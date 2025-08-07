@@ -46,17 +46,19 @@ chmod +x credit_card_tracker.py
 Set up your credit cards with their limits and dates:
 
 ```bash
-# Add each of your credit cards
+# Add each of your credit cards (with optional balance due)
 python3 credit_card_tracker.py --add-card "Chase Sapphire" 10000 15 12 --add-card-desc "Primary rewards card"
 python3 credit_card_tracker.py --add-card "Apple" 5000 28 25 --add-card-desc "Apple Card"
-python3 credit_card_tracker.py --add-card "Amex" 15000 20 17 --add-card-desc "Business expenses"
+python3 credit_card_tracker.py --add-card "Amex" 15000 20 17 1200 --add-card-desc "Business expenses"
 python3 credit_card_tracker.py --add-card "Citi" 8000 10 7 --add-card-desc "Backup card"
+python3 credit_card_tracker.py --add-card "Personal Chase" 3000 5 2 --add-card-desc "Personal card"
 ```
 
-**Format**: `--add-card "Card Name" credit_limit statement_date due_date`
+**Format**: `--add-card "Card Name" credit_limit statement_date due_date [balance_due]`
 - `credit_limit`: Your credit limit (e.g., 10000 for $10,000)
 - `statement_date`: Day of month statement closes (e.g., 15 for 15th)
 - `due_date`: Day of month payment is due (e.g., 12 for 12th)
+- `balance_due`: Optional - existing balance from previous statement
 
 ## Getting Transaction Data from Chase Bank
 
@@ -129,7 +131,7 @@ python3 credit_card_tracker.py --due-dates
 **Output:**
 ```
 === Upcoming Due Dates ===
-Amex            2024-04-02 ( 5 days) $    0.00
+Areli Chase     2024-04-02 ( 5 days) $    0.00
 Citi            2024-04-07 (10 days) $    0.00 ⚡ SOON
 Chase Sapphire  2024-04-12 (15 days) $2,367.73
 Apple           2024-04-25 (28 days) $    3.99
@@ -231,14 +233,18 @@ python3 transaction_processor.py transactions.csv --analyze --category "Shopping
 
 | Option | Description | Example |
 |--------|-------------|---------|
-| `--add-card` | Add new credit card | `--add-card "Chase" 10000 15 12` |
+| `--add-card` | Add new credit card | `--add-card "Chase" 10000 15 12 1200` |
 | `--add-card-desc` | Description for new card | `--add-card-desc "Primary card"` |
+| `--update-card` | Update existing card details | `--update-card "Chase" --credit-limit 15000` |
 | `--remove-card` | Remove a credit card | `--remove-card "Old Card"` |
 | `--list-cards` | List all configured cards | `--list-cards` |
-| `--update-balance` | Update card balance | `--update-balance "Chase" 1234.56` |
+| `--update-balance` | Update card balance | `--update-balance "Chase" 1234.56 current` |
+| `--set-limits` | Set monthly spending limits | `--set-limits 2000 3000` |
+| `--process-auto` | Auto-process transaction files | `--process-auto ~/Downloads/Chase*.csv` |
+| `--reset-statement` | Reset for new statement period | `--reset-statement "Chase"` |
+| `--reset` | Reset balances | `--reset current` |
 | `--summary` | Show spending summary | `--summary` |
 | `--due-dates` | Show upcoming due dates | `--due-dates` |
-| `--reset` | Reset all balances to zero | `--reset` |
 
 ### Transaction Processor (`transaction_processor.py`)
 
