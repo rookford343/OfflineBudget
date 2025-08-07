@@ -1,15 +1,25 @@
-# Credit Card Transaction Processor
+# Credit Card Transaction Processor & Tracker
 
-A secure, offline tool for analyzing credit card transactions. Automatically categorizes spending into 6 main categories and provides detailed financial insights without storing credentials or requiring internet access.
+A secure, offline tool for analyzing credit card transactions and tracking spending across multiple cards. Automatically categorizes spending into 6 main categories and provides detailed financial insights without storing credentials or requiring internet access.
 
 ## Features
 
+### Transaction Analysis
 - **Universal Compatibility**: Works with CSV files from any credit card provider (Chase, Amex, Capital One, etc.)
 - **Smart Categorization**: Uses bank's existing categories when possible, falls back to intelligent keyword matching
 - **6 Core Categories**: Shopping, Food & Drinks, Services, Entertainment, Groceries, Other
 - **Detailed Analysis**: Category breakdowns, spending totals, merchant analysis
+
+### Credit Card Tracking
+- **Multi-Card Management**: Track spending across all your credit cards
+- **Credit Limit Monitoring**: See available credit and spending limits
+- **Due Date Tracking**: Never miss a payment with upcoming due date alerts
+- **Spending Summary**: Quick overview of current balances and total spending
+
+### Security
 - **Secure Storage**: Encrypts local data using your system's secure keyring
 - **Offline Processing**: Everything runs locally on your machine
+- **No Credentials**: Never stores bank login information
 
 ## Installation
 
@@ -22,11 +32,31 @@ pip install pandas keyring cryptography
 ```
 
 ### Setup
-1. Download `transaction_processor.py`
-2. Make it executable:
+1. Download `transaction_processor.py` and `credit_card_tracker.py`
+2. Make them executable:
 ```bash
 chmod +x transaction_processor.py
+chmod +x credit_card_tracker.py
 ```
+
+## Credit Card Tracker Setup
+
+### Initial Configuration
+
+Set up your credit cards with their limits and dates:
+
+```bash
+# Add each of your credit cards
+python3 credit_card_tracker.py --add-card "Chase Sapphire" 10000 15 12 --add-card-desc "Primary rewards card"
+python3 credit_card_tracker.py --add-card "Apple" 5000 28 25 --add-card-desc "Apple Card"
+python3 credit_card_tracker.py --add-card "Amex" 15000 20 17 --add-card-desc "Business expenses"
+python3 credit_card_tracker.py --add-card "Citi" 8000 10 7 --add-card-desc "Backup card"
+```
+
+**Format**: `--add-card "Card Name" credit_limit statement_date due_date`
+- `credit_limit`: Your credit limit (e.g., 10000 for $10,000)
+- `statement_date`: Day of month statement closes (e.g., 15 for 15th)
+- `due_date`: Day of month payment is due (e.g., 12 for 12th)
 
 ## Getting Transaction Data from Chase Bank
 
@@ -61,7 +91,56 @@ The processor works with CSV files from other providers too:
 
 ## Usage Examples
 
-### Basic Analysis
+### Credit Card Tracking
+
+**Show current spending summary:**
+```bash
+python3 credit_card_tracker.py --summary
+```
+
+**Output:**
+```
+==================================================
+CREDIT CARD SPENDING SUMMARY
+==================================================
+Chase Sapphire  $   2,367.73
+Apple           $       3.99
+Amex            $          -
+Citi            $          -
+Areli Chase     $          -
+------------------------------
+Left to Spend   $   1,480.72
+------------------------------
+**Total Spent   $   2,371.72**
+==================================================
+```
+
+**Update card balance manually:**
+```bash
+python3 credit_card_tracker.py --update-balance "Chase Sapphire" 2367.73
+python3 credit_card_tracker.py --update-balance "Apple" 3.99
+```
+
+**Check upcoming due dates:**
+```bash
+python3 credit_card_tracker.py --due-dates
+```
+
+**Output:**
+```
+=== Upcoming Due Dates ===
+Amex            2024-04-02 ( 5 days) $    0.00
+Citi            2024-04-07 (10 days) $    0.00 ⚡ SOON
+Chase Sapphire  2024-04-12 (15 days) $2,367.73
+Apple           2024-04-25 (28 days) $    3.99
+```
+
+**List all configured cards:**
+```bash
+python3 credit_card_tracker.py --list-cards
+```
+
+### Transaction Analysis
 ```bash
 python3 transaction_processor.py transactions.csv --analyze
 ```
@@ -147,6 +226,21 @@ python3 transaction_processor.py transactions.csv --analyze --category "Shopping
 ```
 
 ## Command Line Options
+
+### Credit Card Tracker (`credit_card_tracker.py`)
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--add-card` | Add new credit card | `--add-card "Chase" 10000 15 12` |
+| `--add-card-desc` | Description for new card | `--add-card-desc "Primary card"` |
+| `--remove-card` | Remove a credit card | `--remove-card "Old Card"` |
+| `--list-cards` | List all configured cards | `--list-cards` |
+| `--update-balance` | Update card balance | `--update-balance "Chase" 1234.56` |
+| `--summary` | Show spending summary | `--summary` |
+| `--due-dates` | Show upcoming due dates | `--due-dates` |
+| `--reset` | Reset all balances to zero | `--reset` |
+
+### Transaction Processor (`transaction_processor.py`)
 
 | Option | Description | Example |
 |--------|-------------|---------|
