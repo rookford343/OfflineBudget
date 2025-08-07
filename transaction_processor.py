@@ -4,14 +4,72 @@ Credit Card Transaction Processor
 - Processes transaction files from any credit card provider
 - Categorizes transactions into 6 main categories
 - Provides detailed analysis and category breakdowns
+- Merchant name cleaning for better summaries
 - Secure handling of financial data
 """
 import pandas as pd
 import argparse
 import sys
 import keyring
+import re
 from pathlib import Path
 from cryptography.fernet import Fernet
+
+def clean_merchant_name(description):
+    """Clean merchant names by removing store numbers and extra data."""
+    if not description:
+        return description
+    
+    description = str(description).upper().strip()
+    
+    # Special handling for common merchants
+    if description.startswith('AMAZON'):
+        return 'AMAZON'
+    if description.startswith('COSTCO'):
+        return 'COSTCO'
+    if description.startswith('TARGET'):
+        return 'TARGET'
+    if description.startswith('WALMART') or description.startswith('WAL-MART'):
+        return 'WALMART'
+    if description.startswith('STARBUCKS'):
+        return 'STARBUCKS'
+    if 'MCDONALD' in description:
+        return 'MCDONALDS'
+    if description.startswith('CVS'):
+        return 'CVS'
+    if 'HOME DEPOT' in description:
+        return 'HOME DEPOT'
+    if 'CHIPOTLE' in description:
+        return 'CHIPOTLE'
+    if description.startswith('SHELL'):
+        return 'SHELL'
+    if 'CHASE CREDIT' in description or 'CHASE AUTO' in description:
+        return 'CHASE'
+    
+    # Generic cleaning for other merchants
+    # Remove everything after "*" or "#" 
+    if '*' in description:
+        description = description.split('*')[0].strip()
+    if '#' in description and not description.startswith('#'):
+        description = description.split('#')[0].strip()
+    
+    # Remove common suffixes
+    suffixes_to_remove = [
+        ' STORE', ' WHSE', ' GAS', ' SUPERCENTER', ' WHOLESALE',
+        ' PHARMACY', ' COFFEE', ' MEXICAN GRILL', ' SERVICE STATION',
+        ' INC', ' LLC', ' CORP', ' CO'
+    ]
+    
+    for suffix in suffixes_to_remove:
+        if description.endswith(suffix):
+            description = description[:-len(suffix)].strip()
+    
+    # Remove trailing numbers and special characters
+    description = re.sub(r'\s+\d+$', '', description)
+    description = re.sub(r'[^A-Za-z\s&\'-]', ' ', description)
+    description = re.sub(r'\s+', ' ', description).strip()
+    
+    return description or "UNKNOWN MERCHANT"
 
 def categorize_transaction(description, memo='', original_category=''):
     """Categorize transaction based on original category first, then description/memo."""
@@ -221,8 +279,10 @@ def analyze_category_detail(df, category_name):
     spending_df = category_df[category_df['Amount'] < 0].copy()
     spending_df['amount_abs'] = spending_df['Amount'].abs()
     
-    # Group by merchant/description for detailed breakdown
-    merchant_breakdown = spending_df.groupby('Description').agg({
+    # Group by cleaned merchant name for detailed breakdown
+    merchant_breakdown = spending_df.groupby(
+        spending_df['Description'].apply(clean_merchant_name)
+    ).agg({
         'amount_abs': ['sum', 'count'],
         'Transaction Date': ['min', 'max']
     }).round(2)

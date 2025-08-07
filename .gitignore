@@ -24,6 +24,9 @@ Thumbs.db
 transactions/
 data/
 
+# Test code
+test.py
+
 # Logs
 *.log
 EOF

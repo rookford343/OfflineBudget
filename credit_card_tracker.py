@@ -4,7 +4,8 @@ Enhanced Credit Card Tracker
 - Tracks spending across multiple credit cards
 - Manages credit limits, due dates, and balances
 - Soft/hard spending limits with alerts
-- Automatic transaction processing
+- Category budget tracking
+- Automatic transaction processing with merchant name cleaning
 - Secure storage of card configurations
 """
 import json
@@ -16,17 +17,22 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from cryptography.fernet import Fernet
-from transaction_processor import categorize_transaction, process_csv_file
 
 class CreditCardTracker:
     def __init__(self):
         self.cards = {}
         self.spending_limits = {}
+        self.category_budgets = {}
+        self.category_spending = {}
         self.cipher_suite = self._setup_encryption()
         self.config_file = 'credit_cards.enc'
         self.limits_file = 'spending_limits.enc'
+        self.budgets_file = 'category_budgets.enc'
+        self.spending_file = 'category_spending.enc'
         self.load_cards()
         self.load_spending_limits()
+        self.load_category_budgets()
+        self.load_category_spending()
     
     def _setup_encryption(self):
         """Set up encryption for secure storage."""
@@ -39,20 +45,232 @@ class CreditCardTracker:
             
         return Fernet(encryption_key.encode())
     
-    def add_card(self, name, credit_limit, statement_date, due_date, description="", balance_due=0.0):
+    def _process_csv_file(self, file_path):
+        """Process CSV files from credit card providers."""
+        print(f"Processing CSV file: {file_path}")
+        
+        try:
+            # Try different encodings
+            encodings = ['utf-8', 'latin-1', 'cp1252']
+            
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(file_path, encoding=encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                raise Exception("Could not decode file with any standard encoding")
+            
+            # Clean amount field
+            if 'Amount' in df.columns:
+                df['Amount'] = df['Amount'].astype(str).str.replace(r'[\$,]', '', regex=True)
+                df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
+            
+            # Remove empty rows
+            df = df.dropna(subset=['Amount'])
+            
+            # Sort by date
+            if 'Transaction Date' in df.columns:
+                try:
+                    df['parsed_date'] = pd.to_datetime(df['Transaction Date'])
+                    df = df.sort_values('parsed_date', ascending=False)
+                    df = df.drop('parsed_date', axis=1)
+                except:
+                    pass
+            
+            return df
+            
+        except Exception as e:
+            print(f"Error processing CSV file: {e}")
+            return pd.DataFrame()
+    
+    def _categorize_transaction(self, description, memo='', original_category=''):
+        """Categorize transaction based on original category first, then description/memo."""
+        # Handle NaN values safely
+        if pd.isna(description):
+            description = ''
+        if pd.isna(memo):
+            memo = ''
+        if pd.isna(original_category):
+            original_category = ''
+        
+        description = str(description)
+        memo = str(memo)
+        original_category = str(original_category)
+        
+        target_categories = ['Shopping', 'Food & Drinks', 'Services', 'Entertainment', 'Groceries']
+        
+        # First, check if the original category matches one of our target categories
+        if original_category and original_category.strip():
+            original_cat_lower = original_category.lower()
+            
+            # Direct matches
+            if original_category in target_categories:
+                return original_category
+            
+            # Map common bank categories to our categories
+            category_mapping = {
+                'shopping': 'Shopping',
+                'merchandise': 'Shopping',
+                'retail': 'Shopping',
+                'health & wellness': 'Services',
+                'healthcare': 'Services',
+                'professional services': 'Services',
+                'bills & utilities': 'Services',
+                'restaurants': 'Food & Drinks',
+                'fast food': 'Food & Drinks',
+                'coffee shops': 'Food & Drinks',
+                'dining': 'Food & Drinks',
+                'supermarkets': 'Groceries',
+                'grocery stores': 'Groceries',
+                'travel': 'Entertainment',
+                'recreation': 'Entertainment',
+                'entertainment': 'Entertainment'
+            }
+            
+            for bank_variant, our_category in category_mapping.items():
+                if bank_variant in original_cat_lower:
+                    return our_category
+        
+        # If original category doesn't match, fall back to description/memo analysis
+        text = f"{description} {memo}".lower()
+        
+        # Define keywords for each category
+        categories = {
+            'Shopping': [
+                'amazon', 'walmart', 'target', 'costco', 'home depot', 'lowes', 'best buy',
+                'macys', 'nordstrom', 'tjmaxx', 'marshalls', 'kohls', 'jcpenney',
+                'cvs', 'walgreens', 'rite aid', 'pharmacy', 'dollar tree', 'dollar general',
+                'shopping', 'retail', 'store', 'mall', 'outlet'
+            ],
+            'Food & Drinks': [
+                'mcdonalds', 'burger king', 'subway', 'kfc', 'pizza hut', 'dominos',
+                'starbucks', 'dunkin', 'chipotle', 'panera', 'chick-fil-a', 'taco bell',
+                'restaurant', 'cafe', 'bar', 'pub', 'brewery', 'coffee', 'pizza',
+                'fast food', 'takeout', 'delivery', 'doordash', 'uber eats', 'grubhub',
+                'dining', 'food', 'drink', 'beverage', 'alcohol', 'wine', 'beer'
+            ],
+            'Services': [
+                'bank', 'atm', 'fee', 'service charge', 'maintenance', 'overdraft',
+                'insurance', 'medical', 'dental', 'doctor', 'hospital', 'clinic',
+                'chiropr', 'lawyer', 'attorney', 'repair', 'cleaning', 'dry clean',
+                'haircut', 'salon', 'spa', 'gym', 'fitness', 'subscription',
+                'netflix', 'spotify', 'hulu', 'disney', 'internet', 'phone', 'cable',
+                'utility', 'electric', 'gas', 'water', 'trash', 'sewer'
+            ],
+            'Entertainment': [
+                'movie', 'theater', 'cinema', 'concert', 'show', 'ticket', 'event',
+                'amusement', 'theme park', 'zoo', 'museum', 'sports', 'game',
+                'bowling', 'golf', 'tennis', 'recreation', 'hobby', 'book', 'magazine',
+                'music', 'video game', 'gaming', 'entertainment', 'fun', 'leisure',
+                'vacation', 'travel', 'hotel', 'flight', 'airline', 'rental car'
+            ],
+            'Groceries': [
+                'grocery', 'supermarket', 'kroger', 'safeway', 'publix', 'whole foods',
+                'trader joes', 'aldi', 'food lion', 'giant', 'harris teeter',
+                'stop shop', 'jewel', 'meijer', 'heb', 'wegmans', 'fresh market',
+                'market', 'produce', 'deli', 'bakery', 'butcher', 'organic'
+            ]
+        }
+        
+        # Check each category for keyword matches
+        for category, keywords in categories.items():
+            for keyword in keywords:
+                if keyword in text:
+                    return category
+        
+        # If no match found, categorize as Other
+        return 'Other'
+        """Clean merchant names by removing store numbers and extra data."""
+        if not description:
+            return description
+        
+        description = str(description).upper()
+        
+        # Common merchant cleaning patterns
+        merchant_patterns = {
+            # Amazon variants
+            'AMAZON': ['AMAZON MKTPL', 'AMAZON.COM', 'AMAZON WEB', 'AMAZON PRIME', 'AMZN MKTP'],
+            
+            # Costco variants  
+            'COSTCO': ['COSTCO WHSE', 'COSTCO GAS', 'COSTCO WHOLESALE'],
+            
+            # Walmart variants
+            'WALMART': ['WALMART SUPERCENTER', 'WALMART STORE', 'WAL-MART'],
+            
+            # Target variants
+            'TARGET': ['TARGET STORE', 'TARGET T-'],
+            
+            # Starbucks variants
+            'STARBUCKS': ['STARBUCKS STORE', 'STARBUCKS COFFEE'],
+            
+            # McDonald's variants
+            'MCDONALDS': ['MCDONALD\'S F', 'MCDONALDS F'],
+            
+            # CVS variants
+            'CVS': ['CVS/PHARMACY', 'CVS PHARMACY'],
+            
+            # Home Depot variants
+            'HOME DEPOT': ['HOME DEPOT #', 'THE HOME DEPOT'],
+            
+            # Chipotle variants
+            'CHIPOTLE': ['CHIPOTLE MEXICAN', 'CHIPOTLE #'],
+            
+            # Shell variants
+            'SHELL': ['SHELL OIL', 'SHELL SERVICE'],
+            
+            # Chase variants (for payments)
+            'CHASE': ['CHASE CREDIT CRD', 'CHASE AUTO'],
+        }
+        
+        # Check for merchant patterns first
+        for clean_name, patterns in merchant_patterns.items():
+            for pattern in patterns:
+                if pattern in description:
+                    return clean_name
+        
+        # Generic cleaning - remove everything after "*" or "#" 
+        if '*' in description:
+            description = description.split('*')[0].strip()
+        if '#' in description:
+            description = description.split('#')[0].strip()
+        
+        # Remove common suffixes
+        suffixes_to_remove = [
+            ' STORE', ' #', ' WHSE', ' GAS', ' SUPERCENTER', ' WHOLESALE',
+            ' PHARMACY', ' COFFEE', ' MEXICAN GRILL', ' SERVICE STATION'
+        ]
+        
+        for suffix in suffixes_to_remove:
+            if description.endswith(suffix):
+                description = description[:-len(suffix)].strip()
+        
+        # Remove trailing numbers and special characters
+        description = re.sub(r'\s+\d+$', '', description)  # Remove trailing numbers
+        description = re.sub(r'[^A-Za-z\s&\'-]', ' ', description)  # Keep only letters, spaces, &, ', -
+        description = re.sub(r'\s+', ' ', description).strip()  # Clean up multiple spaces
+        
+        return description or "UNKNOWN MERCHANT"
+    
+    def add_card(self, name, credit_limit, statement_date, due_date, description="", balance_due=0.0, current_balance=0.0):
         """Add a new credit card to track."""
         self.cards[name] = {
             'credit_limit': float(credit_limit),
             'statement_date': int(statement_date),  # Day of month (e.g., 15 for 15th)
             'due_date': int(due_date),  # Day of month (e.g., 12 for 12th)
             'description': description,
-            'current_balance': 0.0,  # New spending since last statement
+            'current_balance': float(current_balance),  # New spending since last statement
             'balance_due': float(balance_due),  # Balance from previous statement
             'last_updated': datetime.now().isoformat(),
             'last_statement_reset': datetime.now().isoformat()
         }
         self.save_cards()
         print(f"Added credit card: {name}")
+        if current_balance > 0:
+            print(f"  Current balance: ${current_balance:,.2f}")
+        if balance_due > 0:
+            print(f"  Balance due: ${balance_due:,.2f}")
     
     def update_card(self, name, **kwargs):
         """Update existing card details."""
@@ -78,6 +296,10 @@ class CreditCardTracker:
         if 'description' in kwargs:
             card['description'] = kwargs['description']
             updated_fields.append(f"description: {card['description']}")
+        
+        if 'current_balance' in kwargs:
+            card['current_balance'] = float(kwargs['current_balance'])
+            updated_fields.append(f"current balance: ${card['current_balance']:,.2f}")
         
         if 'balance_due' in kwargs:
             card['balance_due'] = float(kwargs['balance_due'])
@@ -112,6 +334,33 @@ class CreditCardTracker:
             'soft_limit': 0.0,
             'hard_limit': 0.0
         })
+    
+    def set_category_budgets(self, **budgets):
+        """Set monthly budgets for spending categories."""
+        current_month = datetime.now().strftime('%Y-%m')
+        valid_categories = ['Shopping', 'Food & Drinks', 'Services', 'Entertainment', 'Groceries', 'Other']
+        
+        if current_month not in self.category_budgets:
+            self.category_budgets[current_month] = {}
+        
+        updated_budgets = []
+        for category, budget in budgets.items():
+            if category in valid_categories:
+                self.category_budgets[current_month][category] = float(budget)
+                updated_budgets.append(f"{category}: ${budget:,.2f}")
+        
+        if updated_budgets:
+            self.save_category_budgets()
+            print(f"Set category budgets for {current_month}:")
+            for budget_info in updated_budgets:
+                print(f"  {budget_info}")
+        else:
+            print("No valid categories provided. Valid categories:", valid_categories)
+    
+    def get_current_category_budgets(self):
+        """Get category budgets for current month."""
+        current_month = datetime.now().strftime('%Y-%m')
+        return self.category_budgets.get(current_month, {})
     
     def remove_card(self, name):
         """Remove a credit card."""
@@ -182,7 +431,7 @@ class CreditCardTracker:
         # Process each file and try to match to cards
         for file_path in csv_files:
             file_name = Path(file_path).name.lower()
-            df = process_csv_file(file_path)
+            df = self._process_csv_file(file_path)
             
             if df.empty:
                 print(f"No valid data in {file_path}")
@@ -214,6 +463,9 @@ class CreditCardTracker:
             
             # Calculate new spending since last statement
             new_spending = abs(df[df['Amount'] < 0]['Amount'].sum())
+            
+            # Update category spending based on transactions
+            self._update_category_spending(df)
             
             # Update the card's current balance
             old_balance = self.cards[matched_card]['current_balance']
@@ -249,6 +501,58 @@ class CreditCardTracker:
         
         self.save_cards()
     
+    def _get_category_spending(self):
+        """Get current spending by category across all cards."""
+        current_month = datetime.now().strftime('%Y-%m')
+        return self.category_spending.get(current_month, {
+            'Shopping': 0.0,
+            'Food & Drinks': 0.0,
+            'Services': 0.0,
+            'Entertainment': 0.0,
+            'Groceries': 0.0,
+            'Other': 0.0
+        })
+    
+    def _update_category_spending(self, df):
+        """Update category spending based on transaction data."""
+        if df.empty:
+            return
+        
+        current_month = datetime.now().strftime('%Y-%m')
+        
+        if current_month not in self.category_spending:
+            self.category_spending[current_month] = {
+                'Shopping': 0.0,
+                'Food & Drinks': 0.0,
+                'Services': 0.0,
+                'Entertainment': 0.0,
+                'Groceries': 0.0,
+                'Other': 0.0
+            }
+        
+        # Categorize transactions and calculate spending
+        df['custom_category'] = df.apply(
+            lambda row: self._categorize_transaction(
+                row.get('Description', ''), 
+                row.get('Memo', ''),
+                row.get('Category', '')
+            ), axis=1
+        )
+        
+        # Calculate spending by category (negative amounts only)
+        spending_df = df[df['Amount'] < 0].copy()
+        spending_df['amount_abs'] = spending_df['Amount'].abs()
+        
+        category_totals = spending_df.groupby('custom_category')['amount_abs'].sum()
+        
+        # Update category spending
+        for category, amount in category_totals.items():
+            if category in self.category_spending[current_month]:
+                self.category_spending[current_month][category] = float(amount)
+        
+        # Save the updated category spending
+        self.save_category_spending()
+    
     def show_summary(self):
         """Display current spending summary for all cards."""
         if not self.cards:
@@ -256,6 +560,7 @@ class CreditCardTracker:
             return
         
         limits = self.get_current_spending_limits()
+        budgets = self.get_current_category_budgets()
         current_month = datetime.now().strftime('%B %Y')
         
         print("\n" + "="*50)
@@ -286,7 +591,6 @@ class CreditCardTracker:
         print("-" * 30)
         
         # Calculate spending limit status and left to spend
-        limits = self.get_current_spending_limits()
         spending_status = ""
         
         if limits['soft_limit'] > 0:
@@ -309,6 +613,30 @@ class CreditCardTracker:
         if total_balance_due > 0:
             print(f"  Balance Due   $ {total_balance_due:>10,.2f}")
             print(f"  Total Owed    $ {(total_new_spending + total_balance_due):>10,.2f}")
+        
+        # Show category budget status if budgets are set
+        if budgets:
+            print("\n" + "="*50)
+            print("CATEGORY BUDGET STATUS")
+            print("="*50)
+            
+            # Get category spending from transaction analysis
+            category_spending = self._get_category_spending()
+            
+            for category in ['Shopping', 'Food & Drinks', 'Services', 'Entertainment', 'Groceries', 'Other']:
+                budget = budgets.get(category, 0)
+                spent = category_spending.get(category, 0)
+                
+                if budget > 0:
+                    remaining = budget - spent
+                    status = ""
+                    
+                    if remaining < 0:
+                        status = " 🚨 OVER"
+                    elif remaining < budget * 0.1:  # Less than 10% remaining
+                        status = " ⚠️  LOW"
+                    
+                    print(f"{category:<15} ${spent:>8,.2f} / ${budget:>8,.2f} (${remaining:>8,.2f}){status}")
         
         print("="*50)
     
@@ -359,6 +687,62 @@ class CreditCardTracker:
                 status = "⚡ SOON"
             
             print(f"{name:<15} {due_date.strftime('%Y-%m-%d'):<12} {days_until:>3}d ${balance_due:>9,.2f} ${total_balance:>12,.2f} {status}")
+    
+    def analyze_category_detail(self, df, category_name):
+        """Analyze transactions within a specific category."""
+        if df.empty:
+            return f"No transactions to analyze for category: {category_name}"
+        
+        # Create analysis DataFrame with custom categories
+        analysis_df = df.copy()
+        analysis_df['custom_category'] = analysis_df.apply(
+            lambda row: self._categorize_transaction(
+                row.get('Description', ''), 
+                row.get('Memo', ''),
+                row.get('Category', '')
+            ), axis=1
+        )
+        
+        # Filter to the requested category
+        category_df = analysis_df[analysis_df['custom_category'] == category_name].copy()
+        
+        if category_df.empty:
+            return f"No transactions found in category: {category_name}"
+        
+        # Calculate spending in this category (negative amounts)
+        spending_df = category_df[category_df['Amount'] < 0].copy()
+        spending_df['amount_abs'] = spending_df['Amount'].abs()
+        
+        # Group by cleaned merchant name for detailed breakdown
+        merchant_breakdown = spending_df.groupby(
+            spending_df['Description'].apply(self._clean_merchant_name)
+        ).agg({
+            'amount_abs': ['sum', 'count'],
+            'Transaction Date': ['min', 'max']
+        }).round(2)
+        
+        # Flatten column names
+        merchant_breakdown.columns = ['total_spent', 'transaction_count', 'first_transaction', 'last_transaction']
+        merchant_breakdown = merchant_breakdown.sort_values('total_spent', ascending=False)
+        
+        # Show original bank categories in this bucket
+        bank_categories_used = category_df['Category'].value_counts().to_dict()
+        
+        category_analysis = {
+            'category': category_name,
+            'total_transactions': len(category_df),
+            'total_spending': float(spending_df['amount_abs'].sum()),
+            'average_transaction': float(spending_df['amount_abs'].mean()) if len(spending_df) > 0 else 0,
+            'date_range': {
+                'start': category_df['Transaction Date'].min() if len(category_df) > 0 else 'N/A',
+                'end': category_df['Transaction Date'].max() if len(category_df) > 0 else 'N/A'
+            },
+            'bank_categories_included': bank_categories_used,
+            'top_merchants': merchant_breakdown.head(10).to_dict('index'),
+            'recent_transactions': category_df[['Transaction Date', 'Description', 'Amount', 'Category']].tail(20).to_dict('records')
+        }
+        
+        return category_analysis
     
     def reset_balances(self, balance_type='current'):
         """Reset card balances."""
@@ -443,6 +827,56 @@ class CreditCardTracker:
         except Exception as e:
             print(f"Note: Could not load spending limits ({e}). Starting fresh.")
             self.spending_limits = {}
+    
+    def save_category_budgets(self):
+        """Save category budgets to encrypted file."""
+        try:
+            json_data = json.dumps(self.category_budgets, indent=2)
+            encrypted_data = self.cipher_suite.encrypt(json_data.encode())
+            
+            with open(self.budgets_file, 'wb') as f:
+                f.write(encrypted_data)
+        except Exception as e:
+            print(f"Error saving category budgets: {e}")
+    
+    def load_category_budgets(self):
+        """Load category budgets from encrypted file."""
+        try:
+            if not Path(self.budgets_file).exists():
+                return
+            
+            with open(self.budgets_file, 'rb') as f:
+                encrypted_data = f.read()
+            
+            decrypted_data = self.cipher_suite.decrypt(encrypted_data).decode()
+            self.category_budgets = json.loads(decrypted_data)
+        except Exception as e:
+            print(f"Note: Could not load category budgets ({e}). Starting fresh.")
+    def save_category_spending(self):
+        """Save category spending to encrypted file."""
+        try:
+            json_data = json.dumps(self.category_spending, indent=2)
+            encrypted_data = self.cipher_suite.encrypt(json_data.encode())
+            
+            with open(self.spending_file, 'wb') as f:
+                f.write(encrypted_data)
+        except Exception as e:
+            print(f"Error saving category spending: {e}")
+    
+    def load_category_spending(self):
+        """Load category spending from encrypted file."""
+        try:
+            if not Path(self.spending_file).exists():
+                return
+            
+            with open(self.spending_file, 'rb') as f:
+                encrypted_data = f.read()
+            
+            decrypted_data = self.cipher_suite.decrypt(encrypted_data).decode()
+            self.category_spending = json.loads(decrypted_data)
+        except Exception as e:
+            print(f"Note: Could not load category spending ({e}). Starting fresh.")
+            self.category_spending = {}
 
 def main():
     """Main function with command line interface."""
@@ -450,10 +884,10 @@ def main():
     
     # Card management
     parser.add_argument('--add-card', nargs='+', 
-                       help='Add new card: name credit_limit statement_date due_date [balance_due]')
+                       help='Add new card: name credit_limit statement_date due_date [balance_due] [current_balance]')
     parser.add_argument('--add-card-desc', help='Description for the card being added')
     parser.add_argument('--update-card', nargs='+', 
-                       help='Update card: name [--credit-limit X] [--statement-date X] [--due-date X] [--balance-due X]')
+                       help='Update card: name [--credit-limit X] [--statement-date X] [--due-date X] [--balance-due X] [--current-balance X]')
     parser.add_argument('--remove-card', help='Remove a credit card')
     parser.add_argument('--list-cards', action='store_true', help='List all configured cards')
     
@@ -465,30 +899,33 @@ def main():
     parser.add_argument('--reset-statement', nargs='?', const='all',
                        help='Reset statement period for card (or all cards)')
     
-    # Spending limits
+    # Spending limits and budgets
     parser.add_argument('--set-limits', nargs=2, metavar=('SOFT', 'HARD'),
                        help='Set monthly spending limits: soft_limit hard_limit')
+    parser.add_argument('--set-budgets', nargs='+', metavar='CATEGORY:AMOUNT',
+                       help='Set category budgets: Shopping:500 "Food & Drinks":300 Services:200')
     
     # Transaction processing
     parser.add_argument('--process-auto', nargs='+', metavar='CSV_FILE',
                        help='Auto-process transaction files to update balances')
+    parser.add_argument('--update-categories', nargs='+', metavar='CSV_FILE',
+                       help='Update category spending from transaction files (for budget tracking)')
     
     # Display
     parser.add_argument('--summary', action='store_true', help='Show spending summary')
     parser.add_argument('--due-dates', action='store_true', help='Show upcoming due dates')
+    parser.add_argument('--category', help='Analyze specific category in detail')
     
     args = parser.parse_args()
     tracker = CreditCardTracker()
     
     if args.add_card:
-        if len(args.add_card) < 4:
-            print("Error: --add-card requires name, credit_limit, statement_date, due_date")
-            return
         
         name, limit, stmt_date, due_date = args.add_card[:4]
         balance_due = float(args.add_card[4]) if len(args.add_card) > 4 else 0.0
+        current_balance = float(args.add_card[5]) if len(args.add_card) > 5 else 0.0
         description = args.add_card_desc or ""
-        tracker.add_card(name, limit, stmt_date, due_date, description, balance_due)
+        tracker.add_card(name, limit, stmt_date, due_date, description, balance_due, current_balance)
     
     elif args.update_card:
         if len(args.update_card) < 2:
@@ -514,6 +951,9 @@ def main():
             elif update_args[i] == '--balance-due' and i + 1 < len(update_args):
                 kwargs['balance_due'] = update_args[i + 1]
                 i += 2
+            elif update_args[i] == '--current-balance' and i + 1 < len(update_args):
+                kwargs['current_balance'] = update_args[i + 1]
+                i += 2
             elif update_args[i] == '--description' and i + 1 < len(update_args):
                 kwargs['description'] = update_args[i + 1]
                 i += 2
@@ -536,8 +976,36 @@ def main():
         soft_limit, hard_limit = args.set_limits
         tracker.set_spending_limits(float(soft_limit), float(hard_limit))
     
+    elif args.set_budgets:
+        budgets = {}
+        for budget_str in args.set_budgets:
+            if ':' in budget_str:
+                category, amount = budget_str.split(':', 1)
+                try:
+                    budgets[category.strip()] = float(amount.strip())
+                except ValueError:
+                    print(f"Invalid budget amount for {category}: {amount}")
+        
+        if budgets:
+            tracker.set_category_budgets(**budgets)
+    
     elif args.process_auto:
         tracker.process_transactions_auto(args.process_auto)
+    
+    elif args.update_categories:
+        # Process files to update category spending only
+        all_dfs = []
+        for file_path in args.update_categories:
+            df = tracker._process_csv_file(file_path)
+            if not df.empty:
+                all_dfs.append(df)
+        
+        if all_dfs:
+            combined_df = pd.concat(all_dfs, ignore_index=True) if len(all_dfs) > 1 else all_dfs[0]
+            tracker._update_category_spending(combined_df)
+            print(f"Updated category spending from {len(combined_df)} transactions")
+        else:
+            print("No transaction data found for category update")
     
     elif args.due_dates:
         tracker.show_due_dates()
@@ -554,6 +1022,10 @@ def main():
             tracker.reset_statement_period()
         else:
             tracker.reset_statement_period(args.reset_statement)
+    
+    elif args.category:
+        # This would need integration with transaction processor
+        print(f"Category analysis for '{args.category}' - feature requires transaction data integration")
     
     elif args.summary:
         tracker.show_summary()

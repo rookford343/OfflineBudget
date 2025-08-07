@@ -1,6 +1,6 @@
 # Credit Card Transaction Processor & Tracker
 
-A secure, offline tool for analyzing credit card transactions and tracking spending across multiple cards. Automatically categorizes spending into 6 main categories and provides detailed financial insights without storing credentials or requiring internet access.
+A secure, offline tool for analyzing credit card transactions and tracking spending across multiple cards. Features intelligent merchant name cleaning, category budget tracking, and comprehensive financial insights without storing credentials or requiring internet access.
 
 ## Features
 
@@ -8,13 +8,17 @@ A secure, offline tool for analyzing credit card transactions and tracking spend
 - **Universal Compatibility**: Works with CSV files from any credit card provider (Chase, Amex, Capital One, etc.)
 - **Smart Categorization**: Uses bank's existing categories when possible, falls back to intelligent keyword matching
 - **6 Core Categories**: Shopping, Food & Drinks, Services, Entertainment, Groceries, Other
-- **Detailed Analysis**: Category breakdowns, spending totals, merchant analysis
+- **Merchant Name Cleaning**: Automatically cleans messy transaction names (e.g., "AMAZON MKTPL*WC4V41N33" → "AMAZON")
+- **Detailed Analysis**: Category breakdowns, spending totals, clean merchant summaries
 
 ### Credit Card Tracking
 - **Multi-Card Management**: Track spending across all your credit cards
+- **Dual Balance Tracking**: Separate current spending from previous statement balances
 - **Credit Limit Monitoring**: See available credit and spending limits
 - **Due Date Tracking**: Never miss a payment with upcoming due date alerts
-- **Spending Summary**: Quick overview of current balances and total spending
+- **Spending Limits**: Set soft (savings goals) and hard (emergency) spending limits
+- **Category Budgets**: Set and monitor monthly budgets for each spending category
+- **Spending Summary**: Quick overview with alerts for overspending
 
 ### Security
 - **Secure Storage**: Encrypts local data using your system's secure keyring
@@ -46,19 +50,20 @@ chmod +x credit_card_tracker.py
 Set up your credit cards with their limits and dates:
 
 ```bash
-# Add each of your credit cards (with optional balance due)
+# Add each of your credit cards (with optional balance due and current balance)
 python3 credit_card_tracker.py --add-card "Chase Sapphire" 10000 15 12 --add-card-desc "Primary rewards card"
-python3 credit_card_tracker.py --add-card "Apple" 5000 28 25 --add-card-desc "Apple Card"
-python3 credit_card_tracker.py --add-card "Amex" 15000 20 17 1200 --add-card-desc "Business expenses"
+python3 credit_card_tracker.py --add-card "Apple" 5000 28 25 1200 567.89 --add-card-desc "Apple Card"
+python3 credit_card_tracker.py --add-card "Amex" 15000 20 17 --add-card-desc "Business expenses"
 python3 credit_card_tracker.py --add-card "Citi" 8000 10 7 --add-card-desc "Backup card"
 python3 credit_card_tracker.py --add-card "Personal Chase" 3000 5 2 --add-card-desc "Personal card"
 ```
 
-**Format**: `--add-card "Card Name" credit_limit statement_date due_date [balance_due]`
+**Format**: `--add-card "Card Name" credit_limit statement_date due_date [balance_due] [current_balance]`
 - `credit_limit`: Your credit limit (e.g., 10000 for $10,000)
 - `statement_date`: Day of month statement closes (e.g., 15 for 15th)
 - `due_date`: Day of month payment is due (e.g., 12 for 12th)
 - `balance_due`: Optional - existing balance from previous statement
+- `current_balance`: Optional - new spending since last statement
 
 ## Getting Transaction Data from Chase Bank
 
@@ -95,7 +100,49 @@ The processor works with CSV files from other providers too:
 
 ### Credit Card Tracking
 
-**Show current spending summary:**
+**Set category budgets for monthly spending goals:**
+```bash
+# Set budgets for specific categories
+python3 credit_card_tracker.py --set-budgets Shopping:800 "Food & Drinks":400 Services:300 Entertainment:200 Groceries:350
+
+# Set individual budgets
+python3 credit_card_tracker.py --set-budgets Shopping:800
+python3 credit_card_tracker.py --set-budgets "Food & Drinks":400
+```
+
+**Enhanced summary with budget tracking:**
+```bash
+python3 credit_card_tracker.py --summary
+```
+
+**Output:**
+```
+==================================================
+CREDIT CARD SPENDING SUMMARY - January 2025
+==================================================
+Chase Sapphire  $   2,367.73
+Apple           $       3.99
+Amex            $          -
+Citi            $          -
+Personal Chase  $          -
+------------------------------
+Left to Spend   $    -371.72 ⚠️  CAUTION
+------------------------------
+**New Spending  $   2,371.72**
+  Balance Due   $   1,200.00
+  Total Owed    $   3,571.72
+
+==================================================
+CATEGORY BUDGET STATUS
+==================================================
+Shopping        $  845.67 /   $800.00 ($ -45.67) 🚨 OVER
+Food & Drinks   $  234.56 /   $400.00 ($  165.44)
+Services        $  156.78 /   $300.00 ($  143.22)
+Entertainment   $   89.45 /   $200.00 ($  110.55)
+Groceries       $  378.90 /   $350.00 ($  -28.90) ⚠️  LOW
+Other           $   45.23 /        - (     -     )
+==================================================
+```
 ```bash
 python3 credit_card_tracker.py --summary
 ```
@@ -235,11 +282,12 @@ python3 transaction_processor.py transactions.csv --analyze --category "Shopping
 |--------|-------------|---------|
 | `--add-card` | Add new credit card | `--add-card "Chase" 10000 15 12 1200` |
 | `--add-card-desc` | Description for new card | `--add-card-desc "Primary card"` |
-| `--update-card` | Update existing card details | `--update-card "Chase" --credit-limit 15000` |
+| `--update-card` | Update existing card details | `--update-card "Chase" --credit-limit 15000 --current-balance 1234` |
 | `--remove-card` | Remove a credit card | `--remove-card "Old Card"` |
 | `--list-cards` | List all configured cards | `--list-cards` |
 | `--update-balance` | Update card balance | `--update-balance "Chase" 1234.56 current` |
 | `--set-limits` | Set monthly spending limits | `--set-limits 2000 3000` |
+| `--set-budgets` | Set category budgets | `--set-budgets Shopping:800 "Food & Drinks":400` |
 | `--process-auto` | Auto-process transaction files | `--process-auto ~/Downloads/Chase*.csv` |
 | `--reset-statement` | Reset for new statement period | `--reset-statement "Chase"` |
 | `--reset` | Reset balances | `--reset current` |
