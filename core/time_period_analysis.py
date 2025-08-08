@@ -23,6 +23,7 @@ class TimePeriodAnalyzer:
         data_dir = self.tracker._get_data_directory()
         self.historical_file = os.path.join(data_dir, 'historical_spending.enc')
         
+        # Load historical data (this uses self.tracker.cipher_suite)
         self.load_historical_data()
     
     def analyze_time_period(self, df, start_date=None, end_date=None, group_by='month'):

@@ -382,6 +382,9 @@ class CreditCardTracker:
         self.budgets_file = os.path.join(data_dir, 'category_budgets.enc')
         self.spending_file = os.path.join(data_dir, 'category_spending.enc')
 
+        # Set up encryption BEFORE loading files
+        self.cipher_suite = self._setup_encryption()
+
         self.load_cards()
         self.load_spending_limits()
         self.load_category_budgets()
