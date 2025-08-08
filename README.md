@@ -20,7 +20,7 @@ A secure, offline tool for analyzing credit card transactions and tracking spend
 - **Category Budgets**: Set and monitor monthly budgets for each spending category
 - **Spending Summary**: Quick overview with alerts for overspending
 
-### Time Period Analysis (NEW)
+### Time Period Analysis
 - **Monthly/Quarterly/Yearly Breakdowns**: Analyze spending patterns over custom time periods
 - **Trend Analysis**: Visual indicators (📈📉➡️) showing spending direction and percentage changes
 - **Period Comparisons**: Month-over-month, quarter-over-quarter, and year-over-year analysis
@@ -28,10 +28,24 @@ A secure, offline tool for analyzing credit card transactions and tracking spend
 - **Category Trends**: Track specific category spending over time
 - **Custom Date Ranges**: Analyze any date range from your transaction history
 
+### Web Interface
+- **Modern Web UI**: Beautiful, responsive web interface for visual analysis
+- **Drag & Drop**: Easy CSV file upload with drag and drop support
+- **Real-time Dashboard**: Live spending summaries with budget alerts
+- **Interactive Analysis**: Visual time period analysis with charts and trends
+- **Mobile Responsive**: Works on desktop, tablet, and mobile browsers
+
+### Mobile App Support
+- **Read-only Mobile Access**: Safe mobile viewing without data modification risk
+- **Budget Monitoring**: Quick spending checks and budget status
+- **Push Notifications**: Alerts for budget limits and due dates
+- **Offline Capable**: Core features work without internet connection
+
 ### Security
 - **Secure Storage**: Encrypts local data using your system's secure keyring
 - **Offline Processing**: Everything runs locally on your machine
 - **No Credentials**: Never stores bank login information
+- **Local Network Only**: Web interface accessible only on your home network
 
 ## Installation
 
@@ -40,7 +54,11 @@ A secure, offline tool for analyzing credit card transactions and tracking spend
 - Required packages:
 
 ```bash
+# Core functionality
 pip install pandas keyring cryptography
+
+# Web interface (optional)
+pip install flask flask-cors werkzeug
 ```
 
 ### Setup
@@ -50,6 +68,14 @@ pip install pandas keyring cryptography
 chmod +x transaction_processor.py
 chmod +x credit_card_tracker.py
 ```
+
+### Web Interface Setup (Optional)
+1. Download `web_api_server.py` and `web_frontend.html` 
+2. Run the web server:
+```bash
+python3 web_api_server.py
+```
+3. Access the web interface at `http://localhost:5000`
 
 ## Credit Card Tracker Setup
 
@@ -166,7 +192,37 @@ Chase Sapphire  2024-04-12 (15 days) $2,367.73
 Apple           2024-04-25 (28 days) $    3.99
 ```
 
-### Time Period Analysis (NEW)
+## Web Interface Usage
+
+### Starting the Web Server
+```bash
+# Start the web server
+python3 web_api_server.py
+
+# Access at: http://localhost:5000
+# Mobile API: http://localhost:5000/api/mobile-summary
+```
+
+### Web Interface Features
+- **Visual Dashboard**: Modern interface with spending summaries and budget status
+- **Drag & Drop Upload**: Easy CSV file processing with visual feedback  
+- **Time Period Analysis**: Interactive analysis with charts and trend indicators
+- **Card Management**: Add, update, and remove credit cards through the web UI
+- **Budget Setting**: Set spending limits and category budgets visually
+- **Historical Analysis**: Store and compare multiple time period analyses
+
+### Mobile-Friendly Design
+The web interface is fully responsive and works on:
+- Desktop browsers (Chrome, Firefox, Safari)
+- Tablet browsers (iPad, Android tablets)
+- Mobile browsers (iPhone, Android phones)
+
+### API Endpoints for Mobile App
+The web server provides REST API endpoints for building mobile apps:
+- `GET /api/mobile-summary` - Simplified summary for mobile dashboards
+- `GET /api/summary` - Full dashboard data
+- `GET /api/cards` - Credit card information
+- `POST /api/analyze` - Run time period analysis
 
 **Basic monthly spending analysis:**
 ```bash
@@ -501,10 +557,13 @@ Your CSV should have these columns:
 
 ## Privacy and Security
 
-- **Offline Only**: No internet connection required or used
+- **Offline First**: Core functionality requires no internet connection
 - **Local Processing**: All analysis happens on your machine
-- **Encrypted Storage**: Backup files and historical analyses are encrypted using industry-standard encryption
+- **Encrypted Storage**: All data files and historical analyses are encrypted using industry-standard encryption
 - **No Tracking**: No analytics, telemetry, or data collection
+- **Local Network Only**: Web interface accessible only on your home network
+- **No Cloud Dependencies**: Nothing is sent to external servers
+- **Read-Only Mobile**: Mobile access cannot modify financial data
 
 ## Contributing
 
@@ -536,4 +595,16 @@ This tool is provided as-is for personal financial analysis. Use responsibly and
 - **Period Comparisons**: Month-over-month, quarter-over-quarter analysis
 - **Custom Date Ranges**: Analyze any specific date range from your transaction history
 - **Category Trends**: Track how specific spending categories change over time
-- **Secure Storage**: All historical analyses encrypted using existing security system
+
+### Web Interface Features
+- **Modern Web UI**: Beautiful, responsive interface for visual analysis and management
+- **Drag & Drop CSV Upload**: Easy transaction file processing with visual feedback
+- **Interactive Dashboard**: Real-time spending summaries with budget alerts and status
+- **Visual Time Period Analysis**: Charts, trends, and comparisons with intuitive interface
+- **Mobile Responsive**: Works seamlessly on desktop, tablet, and mobile browsers
+- **REST API**: Endpoints for building custom mobile applications
+
+### Security Enhancements
+- **Encrypted Historical Data**: All stored analyses use existing security system
+- **Local Network Access**: Web interface accessible only on home network
+- **Read-Only Mobile Support**: Mobile API provides safe, view-only access to spending data
