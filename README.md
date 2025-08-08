@@ -1,6 +1,6 @@
 # Credit Card Transaction Processor & Tracker
 
-A secure, offline tool for analyzing credit card transactions and tracking spending across multiple cards. Features intelligent merchant name cleaning, category budget tracking, and comprehensive financial insights without storing credentials or requiring internet access.
+A secure, offline tool for analyzing credit card transactions and tracking spending across multiple cards. Features intelligent merchant name cleaning, category budget tracking, time period analysis with monthly/quarterly/yearly breakdowns, and comprehensive financial insights without storing credentials or requiring internet access.
 
 ## Features
 
@@ -19,6 +19,14 @@ A secure, offline tool for analyzing credit card transactions and tracking spend
 - **Spending Limits**: Set soft (savings goals) and hard (emergency) spending limits
 - **Category Budgets**: Set and monitor monthly budgets for each spending category
 - **Spending Summary**: Quick overview with alerts for overspending
+
+### Time Period Analysis (NEW)
+- **Monthly/Quarterly/Yearly Breakdowns**: Analyze spending patterns over custom time periods
+- **Trend Analysis**: Visual indicators (📈📉➡️) showing spending direction and percentage changes
+- **Period Comparisons**: Month-over-month, quarter-over-quarter, and year-over-year analysis
+- **Historical Storage**: Save and recall previous analyses for comparison
+- **Category Trends**: Track specific category spending over time
+- **Custom Date Ranges**: Analyze any date range from your transaction history
 
 ### Security
 - **Secure Storage**: Encrypts local data using your system's secure keyring
@@ -143,32 +151,6 @@ Groceries       $  378.90 /   $350.00 ($  -28.90) ⚠️  LOW
 Other           $   45.23 /        - (     -     )
 ==================================================
 ```
-```bash
-python3 credit_card_tracker.py --summary
-```
-
-**Output:**
-```
-==================================================
-CREDIT CARD SPENDING SUMMARY
-==================================================
-Chase Sapphire  $   2,367.73
-Apple           $       3.99
-Amex            $          -
-Citi            $          -
-Areli Chase     $          -
-------------------------------
-Left to Spend   $   1,480.72
-------------------------------
-**Total Spent   $   2,371.72**
-==================================================
-```
-
-**Update card balance manually:**
-```bash
-python3 credit_card_tracker.py --update-balance "Chase Sapphire" 2367.73
-python3 credit_card_tracker.py --update-balance "Apple" 3.99
-```
 
 **Check upcoming due dates:**
 ```bash
@@ -178,18 +160,129 @@ python3 credit_card_tracker.py --due-dates
 **Output:**
 ```
 === Upcoming Due Dates ===
-Areli Chase     2024-04-02 ( 5 days) $    0.00
+Personal Chase  2024-04-02 ( 5 days) $    0.00
 Citi            2024-04-07 (10 days) $    0.00 ⚡ SOON
 Chase Sapphire  2024-04-12 (15 days) $2,367.73
 Apple           2024-04-25 (28 days) $    3.99
 ```
 
-**List all configured cards:**
+### Time Period Analysis (NEW)
+
+**Basic monthly spending analysis:**
 ```bash
-python3 credit_card_tracker.py --list-cards
+# Analyze all transactions by month
+python3 credit_card_tracker.py --analyze-period ~/Downloads/chase_*.csv
+```
+
+**Custom date range with comparisons:**
+```bash
+# Analyze specific date range with month-over-month comparison
+python3 credit_card_tracker.py --analyze-period ~/Downloads/chase_*.csv \
+    --start-date 2024-01-01 --end-date 2024-06-30 --compare
+```
+
+**Comprehensive analysis with trends and storage:**
+```bash
+# Full analysis with all features
+python3 credit_card_tracker.py --analyze-period ~/Downloads/*.csv \
+    --start-date 2024-01-01 --end-date 2024-12-31 \
+    --group-by month --compare --trend "Food & Drinks" \
+    --store-analysis "2024_Full_Year"
+```
+
+**Sample Time Period Output:**
+```
+================================================================================
+TIME PERIOD SPENDING ANALYSIS
+================================================================================
+Period       Total Spent  Transactions Avg/Transaction
+-------------------------------------------------------
+2024-01      $2,845.67    89           $31.97        
+2024-02      $3,234.89    95           $34.05        
+2024-03      $2,667.45    82           $32.53        
+2024-04      $3,445.23    101          $34.11        
+2024-05      $2,998.76    88           $34.08        
+2024-06      $3,123.55    93           $33.59        
+-------------------------------------------------------
+TOTAL        $18,315.55   548          $33.42        
+
+================================================================================
+MONTHLY CATEGORY BREAKDOWN
+================================================================================
+Period       Shopping    Food & DrinkServices    Entertainment Groceries   Other      
+--------------------------------------------------------------------------------
+2024-01      $845        $523        $234        $189         $467        $587       
+2024-02      $967        $634        $345        $234         $523        $532       
+2024-03      $723        $456        $267        $156         $445        $621       
+2024-04      $1,034      $689        $389        $267         $589        $477       
+2024-05      $834        $567        $312        $198         $534        $554       
+2024-06      $889        $598        $334        $223         $556        $524       
+--------------------------------------------------------------------------------
+TOTALS       $5,292      $3,467      $1,881      $1,267       $3,114      $3,295     
+
+=== PERIOD COMPARISON (MONTH_OVER_MONTH) ===
+2024-01 → 2024-02: +$389.22 (+13.7%) 📈
+2024-02 → 2024-03: -$567.44 (-17.5%) 📉
+2024-03 → 2024-04: +$777.78 (+29.2%) 📈
+2024-04 → 2024-05: -$446.47 (-13.0%) 📉
+2024-05 → 2024-06: +$124.79 (+4.2%) 📈
+
+=== TREND ANALYSIS ===
+Category: Food & Drinks
+Overall Trend: 📈 INCREASING (+12.3%)
+
+Period       Amount       Change      
+------------------------------------
+2024-01      $523.45      -           
+2024-02      $634.21      +$110.76    
+2024-03      $456.78      -$177.43    
+2024-04      $689.32      +$232.54    
+2024-05      $567.89      -$121.43    
+2024-06      $598.45      +$30.56     
+```
+
+**Historical Analysis Management:**
+```bash
+# Store current analysis for future reference
+python3 credit_card_tracker.py --analyze-period *.csv \
+    --start-date 2024-01-01 --end-date 2024-03-31 \
+    --store-analysis "Q1_2024"
+
+# List all stored analyses
+python3 credit_card_tracker.py --list-analyses
+
+# Load and display stored analysis
+python3 credit_card_tracker.py --load-analysis "Q1_2024" --compare --trend total
+
+# Compare two stored time periods
+python3 credit_card_tracker.py --compare-analyses "Q1_2024" "Q2_2024"
+```
+
+**Quarterly and yearly analysis:**
+```bash
+# Group by quarters instead of months
+python3 credit_card_tracker.py --analyze-period *.csv \
+    --group-by quarter --start-date 2024-01-01
+
+# Annual overview
+python3 credit_card_tracker.py --analyze-period ~/transactions_2024/*.csv \
+    --group-by year --compare --trend total
+```
+
+**Category-focused analysis:**
+```bash
+# Focus on specific spending category trends
+python3 credit_card_tracker.py --analyze-period *.csv \
+    --trend Shopping --compare --start-date 2024-01-01
+
+# Hide category breakdown (totals only)
+python3 credit_card_tracker.py --analyze-period *.csv \
+    --no-categories --trend total
 ```
 
 ### Transaction Analysis
+
+**Process single file:**
 ```bash
 python3 transaction_processor.py transactions.csv --analyze
 ```
@@ -220,64 +313,21 @@ Other           :   17.2%
 Entertainment   :    3.5%
 ```
 
-### Detailed Category Analysis
+**Detailed Category Analysis:**
 ```bash
 python3 transaction_processor.py transactions.csv --category "Food & Drinks"
 ```
 
-**Output:**
-```
-=== Detailed Analysis: Food & Drinks ===
-Total Transactions: 45
-Total Spending: $1,523.89
-Average Transaction: $33.86
-Date Range: 2024-01-02 to 2024-03-30
-
-=== Bank Categories Included ===
-Restaurants: 23 transactions
-Fast Food: 12 transactions
-Coffee Shops: 8 transactions
-Food & Drink: 2 transactions
-
-=== Top Merchants in Food & Drinks ===
-STARBUCKS #12345                        :   $234.56 (12 transactions)
-CHIPOTLE MEXICAN GRILL                   :   $189.45 (8 transactions)
-MCDONALD'S #4567                         :   $156.78 (11 transactions)
-```
-
-### Processing Multiple Files
+**Processing Multiple Files:**
 ```bash
 python3 transaction_processor.py jan.csv feb.csv mar.csv --analyze
-```
-
-### Save and Load Encrypted Data
-```bash
-# Save processed data securely
-python3 transaction_processor.py transactions.csv --save backup.enc
-
-# Load and analyze saved data
-python3 transaction_processor.py --load backup.enc --analyze
-```
-
-### Export Analysis
-```bash
-# Export to Excel for further analysis
-python3 transaction_processor.py transactions.csv --export report.xlsx --format excel
-
-# Export to CSV
-python3 transaction_processor.py transactions.csv --export summary.csv --format csv
-```
-
-### Combined Operations
-```bash
-# Process, analyze, save, and export in one command
-python3 transaction_processor.py transactions.csv --analyze --category "Shopping" --save backup.enc --export report.xlsx --format excel
 ```
 
 ## Command Line Options
 
 ### Credit Card Tracker (`credit_card_tracker.py`)
 
+#### Card Management
 | Option | Description | Example |
 |--------|-------------|---------|
 | `--add-card` | Add new credit card | `--add-card "Chase" 10000 15 12 1200` |
@@ -286,13 +336,45 @@ python3 transaction_processor.py transactions.csv --analyze --category "Shopping
 | `--remove-card` | Remove a credit card | `--remove-card "Old Card"` |
 | `--list-cards` | List all configured cards | `--list-cards` |
 | `--update-balance` | Update card balance | `--update-balance "Chase" 1234.56 current` |
+
+#### Budget Management
+| Option | Description | Example |
+|--------|-------------|---------|
 | `--set-limits` | Set monthly spending limits | `--set-limits 2000 3000` |
 | `--set-budgets` | Set category budgets | `--set-budgets Shopping:800 "Food & Drinks":400` |
-| `--process-auto` | Auto-process transaction files | `--process-auto ~/Downloads/Chase*.csv` |
 | `--reset-statement` | Reset for new statement period | `--reset-statement "Chase"` |
 | `--reset` | Reset balances | `--reset current` |
+
+#### Transaction Processing
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--process-auto` | Auto-process transaction files | `--process-auto ~/Downloads/Chase*.csv` |
+| `--update-categories` | Update category spending only | `--update-categories *.csv` |
+
+#### Display
+| Option | Description | Example |
+|--------|-------------|---------|
 | `--summary` | Show spending summary | `--summary` |
 | `--due-dates` | Show upcoming due dates | `--due-dates` |
+
+#### Time Period Analysis (NEW)
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--analyze-period` | Analyze transactions over time | `--analyze-period ~/Downloads/*.csv` |
+| `--start-date` | Start date for analysis | `--start-date 2024-01-01` |
+| `--end-date` | End date for analysis | `--end-date 2024-06-30` |
+| `--group-by` | Group by time period | `--group-by quarter` |
+| `--compare` | Show period comparisons | `--compare` |
+| `--trend` | Show trend analysis | `--trend "Food & Drinks"` or `--trend total` |
+| `--store-analysis` | Store analysis with name | `--store-analysis "Q1_2024"` |
+| `--no-categories` | Hide category breakdown | `--no-categories` |
+
+#### Historical Analysis
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--list-analyses` | List stored analyses | `--list-analyses` |
+| `--load-analysis` | Load stored analysis | `--load-analysis "Q1_2024"` |
+| `--compare-analyses` | Compare two analyses | `--compare-analyses "Q1_2024" "Q2_2024"` |
 
 ### Transaction Processor (`transaction_processor.py`)
 
@@ -339,12 +421,43 @@ The processor automatically categorizes transactions into these 6 categories:
 - Any transaction that doesn't fit the above categories
 - Transfers, unusual purchases
 
-## How Categorization Works
+## Time Period Analysis Use Cases
 
-1. **Bank Category First**: If your bank already categorized the transaction correctly (e.g., Chase labels it "Shopping"), we use that
-2. **Smart Mapping**: Maps bank categories like "Health & Wellness" → Services
-3. **Keyword Matching**: Analyzes transaction descriptions for merchants and keywords
-4. **Fallback**: Uncategorized transactions go to "Other"
+### Monthly Budget Review
+```bash
+# Current month analysis with budget comparison
+python3 credit_card_tracker.py --analyze-period current_month.csv \
+    --start-date $(date +%Y-%m-01) --compare --trend total
+```
+
+### Quarterly Business Review
+```bash
+# Compare quarters with category trends
+python3 credit_card_tracker.py --analyze-period *.csv \
+    --group-by quarter --compare --trend Shopping --store-analysis "$(date +%Y)_Quarterly"
+```
+
+### Annual Spending Analysis
+```bash
+# Full year breakdown with comprehensive analysis
+python3 credit_card_tracker.py --analyze-period ~/transactions_2024/*.csv \
+    --start-date 2024-01-01 --end-date 2024-12-31 \
+    --compare --trend total --store-analysis "Annual_2024"
+```
+
+### Category Deep Dive
+```bash
+# Analyze specific category over time
+python3 credit_card_tracker.py --analyze-period *.csv \
+    --trend "Food & Drinks" --compare --start-date 2024-01-01
+```
+
+### Spending Pattern Detection
+```bash
+# Identify spending patterns by month
+python3 credit_card_tracker.py --analyze-period *.csv \
+    --group-by month --compare --trend total --start-date 2023-01-01
+```
 
 ## Security Features
 
@@ -352,6 +465,7 @@ The processor automatically categorizes transactions into these 6 categories:
 - **Local Processing**: Everything runs on your computer, no data sent online
 - **Encrypted Storage**: Uses your system's secure keyring for encryption keys
 - **Secure File Handling**: Encrypted backups protect your financial data
+- **Historical Data Protection**: Time period analyses stored with same encryption as card data
 
 ## Troubleshooting
 
@@ -368,6 +482,14 @@ The processor automatically categorizes transactions into these 6 categories:
 **"Module not found"**
 - Install required packages: `pip install pandas keyring cryptography`
 
+**"Could not parse transaction dates"**
+- Ensure your CSV has a 'Transaction Date' column
+- Check that dates are in a recognizable format (MM/DD/YYYY, YYYY-MM-DD, etc.)
+
+**"No data found in specified date range"**
+- Verify your start and end dates are correct
+- Check that transaction dates fall within your specified range
+
 ### File Format Requirements
 
 Your CSV should have these columns:
@@ -381,7 +503,7 @@ Your CSV should have these columns:
 
 - **Offline Only**: No internet connection required or used
 - **Local Processing**: All analysis happens on your machine
-- **Encrypted Storage**: Backup files are encrypted using industry-standard encryption
+- **Encrypted Storage**: Backup files and historical analyses are encrypted using industry-standard encryption
 - **No Tracking**: No analytics, telemetry, or data collection
 
 ## Contributing
@@ -403,4 +525,15 @@ This tool is provided as-is for personal financial analysis. Use responsibly and
 - Check that your CSV has the required columns
 - Ensure Python packages are installed correctly
 - Try with a smaller date range if processing large files
-- Use `--save` to backup your data before trying different analysis options
+- Use `--store-analysis` to backup your data before trying different analysis options
+
+## Recent Updates
+
+### Time Period Analysis Features
+- **Monthly/Quarterly/Yearly Breakdowns**: Analyze spending patterns over any time period
+- **Trend Analysis**: Visual indicators showing spending direction with percentage changes
+- **Historical Storage**: Save and compare multiple time period analyses
+- **Period Comparisons**: Month-over-month, quarter-over-quarter analysis
+- **Custom Date Ranges**: Analyze any specific date range from your transaction history
+- **Category Trends**: Track how specific spending categories change over time
+- **Secure Storage**: All historical analyses encrypted using existing security system
