@@ -29,8 +29,9 @@ Thumbs.db
 transactions/
 data/
 
-# Test code
+# Test files
 test.py
+test_report_*.json
 
 # Logs
 *.log
