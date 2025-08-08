@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
 
 # Virtual environments
@@ -13,6 +16,8 @@ ENV/
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # OS
 .DS_Store
@@ -29,4 +34,6 @@ test.py
 
 # Logs
 *.log
-EOF
+
+# Temporary files
+/web/uploads/

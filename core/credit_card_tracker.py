@@ -15,6 +15,7 @@ import pandas as pd
 import keyring
 import argparse
 import sys
+import os
 import re
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -373,15 +374,33 @@ class CreditCardTracker:
         self.spending_limits = {}
         self.category_budgets = {}
         self.category_spending = {}
-        self.cipher_suite = self._setup_encryption()
-        self.config_file = 'credit_cards.enc'
-        self.limits_file = 'spending_limits.enc'
-        self.budgets_file = 'category_budgets.enc'
-        self.spending_file = 'category_spending.enc'
+
+        # Update file paths to use data directory
+        data_dir = self._get_data_directory()
+        self.config_file = os.path.join(data_dir, 'credit_cards.enc')
+        self.limits_file = os.path.join(data_dir, 'spending_limits.enc')
+        self.budgets_file = os.path.join(data_dir, 'category_budgets.enc')
+        self.spending_file = os.path.join(data_dir, 'category_spending.enc')
+
         self.load_cards()
         self.load_spending_limits()
         self.load_category_budgets()
         self.load_category_spending()
+
+    def _get_data_directory(self):
+        """Get the data directory path, creating it if it doesn't exist."""
+        import os
+        from pathlib import Path
+        
+        # Get the project root directory (parent of core directory)
+        current_file = Path(__file__)
+        project_root = current_file.parent.parent
+        data_dir = project_root / 'data'
+        
+        # Create data directory if it doesn't exist
+        data_dir.mkdir(exist_ok=True)
+        
+        return str(data_dir)
     
     def _setup_encryption(self):
         """Set up encryption for secure storage."""

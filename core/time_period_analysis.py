@@ -8,6 +8,7 @@ Time Period Analysis Extension for Credit Card Tracker
 """
 import pandas as pd
 import json
+import os
 from datetime import datetime, timedelta
 from collections import defaultdict
 import calendar
@@ -17,7 +18,11 @@ class TimePeriodAnalyzer:
         """Initialize with reference to main credit card tracker."""
         self.tracker = credit_card_tracker
         self.historical_data = {}
-        self.historical_file = 'historical_spending.enc'
+        
+        # Use the same data directory as the tracker
+        data_dir = self.tracker._get_data_directory()
+        self.historical_file = os.path.join(data_dir, 'historical_spending.enc')
+        
         self.load_historical_data()
     
     def analyze_time_period(self, df, start_date=None, end_date=None, group_by='month'):
@@ -427,7 +432,7 @@ def add_period_analysis_to_tracker():
 # Example usage functions
 def main_period_analysis():
     """Example of how to use the time period analysis."""
-    from credit_card_tracker import CreditCardTracker
+    from core.credit_card_tracker import CreditCardTracker
     
     # Create tracker instance
     tracker = CreditCardTracker()
