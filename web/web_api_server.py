@@ -875,7 +875,7 @@ if __name__ == '__main__':
     try:
         # Run development server
         app.run(
-            debug=True,  # Enable debug mode for development
+            debug=False,  # Enable debug mode for development
             host='127.0.0.1',  # Bind to localhost only for security
             port=port,
             threaded=True,
