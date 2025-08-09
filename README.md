@@ -1,26 +1,36 @@
 # Credit Card Transaction Processor & Tracker
 
-A secure, offline tool for analyzing credit card transactions and tracking spending across multiple cards. Features intelligent merchant name cleaning, category budget tracking, time period analysis with monthly/quarterly/yearly breakdowns, and comprehensive financial insights without storing credentials or requiring internet access.
+A secure, offline tool for analyzing credit card transactions and tracking spending across multiple cards. Features intelligent merchant name cleaning, category budget tracking, time period analysis with monthly/quarterly/yearly breakdowns, comprehensive financial insights, and a modern web interface - all without storing credentials or requiring internet access.
 
-## Features
+[![Security](https://img.shields.io/badge/security-encrypted_local_storage-green.svg)](https://github.com/your-username/credit-card-tracker)
+[![Privacy](https://img.shields.io/badge/privacy-offline_processing-blue.svg)](https://github.com/your-username/credit-card-tracker)
+[![Platform](https://img.shields.io/badge/platform-cross_platform-orange.svg)](https://github.com/your-username/credit-card-tracker)
 
-### Transaction Analysis
+## 🌟 Key Features
+
+### 💻 **Modern Web Interface**
+- **7-Tab Dashboard**: Complete spending overview, card management, budgets, transaction processing, analysis, historical data, and settings
+- **Drag & Drop Upload**: Easy CSV file processing with visual feedback
+- **Real-time Updates**: Live dashboard with auto-refresh and instant notifications
+- **Responsive Design**: Works seamlessly on desktop, tablet, and mobile devices
+- **Secure Local Processing**: All data processed on your machine with encrypted storage
+
+### 📊 **Transaction Analysis**
 - **Universal Compatibility**: Works with CSV files from any credit card provider (Chase, Amex, Capital One, etc.)
 - **Smart Categorization**: Uses bank's existing categories when possible, falls back to intelligent keyword matching
 - **6 Core Categories**: Shopping, Food & Drinks, Services, Entertainment, Groceries, Other
 - **Merchant Name Cleaning**: Automatically cleans messy transaction names (e.g., "AMAZON MKTPL*WC4V41N33" → "AMAZON")
 - **Detailed Analysis**: Category breakdowns, spending totals, clean merchant summaries
 
-### Credit Card Tracking
+### 💳 **Credit Card Tracking**
 - **Multi-Card Management**: Track spending across all your credit cards
 - **Dual Balance Tracking**: Separate current spending from previous statement balances
 - **Credit Limit Monitoring**: See available credit and spending limits
 - **Due Date Tracking**: Never miss a payment with upcoming due date alerts
 - **Spending Limits**: Set soft (savings goals) and hard (emergency) spending limits
 - **Category Budgets**: Set and monitor monthly budgets for each spending category
-- **Spending Summary**: Quick overview with alerts for overspending
 
-### Time Period Analysis
+### 📈 **Time Period Analysis**
 - **Monthly/Quarterly/Yearly Breakdowns**: Analyze spending patterns over custom time periods
 - **Trend Analysis**: Visual indicators (📈📉➡️) showing spending direction and percentage changes
 - **Period Comparisons**: Month-over-month, quarter-over-quarter, and year-over-year analysis
@@ -28,225 +38,188 @@ A secure, offline tool for analyzing credit card transactions and tracking spend
 - **Category Trends**: Track specific category spending over time
 - **Custom Date Ranges**: Analyze any date range from your transaction history
 
-### Web Interface
-- **Modern Web UI**: Beautiful, responsive web interface for visual analysis
-- **Drag & Drop**: Easy CSV file upload with drag and drop support
-- **Real-time Dashboard**: Live spending summaries with budget alerts
-- **Interactive Analysis**: Visual time period analysis with charts and trends
-- **Mobile Responsive**: Works on desktop, tablet, and mobile browsers
-
-### Mobile App Support
-- **Read-only Mobile Access**: Safe mobile viewing without data modification risk
-- **Budget Monitoring**: Quick spending checks and budget status
-- **Push Notifications**: Alerts for budget limits and due dates
-- **Offline Capable**: Core features work without internet connection
-
-### Security
+### 🔒 **Security & Privacy**
 - **Secure Storage**: Encrypts local data using your system's secure keyring
 - **Offline Processing**: Everything runs locally on your machine
 - **No Credentials**: Never stores bank login information
 - **Local Network Only**: Web interface accessible only on your home network
 
-## Installation
+## 🚀 Quick Start
 
 ### Requirements
 - Python 3.7 or higher
-- Required packages:
+- Web browser (Chrome, Firefox, Safari, Edge)
+
+### Installation
 
 ```bash
-# Core functionality
-pip install pandas keyring cryptography
+# Clone the repository
+git clone https://github.com/your-username/credit-card-tracker.git
+cd credit-card-tracker
 
-# Web interface (optional)
-pip install flask flask-cors werkzeug
-```
+# Install dependencies
+pip install -r requirements.txt
 
-### Setup
-1. Download `transaction_processor.py` and `credit_card_tracker.py`
-2. Make them executable:
-```bash
-chmod +x transaction_processor.py
-chmod +x credit_card_tracker.py
-```
-
-### Web Interface Setup (Optional)
-1. Download `web_api_server.py` and `web_frontend.html` 
-2. Run the web server:
-```bash
+# Start the web interface
+cd web
 python3 web_api_server.py
 ```
-3. Access the web interface at `http://localhost:5000`
 
-## Credit Card Tracker Setup
+### First-Time Setup
 
-### Initial Configuration
+1. **Access the Web Interface**
+   ```
+   Open your browser and go to: http://localhost:5001
+   ```
 
-Set up your credit cards with their limits and dates:
+2. **Add Your Credit Cards**
+   - Click the "Manage Cards" tab
+   - Add each of your credit cards with limits and dates
+   - Example:
+     ```
+     Card Name: Chase Sapphire
+     Credit Limit: $10,000
+     Statement Date: 15 (15th of each month)
+     Due Date: 12 (12th of each month)
+     ```
+
+3. **Set Budgets (Optional)**
+   - Click "Budgets & Limits" tab
+   - Set monthly spending limits and category budgets
+   - Example:
+     ```
+     Monthly Limit: $2,000
+     Shopping: $800
+     Food & Drinks: $400
+     Groceries: $350
+     ```
+
+4. **Upload Transaction Data**
+   - Download CSV files from your credit card websites
+   - Drag and drop files into the "Import Transactions" tab
+   - Choose whether to update balances or analyze only
+
+## 📱 Web Interface Guide
+
+### Dashboard Tab
+- **Real-time Overview**: Current spending, balance due, budget status
+- **Visual Progress**: Color-coded budget bars and spending alerts
+- **Due Date Alerts**: Upcoming payment reminders with urgency indicators
+- **Auto-refresh**: Updates every 30 seconds
+
+![Dashboard Screenshot](docs/images/dashboard.png)
+
+### Manage Cards Tab
+- **Add New Cards**: Complete credit card configuration
+- **Edit Existing**: Update limits, dates, balances
+- **Balance Management**: Track current spending vs. statement balances
+- **Card Overview**: Available credit and utilization
+
+### Import Transactions Tab
+- **Drag & Drop Upload**: Multi-file CSV processing
+- **Processing Options**: 
+  - Auto-update card balances
+  - Category spending updates only
+  - Analysis without updates
+- **File Validation**: Automatic format checking and error reporting
+
+### Time Period Analysis Tab
+- **Flexible Date Ranges**: Custom start/end dates or all data
+- **Grouping Options**: Month, quarter, or year analysis
+- **Trend Indicators**: Visual spending direction indicators
+- **Save Analyses**: Store for future comparison
+
+### Historical Data Tab
+- **Stored Analyses**: View previously saved analyses
+- **Side-by-Side Comparison**: Compare different time periods
+- **Trend Visualization**: Percentage changes and spending patterns
+
+### Settings Tab
+- **Data Management**: Reset balances, statement periods
+- **Debug Information**: System status and troubleshooting
+- **Export Options**: Download data in JSON format
+
+## 🔧 Command Line Usage
+
+For advanced users who prefer command-line tools:
+
+### Initial Credit Card Setup
 
 ```bash
-# Add each of your credit cards (with optional balance due and current balance)
+# Add your credit cards
 python3 credit_card_tracker.py --add-card "Chase Sapphire" 10000 15 12 --add-card-desc "Primary rewards card"
-python3 credit_card_tracker.py --add-card "Apple" 5000 28 25 1200 567.89 --add-card-desc "Apple Card"
-python3 credit_card_tracker.py --add-card "Amex" 15000 20 17 --add-card-desc "Business expenses"
-python3 credit_card_tracker.py --add-card "Citi" 8000 10 7 --add-card-desc "Backup card"
-python3 credit_card_tracker.py --add-card "Personal Chase" 3000 5 2 --add-card-desc "Personal card"
+python3 credit_card_tracker.py --add-card "Apple" 5000 28 25 --add-card-desc "Apple Card"
+
+# Set spending limits
+python3 credit_card_tracker.py --set-limits 2000 3000
+
+# Set category budgets
+python3 credit_card_tracker.py --set-budgets Shopping:800 "Food & Drinks":400 Services:300
 ```
 
-**Format**: `--add-card "Card Name" credit_limit statement_date due_date [balance_due] [current_balance]`
-- `credit_limit`: Your credit limit (e.g., 10000 for $10,000)
-- `statement_date`: Day of month statement closes (e.g., 15 for 15th)
-- `due_date`: Day of month payment is due (e.g., 12 for 12th)
-- `balance_due`: Optional - existing balance from previous statement
-- `current_balance`: Optional - new spending since last statement
+### Transaction Processing
 
-## Getting Transaction Data from Chase Bank
+```bash
+# Process transaction files and update balances
+python3 credit_card_tracker.py --process-auto ~/Downloads/Chase*.csv
 
-### Step-by-Step Download Process:
+# Analyze transactions without updating balances
+python3 transaction_processor.py ~/Downloads/chase_transactions.csv --analyze
+
+# Category analysis
+python3 transaction_processor.py transactions.csv --category "Food & Drinks"
+```
+
+### Time Period Analysis
+
+```bash
+# Monthly analysis with trends
+python3 credit_card_tracker.py --analyze-period ~/Downloads/*.csv \
+    --start-date 2024-01-01 --end-date 2024-06-30 --compare --trend total
+
+# Save analysis for future comparison
+python3 credit_card_tracker.py --analyze-period *.csv \
+    --store-analysis "Q2_2024" --trend "Food & Drinks"
+
+# Compare stored analyses
+python3 credit_card_tracker.py --compare-analyses "Q1_2024" "Q2_2024"
+```
+
+## 📂 Getting Transaction Data
+
+### Chase Bank Download Process
 
 1. **Log into Chase Online Banking**
    - Go to [chase.com](https://www.chase.com) and sign in
 
-2. **Navigate to Your Credit Card Account**
+2. **Navigate to Your Credit Card**
    - Click on the credit card you want to analyze
 
-3. **Access Transaction History**
-   - Look for "Account Activity" or "Statements & Activity"
-   - Click "Download account activity" or "Download transactions"
-
-4. **Configure Download Settings**
-   - **Date Range**: Select your desired time period (up to 2 years)
-   - **Format**: Choose **CSV** (not PDF or other formats)
-   - **Account**: Ensure correct credit card is selected
-
-5. **Download the File**
-   - File will typically be named something like `Chase1234_Activity20240101_20240331_20240405.CSV`
-   - Save to a folder you'll remember (e.g., `~/Downloads`)
+3. **Download Transactions**
+   - Look for "Account Activity" or "Download account activity"
+   - Select date range (up to 2 years available)
+   - Choose **CSV format** (not PDF)
+   - Download to your computer
 
 ### Other Credit Card Providers
 
-The processor works with CSV files from other providers too:
+The tool works with CSV files from all major providers:
 - **American Express**: Download from "Statements & Activity"
 - **Capital One**: Use "Download Transactions" feature
 - **Discover**: Export from "Recent Activity"
 - **Citi**: Download from "Account Activity"
 
-## Usage Examples
+## 📊 Analysis Examples
 
-### Credit Card Tracking
-
-**Set category budgets for monthly spending goals:**
+### Monthly Budget Review
 ```bash
-# Set budgets for specific categories
-python3 credit_card_tracker.py --set-budgets Shopping:800 "Food & Drinks":400 Services:300 Entertainment:200 Groceries:350
-
-# Set individual budgets
-python3 credit_card_tracker.py --set-budgets Shopping:800
-python3 credit_card_tracker.py --set-budgets "Food & Drinks":400
+# Web Interface: Upload current month's transactions via drag & drop
+# CLI: Analyze current month with budget comparison
+python3 credit_card_tracker.py --analyze-period current_month.csv \
+    --start-date $(date +%Y-%m-01) --compare --trend total
 ```
 
-**Enhanced summary with budget tracking:**
-```bash
-python3 credit_card_tracker.py --summary
-```
-
-**Output:**
-```
-==================================================
-CREDIT CARD SPENDING SUMMARY - January 2025
-==================================================
-Chase Sapphire  $   2,367.73
-Apple           $       3.99
-Amex            $          -
-Citi            $          -
-Personal Chase  $          -
-------------------------------
-Left to Spend   $    -371.72 ⚠️  CAUTION
-------------------------------
-**New Spending  $   2,371.72**
-  Balance Due   $   1,200.00
-  Total Owed    $   3,571.72
-
-==================================================
-CATEGORY BUDGET STATUS
-==================================================
-Shopping        $  845.67 /   $800.00 ($ -45.67) 🚨 OVER
-Food & Drinks   $  234.56 /   $400.00 ($  165.44)
-Services        $  156.78 /   $300.00 ($  143.22)
-Entertainment   $   89.45 /   $200.00 ($  110.55)
-Groceries       $  378.90 /   $350.00 ($  -28.90) ⚠️  LOW
-Other           $   45.23 /        - (     -     )
-==================================================
-```
-
-**Check upcoming due dates:**
-```bash
-python3 credit_card_tracker.py --due-dates
-```
-
-**Output:**
-```
-=== Upcoming Due Dates ===
-Personal Chase  2024-04-02 ( 5 days) $    0.00
-Citi            2024-04-07 (10 days) $    0.00 ⚡ SOON
-Chase Sapphire  2024-04-12 (15 days) $2,367.73
-Apple           2024-04-25 (28 days) $    3.99
-```
-
-## Web Interface Usage
-
-### Starting the Web Server
-```bash
-# Start the web server
-python3 web_api_server.py
-
-# Access at: http://localhost:5000
-# Mobile API: http://localhost:5000/api/mobile-summary
-```
-
-### Web Interface Features
-- **Visual Dashboard**: Modern interface with spending summaries and budget status
-- **Drag & Drop Upload**: Easy CSV file processing with visual feedback  
-- **Time Period Analysis**: Interactive analysis with charts and trend indicators
-- **Card Management**: Add, update, and remove credit cards through the web UI
-- **Budget Setting**: Set spending limits and category budgets visually
-- **Historical Analysis**: Store and compare multiple time period analyses
-
-### Mobile-Friendly Design
-The web interface is fully responsive and works on:
-- Desktop browsers (Chrome, Firefox, Safari)
-- Tablet browsers (iPad, Android tablets)
-- Mobile browsers (iPhone, Android phones)
-
-### API Endpoints for Mobile App
-The web server provides REST API endpoints for building mobile apps:
-- `GET /api/mobile-summary` - Simplified summary for mobile dashboards
-- `GET /api/summary` - Full dashboard data
-- `GET /api/cards` - Credit card information
-- `POST /api/analyze` - Run time period analysis
-
-**Basic monthly spending analysis:**
-```bash
-# Analyze all transactions by month
-python3 credit_card_tracker.py --analyze-period ~/Downloads/chase_*.csv
-```
-
-**Custom date range with comparisons:**
-```bash
-# Analyze specific date range with month-over-month comparison
-python3 credit_card_tracker.py --analyze-period ~/Downloads/chase_*.csv \
-    --start-date 2024-01-01 --end-date 2024-06-30 --compare
-```
-
-**Comprehensive analysis with trends and storage:**
-```bash
-# Full analysis with all features
-python3 credit_card_tracker.py --analyze-period ~/Downloads/*.csv \
-    --start-date 2024-01-01 --end-date 2024-12-31 \
-    --group-by month --compare --trend "Food & Drinks" \
-    --store-analysis "2024_Full_Year"
-```
-
-**Sample Time Period Output:**
+**Sample Output:**
 ```
 ================================================================================
 TIME PERIOD SPENDING ANALYSIS
@@ -256,355 +229,308 @@ Period       Total Spent  Transactions Avg/Transaction
 2024-01      $2,845.67    89           $31.97        
 2024-02      $3,234.89    95           $34.05        
 2024-03      $2,667.45    82           $32.53        
-2024-04      $3,445.23    101          $34.11        
-2024-05      $2,998.76    88           $34.08        
-2024-06      $3,123.55    93           $33.59        
 -------------------------------------------------------
-TOTAL        $18,315.55   548          $33.42        
-
-================================================================================
-MONTHLY CATEGORY BREAKDOWN
-================================================================================
-Period       Shopping    Food & DrinkServices    Entertainment Groceries   Other      
---------------------------------------------------------------------------------
-2024-01      $845        $523        $234        $189         $467        $587       
-2024-02      $967        $634        $345        $234         $523        $532       
-2024-03      $723        $456        $267        $156         $445        $621       
-2024-04      $1,034      $689        $389        $267         $589        $477       
-2024-05      $834        $567        $312        $198         $534        $554       
-2024-06      $889        $598        $334        $223         $556        $524       
---------------------------------------------------------------------------------
-TOTALS       $5,292      $3,467      $1,881      $1,267       $3,114      $3,295     
+TOTAL        $8,747.01    266          $32.87        
 
 === PERIOD COMPARISON (MONTH_OVER_MONTH) ===
 2024-01 → 2024-02: +$389.22 (+13.7%) 📈
 2024-02 → 2024-03: -$567.44 (-17.5%) 📉
-2024-03 → 2024-04: +$777.78 (+29.2%) 📈
-2024-04 → 2024-05: -$446.47 (-13.0%) 📉
-2024-05 → 2024-06: +$124.79 (+4.2%) 📈
 
 === TREND ANALYSIS ===
 Category: Food & Drinks
 Overall Trend: 📈 INCREASING (+12.3%)
-
-Period       Amount       Change      
-------------------------------------
-2024-01      $523.45      -           
-2024-02      $634.21      +$110.76    
-2024-03      $456.78      -$177.43    
-2024-04      $689.32      +$232.54    
-2024-05      $567.89      -$121.43    
-2024-06      $598.45      +$30.56     
-```
-
-**Historical Analysis Management:**
-```bash
-# Store current analysis for future reference
-python3 credit_card_tracker.py --analyze-period *.csv \
-    --start-date 2024-01-01 --end-date 2024-03-31 \
-    --store-analysis "Q1_2024"
-
-# List all stored analyses
-python3 credit_card_tracker.py --list-analyses
-
-# Load and display stored analysis
-python3 credit_card_tracker.py --load-analysis "Q1_2024" --compare --trend total
-
-# Compare two stored time periods
-python3 credit_card_tracker.py --compare-analyses "Q1_2024" "Q2_2024"
-```
-
-**Quarterly and yearly analysis:**
-```bash
-# Group by quarters instead of months
-python3 credit_card_tracker.py --analyze-period *.csv \
-    --group-by quarter --start-date 2024-01-01
-
-# Annual overview
-python3 credit_card_tracker.py --analyze-period ~/transactions_2024/*.csv \
-    --group-by year --compare --trend total
-```
-
-**Category-focused analysis:**
-```bash
-# Focus on specific spending category trends
-python3 credit_card_tracker.py --analyze-period *.csv \
-    --trend Shopping --compare --start-date 2024-01-01
-
-# Hide category breakdown (totals only)
-python3 credit_card_tracker.py --analyze-period *.csv \
-    --no-categories --trend total
-```
-
-### Transaction Analysis
-
-**Process single file:**
-```bash
-python3 transaction_processor.py transactions.csv --analyze
-```
-
-**Output:**
-```
-=== Transaction Analysis ===
-Total Transactions: 247
-Date Range: 2024-01-01 to 2024-03-31
-Total Spent: $8,456.32
-Total Credits: $125.00
-Average Transaction: $34.25
-
-=== Category Totals ===
-Shopping        : $2,845.67
-Food & Drinks   : $1,523.89
-Services        : $1,245.33
-Groceries       : $1,089.44
-Other           : $1,456.78
-Entertainment   :   $295.21
-
-=== Category Percentages ===
-Shopping        :   33.7%
-Food & Drinks   :   18.0%
-Services        :   14.7%
-Groceries       :   12.9%
-Other           :   17.2%
-Entertainment   :    3.5%
-```
-
-**Detailed Category Analysis:**
-```bash
-python3 transaction_processor.py transactions.csv --category "Food & Drinks"
-```
-
-**Processing Multiple Files:**
-```bash
-python3 transaction_processor.py jan.csv feb.csv mar.csv --analyze
-```
-
-## Command Line Options
-
-### Credit Card Tracker (`credit_card_tracker.py`)
-
-#### Card Management
-| Option | Description | Example |
-|--------|-------------|---------|
-| `--add-card` | Add new credit card | `--add-card "Chase" 10000 15 12 1200` |
-| `--add-card-desc` | Description for new card | `--add-card-desc "Primary card"` |
-| `--update-card` | Update existing card details | `--update-card "Chase" --credit-limit 15000 --current-balance 1234` |
-| `--remove-card` | Remove a credit card | `--remove-card "Old Card"` |
-| `--list-cards` | List all configured cards | `--list-cards` |
-| `--update-balance` | Update card balance | `--update-balance "Chase" 1234.56 current` |
-
-#### Budget Management
-| Option | Description | Example |
-|--------|-------------|---------|
-| `--set-limits` | Set monthly spending limits | `--set-limits 2000 3000` |
-| `--set-budgets` | Set category budgets | `--set-budgets Shopping:800 "Food & Drinks":400` |
-| `--reset-statement` | Reset for new statement period | `--reset-statement "Chase"` |
-| `--reset` | Reset balances | `--reset current` |
-
-#### Transaction Processing
-| Option | Description | Example |
-|--------|-------------|---------|
-| `--process-auto` | Auto-process transaction files | `--process-auto ~/Downloads/Chase*.csv` |
-| `--update-categories` | Update category spending only | `--update-categories *.csv` |
-
-#### Display
-| Option | Description | Example |
-|--------|-------------|---------|
-| `--summary` | Show spending summary | `--summary` |
-| `--due-dates` | Show upcoming due dates | `--due-dates` |
-
-#### Time Period Analysis (NEW)
-| Option | Description | Example |
-|--------|-------------|---------|
-| `--analyze-period` | Analyze transactions over time | `--analyze-period ~/Downloads/*.csv` |
-| `--start-date` | Start date for analysis | `--start-date 2024-01-01` |
-| `--end-date` | End date for analysis | `--end-date 2024-06-30` |
-| `--group-by` | Group by time period | `--group-by quarter` |
-| `--compare` | Show period comparisons | `--compare` |
-| `--trend` | Show trend analysis | `--trend "Food & Drinks"` or `--trend total` |
-| `--store-analysis` | Store analysis with name | `--store-analysis "Q1_2024"` |
-| `--no-categories` | Hide category breakdown | `--no-categories` |
-
-#### Historical Analysis
-| Option | Description | Example |
-|--------|-------------|---------|
-| `--list-analyses` | List stored analyses | `--list-analyses` |
-| `--load-analysis` | Load stored analysis | `--load-analysis "Q1_2024"` |
-| `--compare-analyses` | Compare two analyses | `--compare-analyses "Q1_2024" "Q2_2024"` |
-
-### Transaction Processor (`transaction_processor.py`)
-
-| Option | Description | Example |
-|--------|-------------|---------|
-| `files` | CSV transaction files to process | `transactions.csv` |
-| `--analyze` | Show category breakdown and spending analysis | `--analyze` |
-| `--category` | Detailed analysis of specific category | `--category "Shopping"` |
-| `--save` | Save encrypted backup | `--save backup.enc` |
-| `--load` | Load from encrypted backup | `--load backup.enc` |
-| `--export` | Export processed data | `--export report.xlsx` |
-| `--format` | Export format (csv, excel, json) | `--format excel` |
-
-## Category System
-
-The processor automatically categorizes transactions into these 6 categories:
-
-### 🛍️ Shopping
-- Amazon, Walmart, Target, Costco
-- Department stores, pharmacies, retail
-- Online shopping, home improvement
-
-### 🍕 Food & Drinks
-- Restaurants, fast food, coffee shops
-- Delivery services (DoorDash, Uber Eats)
-- Bars, breweries, dining out
-
-### 🔧 Services
-- Healthcare, insurance, banking fees
-- Utilities, internet, phone, subscriptions
-- Professional services, repairs
-
-### 🎬 Entertainment
-- Movies, concerts, sports events
-- Travel, hotels, flights
-- Books, games, recreation
-
-### 🥬 Groceries
-- Supermarkets, grocery stores
-- Whole Foods, Trader Joe's, local markets
-- Organic stores, produce stands
-
-### 📋 Other
-- Any transaction that doesn't fit the above categories
-- Transfers, unusual purchases
-
-## Time Period Analysis Use Cases
-
-### Monthly Budget Review
-```bash
-# Current month analysis with budget comparison
-python3 credit_card_tracker.py --analyze-period current_month.csv \
-    --start-date $(date +%Y-%m-01) --compare --trend total
-```
-
-### Quarterly Business Review
-```bash
-# Compare quarters with category trends
-python3 credit_card_tracker.py --analyze-period *.csv \
-    --group-by quarter --compare --trend Shopping --store-analysis "$(date +%Y)_Quarterly"
-```
-
-### Annual Spending Analysis
-```bash
-# Full year breakdown with comprehensive analysis
-python3 credit_card_tracker.py --analyze-period ~/transactions_2024/*.csv \
-    --start-date 2024-01-01 --end-date 2024-12-31 \
-    --compare --trend total --store-analysis "Annual_2024"
 ```
 
 ### Category Deep Dive
 ```bash
-# Analyze specific category over time
-python3 credit_card_tracker.py --analyze-period *.csv \
-    --trend "Food & Drinks" --compare --start-date 2024-01-01
+# Web Interface: Use Time Period Analysis tab with category filter
+# CLI: Analyze specific category trends
+python3 transaction_processor.py transactions.csv --category "Shopping"
 ```
 
-### Spending Pattern Detection
-```bash
-# Identify spending patterns by month
-python3 credit_card_tracker.py --analyze-period *.csv \
-    --group-by month --compare --trend total --start-date 2023-01-01
+**Sample Output:**
+```
+=== Detailed Analysis: Shopping ===
+Total Transactions: 45
+Total Spending: $1,234.56
+Average Transaction: $27.43
+
+=== Top Merchants in Shopping ===
+AMAZON                          : $  456.78 (12 transactions)
+TARGET                          : $  234.56 (8 transactions)
+COSTCO                          : $  189.34 (3 transactions)
 ```
 
-## Security Features
+## 🏗️ Project Structure
 
-- **No Credentials Stored**: Never stores your bank login information
-- **Local Processing**: Everything runs on your computer, no data sent online
-- **Encrypted Storage**: Uses your system's secure keyring for encryption keys
-- **Secure File Handling**: Encrypted backups protect your financial data
-- **Historical Data Protection**: Time period analyses stored with same encryption as card data
+```
+credit-card-tracker/
+├── README.md                    # This file
+├── requirements.txt             # Python dependencies
+├── LICENSE                      # MIT License
+├── core/                        # Core functionality
+│   ├── __init__.py
+│   ├── credit_card_tracker.py   # Main tracker logic
+│   ├── transaction_processor.py # CSV processing
+│   └── time_period_analysis.py  # Historical analysis
+├── web/                         # Web interface
+│   ├── web_api_server.py        # Flask server
+│   ├── templates/
+│   │   └── index.html           # Main web interface
+│   └── static/                  # CSS, JS, images
+├── data/                        # Encrypted data storage
+│   ├── *.enc                    # Encrypted configuration files
+│   ├── uploads/                 # Temporary upload directory
+│   └── transaction_files/       # Your CSV files
+├── docs/                        # Documentation
+├── mobile/                      # Mobile app components
+└── scripts/                     # Utility scripts
+```
 
-## Troubleshooting
+## 📋 API Documentation
+
+The web interface provides a comprehensive REST API:
+
+### Dashboard Endpoints
+- `GET /api/summary` - Complete dashboard data
+- `GET /api/cards` - Credit card information
+- `GET /api/mobile-summary` - Simplified mobile data
+
+### Card Management
+- `POST /api/cards` - Add new credit card
+- `PUT /api/cards/<name>` - Update card details
+- `DELETE /api/cards/<name>` - Remove card
+
+### Budget Management
+- `POST /api/spending-limits` - Set monthly limits
+- `POST /api/category-budgets` - Set category budgets
+
+### Transaction Processing
+- `POST /api/upload-transactions` - Upload and process CSV files
+
+### Historical Analysis
+- `GET /api/historical-analyses` - List stored analyses
+- `POST /api/compare-analyses` - Compare two analyses
+
+### Data Management
+- `POST /api/reset-statement` - Reset statement periods
+- `POST /api/reset-balances` - Reset card balances
+
+## 🎯 Category System
+
+The system automatically categorizes transactions into 6 main categories:
+
+| Category | Examples |
+|----------|----------|
+| 🛍️ **Shopping** | Amazon, Walmart, Target, Costco, Best Buy, Pharmacies |
+| 🍕 **Food & Drinks** | Restaurants, Fast Food, Coffee Shops, Bars, Delivery Services |
+| 🔧 **Services** | Healthcare, Insurance, Utilities, Subscriptions, Professional Services |
+| 🎬 **Entertainment** | Movies, Travel, Hotels, Sports Events, Books, Gaming |
+| 🥬 **Groceries** | Supermarkets, Whole Foods, Trader Joe's, Farmers Markets |
+| 📋 **Other** | Any transaction that doesn't fit the above categories |
+
+## 🛡️ Security Features
+
+- **Encryption**: All data encrypted using your system's secure keyring
+- **Local Processing**: No data transmitted to external servers
+- **No Credentials**: Never stores bank login information
+- **Local Network**: Web interface only accessible on your home network
+- **Temporary Files**: Uploaded files automatically cleaned after processing
+- **Input Validation**: All user inputs sanitized and validated
+
+## 🔧 Advanced Configuration
+
+### Custom Category Rules
+Edit `core/transaction_processor.py` to customize categorization:
+
+```python
+# Add custom merchant patterns
+merchant_patterns = {
+    'MY_CUSTOM_STORE': ['CUSTOM STORE', 'CUSTOM SHOP'],
+    # Add your patterns here
+}
+```
+
+### API Rate Limiting
+For production use, consider adding rate limiting:
+
+```python
+# In web_api_server.py
+from flask_limiter import Limiter
+
+limiter = Limiter(
+    app,
+    key_func=lambda: request.remote_addr,
+    default_limits=["200 per day", "50 per hour"]
+)
+```
+
+## 🐛 Troubleshooting
 
 ### Common Issues
 
-**"No transactions to analyze"**
-- Check that your CSV file has data
-- Ensure file is in correct format with columns: Transaction Date, Description, Category, Amount
+**"No template found" Error**
+```bash
+# Make sure you're running from the correct directory
+cd web
+python3 web_api_server.py
 
-**"Error processing CSV file"**
-- Try different file encoding if special characters appear garbled
-- Ensure file isn't corrupted during download
+# Or use absolute paths
+python3 /path/to/project/web/web_api_server.py
+```
 
-**"Module not found"**
-- Install required packages: `pip install pandas keyring cryptography`
+**CSV Processing Errors**
+- Ensure CSV files are in the correct format
+- Check that files have required columns: Transaction Date, Description, Amount
+- Verify file encoding (UTF-8, Latin-1, or CP1252 supported)
 
-**"Could not parse transaction dates"**
-- Ensure your CSV has a 'Transaction Date' column
-- Check that dates are in a recognizable format (MM/DD/YYYY, YYYY-MM-DD, etc.)
+**Port Already in Use**
+```bash
+# The server automatically tries ports 5001-5010
+# If all are busy, manually specify a port:
+flask run --host=127.0.0.1 --port=5020
+```
 
-**"No data found in specified date range"**
-- Verify your start and end dates are correct
-- Check that transaction dates fall within your specified range
+**Permission Errors on File Upload**
+```bash
+# Check upload directory permissions
+chmod 755 data/uploads/
+```
 
-### File Format Requirements
+### Debug Information
 
-Your CSV should have these columns:
-- `Transaction Date` - Date of transaction
-- `Description` - Merchant name/description
-- `Category` - Bank's original category (optional)
-- `Amount` - Transaction amount (negative for spending)
-- `Memo` - Additional details (optional)
+Access debug info at: `http://localhost:5001/api/debug`
 
-## Privacy and Security
+Or use command line:
+```bash
+python3 credit_card_tracker.py --summary  # Show current status
+```
 
-- **Offline First**: Core functionality requires no internet connection
-- **Local Processing**: All analysis happens on your machine
-- **Encrypted Storage**: All data files and historical analyses are encrypted using industry-standard encryption
-- **No Tracking**: No analytics, telemetry, or data collection
-- **Local Network Only**: Web interface accessible only on your home network
-- **No Cloud Dependencies**: Nothing is sent to external servers
-- **Read-Only Mobile**: Mobile access cannot modify financial data
+## 🚀 Performance Tips
 
-## Contributing
+### Large Transaction Files
+- Process files in smaller batches (6 months at a time)
+- Use SSD storage for better I/O performance
+- Close other applications during large file processing
 
-This tool was built with security professionals in mind. If you find issues or want to contribute improvements:
+### Web Interface Optimization
+- Use modern browsers (Chrome, Firefox, Safari, Edge)
+- Enable hardware acceleration in browser settings
+- Close unused browser tabs during heavy processing
 
-1. Test thoroughly with sample data
-2. Maintain security-first principles
-3. Keep dependencies minimal
-4. Document any changes clearly
+## 🔄 Data Migration
 
-## License
+### From Version 1.x to 2.x
+```bash
+# Backup your data first
+cp -r data/ data_backup/
 
-This tool is provided as-is for personal financial analysis. Use responsibly and in accordance with your bank's terms of service.
+# Run migration script
+python3 scripts/migrate_v1_to_v2.py
+
+# Verify migration
+python3 credit_card_tracker.py --summary
+```
+
+### Export/Import Data
+```bash
+# Export all data
+python3 credit_card_tracker.py --export-data backup.json
+
+# Import data (new installation)
+python3 credit_card_tracker.py --import-data backup.json
+```
+
+## 📱 Mobile App (Coming Soon)
+
+We're developing companion mobile apps:
+
+- **iOS App**: Native Swift application for iPhone/iPad
+- **Android App**: Native Kotlin application
+- **React Native**: Cross-platform mobile solution
+
+Features will include:
+- Read-only dashboard access
+- Budget notifications
+- Due date reminders
+- Quick balance checks
+
+## 🤝 Contributing
+
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Setup
+```bash
+# Clone and set up development environment
+git clone https://github.com/your-username/credit-card-tracker.git
+cd credit-card-tracker
+
+# Create virtual environment
+python3 -m venv venv
+source venv/bin/activate  # Linux/Mac
+# or
+venv\Scripts\activate     # Windows
+
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Run tests
+python3 -m pytest tests/
+
+# Start development server
+cd web
+python3 web_api_server.py
+```
+
+### Code Style
+- Follow PEP 8 for Python code
+- Use ESLint for JavaScript
+- Write tests for new features
+- Update documentation
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **Security Focus**: Built with security professionals in mind
+- **Privacy First**: No telemetry, analytics, or external data transmission
+- **Open Source**: Community-driven development
+- **Cross-Platform**: Works on Windows, macOS, and Linux
+
+## 📞 Support
+
+- **Documentation**: Check this README and the `/docs` folder
+- **Issues**: Report bugs on [GitHub Issues](https://github.com/your-username/credit-card-tracker/issues)
+- **Discussions**: Join conversations on [GitHub Discussions](https://github.com/your-username/credit-card-tracker/discussions)
+- **Security**: Report security issues privately to [security@yourproject.com](mailto:security@yourproject.com)
+
+## 🔮 Roadmap
+
+### Version 2.1 (Current)
+- ✅ Modern web interface with 7-tab navigation
+- ✅ Drag & drop file upload
+- ✅ Real-time dashboard updates
+- ✅ Complete API coverage
+- ✅ Mobile-responsive design
+
+### Version 2.2 (Planned)
+- 📱 Native mobile applications (iOS/Android)
+- 📊 Advanced visualization charts
+- 🔄 Automatic bank data synchronization (optional)
+- 🏦 Support for bank-specific CSV formats
+- 📈 Machine learning transaction categorization
+
+### Version 3.0 (Future)
+- 🌐 Multi-user support with role-based access
+- 🔗 Integration with personal finance platforms
+- 📊 Advanced reporting and analytics
+- 🔒 Hardware security module support
+- ☁️ Optional encrypted cloud backup
 
 ---
 
-**Need Help?** 
-- Check that your CSV has the required columns
-- Ensure Python packages are installed correctly
-- Try with a smaller date range if processing large files
-- Use `--store-analysis` to backup your data before trying different analysis options
+**Built with ❤️ for security-conscious financial tracking**
 
-## Recent Updates
-
-### Time Period Analysis Features
-- **Monthly/Quarterly/Yearly Breakdowns**: Analyze spending patterns over any time period
-- **Trend Analysis**: Visual indicators showing spending direction with percentage changes
-- **Historical Storage**: Save and compare multiple time period analyses
-- **Period Comparisons**: Month-over-month, quarter-over-quarter analysis
-- **Custom Date Ranges**: Analyze any specific date range from your transaction history
-- **Category Trends**: Track how specific spending categories change over time
-
-### Web Interface Features
-- **Modern Web UI**: Beautiful, responsive interface for visual analysis and management
-- **Drag & Drop CSV Upload**: Easy transaction file processing with visual feedback
-- **Interactive Dashboard**: Real-time spending summaries with budget alerts and status
-- **Visual Time Period Analysis**: Charts, trends, and comparisons with intuitive interface
-- **Mobile Responsive**: Works seamlessly on desktop, tablet, and mobile browsers
-- **REST API**: Endpoints for building custom mobile applications
-
-### Security Enhancements
-- **Encrypted Historical Data**: All stored analyses use existing security system
-- **Local Network Access**: Web interface accessible only on home network
-- **Read-Only Mobile Support**: Mobile API provides safe, view-only access to spending data
+> *"Take control of your finances without compromising your privacy"*
