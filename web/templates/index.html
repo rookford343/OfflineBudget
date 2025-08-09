@@ -3,30 +3,1866 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Credit Card Tracker API</title>
+    <title>Credit Card Tracker Dashboard</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
-        .container { max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; }
-        h1 { color: #333; text-align: center; }
-        .status { background: #d4edda; padding: 15px; border-radius: 5px; text-align: center; }
-        .api-list { background: #f8f9fa; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #64748b;
+            --success-color: #059669;
+            --warning-color: #d97706;
+            --danger-color: #dc2626;
+            --background-color: #f8fafc;
+            --card-background: #ffffff;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --border-color: #e2e8f0;
+            --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+            --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+            background-color: var(--background-color);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, #3b82f6 100%);
+            color: white;
+            padding: 1.5rem 0;
+            box-shadow: var(--shadow-lg);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            text-align: center;
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            text-align: center;
+            opacity: 0.9;
+            font-size: 1rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1rem;
+        }
+
+        /* Tab Navigation */
+        .tab-navigation {
+            background: var(--card-background);
+            border-bottom: 1px solid var(--border-color);
+            padding: 0;
+            margin-bottom: 2rem;
+            position: sticky;
+            top: 120px;
+            z-index: 90;
+        }
+
+        .tab-list {
+            display: flex;
+            list-style: none;
+            overflow-x: auto;
+            margin: 0;
+            padding: 0;
+        }
+
+        .tab-item {
+            flex-shrink: 0;
+        }
+
+        .tab-button {
+            display: block;
+            padding: 1rem 1.5rem;
+            border: none;
+            background: none;
+            color: var(--text-secondary);
+            text-decoration: none;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s ease;
+            font-weight: 500;
+            white-space: nowrap;
+        }
+
+        .tab-button:hover {
+            color: var(--primary-color);
+            background: var(--background-color);
+        }
+
+        .tab-button.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+            background: var(--background-color);
+        }
+
+        /* Tab Content */
+        .tab-content {
+            display: none;
+            min-height: 60vh;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Common Components */
+        .controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            text-decoration: none;
+        }
+
+        .btn:hover:not(:disabled) {
+            background: #1d4ed8;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: var(--secondary-color);
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #475569;
+        }
+
+        .btn-success {
+            background: var(--success-color);
+        }
+
+        .btn-success:hover:not(:disabled) {
+            background: #047857;
+        }
+
+        .btn-warning {
+            background: var(--warning-color);
+        }
+
+        .btn-warning:hover:not(:disabled) {
+            background: #b45309;
+        }
+
+        .btn-danger {
+            background: var(--danger-color);
+        }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #b91c1c;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .card {
+            background: var(--card-background);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+        }
+
+        .card h2, .card h3 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Form Components */
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .form-input, .form-select, .form-textarea {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 1rem;
+            transition: border-color 0.2s ease;
+        }
+
+        .form-input:focus, .form-select:focus, .form-textarea:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgb(37 99 235 / 0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        /* File Upload */
+        .file-upload {
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .file-upload:hover, .file-upload.dragover {
+            border-color: var(--primary-color);
+            background: rgb(37 99 235 / 0.05);
+        }
+
+        .file-upload input[type="file"] {
+            display: none;
+        }
+
+        .file-upload-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        /* Status Components */
+        .status-card {
+            text-align: center;
+            padding: 2rem 1.5rem;
+        }
+
+        .status-amount {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 1rem 0;
+        }
+
+        .status-good { color: var(--success-color); }
+        .status-warning { color: var(--warning-color); }
+        .status-critical { color: var(--danger-color); }
+
+        .status-message {
+            font-size: 1.1rem;
+            font-weight: 500;
+            opacity: 0.8;
+        }
+
+        /* Loading and Error States */
+        .loading {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 2rem;
+            height: 2rem;
+            border: 2px solid var(--border-color);
+            border-radius: 50%;
+            border-top-color: var(--primary-color);
+            animation: spin 1s ease-in-out infinite;
+            margin-bottom: 1rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error, .success, .info {
+            padding: 1rem;
+            border-radius: 8px;
+            margin: 1rem 0;
+        }
+
+        .error {
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+        }
+
+        .success {
+            background: #f0fdf4;
+            border: 1px solid #bbf7d0;
+            color: #166534;
+        }
+
+        .info {
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            color: #1e40af;
+        }
+
+        /* List Components */
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem;
+            background: var(--background-color);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 0.75rem;
+        }
+
+        .item-info {
+            flex: 1;
+        }
+
+        .item-name {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .item-details {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .item-amount {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .item-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-left: 1rem;
+        }
+
+        .btn-small {
+            padding: 0.375rem 0.75rem;
+            font-size: 0.875rem;
+        }
+
+        /* Progress Bar */
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+
+        .progress-fill {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-good { background: var(--success-color); }
+        .progress-warning { background: var(--warning-color); }
+        .progress-critical { background: var(--danger-color); }
+
+        /* Due Date Styles */
+        .due-date-urgent {
+            background: #fef2f2 !important;
+            border-color: #fecaca !important;
+        }
+
+        .due-date-soon {
+            background: #fffbeb !important;
+            border-color: #fed7aa !important;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 2rem 0;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--border-color);
+            margin-top: 3rem;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.75rem;
+            }
+
+            .tab-list {
+                justify-content: flex-start;
+            }
+
+            .grid {
+                grid-template-columns: 1fr;
+                gap: 1rem;
+            }
+
+            .card {
+                padding: 1rem;
+            }
+
+            .status-amount {
+                font-size: 2rem;
+            }
+
+            .controls {
+                justify-content: center;
+                flex-direction: column;
+            }
+
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Analysis Results */
+        .analysis-results {
+            max-height: 400px;
+            overflow-y: auto;
+            background: var(--background-color);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+
+        .analysis-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+
+        .analysis-table th,
+        .analysis-table td {
+            padding: 0.75rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .analysis-table th {
+            background: var(--background-color);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+
+        .trend-indicator {
+            font-size: 1.2rem;
+            margin-left: 0.5rem;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>💳 Credit Card Tracker API</h1>
-        <div class="status">
-            <h2>✅ Server Running</h2>
-            <p>API server is active and ready for requests</p>
-        </div>
-        <div class="api-list">
-            <h3>Available Endpoints:</h3>
-            <ul>
-                <li><a href="/api/summary">/api/summary</a> - Dashboard data</li>
-                <li><a href="/api/cards">/api/cards</a> - Credit cards</li>
-                <li><a href="/api/mobile-summary">/api/mobile-summary</a> - Mobile summary</li>
-            </ul>
+    <div class="header">
+        <div class="container">
+            <h1>💳 Credit Card Tracker</h1>
+            <p>Secure spending analysis and budget management</p>
         </div>
     </div>
+
+    <div class="container">
+        <!-- Tab Navigation -->
+        <nav class="tab-navigation">
+            <ul class="tab-list">
+                <li class="tab-item">
+                    <button class="tab-button active" onclick="showTab('dashboard')">
+                        📊 Dashboard
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('cards')">
+                        💳 Manage Cards
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('budgets')">
+                        🎯 Budgets & Limits
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('transactions')">
+                        📄 Import Transactions
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('analysis')">
+                        📈 Time Period Analysis
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('historical')">
+                        🗂️ Historical Data
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('settings')">
+                        ⚙️ Settings
+                    </button>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard-tab" class="tab-content active">
+            <div class="controls">
+                <button class="btn" onclick="loadDashboard()" id="refreshBtn">
+                    <span id="refreshIcon">🔄</span>
+                    <span id="refreshText">Refresh Data</span>
+                </button>
+                <div class="last-updated" id="lastUpdated"></div>
+            </div>
+
+            <div id="loading" class="loading">
+                <div class="loading-spinner"></div>
+                <p>Loading your financial data...</p>
+            </div>
+
+            <div id="error" class="error" style="display: none;"></div>
+
+            <div id="dashboard" style="display: none;">
+                <!-- Spending Summary -->
+                <div class="grid">
+                    <div class="card status-card">
+                        <h2>💰 Monthly Spending</h2>
+                        <div class="status-amount" id="totalSpending">$0.00</div>
+                        <div class="status-message" id="spendingMessage">Loading...</div>
+                    </div>
+
+                    <div class="card status-card">
+                        <h2>💸 Balance Due</h2>
+                        <div class="status-amount status-warning" id="balanceDue">$0.00</div>
+                        <div class="status-message">Previous statements</div>
+                    </div>
+
+                    <div class="card status-card">
+                        <h2>🎯 Left to Spend</h2>
+                        <div class="status-amount" id="leftToSpend">$0.00</div>
+                        <div class="status-message" id="budgetStatus">Within budget</div>
+                    </div>
+                </div>
+
+                <!-- Credit Cards and Categories -->
+                <div class="grid">
+                    <div class="card">
+                        <h2>💳 Credit Cards</h2>
+                        <div id="cardsList">
+                            <!-- Cards will be populated here -->
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>📊 Category Budgets</h2>
+                        <div id="categoriesList">
+                            <!-- Categories will be populated here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Due Dates -->
+                <div class="card">
+                    <h2>📅 Upcoming Due Dates</h2>
+                    <div id="dueDatesList">
+                        <!-- Due dates will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manage Cards Tab -->
+        <div id="cards-tab" class="tab-content">
+            <div class="controls">
+                <h2>💳 Credit Card Management</h2>
+                <button class="btn btn-success" onclick="showAddCardForm()">
+                    ➕ Add New Card
+                </button>
+            </div>
+
+            <div id="addCardForm" class="card" style="display: none; margin-bottom: 2rem;">
+                <h3>Add New Credit Card</h3>
+                <form onsubmit="addCard(event)">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Card Name *</label>
+                            <input type="text" class="form-input" id="cardName" required 
+                                   placeholder="e.g., Chase Sapphire">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Credit Limit *</label>
+                            <input type="number" class="form-input" id="creditLimit" required 
+                                   placeholder="10000" step="0.01">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Statement Date *</label>
+                            <input type="number" class="form-input" id="statementDate" required 
+                                   placeholder="15" min="1" max="31">
+                            <small class="item-details">Day of month (1-31)</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Due Date *</label>
+                            <input type="number" class="form-input" id="dueDate" required 
+                                   placeholder="12" min="1" max="31">
+                            <small class="item-details">Day of month (1-31)</small>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Current Balance</label>
+                            <input type="number" class="form-input" id="currentBalance" 
+                                   placeholder="0.00" step="0.01">
+                            <small class="item-details">New spending since last statement</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Balance Due</label>
+                            <input type="number" class="form-input" id="balanceDue" 
+                                   placeholder="0.00" step="0.01">
+                            <small class="item-details">Previous statement balance</small>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Description</label>
+                        <input type="text" class="form-input" id="cardDescription" 
+                               placeholder="e.g., Primary rewards card">
+                    </div>
+                    <div class="form-group">
+                        <button type="submit" class="btn btn-success">Add Card</button>
+                        <button type="button" class="btn btn-secondary" onclick="hideAddCardForm()">Cancel</button>
+                    </div>
+                </form>
+            </div>
+
+            <div id="cardsManagement">
+                <!-- Cards management will be populated here -->
+            </div>
+        </div>
+
+        <!-- Budgets & Limits Tab -->
+        <div id="budgets-tab" class="tab-content">
+            <div class="controls">
+                <h2>🎯 Budgets & Spending Limits</h2>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3>📈 Monthly Spending Limits</h3>
+                    <form onsubmit="setSpendingLimits(event)">
+                        <div class="form-group">
+                            <label class="form-label">Soft Limit (Savings Goal)</label>
+                            <input type="number" class="form-input" id="softLimit" 
+                                   placeholder="2000.00" step="0.01">
+                            <small class="item-details">Target monthly spending amount</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Hard Limit (Emergency)</label>
+                            <input type="number" class="form-input" id="hardLimit" 
+                                   placeholder="3000.00" step="0.01">
+                            <small class="item-details">Maximum emergency spending</small>
+                        </div>
+                        <button type="submit" class="btn btn-success">Set Limits</button>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>📊 Category Budgets</h3>
+                    <form onsubmit="setCategoryBudgets(event)">
+                        <div class="form-group">
+                            <label class="form-label">Shopping</label>
+                            <input type="number" class="form-input" id="budgetShopping" 
+                                   placeholder="800.00" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Food & Drinks</label>
+                            <input type="number" class="form-input" id="budgetFoodDrinks" 
+                                   placeholder="400.00" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Services</label>
+                            <input type="number" class="form-input" id="budgetServices" 
+                                   placeholder="300.00" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Entertainment</label>
+                            <input type="number" class="form-input" id="budgetEntertainment" 
+                                   placeholder="200.00" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Groceries</label>
+                            <input type="number" class="form-input" id="budgetGroceries" 
+                                   placeholder="350.00" step="0.01">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Other</label>
+                            <input type="number" class="form-input" id="budgetOther" 
+                                   placeholder="150.00" step="0.01">
+                        </div>
+                        <button type="submit" class="btn btn-success">Set Category Budgets</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <!-- Import Transactions Tab -->
+        <div id="transactions-tab" class="tab-content">
+            <div class="controls">
+                <h2>📄 Import Transaction Files</h2>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3>📁 Upload CSV Files</h3>
+                    <div class="file-upload" onclick="document.getElementById('csvFiles').click()" 
+                         ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                        <input type="file" id="csvFiles" multiple accept=".csv" onchange="handleFileSelect(event)">
+                        <div class="file-upload-icon">📁</div>
+                        <p><strong>Click to select files</strong> or drag and drop CSV files here</p>
+                        <p class="item-details">Supports multiple files from any credit card provider</p>
+                    </div>
+                    <div id="selectedFiles"></div>
+                    <div class="form-group" style="margin-top: 1rem;">
+                        <button class="btn btn-success" onclick="processTransactions()" id="processBtn" disabled>
+                            🔄 Process Transactions
+                        </button>
+                        <button class="btn btn-secondary" onclick="analyzeOnly()" id="analyzeBtn" disabled>
+                            📊 Analyze Only
+                        </button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>⚙️ Processing Options</h3>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" id="autoUpdateBalances" checked style="margin-right: 0.5rem;">
+                            Auto-update card balances
+                        </label>
+                        <small class="item-details">Automatically update current balances from transaction data</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" id="updateCategories" checked style="margin-right: 0.5rem;">
+                            Update category spending
+                        </label>
+                        <small class="item-details">Update monthly category spending for budget tracking</small>
+                    </div>
+                </div>
+            </div>
+
+            <div id="transactionResults"></div>
+        </div>
+
+        <!-- Time Period Analysis Tab -->
+        <div id="analysis-tab" class="tab-content">
+            <div class="controls">
+                <h2>📈 Time Period Analysis</h2>
+            </div>
+
+            <div class="card">
+                <h3>🔍 Analysis Configuration</h3>
+                <form onsubmit="runAnalysis(event)">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Start Date</label>
+                            <input type="date" class="form-input" id="analysisStartDate">
+                            <small class="item-details">Leave empty for all data</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">End Date</label>
+                            <input type="date" class="form-input" id="analysisEndDate">
+                            <small class="item-details">Leave empty for all data</small>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Group By</label>
+                            <select class="form-select" id="analysisGroupBy">
+                                <option value="month">Month</option>
+                                <option value="quarter">Quarter</option>
+                                <option value="year">Year</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Trend Category</label>
+                            <select class="form-select" id="analysisTrendCategory">
+                                <option value="total">Total Spending</option>
+                                <option value="Shopping">Shopping</option>
+                                <option value="Food & Drinks">Food & Drinks</option>
+                                <option value="Services">Services</option>
+                                <option value="Entertainment">Entertainment</option>
+                                <option value="Groceries">Groceries</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">
+                                <input type="checkbox" id="showCategories" checked style="margin-right: 0.5rem;">
+                                Show category breakdown
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">
+                                <input type="checkbox" id="showComparison" style="margin-right: 0.5rem;">
+                                Show period comparison
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Save Analysis As (Optional)</label>
+                        <input type="text" class="form-input" id="analysisName" 
+                               placeholder="e.g., Q1_2024_Analysis">
+                        <small class="item-details">Save this analysis for future comparison</small>
+                    </div>
+                    <button type="submit" class="btn btn-success">Run Analysis</button>
+                </form>
+            </div>
+
+            <div id="analysisResults"></div>
+        </div>
+
+        <!-- Historical Data Tab -->
+        <div id="historical-tab" class="tab-content">
+            <div class="controls">
+                <h2>🗂️ Historical Analysis Data</h2>
+                <button class="btn" onclick="loadStoredAnalyses()">
+                    🔄 Refresh List
+                </button>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3>📋 Stored Analyses</h3>
+                    <div id="storedAnalysesList">
+                        <!-- Stored analyses will be populated here -->
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>🔄 Compare Analyses</h3>
+                    <form onsubmit="compareAnalyses(event)">
+                        <div class="form-group">
+                            <label class="form-label">First Analysis</label>
+                            <select class="form-select" id="compareAnalysis1">
+                                <option value="">Select analysis...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Second Analysis</label>
+                            <select class="form-select" id="compareAnalysis2">
+                                <option value="">Select analysis...</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-success">Compare Analyses</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="historicalResults"></div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings-tab" class="tab-content">
+            <div class="controls">
+                <h2>⚙️ Application Settings</h2>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3>🔄 Data Management</h3>
+                    <div class="form-group">
+                        <button class="btn btn-warning" onclick="resetStatementPeriod()">
+                            📅 Reset Statement Period
+                        </button>
+                        <small class="item-details">Move current balances to balance due for new statement</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-danger" onclick="resetBalances('current')">
+                            🧹 Reset Current Balances
+                        </button>
+                        <small class="item-details">Reset all current spending to $0.00</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-danger" onclick="resetBalances('due')">
+                            💸 Reset Due Balances
+                        </button>
+                        <small class="item-details">Reset all due balances to $0.00</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-danger" onclick="resetBalances('all')">
+                            🚨 Reset All Balances
+                        </button>
+                        <small class="item-details">Reset both current and due balances to $0.00</small>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>📊 Debug Information</h3>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" onclick="showDebugInfo()">
+                            🔍 Show Debug Info
+                        </button>
+                        <small class="item-details">View system status and file information</small>
+                    </div>
+                    <div id="debugInfo"></div>
+                </div>
+
+                <div class="card">
+                    <h3>💾 Data Export</h3>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" onclick="exportData('summary')">
+                            📋 Export Summary
+                        </button>
+                        <small class="item-details">Export current spending summary as JSON</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" onclick="exportData('cards')">
+                            💳 Export Cards Data
+                        </button>
+                        <small class="item-details">Export credit card configurations</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="container">
+            <p>🔒 All data processed securely on your local machine • No data transmitted externally</p>
+        </div>
+    </div>
+
+    <script>
+        let isLoading = false;
+        let lastUpdateTime = null;
+        let selectedFiles = [];
+        let storedAnalyses = [];
+
+        // Tab Management
+        function showTab(tabName) {
+            // Hide all tab content
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active class from all tab buttons
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabName + '-tab').classList.add('active');
+            
+            // Add active class to clicked tab button
+            event.target.classList.add('active');
+            
+            // Load data for specific tabs
+            if (tabName === 'dashboard') {
+                loadDashboard();
+            } else if (tabName === 'cards') {
+                loadCardsManagement();
+            } else if (tabName === 'historical') {
+                loadStoredAnalyses();
+            }
+        }
+
+        // Dashboard Functions
+        async function loadDashboard() {
+            if (isLoading) return;
+            
+            isLoading = true;
+            const refreshBtn = document.getElementById('refreshBtn');
+            const refreshIcon = document.getElementById('refreshIcon');
+            const refreshText = document.getElementById('refreshText');
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
+            const dashboard = document.getElementById('dashboard');
+
+            if (refreshBtn) {
+                refreshBtn.disabled = true;
+                refreshIcon.textContent = '⏳';
+                refreshText.textContent = 'Loading...';
+            }
+            
+            loading.style.display = 'block';
+            error.style.display = 'none';
+            dashboard.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/summary');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                
+                if (!result.success) {
+                    throw new Error(result.error || 'Unknown error occurred');
+                }
+
+                displayDashboard(result.data);
+                await loadCards();
+                
+                loading.style.display = 'none';
+                dashboard.style.display = 'block';
+                
+                lastUpdateTime = new Date();
+                updateLastUpdatedTime();
+
+            } catch (err) {
+                console.error('Error loading dashboard:', err);
+                showError(`Failed to load dashboard: ${err.message}`);
+                loading.style.display = 'none';
+            } finally {
+                isLoading = false;
+                if (refreshBtn) {
+                    refreshBtn.disabled = false;
+                    refreshIcon.textContent = '🔄';
+                    refreshText.textContent = 'Refresh Data';
+                }
+            }
+        }
+
+        async function loadCards() {
+            try {
+                const response = await fetch('/api/cards');
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayCards(result.data);
+                }
+            } catch (err) {
+                console.error('Error loading cards:', err);
+            }
+        }
+
+        function displayDashboard(data) {
+            // Update spending summary
+            document.getElementById('totalSpending').textContent = formatCurrency(data.total_spending);
+            document.getElementById('balanceDue').textContent = formatCurrency(data.balance_due);
+            document.getElementById('leftToSpend').textContent = formatCurrency(data.left_to_spend);
+            
+            // Update spending status
+            const spendingElement = document.getElementById('totalSpending');
+            const leftToSpendElement = document.getElementById('leftToSpend');
+            const spendingMessage = document.getElementById('spendingMessage');
+            const budgetStatus = document.getElementById('budgetStatus');
+
+            spendingElement.className = 'status-amount';
+            leftToSpendElement.className = 'status-amount';
+            
+            if (data.spending_status) {
+                spendingElement.classList.add(data.spending_status.replace('status-', 'status-'));
+            }
+            
+            leftToSpendElement.classList.add(data.left_to_spend < 0 ? 'status-critical' : 'status-good');
+            
+            spendingMessage.textContent = data.spending_message ? 
+                data.spending_message.replace(/[🚨⚠️✅]/g, '').trim() : 'No status';
+            budgetStatus.textContent = data.left_to_spend < 0 ? 'Over budget' : 'Within budget';
+
+            displayCategories(data.category_budgets || []);
+            displayDueDates(data.due_dates || []);
+        }
+
+        function displayCards(cards) {
+            const cardsList = document.getElementById('cardsList');
+            
+            if (!cards || cards.length === 0) {
+                cardsList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💳</div>No credit cards configured<br><small>Add cards using the "Manage Cards" tab</small></div>';
+                return;
+            }
+
+            cardsList.innerHTML = cards.map(card => `
+                <div class="list-item">
+                    <div class="item-info">
+                        <div class="item-name">${escapeHtml(card.name)}</div>
+                        <div class="item-details">
+                            Available: ${formatCurrency(card.available_credit)} of ${formatCurrency(card.credit_limit)}
+                            ${card.description ? ' • ' + escapeHtml(card.description) : ''}
+                        </div>
+                    </div>
+                    <div class="item-amount ${card.current_balance > 0 ? 'status-warning' : 'status-good'}">
+                        ${formatCurrency(card.current_balance)}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function displayCategories(categories) {
+            const categoriesList = document.getElementById('categoriesList');
+            
+            if (!categories || categories.length === 0) {
+                categoriesList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📊</div>No budgets set<br><small>Set budgets using the "Budgets & Limits" tab</small></div>';
+                return;
+            }
+
+            categoriesList.innerHTML = categories.map(cat => {
+                const progressClass = cat.status ? cat.status.replace('budget-', 'progress-') : 'progress-good';
+                const progressWidth = Math.min(cat.percentage || 0, 100);
+                
+                return `
+                    <div class="list-item">
+                        <div class="item-info">
+                            <div class="item-name">${escapeHtml(cat.category)}</div>
+                            <div class="progress-bar">
+                                <div class="progress-fill ${progressClass}" style="width: ${progressWidth}%"></div>
+                            </div>
+                            <div class="item-details">
+                                ${formatCurrency(cat.spent)} of ${formatCurrency(cat.budget)}
+                            </div>
+                        </div>
+                        <div class="item-amount ${cat.status ? cat.status.replace('budget-', 'status-') : 'status-good'}">
+                            ${formatCurrency(cat.remaining)}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function displayDueDates(dueDates) {
+            const dueDatesList = document.getElementById('dueDatesList');
+            
+            if (!dueDates || dueDates.length === 0) {
+                dueDatesList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">📅</div>No upcoming due dates</div>';
+                return;
+            }
+
+            dueDatesList.innerHTML = dueDates.map(due => {
+                let itemClass = 'list-item';
+                if (due.urgency === 'budget-critical') {
+                    itemClass += ' due-date-urgent';
+                } else if (due.urgency === 'budget-warning') {
+                    itemClass += ' due-date-soon';
+                }
+                
+                return `
+                    <div class="${itemClass}">
+                        <div class="item-info">
+                            <div class="item-name">${escapeHtml(due.card_name)}</div>
+                            <div class="item-details">${due.status}</div>
+                        </div>
+                        <div class="item-amount ${due.balance > 0 ? 'status-warning' : 'status-good'}">
+                            ${formatCurrency(due.balance)}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Card Management Functions
+        async function loadCardsManagement() {
+            try {
+                const response = await fetch('/api/cards');
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayCardsManagement(result.data);
+                }
+            } catch (err) {
+                console.error('Error loading cards for management:', err);
+            }
+        }
+
+        function displayCardsManagement(cards) {
+            const cardsManagement = document.getElementById('cardsManagement');
+            
+            if (!cards || cards.length === 0) {
+                cardsManagement.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💳</div>No credit cards configured<br><small>Add your first card using the form above</small></div>';
+                return;
+            }
+
+            cardsManagement.innerHTML = cards.map(card => `
+                <div class="card">
+                    <div class="list-item">
+                        <div class="item-info">
+                            <div class="item-name">${escapeHtml(card.name)}</div>
+                            <div class="item-details">
+                                Limit: ${formatCurrency(card.credit_limit)} • 
+                                Available: ${formatCurrency(card.available_credit)} • 
+                                Statement: ${card.statement_date}th • 
+                                Due: ${card.due_date}th
+                                ${card.description ? '<br>' + escapeHtml(card.description) : ''}
+                            </div>
+                        </div>
+                        <div class="item-actions">
+                            <button class="btn btn-small btn-warning" onclick="editCard('${escapeHtml(card.name)}')">
+                                ✏️ Edit
+                            </button>
+                            <button class="btn btn-small btn-danger" onclick="removeCard('${escapeHtml(card.name)}')">
+                                🗑️ Remove
+                            </button>
+                        </div>
+                    </div>
+                    <div style="margin-top: 1rem;">
+                        <strong>Current Balance:</strong> ${formatCurrency(card.current_balance)} | 
+                        <strong>Balance Due:</strong> ${formatCurrency(card.balance_due)}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function showAddCardForm() {
+            document.getElementById('addCardForm').style.display = 'block';
+        }
+
+        function hideAddCardForm() {
+            document.getElementById('addCardForm').style.display = 'none';
+            document.getElementById('addCardForm').querySelector('form').reset();
+        }
+
+        async function addCard(event) {
+            event.preventDefault();
+            
+            const cardData = {
+                name: document.getElementById('cardName').value,
+                credit_limit: parseFloat(document.getElementById('creditLimit').value),
+                statement_date: parseInt(document.getElementById('statementDate').value),
+                due_date: parseInt(document.getElementById('dueDate').value),
+                current_balance: parseFloat(document.getElementById('currentBalance').value) || 0,
+                balance_due: parseFloat(document.getElementById('balanceDue').value) || 0,
+                description: document.getElementById('cardDescription').value
+            };
+
+            try {
+                const response = await fetch('/api/cards', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(cardData)
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Card added successfully!', 'success');
+                    hideAddCardForm();
+                    loadCardsManagement();
+                } else {
+                    showMessage('Error adding card: ' + result.error, 'error');
+                }
+            } catch (err) {
+                showMessage('Error adding card: ' + err.message, 'error');
+            }
+        }
+
+        async function removeCard(cardName) {
+            if (!confirm(`Are you sure you want to remove the card "${cardName}"?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/cards/${encodeURIComponent(cardName)}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Card removed successfully!', 'success');
+                    loadCardsManagement();
+                } else {
+                    showMessage('Error removing card: ' + result.error, 'error');
+                }
+            } catch (err) {
+                showMessage('Error removing card: ' + err.message, 'error');
+            }
+        }
+
+        // Budget Management Functions
+        async function setSpendingLimits(event) {
+            event.preventDefault();
+            
+            const softLimit = parseFloat(document.getElementById('softLimit').value);
+            const hardLimit = parseFloat(document.getElementById('hardLimit').value);
+            
+            if (!softLimit && !hardLimit) {
+                showMessage('Please enter at least one spending limit', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/spending-limits', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        soft_limit: softLimit || 0,
+                        hard_limit: hardLimit || 0
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Spending limits set successfully!', 'success');
+                    event.target.reset();
+                } else {
+                    showMessage('Error setting spending limits: ' + result.error, 'error');
+                }
+            } catch (err) {
+                showMessage('Error setting spending limits: ' + err.message, 'error');
+            }
+        }
+
+        async function setCategoryBudgets(event) {
+            event.preventDefault();
+            
+            const budgets = {
+                Shopping: parseFloat(document.getElementById('budgetShopping').value) || 0,
+                'Food & Drinks': parseFloat(document.getElementById('budgetFoodDrinks').value) || 0,
+                Services: parseFloat(document.getElementById('budgetServices').value) || 0,
+                Entertainment: parseFloat(document.getElementById('budgetEntertainment').value) || 0,
+                Groceries: parseFloat(document.getElementById('budgetGroceries').value) || 0,
+                Other: parseFloat(document.getElementById('budgetOther').value) || 0
+            };
+
+            try {
+                const response = await fetch('/api/category-budgets', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(budgets)
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Category budgets set successfully!', 'success');
+                    event.target.reset();
+                } else {
+                    showMessage('Error setting category budgets: ' + result.error, 'error');
+                }
+            } catch (err) {
+                showMessage('Error setting category budgets: ' + err.message, 'error');
+            }
+        }
+
+        // File Upload Functions
+        function handleDragOver(event) {
+            event.preventDefault();
+            event.currentTarget.classList.add('dragover');
+        }
+
+        function handleDragLeave(event) {
+            event.preventDefault();
+            event.currentTarget.classList.remove('dragover');
+        }
+
+        function handleDrop(event) {
+            event.preventDefault();
+            event.currentTarget.classList.remove('dragover');
+            
+            const files = Array.from(event.dataTransfer.files).filter(file => 
+                file.name.toLowerCase().endsWith('.csv')
+            );
+            
+            if (files.length > 0) {
+                selectedFiles = files;
+                updateSelectedFiles();
+            }
+        }
+
+        function handleFileSelect(event) {
+            selectedFiles = Array.from(event.target.files);
+            updateSelectedFiles();
+        }
+
+        function updateSelectedFiles() {
+            const selectedFilesDiv = document.getElementById('selectedFiles');
+            const processBtn = document.getElementById('processBtn');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            
+            if (selectedFiles.length === 0) {
+                selectedFilesDiv.innerHTML = '';
+                processBtn.disabled = true;
+                analyzeBtn.disabled = true;
+                return;
+            }
+
+            selectedFilesDiv.innerHTML = `
+                <div class="card" style="margin-top: 1rem;">
+                    <h4>Selected Files (${selectedFiles.length})</h4>
+                    ${selectedFiles.map(file => `
+                        <div class="item-details">📄 ${file.name} (${(file.size / 1024).toFixed(1)} KB)</div>
+                    `).join('')}
+                </div>
+            `;
+            
+            processBtn.disabled = false;
+            analyzeBtn.disabled = false;
+        }
+
+        async function processTransactions() {
+            if (selectedFiles.length === 0) return;
+
+            const processBtn = document.getElementById('processBtn');
+            const originalText = processBtn.textContent;
+            
+            processBtn.disabled = true;
+            processBtn.textContent = '🔄 Processing...';
+
+            try {
+                const formData = new FormData();
+                selectedFiles.forEach(file => {
+                    formData.append('files', file);
+                });
+                
+                formData.append('auto_update', document.getElementById('autoUpdateBalances').checked);
+                formData.append('update_categories', document.getElementById('updateCategories').checked);
+
+                const response = await fetch('/api/upload-transactions', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(result.message, 'success');
+                    
+                    // Show processing results
+                    const resultsDiv = document.getElementById('transactionResults');
+                    resultsDiv.innerHTML = `
+                        <div class="card">
+                            <h3>✅ Processing Complete</h3>
+                            <p>${result.message}</p>
+                            <p><strong>Files processed:</strong> ${result.files_processed}</p>
+                        </div>
+                    `;
+                    
+                    // Clear selected files
+                    selectedFiles = [];
+                    updateSelectedFiles();
+                    document.getElementById('csvFiles').value = '';
+                    
+                    // Refresh dashboard if visible
+                    if (document.getElementById('dashboard-tab').classList.contains('active')) {
+                        loadDashboard();
+                    }
+                } else {
+                    showMessage('Error processing transactions: ' + result.error, 'error');
+                }
+            } catch (err) {
+                showMessage('Error processing transactions: ' + err.message, 'error');
+            } finally {
+                processBtn.disabled = false;
+                processBtn.textContent = originalText;
+            }
+        }
+
+        async function analyzeOnly() {
+            if (selectedFiles.length === 0) return;
+
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            const originalText = analyzeBtn.textContent;
+            
+            analyzeBtn.disabled = true;
+            analyzeBtn.textContent = '📊 Analyzing...';
+
+            try {
+                const formData = new FormData();
+                selectedFiles.forEach(file => {
+                    formData.append('files', file);
+                });
+                
+                formData.append('auto_update', 'false');
+                formData.append('update_categories', document.getElementById('updateCategories').checked);
+
+                const response = await fetch('/api/upload-transactions', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Transaction analysis completed', 'success');
+                    
+                    // Show analysis results
+                    const resultsDiv = document.getElementById('transactionResults');
+                    resultsDiv.innerHTML = `
+                        <div class="card">
+                            <h3>📊 Analysis Complete</h3>
+                            <p>${result.message}</p>
+                            <p><strong>Files analyzed:</strong> ${result.files_processed}</p>
+                            <p class="item-details">No balances were updated - analysis only.</p>
+                        </div>
+                    `;
+                } else {
+                    showMessage('Error analyzing transactions: ' + result.error, 'error');
+                }
+            } catch (err) {
+                showMessage('Error analyzing transactions: ' + err.message, 'error');
+            } finally {
+                analyzeBtn.disabled = false;
+                analyzeBtn.textContent = originalText;
+            }
+        }
+
+        // Time Period Analysis Functions
+        async function runAnalysis(event) {
+            event.preventDefault();
+            
+            try {
+                // Note: This would need to be implemented in the backend API
+                showMessage('Time period analysis feature coming soon!', 'info');
+            } catch (err) {
+                showMessage('Error running analysis: ' + err.message, 'error');
+            }
+        }
+
+        // Historical Data Functions
+        async function loadStoredAnalyses() {
+            try {
+                const response = await fetch('/api/historical-analyses');
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayStoredAnalyses(result.data);
+                    updateComparisonDropdowns(result.data);
+                    storedAnalyses = result.data;
+                } else {
+                    showMessage('Error loading stored analyses: ' + result.error, 'error');
+                }
+            } catch (err) {
+                showMessage('Error loading stored analyses: ' + err.message, 'error');
+            }
+        }
+
+        function displayStoredAnalyses(analyses) {
+            const storedAnalysesList = document.getElementById('storedAnalysesList');
+            
+            if (!analyses || analyses.length === 0) {
+                storedAnalysesList.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🗂️</div>No stored analyses found<br><small>Run and save analyses from the Time Period Analysis tab</small></div>';
+                return;
+            }
+
+            storedAnalysesList.innerHTML = analyses.map(analysis => `
+                <div class="list-item">
+                    <div class="item-info">
+                        <div class="item-name">${escapeHtml(analysis.name)}</div>
+                        <div class="item-details">
+                            Created: ${new Date(analysis.created_date).toLocaleDateString()} • 
+                            ${analysis.period_count} periods
+                            ${analysis.metadata && Object.keys(analysis.metadata).length > 0 ? 
+                                '<br>' + Object.entries(analysis.metadata).map(([k,v]) => `${k}: ${v}`).join(' • ') : ''}
+                        </div>
+                    </div>
+                    <div class="item-actions">
+                        <button class="btn btn-small" onclick="viewStoredAnalysis('${escapeHtml(analysis.name)}')">
+                            👁️ View
+                        </button>
+                        <button class="btn btn-small btn-danger" onclick="deleteStoredAnalysis('${escapeHtml(analysis.name)}')">
+                            🗑️ Delete
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function viewStoredAnalysis(analysisName) {
+            try {
+                const response = await fetch(`/api/historical-analyses/${encodeURIComponent(analysisName)}`);
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayAnalysisResults(result.data, `Stored Analysis: ${analysisName}`);
+                } else {
+                    showMessage('Error loading analysis: ' + result.error, 'error');
+                }
+            } catch (err) {
+                showMessage('Error loading analysis: ' + err.message, 'error');
+            }
+        }
+
+        function updateComparisonDropdowns(analyses) {
+            const dropdown1 = document.getElementById('compareAnalysis1');
+            const dropdown2 = document.getElementById('compareAnalysis2');
+            
+            [dropdown1, dropdown2].forEach(dropdown => {
+                dropdown.innerHTML = '<option value="">Select analysis...</option>';
+                analyses.forEach(analysis => {
+                    dropdown.innerHTML += `<option value="${escapeHtml(analysis.name)}">${escapeHtml(analysis.name)}</option>`;
+                });
+            });
+        }
+
+        async function compareAnalyses(event) {
+            event.preventDefault();
+            
+            const analysis1 = document.getElementById('compareAnalysis1').value;
+            const analysis2 = document.getElementById('compareAnalysis2').value;
+            
+            if (!analysis1 || !analysis2) {
+                showMessage('Please select two analyses to compare', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/compare-analyses', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        analysis1: analysis1,
+                        analysis2: analysis2
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayComparisonResults(result.data);
+                } else {
+                    showMessage('Error comparing analyses: ' + result.error, 'error');
+                }
+            } catch (err) {
+                showMessage('Error comparing analyses: ' + err.message, 'error');
+            }
+        }
+
+        function displayComparisonResults(data) {
+            const resultsDiv = document.getElementById('historicalResults');
+            
+            resultsDiv.innerHTML = `
+                <div class="card">
+                    <h3>📊 Analysis Comparison</h3>
+                    <p><strong>${escapeHtml(data.analysis1_name)}</strong> vs <strong>${escapeHtml(data.analysis2_name)}</strong></p>
+                    <p>Common periods: ${data.common_periods}</p>
+                    
+                    <div class="analysis-results">
+                        <table class="analysis-table">
+                            <thead>
+                                <tr>
+                                    <th>Period</th>
+                                    <th>${escapeHtml(data.analysis1_name)}</th>
+                                    <th>${escapeHtml(data.analysis2_name)}</th>
+                                    <th>Difference</th>
+                                    <th>% Change</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${data.comparisons.map(comp => `
+                                    <tr>
+                                        <td>${comp.period}</td>
+                                        <td>${formatCurrency(comp.analysis1_total)}</td>
+                                        <td>${formatCurrency(comp.analysis2_total)}</td>
+                                        <td class="${comp.difference >= 0 ? 'status-warning' : 'status-good'}">
+                                            ${formatCurrency(comp.difference)}
+                                        </td>
+                                        <td class="${comp.percent_change >= 0 ? 'status-warning' : 'status-good'}">
+                                            ${comp.percent_change.toFixed(1)}%
+                                            <span class="trend-indicator">
+                                                ${comp.percent_change > 0 ? '📈' : comp.percent_change < 0 ? '📉' : '➡️'}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Settings Functions
+        async function resetStatementPeriod() {
+            if (!confirm('Are you sure you want to reset the statement period? This will move current balances to balance due.')) {
+                return;
+            }
+
+            try {
+                // Note: This would need to be implemented in the backend API
+                showMessage('Statement period reset feature coming soon!', 'info');
+            } catch (err) {
+                showMessage('Error resetting statement period: ' + err.message, 'error');
+            }
+        }
+
+        async function resetBalances(type) {
+            const typeNames = {
+                'current': 'current balances',
+                'due': 'due balances',
+                'all': 'all balances'
+            };
+
+            if (!confirm(`Are you sure you want to reset ${typeNames[type]}? This action cannot be undone.`)) {
+                return;
+            }
+
+            try {
+                // Note: This would need to be implemented in the backend API
+                showMessage(`Reset ${typeNames[type]} feature coming soon!`, 'info');
+            } catch (err) {
+                showMessage(`Error resetting ${typeNames[type]}: ` + err.message, 'error');
+            }
+        }
+
+        async function showDebugInfo() {
+            try {
+                const response = await fetch('/api/debug');
+                const result = await response.json();
+                
+                const debugInfo = document.getElementById('debugInfo');
+                debugInfo.innerHTML = `
+                    <div class="analysis-results">
+                        <h4>System Information</h4>
+                        <pre>${JSON.stringify(result, null, 2)}</pre>
+                    </div>
+                `;
+            } catch (err) {
+                showMessage('Error loading debug info: ' + err.message, 'error');
+            }
+        }
+
+        async function exportData(type) {
+            try {
+                let endpoint = '';
+                if (type === 'summary') endpoint = '/api/summary';
+                else if (type === 'cards') endpoint = '/api/cards';
+                
+                const response = await fetch(endpoint);
+                const result = await response.json();
+                
+                const dataStr = JSON.stringify(result, null, 2);
+                const dataBlob = new Blob([dataStr], {type: 'application/json'});
+                
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(dataBlob);
+                link.download = `credit_card_tracker_${type}_${new Date().toISOString().split('T')[0]}.json`;
+                link.click();
+                
+                showMessage(`${type} data exported successfully!`, 'success');
+            } catch (err) {
+                showMessage(`Error exporting ${type} data: ` + err.message, 'error');
+            }
+        }
+
+        // Utility Functions
+        function showError(message) {
+            const error = document.getElementById('error');
+            if (error) {
+                error.textContent = message;
+                error.style.display = 'block';
+            }
+        }
+
+        function showMessage(message, type = 'info') {
+            // Create a temporary message element
+            const messageDiv = document.createElement('div');
+            messageDiv.className = type;
+            messageDiv.textContent = message;
+            messageDiv.style.position = 'fixed';
+            messageDiv.style.top = '20px';
+            messageDiv.style.right = '20px';
+            messageDiv.style.zIndex = '1000';
+            messageDiv.style.maxWidth = '300px';
+            
+            document.body.appendChild(messageDiv);
+            
+            // Remove after 5 seconds
+            setTimeout(() => {
+                document.body.removeChild(messageDiv);
+            }, 5000);
+        }
+
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2
+            }).format(amount || 0);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+
+        function updateLastUpdatedTime() {
+            const lastUpdated = document.getElementById('lastUpdated');
+            if (lastUpdated && lastUpdateTime) {
+                lastUpdated.textContent = `Last updated: ${lastUpdateTime.toLocaleTimeString()}`;
+            }
+        }
+
+        // Event Listeners and Initialization
+        document.addEventListener('DOMContentLoaded', () => {
+            // Load dashboard on page load
+            loadDashboard();
+            
+            // Update time display every second
+            setInterval(updateLastUpdatedTime, 1000);
+            
+            // Auto-refresh dashboard every 30 seconds
+            setInterval(() => {
+                if (!isLoading && document.getElementById('dashboard-tab').classList.contains('active')) {
+                    loadDashboard();
+                }
+            }, 30000);
+        });
+
+        // Handle keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+                e.preventDefault();
+                loadDashboard();
+            }
+        });
+    </script>
 </body>
 </html>
