@@ -27,6 +27,7 @@ class TestSuite:
         self.temp_data_dir = None
         self.original_data_dir = None
         self.web_server_process = None
+        self.server_port = None  # Track the actual server port
         self.setup_test_environment()
     
     def setup_test_environment(self):
@@ -366,34 +367,114 @@ class TestSuite:
     def start_web_server(self):
         """Start the web server in background for testing."""
         try:
+            print("      Starting web server...")
+            
+            # Start server process
             self.web_server_process = subprocess.Popen(
                 ['python3', 'web/web_api_server.py'],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stderr=subprocess.PIPE,
+                text=True
             )
             
-            # Wait for server to start
-            time.sleep(3)
-            
-            # Check if server is running
-            try:
-                response = requests.get('http://localhost:5000/api/summary', timeout=5)
-                return response.status_code in [200, 404, 500]  # Any response means server is up
-            except:
-                return False
+            # Wait for server to start and detect port
+            server_port = None
+            for attempt in range(15):  # Try for up to 15 seconds
+                time.sleep(1)
                 
+                # Try common ports if we haven't detected the port yet
+                test_ports = [5001, 5002, 5003, 5004]
+                
+                for port in test_ports:
+                    try:
+                        # Try health endpoint first
+                        response = requests.get(f'http://localhost:{port}/api/health', timeout=2)
+                        if response.status_code == 200:
+                            print(f"      Server health check passed on port {port}")
+                            self.server_port = port  # Store for other tests
+                            return True
+                        elif response.status_code == 404:
+                            # Server is running but endpoint not found - check if it's our server
+                            try:
+                                response = requests.get(f'http://localhost:{port}/api/summary', timeout=2)
+                                if response.status_code == 200:
+                                    print(f"      Server running on port {port} (health endpoint missing)")
+                                    self.server_port = port
+                                    return True
+                            except:
+                                pass
+                        elif 'AirTunes' in response.headers.get('Server', ''):
+                            print(f"      Port {port} occupied by macOS AirPlay, skipping")
+                            continue
+                    except requests.exceptions.ConnectionError:
+                        continue
+                    except Exception as e:
+                        continue
+                
+                if attempt < 14:
+                    print(f"      Attempt {attempt + 1}: Server not ready, retrying...")
+            
+            # Check if process is still running
+            if self.web_server_process.poll() is None:
+                print("      Server process is running but not responding")
+                
+                # Get basic server output for debugging
+                try:
+                    # Use a simple approach to read output
+                    import select
+                    ready, _, _ = select.select([self.web_server_process.stdout], [], [], 1)
+                    if ready:
+                        output = self.web_server_process.stdout.read(500)
+                        if output:
+                            print(f"      Server stdout: {output[:200]}")
+                    
+                    ready, _, _ = select.select([self.web_server_process.stderr], [], [], 1)
+                    if ready:
+                        error = self.web_server_process.stderr.read(500)
+                        if error:
+                            print(f"      Server stderr: {error[:200]}")
+                            
+                except Exception as e:
+                    print(f"      Could not read server output: {e}")
+                    
+            else:
+                print("      Server process terminated unexpectedly")
+                try:
+                    stdout, stderr = self.web_server_process.communicate(timeout=1)
+                    if stderr:
+                        print(f"      Server error: {stderr[:300]}")
+                    if stdout:
+                        print(f"      Server output: {stdout[:300]}")
+                except Exception as comm_error:
+                    print(f"      Could not read server output: {comm_error}")
+            
+            return False
+                
+        except FileNotFoundError:
+            print("      Error: web/web_api_server.py not found")
+            return False
         except Exception as e:
-            print(f"Failed to start web server: {e}")
+            print(f"      Failed to start web server: {e}")
+            # Print more details about the error
+            import traceback
+            print(f"      Traceback: {traceback.format_exc()}")
             return False
     
     def stop_web_server(self):
         """Stop the web server."""
         if self.web_server_process:
+            print("      Stopping web server...")
             self.web_server_process.terminate()
             try:
                 self.web_server_process.wait(timeout=5)
+                print("      Web server stopped gracefully")
             except subprocess.TimeoutExpired:
+                print("      Force killing web server...")
                 self.web_server_process.kill()
+                try:
+                    self.web_server_process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    print("      Warning: Could not kill web server process")
             self.web_server_process = None
     
     def test_web_api(self):
@@ -409,6 +490,7 @@ class TestSuite:
         
         # Test API endpoints
         api_tests = [
+            ('GET', '/api/health', 'Health check endpoint'),
             ('GET', '/api/summary', 'Dashboard summary endpoint'),
             ('GET', '/api/cards', 'Cards list endpoint'),
             ('GET', '/api/mobile-summary', 'Mobile summary endpoint')
@@ -416,8 +498,12 @@ class TestSuite:
         
         for method, endpoint, test_name in api_tests:
             try:
+                # Use the detected server port
+                port = getattr(self, 'server_port', 5001)
+                url = f'http://localhost:{port}{endpoint}'
+                
                 if method == 'GET':
-                    response = requests.get(f'http://localhost:5000{endpoint}', timeout=10)
+                    response = requests.get(url, timeout=10)
                 
                 api_successful = response.status_code == 200
                 
@@ -430,7 +516,12 @@ class TestSuite:
                     except:
                         self.log_test(test_name, False, f"Status: {response.status_code}, Invalid JSON response")
                 else:
-                    self.log_test(test_name, False, f"HTTP {response.status_code}")
+                    # Check if this is the AirTunes server
+                    server_header = response.headers.get('Server', '')
+                    if 'AirTunes' in server_header:
+                        self.log_test(test_name, False, f"Hit macOS AirPlay service instead of Flask (port issue)")
+                    else:
+                        self.log_test(test_name, False, f"HTTP {response.status_code}")
                     
             except requests.RequestException as e:
                 self.log_test(test_name, False, f"Request failed: {str(e)[:100]}")
@@ -547,18 +638,29 @@ class TestSuite:
         
         # Save detailed report
         report_file = f"test_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-        with open(report_file, 'w') as f:
-            json.dump({
-                'timestamp': datetime.now().isoformat(),
-                'duration_seconds': duration.total_seconds(),
-                'total_tests': total_tests,
-                'passed_tests': passed_tests,
-                'failed_tests': failed_tests,
-                'success_rate': passed_tests/total_tests*100,
-                'results': self.test_results
-            }, f, indent=2)
-        
-        print(f"📄 Detailed report saved to: {report_file}")
+        try:
+            with open(report_file, 'w') as f:
+                json.dump({
+                    'timestamp': datetime.now().isoformat(),
+                    'duration_seconds': duration.total_seconds(),
+                    'total_tests': total_tests,
+                    'passed_tests': passed_tests,
+                    'failed_tests': failed_tests,
+                    'success_rate': passed_tests/total_tests*100,
+                    'results': [
+                        {
+                            'test': result['test'],
+                            'passed': bool(result['passed']),  # Ensure it's a proper boolean
+                            'details': str(result['details']) if result['details'] is not None else ""
+                        }
+                        for result in self.test_results
+                    ]
+                }, f, indent=2, ensure_ascii=False)
+            
+            print(f"📄 Detailed report saved to: {report_file}")
+        except Exception as e:
+            print(f"⚠️  Could not save detailed report: {e}")
+            print("📄 Test completed successfully but report save failed")
 
 def main():
     """Run the test suite."""
