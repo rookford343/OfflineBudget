@@ -1,4 +1,4 @@
-# Credit Card Transaction Processor & Tracker
+# Offline Transaction Processor & Budget Tracker
 
 A secure, offline tool for analyzing credit card transactions and tracking spending across multiple cards. Features intelligent merchant name cleaning, category budget tracking, time period analysis with monthly/quarterly/yearly breakdowns, comprehensive financial insights, and a modern web interface - all without storing credentials or requiring internet access.
 

@@ -163,10 +163,11 @@
 
         .btn.loading {
             position: relative;
-            color: transparent;
+            color: transparent !important;
+            pointer-events: none;
         }
 
-        btn.loading::after {
+        .btn.loading::after {
             content: '';
             position: absolute;
             width: 16px;
@@ -313,6 +314,31 @@
             gap: 1rem;
         }
 
+        /* Results Display */
+        .results-card {
+            background: var(--card-background);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+            margin-top: 1rem;
+        }
+
+        .results-card.success {
+            border-left: 4px solid var(--success-color);
+            background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
+        }
+
+        .results-card.error {
+            border-left: 4px solid var(--danger-color);
+            background: linear-gradient(135deg, #fef2f2 0%, #ffffff 100%);
+        }
+
+        .results-card.info {
+            border-left: 4px solid var(--primary-color);
+            background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
+        }
+
         /* File Upload */
         .file-upload {
             border: 2px dashed var(--border-color);
@@ -321,21 +347,82 @@
             text-align: center;
             transition: all 0.2s ease;
             cursor: pointer;
+            position: relative;
+            background: var(--background-color);
         }
 
         .file-upload:hover, .file-upload.dragover {
             border-color: var(--primary-color);
             background: rgb(37 99 235 / 0.05);
+            transform: translateY(-2px);
         }
 
         .file-upload input[type="file"] {
-            display: none;
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            opacity: 0;
+            cursor: pointer;
+            top: 0;
+            left: 0;
         }
 
         .file-upload-icon {
             font-size: 3rem;
             margin-bottom: 1rem;
             opacity: 0.5;
+        }
+
+        /* File List Styles */
+        .file-list {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--background-color);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-info {
+            flex: 1;
+        }
+
+        .file-name {
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .file-size {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+        }
+
+        .file-remove {
+            background: var(--danger-color);
+            color: white;
+            border: none;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: bold;
+            transition: background-color 0.2s ease;
+        }
+
+        .file-remove:hover {
+            background: #b91c1c;
         }
 
         /* Status Components */
@@ -951,26 +1038,24 @@
         <div id="transactions-tab" class="tab-content">
             <div class="controls">
                 <h2>📄 Import Transaction Files</h2>
+                <button class="btn btn-secondary" onclick="clearAllFiles()">
+                    🗑️ Clear All Files
+                </button>
             </div>
 
             <div class="grid">
                 <div class="card">
                     <h3>📁 Upload CSV Files</h3>
-                    <div class="file-upload" onclick="document.getElementById('csvFiles').click()" 
-                         ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
-                        <input type="file" id="csvFiles" multiple accept=".csv" onchange="handleFileSelect(event)">
+                    <div class="file-upload" id="fileUploadArea">
+                        <input type="file" id="csvFiles" multiple accept=".csv">
                         <div class="file-upload-icon">📁</div>
                         <p><strong>Click to select files</strong> or drag and drop CSV files here</p>
                         <p class="item-details">Supports multiple files from any credit card provider</p>
                     </div>
-                    <div id="selectedFiles"></div>
-                    <div class="form-group" style="margin-top: 1rem;">
-                        <button class="btn btn-success" onclick="processTransactions()" id="processBtn" disabled>
-                            🔄 Process Transactions
-                        </button>
-                        <button class="btn btn-secondary" onclick="analyzeOnly()" id="analyzeBtn" disabled>
-                            📊 Analyze Only
-                        </button>
+                    
+                    <div id="selectedFiles" style="display: none; margin-top: 1rem;">
+                        <h4>Selected Files (<span id="fileCount">0</span>)</h4>
+                        <div class="file-list" id="fileList"></div>
                     </div>
                 </div>
 
@@ -990,10 +1075,19 @@
                         </label>
                         <small class="item-details">Update monthly category spending for budget tracking</small>
                     </div>
+                    
+                    <div class="form-group" style="margin-top: 2rem;">
+                        <button class="btn btn-success" onclick="processTransactions()" id="processBtn" disabled>
+                            🔄 Process & Update Balances
+                        </button>
+                        <button class="btn btn-secondary" onclick="analyzeOnly()" id="analyzeBtn" disabled>
+                            📊 Analyze Only (No Updates)
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <div id="transactionResults"></div>
+            <div id="transactionResults" style="display: none; margin-top: 2rem;"></div>
         </div>
 
         <!-- Time Period Analysis Tab -->
@@ -1196,16 +1290,29 @@
             });
             
             // Show selected tab content
-            document.getElementById(tabName + '-tab').classList.add('active');
+            const targetTab = document.getElementById(tabName + '-tab');
+            if (targetTab) {
+                targetTab.classList.add('active');
+            }
             
             // Add active class to clicked tab button
-            event.target.classList.add('active');
+            if (event && event.target) {
+                event.target.classList.add('active');
+            }
             
             // Load data for specific tabs
             if (tabName === 'dashboard') {
                 loadDashboard();
             } else if (tabName === 'cards') {
                 loadCardsManagement();
+            } else if (tabName === 'budgets') {
+                // Load budget settings with a small delay
+                setTimeout(() => {
+                    loadCurrentBudgetSettings();
+                }, 100);
+            } else if (tabName === 'transactions') {
+                // Initialize file upload for transactions tab
+                setTimeout(setupFileUpload, 100);
             } else if (tabName === 'historical') {
                 loadStoredAnalyses();
             }
@@ -1225,6 +1332,76 @@
                     button.textContent = originalText;
                 }
             };
+        }
+
+        async function loadCurrentBudgetSettings() {
+            const loadingElement = document.getElementById('currentSettingsLoading');
+            const contentElement = document.getElementById('currentSettingsContent');
+            const refreshBtn = document.getElementById('refreshBudgetsBtn');
+            
+            // Show loading state
+            if (loadingElement) loadingElement.style.display = 'block';
+            if (contentElement) contentElement.style.display = 'none';
+            
+            // Simple button loading for refresh button
+            let originalRefreshText = '';
+            if (refreshBtn) {
+                originalRefreshText = refreshBtn.textContent;
+                refreshBtn.disabled = true;
+                refreshBtn.textContent = '⏳';
+            }
+            
+            try {
+                console.log('Loading budget settings...');
+                
+                const summaryResponse = await fetch('/api/summary');
+                
+                if (!summaryResponse.ok) {
+                    throw new Error(`HTTP ${summaryResponse.status}: ${summaryResponse.statusText}`);
+                }
+                
+                const summaryResult = await summaryResponse.json();
+                console.log('Budget API response:', summaryResult);
+                
+                if (!summaryResult.success) {
+                    throw new Error(summaryResult.error || 'Failed to load budget data');
+                }
+                
+                // Debug the data we received
+                console.log('Processing budget data:', {
+                    spending_message: summaryResult.data.spending_message,
+                    category_budgets: summaryResult.data.category_budgets,
+                    total_spending: summaryResult.data.total_spending,
+                    left_to_spend: summaryResult.data.left_to_spend
+                });
+                
+                displayCurrentSpendingLimits(summaryResult.data);
+                displayCurrentCategoryBudgets(summaryResult.data.category_budgets || []);
+                
+                if (loadingElement) loadingElement.style.display = 'none';
+                if (contentElement) contentElement.style.display = 'block';
+                
+            } catch (err) {
+                console.error('Error loading current budget settings:', err);
+                
+                if (loadingElement) loadingElement.style.display = 'none';
+                if (contentElement) {
+                    contentElement.innerHTML = `
+                        <div class="error" style="margin: 0.5rem 0; padding: 0.5rem; font-size: 0.9rem;">
+                            Failed to load settings: ${err.message}
+                            <br><button class="btn btn-small" onclick="loadCurrentBudgetSettings()" style="margin-top: 0.5rem;">Retry</button>
+                            <button class="btn btn-small" onclick="debugBudgetData()" style="margin-top: 0.5rem;">Debug</button>
+                        </div>
+                    `;
+                    contentElement.style.display = 'block';
+                }
+            } finally {
+                // Restore refresh button
+                if (refreshBtn) {
+                    refreshBtn.disabled = false;
+                    refreshBtn.textContent = originalRefreshText || '🔄 Refresh';
+                }
+            }
         }
 
         // Dashboard Functions
@@ -1776,11 +1953,7 @@
         async function setSpendingLimits(event) {
             event.preventDefault();
             
-            const submitBtn = document.getElementById('spendingLimitsSubmitBtn');
-            const originalText = submitBtn.textContent;
-            
-            submitBtn.disabled = true;
-            submitBtn.textContent = '⏳ Setting Limits...';
+            const buttonState = setButtonLoading('spendingLimitsSubmitBtn', '⏳ Setting Limits...');
             
             try {
                 const formData = new FormData(event.target);
@@ -1810,6 +1983,20 @@
                 if (result.success) {
                     showMessage('Spending limits set successfully!', 'success');
                     event.target.reset();
+                    
+                    // Auto-refresh current settings display
+                    console.log('Auto-refreshing budget settings...');
+                    setTimeout(() => {
+                        loadCurrentBudgetSettings();
+                        
+                        // Auto-hide edit forms after successful update (optional)
+                        const editSection = document.getElementById('editFormsSection');
+                        if (editSection && editSection.style.display !== 'none') {
+                            setTimeout(() => {
+                                toggleEditForms();
+                            }, 1000);
+                        }
+                    }, 500);
                 } else {
                     showMessage('Error setting spending limits: ' + result.error, 'error');
                 }
@@ -1817,59 +2004,68 @@
                 console.error('Error setting spending limits:', err);
                 showMessage('Error setting spending limits: ' + err.message, 'error');
             } finally {
-                submitBtn.disabled = false;
-                submitBtn.textContent = originalText;
+                if (buttonState) buttonState.restore();
             }
             
             return false;
         }
 
-        // UPDATED: Load current budget settings (using existing function)
-        async function loadCurrentBudgetSettings() {
-            const loadingElement = document.getElementById('currentSettingsLoading');
-            const contentElement = document.getElementById('currentSettingsContent');
+        async function setCategoryBudgets(event) {
+            event.preventDefault();
             
-            if (loadingElement) loadingElement.style.display = 'block';
-            if (contentElement) contentElement.style.display = 'none';
-            
-            const buttonState = setButtonLoading('refreshBudgetsBtn', '⏳');
+            const buttonState = setButtonLoading('categoryBudgetsSubmitBtn', '⏳ Setting Budgets...');
             
             try {
-                const summaryResponse = await fetch('/api/summary');
+                const formData = new FormData(event.target);
+                const budgets = {
+                    Shopping: parseFloat(formData.get('budgetShopping')) || 0,
+                    'Food & Drinks': parseFloat(formData.get('budgetFoodDrinks')) || 0,
+                    Services: parseFloat(formData.get('budgetServices')) || 0,
+                    Entertainment: parseFloat(formData.get('budgetEntertainment')) || 0,
+                    Groceries: parseFloat(formData.get('budgetGroceries')) || 0,
+                    Other: parseFloat(formData.get('budgetOther')) || 0
+                };
+
+                console.log('Setting category budgets:', budgets);
+
+                const response = await fetch('/api/category-budgets', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(budgets)
+                });
+
+                const result = await response.json();
                 
-                if (!summaryResponse.ok) {
-                    throw new Error(`HTTP ${summaryResponse.status}: ${summaryResponse.statusText}`);
+                if (result.success) {
+                    showMessage('Category budgets set successfully!', 'success');
+                    event.target.reset();
+                    
+                    // Auto-refresh current settings display
+                    console.log('Auto-refreshing budget settings...');
+                    setTimeout(() => {
+                        loadCurrentBudgetSettings();
+                        
+                        // Auto-hide edit forms after successful update (optional)
+                        const editSection = document.getElementById('editFormsSection');
+                        if (editSection && editSection.style.display !== 'none') {
+                            setTimeout(() => {
+                                toggleEditForms();
+                            }, 1000);
+                        }
+                    }, 500);
+                } else {
+                    showMessage('Error setting category budgets: ' + result.error, 'error');
                 }
-                
-                const summaryResult = await summaryResponse.json();
-                
-                if (!summaryResult.success) {
-                    throw new Error(summaryResult.error || 'Failed to load budget data');
-                }
-                
-                displayCurrentSpendingLimits(summaryResult.data);
-                displayCurrentCategoryBudgets(summaryResult.data.category_budgets || []);
-                
-                if (loadingElement) loadingElement.style.display = 'none';
-                if (contentElement) contentElement.style.display = 'block';
-                
             } catch (err) {
-                console.error('Error loading current budget settings:', err);
-                
-                if (loadingElement) loadingElement.style.display = 'none';
-                if (contentElement) {
-                    contentElement.innerHTML = `
-                        <div class="error" style="margin: 0.5rem 0; padding: 0.5rem; font-size: 0.9rem;">
-                            Failed to load: ${err.message}
-                        </div>
-                    `;
-                    contentElement.style.display = 'block';
-                }
-                
-                showMessage('Error loading current settings: ' + err.message, 'error');
+                console.error('Error setting category budgets:', err);
+                showMessage('Error setting category budgets: ' + err.message, 'error');
             } finally {
                 if (buttonState) buttonState.restore();
             }
+            
+            return false;
         }
 
         // NEW: Toggle edit forms visibility
@@ -1915,38 +2111,48 @@
             }
         }
 
-        // NEW: Display current spending limits
+        // Display current spending limits
         function displayCurrentSpendingLimits(summaryData) {
             const container = document.getElementById('currentSpendingLimits');
-            if (!container) return;
+            if (!container) {
+                console.log('currentSpendingLimits container not found');
+                return;
+            }
+            
+            console.log('Displaying spending limits with data:', summaryData);
             
             const totalSpending = summaryData.total_spending || 0;
             const leftToSpend = summaryData.left_to_spend || 0;
-            const spendingStatus = summaryData.spending_status || 'status-good';
+            const spendingMessage = summaryData.spending_message || '';
             
-            const hasLimits = summaryData.spending_message && 
-                            !summaryData.spending_message.includes('No Limits Set');
+            // Check if limits are actually set by looking at the spending message
+            const hasLimits = spendingMessage && 
+                            !spendingMessage.includes('No Limits Set') && 
+                            !spendingMessage.includes('No limits set');
+            
+            console.log('Has limits:', hasLimits, 'Message:', spendingMessage);
             
             if (!hasLimits) {
                 container.innerHTML = `
                     <div class="item-details" style="color: var(--text-secondary); font-style: italic;">
-                        No limits set
+                        No spending limits configured
                     </div>
                 `;
                 return;
             }
             
-            // Calculate limits
+            // Try to calculate limits based on spending and left to spend
             let softLimit = 0;
-            if (leftToSpend > 0) {
-                softLimit = totalSpending + leftToSpend;
-            } else if (leftToSpend < 0) {
+            let hardLimit = 0;
+            
+            if (leftToSpend !== 0) {
                 softLimit = totalSpending + Math.abs(leftToSpend);
             }
             
-            const statusClass = spendingStatus.replace('status-', '');
-            const statusIcon = spendingStatus === 'status-good' ? '✅' : 
-                            spendingStatus === 'status-warning' ? '⚠️' : '🚨';
+            // Determine status
+            const isOverBudget = leftToSpend < 0;
+            const statusClass = isOverBudget ? 'status-warning' : 'status-good';
+            const statusIcon = isOverBudget ? '⚠️' : '✅';
             
             container.innerHTML = `
                 <div style="font-size: 0.9rem; line-height: 1.4;">
@@ -1955,8 +2161,12 @@
                         <strong>${formatCurrency(softLimit)}</strong>
                     </div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
-                        <span>Current:</span>
+                        <span>Current Spending:</span>
                         <span class="${statusClass}">${formatCurrency(totalSpending)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>Remaining:</span>
+                        <span class="${statusClass}">${formatCurrency(leftToSpend)}</span>
                     </div>
                     <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span>Status:</span>
@@ -1972,27 +2182,32 @@
             const detailContainer = document.getElementById('currentCategoryBudgets');
             const toggleBtn = document.getElementById('toggleDetailsBtn');
             
-            if (!summaryContainer) return;
+            console.log('Displaying category budgets:', categoryBudgets);
+            
+            if (!summaryContainer) {
+                console.log('currentCategoryBudgetsSummary container not found');
+                return;
+            }
             
             if (!categoryBudgets || categoryBudgets.length === 0) {
                 summaryContainer.innerHTML = `
                     <div class="item-details" style="color: var(--text-secondary); font-style: italic;">
-                        No budgets set
+                        No category budgets configured
                     </div>
                 `;
                 if (toggleBtn) toggleBtn.style.display = 'none';
                 return;
             }
             
-            // Show toggle button
+            // Show toggle button since we have budgets
             if (toggleBtn) toggleBtn.style.display = 'block';
             
             // Calculate totals
-            const totalBudget = categoryBudgets.reduce((sum, cat) => sum + cat.budget, 0);
-            const totalSpent = categoryBudgets.reduce((sum, cat) => sum + cat.spent, 0);
-            const overBudgetCount = categoryBudgets.filter(cat => cat.remaining < 0).length;
+            const totalBudget = categoryBudgets.reduce((sum, cat) => sum + (cat.budget || 0), 0);
+            const totalSpent = categoryBudgets.reduce((sum, cat) => sum + (cat.spent || 0), 0);
+            const overBudgetCount = categoryBudgets.filter(cat => (cat.remaining || 0) < 0).length;
             
-            // Compact summary
+            // Create summary display
             summaryContainer.innerHTML = `
                 <div style="font-size: 0.9rem; line-height: 1.4;">
                     <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
@@ -2010,21 +2225,34 @@
                 </div>
             `;
             
-            // Detailed breakdown (for toggle)
+            // Create detailed breakdown (for toggle)
             if (detailContainer) {
-                const sortedBudgets = [...categoryBudgets].sort((a, b) => b.budget - a.budget);
+                const sortedBudgets = [...categoryBudgets].sort((a, b) => (b.budget || 0) - (a.budget || 0));
                 
                 const budgetHTML = sortedBudgets.map(cat => {
-                    const progressWidth = Math.min((cat.spent / cat.budget) * 100, 100);
-                    const progressClass = cat.status ? cat.status.replace('budget-', 'progress-') : 'progress-good';
-                    const statusClass = cat.status ? cat.status.replace('budget-', 'status-') : 'status-good';
+                    const budget = cat.budget || 0;
+                    const spent = cat.spent || 0;
+                    const remaining = cat.remaining || (budget - spent);
+                    const progressWidth = budget > 0 ? Math.min((spent / budget) * 100, 100) : 0;
+                    
+                    // Determine status
+                    let statusClass = 'status-good';
+                    let progressClass = 'progress-good';
+                    
+                    if (remaining < 0) {
+                        statusClass = 'status-critical';
+                        progressClass = 'progress-critical';
+                    } else if (remaining < budget * 0.1) {
+                        statusClass = 'status-warning';
+                        progressClass = 'progress-warning';
+                    }
                     
                     return `
                         <div style="margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color);">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
                                 <span style="font-weight: 500; font-size: 0.9rem;">${escapeHtml(cat.category)}</span>
                                 <span class="item-amount ${statusClass}" style="font-size: 0.85rem;">
-                                    ${formatCurrency(cat.spent)} / ${formatCurrency(cat.budget)}
+                                    ${formatCurrency(spent)} / ${formatCurrency(budget)}
                                 </span>
                             </div>
                             <div class="progress-bar" style="height: 4px; margin-bottom: 0.25rem;">
@@ -2033,9 +2261,9 @@
                             <div style="display: flex; justify-content: space-between;">
                                 <small class="item-details">${progressWidth.toFixed(0)}% used</small>
                                 <small class="item-details ${statusClass}">
-                                    ${cat.remaining >= 0 ? 
-                                    `${formatCurrency(cat.remaining)} left` : 
-                                    `${formatCurrency(Math.abs(cat.remaining))} over`}
+                                    ${remaining >= 0 ? 
+                                    `${formatCurrency(remaining)} left` : 
+                                    `${formatCurrency(Math.abs(remaining))} over`}
                                 </small>
                             </div>
                         </div>
@@ -2046,58 +2274,98 @@
             }
         }
 
-        // Enhanced showTab function to load budget settings when budgets tab is shown
-        const originalShowTab = window.showTab;
-        window.showTab = function(tabName) {
-            originalShowTab.call(this, tabName);
-            
-            if (tabName === 'budgets') {
-                setTimeout(() => {
-                    loadCurrentBudgetSettings();
-                }, 100);
+        function debugBudgetData() {
+            fetch('/api/summary')
+                .then(response => response.json())
+                .then(result => {
+                    console.log('=== DEBUG BUDGET DATA ===');
+                    console.log('Full API response:', result);
+                    if (result.success && result.data) {
+                        console.log('Summary data:', result.data);
+                        console.log('Spending message:', result.data.spending_message);
+                        console.log('Category budgets:', result.data.category_budgets);
+                        console.log('Total spending:', result.data.total_spending);
+                        console.log('Left to spend:', result.data.left_to_spend);
+                    }
+                    console.log('=== END DEBUG ===');
+                })
+                .catch(err => console.error('Debug error:', err));
+        }
+
+        function initializeFileUploadWhenNeeded() {
+            // Set up file upload when transactions tab is clicked
+            const transactionsTabButton = document.querySelector('button[onclick="showTab(\'transactions\')"]');
+            if (transactionsTabButton) {
+                transactionsTabButton.addEventListener('click', function() {
+                    // Delay to ensure tab content is visible
+                    setTimeout(setupFileUpload, 100);
+                });
             }
-        };
+            
+            // Also initialize if transactions tab is already active
+            if (document.getElementById('transactions-tab')?.classList.contains('active')) {
+                setTimeout(setupFileUpload, 100);
+            }
+        }
 
-        // Enhanced setSpendingLimits function to refresh current settings after update
-        const originalSetSpendingLimits = window.setSpendingLimits;
-        window.setSpendingLimits = async function(event) {
-            const result = await originalSetSpendingLimits.call(this, event);
-            
-            setTimeout(() => {
-                loadCurrentBudgetSettings();
-                // Auto-hide edit forms after successful update
-                const editSection = document.getElementById('editFormsSection');
-                if (editSection && editSection.style.display !== 'none') {
-                    setTimeout(() => {
-                        toggleEditForms();
-                    }, 1000);
-                }
-            }, 500);
-            
-            return result;
-        };
+        function setupFileUpload() {
+            const fileInput = document.getElementById('csvFiles');
+            const uploadArea = document.getElementById('fileUploadArea');
 
-        // Enhanced setCategoryBudgets function to refresh current settings after update
-        const originalSetCategoryBudgets = window.setCategoryBudgets;
-        window.setCategoryBudgets = async function(event) {
-            const result = await originalSetCategoryBudgets.call(this, event);
+            if (!fileInput || !uploadArea) {
+                console.log('File upload elements not found');
+                return;
+            }
             
-            setTimeout(() => {
-                loadCurrentBudgetSettings();
-                // Auto-hide edit forms after successful update
-                const editSection = document.getElementById('editFormsSection');
-                if (editSection && editSection.style.display !== 'none') {
-                    setTimeout(() => {
-                        toggleEditForms();
-                    }, 1000);
+            if (uploadArea.hasAttribute('data-setup')) {
+                console.log('File upload already set up');
+                return;
+            }
+            
+            uploadArea.setAttribute('data-setup', 'true');
+            console.log('Setting up file upload...');
+
+            // Simple file input change handler
+            fileInput.onchange = function(event) {
+                console.log('File input changed');
+                const files = Array.from(event.target.files);
+                console.log('Selected files:', files.map(f => f.name));
+                addFiles(files);
+            };
+
+            // Simple click handler - remove the complex event prevention
+            uploadArea.onclick = function(e) {
+                if (e.target !== fileInput) {
+                    console.log('Upload area clicked');
+                    fileInput.click();
                 }
-            }, 500);
+            };
             
-            return result;
-        };
+            // Simple drag and drop
+            uploadArea.ondragover = function(e) {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            };
+            
+            uploadArea.ondragleave = function(e) {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+            };
+            
+            uploadArea.ondrop = function(e) {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = Array.from(e.dataTransfer.files);
+                console.log('Files dropped:', files.map(f => f.name));
+                addFiles(files);
+            };
+            
+            console.log('File upload setup complete');
+        }
 
         // Auto-load current settings when page loads
         document.addEventListener('DOMContentLoaded', function() {
+            setupFileUpload();
             // Load current budget settings if budgets tab is active
             if (document.getElementById('budgets-tab')?.classList.contains('active')) {
                 setTimeout(() => {
@@ -2158,31 +2426,133 @@
         // File Upload Functions
         function handleDragOver(event) {
             event.preventDefault();
+            event.stopPropagation();
             event.currentTarget.classList.add('dragover');
         }
 
         function handleDragLeave(event) {
             event.preventDefault();
+            event.stopPropagation();
             event.currentTarget.classList.remove('dragover');
         }
 
         function handleDrop(event) {
             event.preventDefault();
+            event.stopPropagation();
             event.currentTarget.classList.remove('dragover');
             
-            const files = Array.from(event.dataTransfer.files).filter(file => 
-                file.name.toLowerCase().endsWith('.csv')
-            );
+            const files = Array.from(event.dataTransfer.files);
+            console.log('Dropped files:', files.map(f => f.name));
             
             if (files.length > 0) {
-                selectedFiles = files;
-                updateSelectedFiles();
+                addFiles(files);
             }
         }
 
         function handleFileSelect(event) {
-            selectedFiles = Array.from(event.target.files);
-            updateSelectedFiles();
+            console.log('File selection event triggered');
+            const files = Array.from(event.target.files);
+            console.log('Selected files:', files.map(f => f.name));
+            
+            if (files.length > 0) {
+                addFiles(files);
+            }
+        }
+
+        function addFiles(files) {
+            console.log('Adding files:', files.map(f => f.name));
+            
+            if (!files || files.length === 0) {
+                console.log('No files to add');
+                return;
+            }
+            
+            // Very simple CSV validation - just check the extension
+            const csvFiles = files.filter(file => {
+                const name = file.name.toLowerCase();
+                const isCSV = name.endsWith('.csv');
+                console.log(`File "${file.name}": is CSV = ${isCSV}`);
+                return isCSV;
+            });
+
+            if (csvFiles.length === 0) {
+                showMessage('No CSV files found. Please select files ending in .csv', 'error');
+                console.log('Available files:', files.map(f => f.name));
+                return;
+            }
+
+            // Add files without duplicate checking for now
+            selectedFiles = selectedFiles.concat(csvFiles);
+            console.log('Total files now:', selectedFiles.length);
+            
+            updateFileDisplay();
+            updateButtonStates();
+            
+            showMessage(`Added ${csvFiles.length} file(s)`, 'success');
+        }
+
+        function removeFile(index) {
+            selectedFiles.splice(index, 1);
+            updateFileDisplay();
+            updateButtonStates();
+        }
+
+        function clearAllFiles() {
+            selectedFiles = [];
+            const fileInput = document.getElementById('csvFiles');
+            if (fileInput) fileInput.value = '';
+            updateFileDisplay();
+            updateButtonStates();
+            hideTransactionResults();
+        }
+
+        function updateFileDisplay() {
+            const selectedFilesDiv = document.getElementById('selectedFiles');
+            const fileList = document.getElementById('fileList');
+            const fileCount = document.getElementById('fileCount');
+            
+            if (!selectedFilesDiv || !fileList) {
+                console.log('File display elements not found');
+                return;
+            }
+            
+            if (selectedFiles.length === 0) {
+                selectedFilesDiv.style.display = 'none';
+                return;
+            }
+
+            selectedFilesDiv.style.display = 'block';
+            if (fileCount) fileCount.textContent = selectedFiles.length;
+            
+            fileList.innerHTML = selectedFiles.map((file, index) => `
+                <div class="file-item">
+                    <div class="file-info">
+                        <div class="file-name">📄 ${escapeHtml(file.name)}</div>
+                        <div class="file-size">${formatFileSize(file.size)}</div>
+                    </div>
+                    <button class="file-remove" onclick="removeFile(${index})" title="Remove file">×</button>
+                </div>
+            `).join('');
+        }
+
+        function updateButtonStates() {
+            const processBtn = document.getElementById('processBtn');
+            const analyzeBtn = document.getElementById('analyzeBtn');
+            
+            if (!processBtn || !analyzeBtn) return;
+            
+            const hasFiles = selectedFiles.length > 0;
+            
+            processBtn.disabled = !hasFiles;
+            analyzeBtn.disabled = !hasFiles;
+            
+            if (hasFiles) {
+                processBtn.innerHTML = `🔄 Process ${selectedFiles.length} File(s)`;
+                analyzeBtn.innerHTML = `📊 Analyze ${selectedFiles.length} File(s)`;
+            } else {
+                processBtn.innerHTML = '🔄 Process & Update Balances';
+                analyzeBtn.innerHTML = '📊 Analyze Only (No Updates)';
+            }
         }
 
         function updateSelectedFiles() {
@@ -2211,110 +2581,198 @@
         }
 
         async function processTransactions() {
-            if (selectedFiles.length === 0) return;
+            console.log('processTransactions called with files:', selectedFiles.map(f => f.name));
+            
+            if (selectedFiles.length === 0) {
+                showMessage('Please select CSV files first', 'error');
+                return;
+            }
 
             const processBtn = document.getElementById('processBtn');
-            const originalText = processBtn.textContent;
-            
-            processBtn.disabled = true;
-            processBtn.textContent = '🔄 Processing...';
+            setTransactionButtonLoading(processBtn, '🔄 Processing...');
 
             try {
                 const formData = new FormData();
-                selectedFiles.forEach(file => {
+                
+                selectedFiles.forEach((file, index) => {
+                    console.log(`Adding file ${index + 1}: ${file.name} (${file.size} bytes)`);
                     formData.append('files', file);
                 });
                 
-                formData.append('auto_update', document.getElementById('autoUpdateBalances').checked);
-                formData.append('update_categories', document.getElementById('updateCategories').checked);
+                const autoUpdate = document.getElementById('autoUpdateBalances');
+                const updateCategories = document.getElementById('updateCategories');
+                
+                formData.append('auto_update', autoUpdate ? autoUpdate.checked : true);
+                formData.append('update_categories', updateCategories ? updateCategories.checked : true);
+
+                console.log('Uploading files...');
 
                 const response = await fetch('/api/upload-transactions', {
                     method: 'POST',
                     body: formData
                 });
 
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
                 const result = await response.json();
+                console.log('Upload response:', result);
                 
                 if (result.success) {
-                    showMessage(result.message, 'success');
+                    showTransactionResults({
+                        type: 'success',
+                        title: '✅ Processing Complete',
+                        message: result.message,
+                        details: [`Files processed: ${result.files_processed}`]
+                    });
                     
-                    // Show processing results
-                    const resultsDiv = document.getElementById('transactionResults');
-                    resultsDiv.innerHTML = `
-                        <div class="card">
-                            <h3>✅ Processing Complete</h3>
-                            <p>${result.message}</p>
-                            <p><strong>Files processed:</strong> ${result.files_processed}</p>
-                        </div>
-                    `;
+                    clearAllFiles();
                     
-                    // Clear selected files
-                    selectedFiles = [];
-                    updateSelectedFiles();
-                    document.getElementById('csvFiles').value = '';
-                    
-                    // Refresh dashboard if visible
-                    if (document.getElementById('dashboard-tab').classList.contains('active')) {
-                        loadDashboard();
+                    if (document.getElementById('dashboard-tab')?.classList.contains('active')) {
+                        setTimeout(loadDashboard, 1000);
                     }
                 } else {
-                    showMessage('Error processing transactions: ' + result.error, 'error');
+                    throw new Error(result.error || 'Processing failed');
                 }
             } catch (err) {
-                showMessage('Error processing transactions: ' + err.message, 'error');
+                console.error('Error processing transactions:', err);
+                showTransactionResults({
+                    type: 'error',
+                    title: '❌ Processing Failed',
+                    message: err.message,
+                    details: ['Check browser console for details']
+                });
             } finally {
-                processBtn.disabled = false;
-                processBtn.textContent = originalText;
+                restoreTransactionButton(processBtn, selectedFiles.length > 0 ? 
+                    `🔄 Process ${selectedFiles.length} File(s)` : '🔄 Process & Update Balances');
             }
         }
 
         async function analyzeOnly() {
-            if (selectedFiles.length === 0) return;
+            if (selectedFiles.length === 0) {
+                showMessage('Please select CSV files first', 'error');
+                return;
+            }
 
             const analyzeBtn = document.getElementById('analyzeBtn');
-            const originalText = analyzeBtn.textContent;
-            
-            analyzeBtn.disabled = true;
-            analyzeBtn.textContent = '📊 Analyzing...';
+            setTransactionButtonLoading(analyzeBtn, '📊 Analyzing...');
 
             try {
                 const formData = new FormData();
+                
                 selectedFiles.forEach(file => {
                     formData.append('files', file);
                 });
                 
                 formData.append('auto_update', 'false');
-                formData.append('update_categories', document.getElementById('updateCategories').checked);
+                formData.append('update_categories', document.getElementById('updateCategories')?.checked || true);
 
                 const response = await fetch('/api/upload-transactions', {
                     method: 'POST',
                     body: formData
                 });
 
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
                 const result = await response.json();
                 
                 if (result.success) {
-                    showMessage('Transaction analysis completed', 'success');
-                    
-                    // Show analysis results
-                    const resultsDiv = document.getElementById('transactionResults');
-                    resultsDiv.innerHTML = `
-                        <div class="card">
-                            <h3>📊 Analysis Complete</h3>
-                            <p>${result.message}</p>
-                            <p><strong>Files analyzed:</strong> ${result.files_processed}</p>
-                            <p class="item-details">No balances were updated - analysis only.</p>
-                        </div>
-                    `;
+                    showTransactionResults({
+                        type: 'info',
+                        title: '📊 Analysis Complete',
+                        message: result.message,
+                        details: [`Files analyzed: ${result.files_processed}`, 'No balances updated']
+                    });
                 } else {
-                    showMessage('Error analyzing transactions: ' + result.error, 'error');
+                    throw new Error(result.error || 'Analysis failed');
                 }
             } catch (err) {
-                showMessage('Error analyzing transactions: ' + err.message, 'error');
+                console.error('Error analyzing transactions:', err);
+                showTransactionResults({
+                    type: 'error',
+                    title: '❌ Analysis Failed',
+                    message: err.message
+                });
             } finally {
-                analyzeBtn.disabled = false;
-                analyzeBtn.textContent = originalText;
+                restoreTransactionButton(analyzeBtn, selectedFiles.length > 0 ? 
+                    `📊 Analyze ${selectedFiles.length} File(s)` : '📊 Analyze Only (No Updates)');
             }
+        }
+
+        // Helper Functions
+        function setButtonLoading(buttonId, loadingText = 'Loading...') {
+            // Handle both button elements and button IDs
+            const button = typeof buttonId === 'string' ? document.getElementById(buttonId) : buttonId;
+            if (!button) return null;
+            
+            const originalText = button.textContent || button.innerHTML;
+            button.disabled = true;
+            button.textContent = loadingText;
+            
+            return {
+                restore: () => {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }
+            };
+        }
+
+        function restoreButton(button, originalText) {
+            if (!button) return;
+            button.disabled = false;
+            button.classList.remove('loading');
+            button.innerHTML = originalText || button.getAttribute('data-original-text') || button.innerHTML;
+        }
+
+        function setTransactionButtonLoading(button, loadingText) {
+            if (!button) return;
+            button.disabled = true;
+            button.classList.add('loading');
+            button.setAttribute('data-original-text', button.innerHTML);
+            button.innerHTML = loadingText;
+        }
+
+        function restoreTransactionButton(button, originalText) {
+            if (!button) return;
+            button.disabled = false;
+            button.classList.remove('loading');
+            button.innerHTML = originalText || button.getAttribute('data-original-text') || button.innerHTML;
+        }
+
+        function showTransactionResults(config) {
+            const resultsDiv = document.getElementById('transactionResults');
+            if (!resultsDiv) return;
+            
+            resultsDiv.innerHTML = `
+                <div class="results-card ${config.type}">
+                    <h4>${config.title}</h4>
+                    <p>${config.message}</p>
+                    ${config.details ? `
+                        <ul style="margin-top: 1rem; margin-left: 1rem;">
+                            ${config.details.map(detail => `<li>${detail}</li>`).join('')}
+                        </ul>
+                    ` : ''}
+                </div>
+            `;
+            
+            resultsDiv.style.display = 'block';
+            resultsDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function hideTransactionResults() {
+            const resultsDiv = document.getElementById('transactionResults');
+            if (resultsDiv) {
+                resultsDiv.style.display = 'none';
+            }
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         }
 
         // Time Period Analysis Functions
@@ -2622,12 +3080,15 @@
             // Update time display every second
             setInterval(updateLastUpdatedTime, 1000);
             
-            // Auto-refresh dashboard every 30 seconds
+            // Auto-refresh dashboard every 10 minutes
             setInterval(() => {
                 if (!isLoading && document.getElementById('dashboard-tab').classList.contains('active')) {
                     loadDashboard();
                 }
-            }, 600000); // 600000 = 10 minutes (10 * 60 * 1000)
+            }, 600000);
+            
+            // Initialize file upload only when needed
+            initializeFileUploadWhenNeeded();
         });
 
         // Handle keyboard shortcuts
