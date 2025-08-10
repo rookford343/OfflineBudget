@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Credit Card Tracker Dashboard</title>
+    <title>Offline Budget Dashboard</title>
     <style>
         :root {
             --primary-color: #2563eb;
@@ -40,7 +40,7 @@
             box-shadow: var(--shadow-lg);
             position: sticky;
             top: 0;
-            z-index: 100;
+            z-index: 50;
         }
 
         .header h1 {
@@ -70,7 +70,7 @@
             margin-bottom: 2rem;
             position: sticky;
             top: 120px;
-            z-index: 90;
+            z-index: 40;
         }
 
         .tab-list {
@@ -114,6 +114,7 @@
         .tab-content {
             display: none;
             min-height: 60vh;
+            padding-top: 1rem; /* Add padding to create buffer */
         }
 
         .tab-content.active {
@@ -126,6 +127,8 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 2rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
             flex-wrap: wrap;
             gap: 1rem;
         }
@@ -143,6 +146,9 @@
             align-items: center;
             gap: 0.5rem;
             text-decoration: none;
+            position: relative;
+            z-index: 5;
+            margin: 0.25rem; /* Add small margin for better click targets */
         }
 
         .btn:hover:not(:disabled) {
@@ -152,6 +158,31 @@
         .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .btn.loading {
+            position: relative;
+            color: transparent;
+        }
+
+        btn.loading::after {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            top: 50%;
+            left: 50%;
+            margin-left: -8px;
+            margin-top: -8px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
 
         .btn-secondary {
@@ -209,6 +240,14 @@
             display: flex;
             align-items: center;
             gap: 0.5rem;
+        }
+
+        #addCardForm {
+            margin-bottom: 2rem;
+            margin-top: 2rem; /* Add top margin */
+            z-index: 10 !important;
+            position: relative;
+            clear: both; /* Ensure proper positioning */
         }
 
         /* Form Components */
@@ -369,9 +408,17 @@
         }
 
         .item-actions {
-            display: flex;
-            gap: 0.5rem;
-            margin-left: 1rem;
+            display: flex !important;
+            gap: 0.5rem !important;
+            flex-shrink: 0 !important;
+            align-items: center !important;
+        }
+
+        .item-actions .btn {
+            position: relative !important;
+            z-index: 5 !important;
+            white-space: nowrap !important;
+            min-width: auto !important;
         }
 
         .btn-small {
@@ -449,6 +496,34 @@
                 padding: 1rem;
             }
 
+            .card .list-item {
+                display: flex !important;
+                justify-content: space-between !important;
+                align-items: flex-start !important;
+                gap: 1rem !important;
+            }
+
+            .card .item-info {
+                flex: 1 !important;
+                min-width: 0 !important;
+            }
+
+            #editCardForm {
+                position: relative !important;
+                z-index: 10 !important;
+                margin-top: 2rem !important;
+                margin-bottom: 2rem !important;
+                border: 2px solid var(--primary-color) !important;
+                background: var(--card-background) !important;
+            }
+
+            #editCardForm h3 {
+                color: var(--primary-color) !important;
+                border-bottom: 1px solid var(--border-color) !important;
+                padding-bottom: 0.5rem !important;
+                margin-bottom: 1.5rem !important;
+            }
+
             .status-amount {
                 font-size: 2rem;
             }
@@ -502,7 +577,7 @@
 <body>
     <div class="header">
         <div class="container">
-            <h1>💳 Credit Card Tracker</h1>
+            <h1>💵 Offline Budget Tracker</h1>
             <p>Secure spending analysis and budget management</p>
         </div>
     </div>
@@ -626,29 +701,29 @@
 
             <div id="addCardForm" class="card" style="display: none; margin-bottom: 2rem;">
                 <h3>Add New Credit Card</h3>
-                <form onsubmit="addCard(event)">
+                <form onsubmit="return addCard(event)" id="addCardFormElement">
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">Card Name *</label>
-                            <input type="text" class="form-input" id="cardName" required 
+                            <input type="text" class="form-input" id="cardName" name="cardName" required 
                                    placeholder="e.g., Chase Sapphire">
                         </div>
                         <div class="form-group">
                             <label class="form-label">Credit Limit *</label>
-                            <input type="number" class="form-input" id="creditLimit" required 
+                            <input type="number" class="form-input" id="creditLimit" name="creditLimit" required 
                                    placeholder="10000" step="0.01">
                         </div>
                     </div>
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">Statement Date *</label>
-                            <input type="number" class="form-input" id="statementDate" required 
+                            <input type="number" class="form-input" id="statementDate" name="statementDate" required 
                                    placeholder="15" min="1" max="31">
                             <small class="item-details">Day of month (1-31)</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Due Date *</label>
-                            <input type="number" class="form-input" id="dueDate" required 
+                            <input type="number" class="form-input" id="dueDate" name="dueDate" required 
                                    placeholder="12" min="1" max="31">
                             <small class="item-details">Day of month (1-31)</small>
                         </div>
@@ -656,24 +731,24 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">Current Balance</label>
-                            <input type="number" class="form-input" id="currentBalance" 
+                            <input type="number" class="form-input" id="currentBalance" name="currentBalance" 
                                    placeholder="0.00" step="0.01">
                             <small class="item-details">New spending since last statement</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Balance Due</label>
-                            <input type="number" class="form-input" id="balanceDue" 
+                            <input type="number" class="form-input" id="balanceDue" name="balanceDue" 
                                    placeholder="0.00" step="0.01">
                             <small class="item-details">Previous statement balance</small>
                         </div>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Description</label>
-                        <input type="text" class="form-input" id="cardDescription" 
+                        <input type="text" class="form-input" id="cardDescription" name="cardDescription" 
                                placeholder="e.g., Primary rewards card">
                     </div>
                     <div class="form-group">
-                        <button type="submit" class="btn btn-success">Add Card</button>
+                        <button type="submit" class="btn btn-success" id="addCardSubmitBtn">Add Card</button>
                         <button type="button" class="btn btn-secondary" onclick="hideAddCardForm()">Cancel</button>
                     </div>
                 </form>
@@ -693,57 +768,57 @@
             <div class="grid">
                 <div class="card">
                     <h3>📈 Monthly Spending Limits</h3>
-                    <form onsubmit="setSpendingLimits(event)">
+                    <form onsubmit="return setSpendingLimits(event)" id="spendingLimitsForm">
                         <div class="form-group">
                             <label class="form-label">Soft Limit (Savings Goal)</label>
-                            <input type="number" class="form-input" id="softLimit" 
+                            <input type="number" class="form-input" id="softLimit" name="softLimit" 
                                    placeholder="2000.00" step="0.01">
                             <small class="item-details">Target monthly spending amount</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">Hard Limit (Emergency)</label>
-                            <input type="number" class="form-input" id="hardLimit" 
+                            <input type="number" class="form-input" id="hardLimit" name="hardLimit" 
                                    placeholder="3000.00" step="0.01">
                             <small class="item-details">Maximum emergency spending</small>
                         </div>
-                        <button type="submit" class="btn btn-success">Set Limits</button>
+                        <button type="submit" class="btn btn-success" id="spendingLimitsSubmitBtn">Set Limits</button>
                     </form>
                 </div>
 
                 <div class="card">
                     <h3>📊 Category Budgets</h3>
-                    <form onsubmit="setCategoryBudgets(event)">
+                    <form onsubmit="return setCategoryBudgets(event)" id="categoryBudgetsForm">
                         <div class="form-group">
                             <label class="form-label">Shopping</label>
-                            <input type="number" class="form-input" id="budgetShopping" 
+                            <input type="number" class="form-input" id="budgetShopping" name="budgetShopping" 
                                    placeholder="800.00" step="0.01">
                         </div>
                         <div class="form-group">
                             <label class="form-label">Food & Drinks</label>
-                            <input type="number" class="form-input" id="budgetFoodDrinks" 
+                            <input type="number" class="form-input" id="budgetFoodDrinks" name="budgetFoodDrinks" 
                                    placeholder="400.00" step="0.01">
                         </div>
                         <div class="form-group">
                             <label class="form-label">Services</label>
-                            <input type="number" class="form-input" id="budgetServices" 
+                            <input type="number" class="form-input" id="budgetServices" name="budgetServices" 
                                    placeholder="300.00" step="0.01">
                         </div>
                         <div class="form-group">
                             <label class="form-label">Entertainment</label>
-                            <input type="number" class="form-input" id="budgetEntertainment" 
+                            <input type="number" class="form-input" id="budgetEntertainment" name="budgetEntertainment" 
                                    placeholder="200.00" step="0.01">
                         </div>
                         <div class="form-group">
                             <label class="form-label">Groceries</label>
-                            <input type="number" class="form-input" id="budgetGroceries" 
+                            <input type="number" class="form-input" id="budgetGroceries" name="budgetGroceries 
                                    placeholder="350.00" step="0.01">
                         </div>
                         <div class="form-group">
                             <label class="form-label">Other</label>
-                            <input type="number" class="form-input" id="budgetOther" 
+                            <input type="number" class="form-input" id="budgetOther" name="budgetOther 
                                    placeholder="150.00" step="0.01">
                         </div>
-                        <button type="submit" class="btn btn-success">Set Category Budgets</button>
+                        <button type="submit" class="btn btn-success" id="categoryBudgetsSubmitBtn">Set Category Budgets</button>
                     </form>
                 </div>
             </div>
@@ -810,12 +885,12 @@
                     <div class="form-row">
                         <div class="form-group">
                             <label class="form-label">Start Date</label>
-                            <input type="date" class="form-input" id="analysisStartDate">
+                            <input type="date" class="form-input" id="analysisStartDate" name="analysisStartDate">
                             <small class="item-details">Leave empty for all data</small>
                         </div>
                         <div class="form-group">
                             <label class="form-label">End Date</label>
-                            <input type="date" class="form-input" id="analysisEndDate">
+                            <input type="date" class="form-input" id="analysisEndDate" name="analysisEndDate">
                             <small class="item-details">Leave empty for all data</small>
                         </div>
                     </div>
@@ -857,7 +932,7 @@
                     </div>
                     <div class="form-group">
                         <label class="form-label">Save Analysis As (Optional)</label>
-                        <input type="text" class="form-input" id="analysisName" 
+                        <input type="text" class="form-input" id="analysisName" name="analysisName" 
                                placeholder="e.g., Q1_2024_Analysis">
                         <small class="item-details">Save this analysis for future comparison</small>
                     </div>
@@ -1013,6 +1088,22 @@
             }
         }
 
+        function setButtonLoading(buttonId, loadingText = 'Loading...') {
+            const button = document.getElementById(buttonId);
+            if (!button) return null;
+            
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = loadingText;
+            
+            return {
+                restore: () => {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }
+            };
+        }
+
         // Dashboard Functions
         async function loadDashboard() {
             if (isLoading) return;
@@ -1025,17 +1116,20 @@
             const error = document.getElementById('error');
             const dashboard = document.getElementById('dashboard');
 
+            // Better button state management
             if (refreshBtn) {
                 refreshBtn.disabled = true;
-                refreshIcon.textContent = '⏳';
-                refreshText.textContent = 'Loading...';
+                if (refreshIcon) refreshIcon.textContent = '⏳';
+                if (refreshText) refreshText.textContent = 'Loading...';
             }
             
-            loading.style.display = 'block';
-            error.style.display = 'none';
-            dashboard.style.display = 'none';
+            if (loading) loading.style.display = 'block';
+            if (error) error.style.display = 'none';
+            if (dashboard) dashboard.style.display = 'none';
 
             try {
+                console.log('Loading dashboard data...');
+                
                 const response = await fetch('/api/summary');
                 
                 if (!response.ok) {
@@ -1043,6 +1137,7 @@
                 }
 
                 const result = await response.json();
+                console.log('Dashboard data received:', result);
                 
                 if (!result.success) {
                     throw new Error(result.error || 'Unknown error occurred');
@@ -1051,8 +1146,8 @@
                 displayDashboard(result.data);
                 await loadCards();
                 
-                loading.style.display = 'none';
-                dashboard.style.display = 'block';
+                if (loading) loading.style.display = 'none';
+                if (dashboard) dashboard.style.display = 'block';
                 
                 lastUpdateTime = new Date();
                 updateLastUpdatedTime();
@@ -1060,13 +1155,13 @@
             } catch (err) {
                 console.error('Error loading dashboard:', err);
                 showError(`Failed to load dashboard: ${err.message}`);
-                loading.style.display = 'none';
+                if (loading) loading.style.display = 'none';
             } finally {
                 isLoading = false;
                 if (refreshBtn) {
                     refreshBtn.disabled = false;
-                    refreshIcon.textContent = '🔄';
-                    refreshText.textContent = 'Refresh Data';
+                    if (refreshIcon) refreshIcon.textContent = '🔄';
+                    if (refreshText) refreshText.textContent = 'Refresh Data';
                 }
             }
         }
@@ -1221,7 +1316,7 @@
             }
 
             cardsManagement.innerHTML = cards.map(card => `
-                <div class="card">
+                <div class="card" style="margin-bottom: 1rem;">
                     <div class="list-item">
                         <div class="item-info">
                             <div class="item-name">${escapeHtml(card.name)}</div>
@@ -1233,51 +1328,82 @@
                                 ${card.description ? '<br>' + escapeHtml(card.description) : ''}
                             </div>
                         </div>
-                        <div class="item-actions">
-                            <button class="btn btn-small btn-warning" onclick="editCard('${escapeHtml(card.name)}')">
+                        <div class="item-actions" style="display: flex; gap: 0.5rem; flex-shrink: 0;">
+                            <button class="btn btn-small btn-warning" 
+                                    onclick="editCard('${escapeHtml(card.name)}')"
+                                    style="z-index: 5; position: relative;">
                                 ✏️ Edit
                             </button>
-                            <button class="btn btn-small btn-danger" onclick="removeCard('${escapeHtml(card.name)}')">
+                            <button class="btn btn-small btn-danger" 
+                                    onclick="removeCard('${escapeHtml(card.name)}')"
+                                    style="z-index: 5; position: relative;">
                                 🗑️ Remove
                             </button>
                         </div>
                     </div>
-                    <div style="margin-top: 1rem;">
-                        <strong>Current Balance:</strong> ${formatCurrency(card.current_balance)} | 
-                        <strong>Balance Due:</strong> ${formatCurrency(card.balance_due)}
+                    <div style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color);">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                            <div>
+                                <strong>Current Balance:</strong><br>
+                                <span class="item-amount ${card.current_balance > 0 ? 'status-warning' : 'status-good'}">
+                                    ${formatCurrency(card.current_balance)}
+                                </span>
+                            </div>
+                            <div>
+                                <strong>Balance Due:</strong><br>
+                                <span class="item-amount ${card.balance_due > 0 ? 'status-warning' : 'status-good'}">
+                                    ${formatCurrency(card.balance_due)}
+                                </span>
+                            </div>
+                        </div>
                     </div>
                 </div>
             `).join('');
         }
 
         function showAddCardForm() {
-            document.getElementById('addCardForm').style.display = 'block';
+            const form = document.getElementById('addCardForm');
+            form.style.display = 'block';
+            form.style.zIndex = '10';
+            
+            // Scroll to form and focus first field
+            form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setTimeout(() => {
+                document.getElementById('cardName').focus();
+            }, 100);
         }
 
         function hideAddCardForm() {
-            document.getElementById('addCardForm').style.display = 'none';
-            document.getElementById('addCardForm').querySelector('form').reset();
+            const form = document.getElementById('addCardForm');
+            form.style.display = 'none';
+            
+            // Reset form
+            const formElement = document.getElementById('addCardFormElement');
+            if (formElement) {
+                formElement.reset();
+            }
         }
 
         async function addCard(event) {
             event.preventDefault();
             
-            const cardData = {
-                name: document.getElementById('cardName').value,
-                credit_limit: parseFloat(document.getElementById('creditLimit').value),
-                statement_date: parseInt(document.getElementById('statementDate').value),
-                due_date: parseInt(document.getElementById('dueDate').value),
-                current_balance: parseFloat(document.getElementById('currentBalance').value) || 0,
-                balance_due: parseFloat(document.getElementById('balanceDue').value) || 0,
-                description: document.getElementById('cardDescription').value
-            };
-
+            const buttonState = setButtonLoading('addCardSubmitBtn', '⏳ Adding Card...');
+            
             try {
+                const formData = new FormData(event.target);
+                const cardData = {
+                    name: formData.get('cardName'),
+                    credit_limit: parseFloat(formData.get('creditLimit')),
+                    statement_date: parseInt(formData.get('statementDate')),
+                    due_date: parseInt(formData.get('dueDate')),
+                    current_balance: parseFloat(formData.get('currentBalance')) || 0,
+                    balance_due: parseFloat(formData.get('balanceDue')) || 0,
+                    description: formData.get('cardDescription') || ''
+                };
+
                 const response = await fetch('/api/cards', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(cardData)
                 });
 
@@ -1287,34 +1413,239 @@
                     showMessage('Card added successfully!', 'success');
                     hideAddCardForm();
                     loadCardsManagement();
+                    event.target.reset();
                 } else {
                     showMessage('Error adding card: ' + result.error, 'error');
                 }
             } catch (err) {
                 showMessage('Error adding card: ' + err.message, 'error');
+            } finally {
+                if (buttonState) buttonState.restore();
             }
+            
+            return false;
         }
 
         async function removeCard(cardName) {
-            if (!confirm(`Are you sure you want to remove the card "${cardName}"?`)) {
+            if (!confirm(`Are you sure you want to remove the card "${cardName}"?\n\nThis action cannot be undone.`)) {
                 return;
             }
 
             try {
+                console.log('Removing card:', cardName);
+                
                 const response = await fetch(`/api/cards/${encodeURIComponent(cardName)}`, {
                     method: 'DELETE'
                 });
 
                 const result = await response.json();
+                console.log('Remove card response:', result);
                 
                 if (result.success) {
                     showMessage('Card removed successfully!', 'success');
                     loadCardsManagement();
+                    
+                    // Hide edit form if it was open for this card
+                    const editForm = document.getElementById('editCardForm');
+                    if (editForm && editForm.style.display !== 'none') {
+                        const editCardName = document.getElementById('editCardName');
+                        if (editCardName && editCardName.value === cardName) {
+                            hideEditCardForm();
+                        }
+                    }
                 } else {
                     showMessage('Error removing card: ' + result.error, 'error');
                 }
             } catch (err) {
+                console.error('Error removing card:', err);
                 showMessage('Error removing card: ' + err.message, 'error');
+            }
+        }
+
+        async function editCard(cardName) {
+            console.log('Editing card:', cardName);
+            
+            try {
+                // Get current card data from API
+                const response = await fetch('/api/cards');
+                const result = await response.json();
+                
+                if (!result.success) {
+                    showMessage('Error loading card data: ' + result.error, 'error');
+                    return;
+                }
+                
+                // Find the specific card
+                const card = result.data.find(c => c.name === cardName);
+                if (!card) {
+                    showMessage('Card not found: ' + cardName, 'error');
+                    return;
+                }
+                
+                // Show edit form (we'll create this)
+                showEditCardForm(card);
+                
+            } catch (err) {
+                console.error('Error loading card for editing:', err);
+                showMessage('Error loading card data: ' + err.message, 'error');
+            }
+        }
+
+        function showEditCardForm(card) {
+            // Hide add card form if it's open
+            hideAddCardForm();
+            
+            // Create or show edit form
+            let editForm = document.getElementById('editCardForm');
+            if (!editForm) {
+                // Create edit form if it doesn't exist
+                editForm = createEditCardForm();
+                document.getElementById('cardsManagement').parentNode.insertBefore(editForm, document.getElementById('cardsManagement'));
+            }
+            
+            // Populate form with card data
+            document.getElementById('editCardName').value = card.name;
+            document.getElementById('editCreditLimit').value = card.credit_limit;
+            document.getElementById('editStatementDate').value = card.statement_date;
+            document.getElementById('editDueDate').value = card.due_date;
+            document.getElementById('editCurrentBalance').value = card.current_balance;
+            document.getElementById('editBalanceDue').value = card.balance_due;
+            document.getElementById('editCardDescription').value = card.description || '';
+            
+            // Store original name for API call
+            editForm.setAttribute('data-original-name', card.name);
+            
+            // Show form
+            editForm.style.display = 'block';
+            editForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            
+            // Focus first editable field (not the name, since it's readonly)
+            setTimeout(() => {
+                document.getElementById('editCreditLimit').focus();
+            }, 100);
+        }
+
+        function createEditCardForm() {
+            const formHTML = `
+                <div id="editCardForm" class="card" style="display: none; margin-bottom: 2rem; z-index: 10;">
+                    <h3>Edit Credit Card</h3>
+                    <form onsubmit="return updateCard(event)" id="editCardFormElement">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="editCardName">Card Name *</label>
+                                <input type="text" class="form-input" id="editCardName" name="editCardName" readonly
+                                    style="background-color: #f5f5f5; cursor: not-allowed;">
+                                <small class="item-details">Card name cannot be changed</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="editCreditLimit">Credit Limit *</label>
+                                <input type="number" class="form-input" id="editCreditLimit" name="editCreditLimit" required 
+                                    step="0.01" min="0">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="editStatementDate">Statement Date *</label>
+                                <input type="number" class="form-input" id="editStatementDate" name="editStatementDate" required 
+                                    min="1" max="31">
+                                <small class="item-details">Day of month (1-31)</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="editDueDate">Due Date *</label>
+                                <input type="number" class="form-input" id="editDueDate" name="editDueDate" required 
+                                    min="1" max="31">
+                                <small class="item-details">Day of month (1-31)</small>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="form-label" for="editCurrentBalance">Current Balance</label>
+                                <input type="number" class="form-input" id="editCurrentBalance" name="editCurrentBalance" 
+                                    step="0.01" min="0">
+                                <small class="item-details">New spending since last statement</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="editBalanceDue">Balance Due</label>
+                                <input type="number" class="form-input" id="editBalanceDue" name="editBalanceDue" 
+                                    step="0.01" min="0">
+                                <small class="item-details">Previous statement balance</small>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="editCardDescription">Description</label>
+                            <input type="text" class="form-input" id="editCardDescription" name="editCardDescription">
+                        </div>
+                        <div class="form-group">
+                            <button type="submit" class="btn btn-success" id="editCardSubmitBtn">Update Card</button>
+                            <button type="button" class="btn btn-secondary" onclick="hideEditCardForm()">Cancel</button>
+                        </div>
+                    </form>
+                </div>
+            `;
+            
+            const formContainer = document.createElement('div');
+            formContainer.innerHTML = formHTML;
+            return formContainer.firstElementChild;
+        }
+
+        async function updateCard(event) {
+            event.preventDefault();
+            
+            const buttonState = setButtonLoading('editCardSubmitBtn', '⏳ Updating Card...');
+            const form = event.target;
+            const originalName = form.parentElement.getAttribute('data-original-name');
+            
+            try {
+                const formData = new FormData(event.target);
+                const cardData = {
+                    credit_limit: parseFloat(formData.get('editCreditLimit')),
+                    statement_date: parseInt(formData.get('editStatementDate')),
+                    due_date: parseInt(formData.get('editDueDate')),
+                    current_balance: parseFloat(formData.get('editCurrentBalance')) || 0,
+                    balance_due: parseFloat(formData.get('editBalanceDue')) || 0,
+                    description: formData.get('editCardDescription') || ''
+                };
+
+                console.log('Updating card:', originalName, cardData);
+
+                const response = await fetch(`/api/cards/${encodeURIComponent(originalName)}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(cardData)
+                });
+
+                const result = await response.json();
+                console.log('Update card response:', result);
+                
+                if (result.success) {
+                    showMessage('Card updated successfully!', 'success');
+                    hideEditCardForm();
+                    loadCardsManagement();
+                } else {
+                    showMessage('Error updating card: ' + result.error, 'error');
+                }
+            } catch (err) {
+                console.error('Error updating card:', err);
+                showMessage('Error updating card: ' + err.message, 'error');
+            } finally {
+                if (buttonState) buttonState.restore();
+            }
+            
+            return false;
+        }
+
+        function hideEditCardForm() {
+            const form = document.getElementById('editCardForm');
+            if (form) {
+                form.style.display = 'none';
+                
+                // Reset form
+                const formElement = document.getElementById('editCardFormElement');
+                if (formElement) {
+                    formElement.reset();
+                }
             }
         }
 
@@ -1322,23 +1653,32 @@
         async function setSpendingLimits(event) {
             event.preventDefault();
             
-            const softLimit = parseFloat(document.getElementById('softLimit').value);
-            const hardLimit = parseFloat(document.getElementById('hardLimit').value);
+            const submitBtn = document.getElementById('spendingLimitsSubmitBtn');
+            const originalText = submitBtn.textContent;
             
-            if (!softLimit && !hardLimit) {
-                showMessage('Please enter at least one spending limit', 'error');
-                return;
-            }
-
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Setting Limits...';
+            
             try {
+                const formData = new FormData(event.target);
+                const softLimit = parseFloat(formData.get('softLimit')) || 0;
+                const hardLimit = parseFloat(formData.get('hardLimit')) || 0;
+                
+                if (!softLimit && !hardLimit) {
+                    showMessage('Please enter at least one spending limit', 'error');
+                    return false;
+                }
+
+                console.log('Setting spending limits:', { softLimit, hardLimit });
+
                 const response = await fetch('/api/spending-limits', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        soft_limit: softLimit || 0,
-                        hard_limit: hardLimit || 0
+                        soft_limit: softLimit,
+                        hard_limit: hardLimit
                     })
                 });
 
@@ -1351,23 +1691,38 @@
                     showMessage('Error setting spending limits: ' + result.error, 'error');
                 }
             } catch (err) {
+                console.error('Error setting spending limits:', err);
                 showMessage('Error setting spending limits: ' + err.message, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
             }
+            
+            return false;
         }
 
         async function setCategoryBudgets(event) {
             event.preventDefault();
             
-            const budgets = {
-                Shopping: parseFloat(document.getElementById('budgetShopping').value) || 0,
-                'Food & Drinks': parseFloat(document.getElementById('budgetFoodDrinks').value) || 0,
-                Services: parseFloat(document.getElementById('budgetServices').value) || 0,
-                Entertainment: parseFloat(document.getElementById('budgetEntertainment').value) || 0,
-                Groceries: parseFloat(document.getElementById('budgetGroceries').value) || 0,
-                Other: parseFloat(document.getElementById('budgetOther').value) || 0
-            };
-
+            const submitBtn = document.getElementById('categoryBudgetsSubmitBtn');
+            const originalText = submitBtn.textContent;
+            
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Setting Budgets...';
+            
             try {
+                const formData = new FormData(event.target);
+                const budgets = {
+                    Shopping: parseFloat(formData.get('budgetShopping')) || 0,
+                    'Food & Drinks': parseFloat(formData.get('budgetFoodDrinks')) || 0,
+                    Services: parseFloat(formData.get('budgetServices')) || 0,
+                    Entertainment: parseFloat(formData.get('budgetEntertainment')) || 0,
+                    Groceries: parseFloat(formData.get('budgetGroceries')) || 0,
+                    Other: parseFloat(formData.get('budgetOther')) || 0
+                };
+
+                console.log('Setting category budgets:', budgets);
+
                 const response = await fetch('/api/category-budgets', {
                     method: 'POST',
                     headers: {
@@ -1385,8 +1740,14 @@
                     showMessage('Error setting category budgets: ' + result.error, 'error');
                 }
             } catch (err) {
+                console.error('Error setting category budgets:', err);
                 showMessage('Error setting category budgets: ' + err.message, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
             }
+            
+            return false;
         }
 
         // File Upload Functions
@@ -1853,7 +2214,7 @@
                 if (!isLoading && document.getElementById('dashboard-tab').classList.contains('active')) {
                     loadDashboard();
                 }
-            }, 30000);
+            }, 600000); // 600000 = 10 minutes (10 * 60 * 1000)
         });
 
         // Handle keyboard shortcuts

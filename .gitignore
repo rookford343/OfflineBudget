@@ -32,6 +32,7 @@ data/
 # Test files
 test.py
 test_report_*.json
+frontend_test_*.json
 
 # Logs
 *.log
