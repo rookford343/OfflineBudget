@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Comprehensive Test Suite for Credit Card Tracker
-Tests all functionality including CLI, core modules, and web API
+Backend Test Suite for Credit Card Tracker
+Tests all backend functionality including CLI, core modules, and web API
 """
 import sys
 import os
