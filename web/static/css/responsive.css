@@ -1,0 +1,92 @@
+/* Responsive Design Styles */
+
+@media (max-width: 768px) {
+    .header h1 {
+        font-size: 1.75rem;
+    }
+
+    .tab-list {
+        justify-content: flex-start;
+    }
+
+    .grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .card {
+        padding: 1rem;
+    }
+
+    .card .list-item {
+        display: flex !important;
+        justify-content: space-between !important;
+        align-items: flex-start !important;
+        gap: 1rem !important;
+    }
+
+    .card .item-info {
+        flex: 1 !important;
+        min-width: 0 !important;
+    }
+
+    #editCardForm {
+        position: relative !important;
+        z-index: 10 !important;
+        margin-top: 2rem !important;
+        margin-bottom: 2rem !important;
+        border: 2px solid var(--primary-color) !important;
+        background: var(--card-background) !important;
+    }
+
+    #editCardForm h3 {
+        color: var(--primary-color) !important;
+        border-bottom: 1px solid var(--border-color) !important;
+        padding-bottom: 0.5rem !important;
+        margin-bottom: 1.5rem !important;
+    }
+
+    #currentSettingsCard .grid {
+        grid-template-columns: 1fr;
+    }
+    
+    #currentSettingsCard .status-card {
+        padding: 0.75rem;
+    }
+
+    .status-amount {
+        font-size: 2rem;
+    }
+
+    .controls {
+        justify-content: center;
+        flex-direction: column;
+    }
+
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Tablet specific adjustments */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .grid {
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+    
+    .tab-button {
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+    }
+}
+
+/* Large screen optimizations */
+@media (min-width: 1200px) {
+    .container {
+        max-width: 1400px;
+    }
+    
+    .grid {
+        grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    }
+}
