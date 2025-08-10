@@ -251,15 +251,33 @@
         }
 
         #currentSettingsCard {
-            border: 2px solid var(--primary-color);
+            border: 1px solid var(--primary-color);
             background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            padding: 0.75rem;
         }
 
         #currentSettingsCard h3 {
             color: var(--primary-color);
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 0.5rem;
-            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            margin: 0;
+        }
+
+        #currentSettingsContent > div {
+            grid-template-columns: 1fr;
+        }
+
+        .compact-section {
+            padding: 0.5rem;
+            background: var(--card-background);
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+
+        .compact-section h4 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--text-primary);
         }
 
         /* Form Components */
@@ -440,23 +458,23 @@
         }
 
         .btn-small {
-            padding: 0.375rem 0.75rem;
-            font-size: 0.875rem;
+            padding: 0.5rem 1rem;
+            font-size: 0.85rem;
         }
 
         /* Progress bars for budget display */
         .progress-bar {
             width: 100%;
-            height: 6px;
+            height: 4px;
             background: var(--border-color);
-            border-radius: 3px;
+            border-radius: 2px;
             overflow: hidden;
         }
 
         .progress-fill {
             height: 100%;
             transition: width 0.3s ease;
-            border-radius: 3px;
+            border-radius: 2px;
         }
 
         /* Status indicators */
@@ -545,6 +563,21 @@
                 border-bottom: 1px solid var(--border-color) !important;
                 padding-bottom: 0.5rem !important;
                 margin-bottom: 1.5rem !important;
+            }
+
+            #editFormsSection {
+                animation: slideDown 0.3s ease-out;
+            }
+
+            @keyframes slideDown {
+                from {
+                    opacity: 0;
+                    transform: translateY(-10px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
             }
 
             #currentSettingsCard .grid {
@@ -794,95 +827,122 @@
         <div id="budgets-tab" class="tab-content">
             <div class="controls">
                 <h2>🎯 Budgets & Spending Limits</h2>
-                <button class="btn" onclick="loadCurrentBudgetSettings()" id="refreshBudgetsBtn">
-                    🔄 Refresh Settings
-                </button>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-secondary" onclick="toggleEditForms()" id="toggleEditBtn">
+                        ✏️ Edit Settings
+                    </button>
+                    <button class="btn" onclick="loadCurrentBudgetSettings()" id="refreshBudgetsBtn">
+                        🔄 Refresh
+                    </button>
+                </div>
             </div>
 
-            <!-- NEW: Current Settings Display Section -->
-            <div class="card" id="currentSettingsCard" style="margin-bottom: 2rem;">
-                <h3>📊 Current Settings</h3>
-                <div id="currentSettingsLoading" class="loading" style="display: none;">
-                    <div class="loading-spinner"></div>
-                    <p>Loading current settings...</p>
+            <!-- Compact Current Settings Display Section -->
+            <div class="card" id="currentSettingsCard" style="margin-bottom: 1.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 style="margin: 0;">📊 Current Settings</h3>
                 </div>
+                
+                <div id="currentSettingsLoading" class="loading" style="display: none; padding: 1rem;">
+                    <div class="loading-spinner"></div>
+                    <p>Loading...</p>
+                </div>
+                
                 <div id="currentSettingsContent">
-                    <!-- Current spending limits -->
-                    <div class="grid" style="margin-bottom: 1.5rem;">
-                        <div class="status-card" style="text-align: left; padding: 1rem;">
-                            <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">💰 Monthly Spending Limits</h4>
+                    <!-- Compact layout for current settings -->
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                        <!-- Current spending limits -->
+                        <div class="compact-section">
+                            <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">💰 Spending Limits</h4>
                             <div id="currentSpendingLimits">
-                                <div class="item-details">No spending limits set</div>
+                                <div class="item-details">No limits set</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Current category budgets summary -->
+                        <div class="compact-section">
+                            <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">📈 Category Budgets</h4>
+                            <div id="currentCategoryBudgetsSummary">
+                                <div class="item-details">No budgets set</div>
                             </div>
                         </div>
                     </div>
                     
-                    <!-- Current category budgets -->
-                    <div class="status-card" style="text-align: left; padding: 1rem;">
-                        <h4 style="margin-bottom: 0.5rem; color: var(--text-primary);">📈 Category Budgets</h4>
-                        <div id="currentCategoryBudgets">
-                            <div class="item-details">No category budgets set</div>
+                    <!-- Detailed category breakdown (collapsible) -->
+                    <div id="categoryBudgetsDetail" style="margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border-color); display: none;">
+                        <div style="display: flex; justify-content: between; align-items: center; margin-bottom: 0.5rem;">
+                            <h4 style="margin: 0; font-size: 0.9rem; color: var(--text-secondary);">Category Details</h4>
                         </div>
+                        <div id="currentCategoryBudgets"></div>
+                    </div>
+                    
+                    <!-- Toggle button for details -->
+                    <div id="toggleDetailsBtn" style="text-align: center; margin-top: 0.5rem; display: none;">
+                        <button class="btn btn-small btn-secondary" onclick="toggleCategoryDetails()" id="detailsToggleBtn">
+                            👁️ Show Details
+                        </button>
                     </div>
                 </div>
             </div>
 
-            <!-- Existing Forms Section -->
-            <div class="grid">
-                <div class="card">
-                    <h3>📈 Set Monthly Spending Limits</h3>
-                    <form onsubmit="return setSpendingLimits(event)" id="spendingLimitsForm">
-                        <div class="form-group">
-                            <label class="form-label" for="softLimit">Soft Limit (Savings Goal)</label>
-                            <input type="number" class="form-input" id="softLimit" name="softLimit"
-                                placeholder="2000.00" step="0.01" min="0">
-                            <small class="item-details">Target monthly spending amount</small>
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="hardLimit">Hard Limit (Emergency)</label>
-                            <input type="number" class="form-input" id="hardLimit" name="hardLimit"
-                                placeholder="3000.00" step="0.01" min="0">
-                            <small class="item-details">Maximum emergency spending</small>
-                        </div>
-                        <button type="submit" class="btn btn-success" id="spendingLimitsSubmitBtn">Set Limits</button>
-                    </form>
-                </div>
+            <!-- Collapsible Forms Section -->
+            <div id="editFormsSection" style="display: none;">
+                <div class="grid">
+                    <div class="card">
+                        <h3>📈 Set Monthly Spending Limits</h3>
+                        <form onsubmit="return setSpendingLimits(event)" id="spendingLimitsForm">
+                            <div class="form-group">
+                                <label class="form-label" for="softLimit">Soft Limit (Savings Goal)</label>
+                                <input type="number" class="form-input" id="softLimit" name="softLimit"
+                                    placeholder="2000.00" step="0.01" min="0">
+                                <small class="item-details">Target monthly spending amount</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="hardLimit">Hard Limit (Emergency)</label>
+                                <input type="number" class="form-input" id="hardLimit" name="hardLimit"
+                                    placeholder="3000.00" step="0.01" min="0">
+                                <small class="item-details">Maximum emergency spending</small>
+                            </div>
+                            <button type="submit" class="btn btn-success" id="spendingLimitsSubmitBtn">Set Limits</button>
+                        </form>
+                    </div>
 
-                <div class="card">
-                    <h3>📊 Set Category Budgets</h3>
-                    <form onsubmit="return setCategoryBudgets(event)" id="categoryBudgetsForm">
-                        <div class="form-group">
-                            <label class="form-label" for="budgetShopping">Shopping</label>
-                            <input type="number" class="form-input" id="budgetShopping" name="budgetShopping"
-                                placeholder="800.00" step="0.01" min="0">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="budgetFoodDrinks">Food & Drinks</label>
-                            <input type="number" class="form-input" id="budgetFoodDrinks" name="budgetFoodDrinks"
-                                placeholder="400.00" step="0.01" min="0">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="budgetServices">Services</label>
-                            <input type="number" class="form-input" id="budgetServices" name="budgetServices"
-                                placeholder="300.00" step="0.01" min="0">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="budgetEntertainment">Entertainment</label>
-                            <input type="number" class="form-input" id="budgetEntertainment" name="budgetEntertainment"
-                                placeholder="200.00" step="0.01" min="0">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="budgetGroceries">Groceries</label>
-                            <input type="number" class="form-input" id="budgetGroceries" name="budgetGroceries"
-                                placeholder="350.00" step="0.01" min="0">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label" for="budgetOther">Other</label>
-                            <input type="number" class="form-input" id="budgetOther" name="budgetOther"
-                                placeholder="150.00" step="0.01" min="0">
-                        </div>
-                        <button type="submit" class="btn btn-success" id="categoryBudgetsSubmitBtn">Set Category Budgets</button>
-                    </form>
+                    <div class="card">
+                        <h3>📊 Set Category Budgets</h3>
+                        <form onsubmit="return setCategoryBudgets(event)" id="categoryBudgetsForm">
+                            <div class="form-group">
+                                <label class="form-label" for="budgetShopping">Shopping</label>
+                                <input type="number" class="form-input" id="budgetShopping" name="budgetShopping"
+                                    placeholder="800.00" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="budgetFoodDrinks">Food & Drinks</label>
+                                <input type="number" class="form-input" id="budgetFoodDrinks" name="budgetFoodDrinks"
+                                    placeholder="400.00" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="budgetServices">Services</label>
+                                <input type="number" class="form-input" id="budgetServices" name="budgetServices"
+                                    placeholder="300.00" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="budgetEntertainment">Entertainment</label>
+                                <input type="number" class="form-input" id="budgetEntertainment" name="budgetEntertainment"
+                                    placeholder="200.00" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="budgetGroceries">Groceries</label>
+                                <input type="number" class="form-input" id="budgetGroceries" name="budgetGroceries"
+                                    placeholder="350.00" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="budgetOther">Other</label>
+                                <input type="number" class="form-input" id="budgetOther" name="budgetOther"
+                                    placeholder="150.00" step="0.01" min="0">
+                            </div>
+                            <button type="submit" class="btn btn-success" id="categoryBudgetsSubmitBtn">Set Category Budgets</button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1764,25 +1824,18 @@
             return false;
         }
 
-        // NEW: Function to load and display current budget settings
+        // UPDATED: Load current budget settings (using existing function)
         async function loadCurrentBudgetSettings() {
             const loadingElement = document.getElementById('currentSettingsLoading');
             const contentElement = document.getElementById('currentSettingsContent');
-            const refreshBtn = document.getElementById('refreshBudgetsBtn');
             
-            // Show loading state
             if (loadingElement) loadingElement.style.display = 'block';
             if (contentElement) contentElement.style.display = 'none';
             
-            const buttonState = setButtonLoading('refreshBudgetsBtn', '⏳ Loading...');
+            const buttonState = setButtonLoading('refreshBudgetsBtn', '⏳');
             
             try {
-                console.log('Loading current budget settings...');
-                
-                // Load both spending limits and category budgets
-                const [summaryResponse] = await Promise.all([
-                    fetch('/api/summary')
-                ]);
+                const summaryResponse = await fetch('/api/summary');
                 
                 if (!summaryResponse.ok) {
                     throw new Error(`HTTP ${summaryResponse.status}: ${summaryResponse.statusText}`);
@@ -1794,23 +1847,20 @@
                     throw new Error(summaryResult.error || 'Failed to load budget data');
                 }
                 
-                // Display the current settings
                 displayCurrentSpendingLimits(summaryResult.data);
                 displayCurrentCategoryBudgets(summaryResult.data.category_budgets || []);
                 
-                // Hide loading and show content
                 if (loadingElement) loadingElement.style.display = 'none';
                 if (contentElement) contentElement.style.display = 'block';
                 
             } catch (err) {
                 console.error('Error loading current budget settings:', err);
                 
-                // Show error state
                 if (loadingElement) loadingElement.style.display = 'none';
                 if (contentElement) {
                     contentElement.innerHTML = `
-                        <div class="error" style="margin: 1rem 0;">
-                            Failed to load current settings: ${err.message}
+                        <div class="error" style="margin: 0.5rem 0; padding: 0.5rem; font-size: 0.9rem;">
+                            Failed to load: ${err.message}
                         </div>
                     `;
                     contentElement.style.display = 'block';
@@ -1822,42 +1872,76 @@
             }
         }
 
+        // NEW: Toggle edit forms visibility
+        function toggleEditForms() {
+            const editSection = document.getElementById('editFormsSection');
+            const toggleBtn = document.getElementById('toggleEditBtn');
+            
+            if (!editSection || !toggleBtn) return;
+            
+            const isVisible = editSection.style.display !== 'none';
+            
+            if (isVisible) {
+                // Hide forms
+                editSection.style.display = 'none';
+                toggleBtn.innerHTML = '✏️ Edit Settings';
+                toggleBtn.className = 'btn btn-secondary';
+            } else {
+                // Show forms
+                editSection.style.display = 'block';
+                toggleBtn.innerHTML = '👁️ View Only';
+                toggleBtn.className = 'btn btn-warning';
+                
+                // Scroll to forms
+                editSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
+        // NEW: Toggle category details visibility
+        function toggleCategoryDetails() {
+            const detailsSection = document.getElementById('categoryBudgetsDetail');
+            const toggleBtn = document.getElementById('detailsToggleBtn');
+            
+            if (!detailsSection || !toggleBtn) return;
+            
+            const isVisible = detailsSection.style.display !== 'none';
+            
+            if (isVisible) {
+                detailsSection.style.display = 'none';
+                toggleBtn.innerHTML = '👁️ Show Details';
+            } else {
+                detailsSection.style.display = 'block';
+                toggleBtn.innerHTML = '👁️ Hide Details';
+            }
+        }
+
         // NEW: Display current spending limits
         function displayCurrentSpendingLimits(summaryData) {
             const container = document.getElementById('currentSpendingLimits');
             if (!container) return;
             
-            // Calculate current spending vs limits
             const totalSpending = summaryData.total_spending || 0;
             const leftToSpend = summaryData.left_to_spend || 0;
             const spendingStatus = summaryData.spending_status || 'status-good';
             
-            // Determine if limits are set based on the data
             const hasLimits = summaryData.spending_message && 
                             !summaryData.spending_message.includes('No Limits Set');
             
             if (!hasLimits) {
                 container.innerHTML = `
-                    <div class="item-details" style="color: var(--text-secondary);">
-                        <em>No spending limits currently set</em>
+                    <div class="item-details" style="color: var(--text-secondary); font-style: italic;">
+                        No limits set
                     </div>
                 `;
                 return;
             }
             
-            // Calculate limits based on spending data
+            // Calculate limits
             let softLimit = 0;
-            let hardLimit = 0;
-            
             if (leftToSpend > 0) {
                 softLimit = totalSpending + leftToSpend;
             } else if (leftToSpend < 0) {
                 softLimit = totalSpending + Math.abs(leftToSpend);
-            }
-            
-            // Estimate hard limit (this is an approximation)
-            if (spendingStatus === 'status-critical') {
-                hardLimit = softLimit * 1.5; // Assume hard limit is 50% more than soft
             }
             
             const statusClass = spendingStatus.replace('status-', '');
@@ -1865,86 +1949,108 @@
                             spendingStatus === 'status-warning' ? '⚠️' : '🚨';
             
             container.innerHTML = `
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin: 0.5rem 0;">
-                    <div>
-                        <strong>Soft Limit:</strong><br>
-                        <span class="item-amount">${formatCurrency(softLimit)}</span>
+                <div style="font-size: 0.9rem; line-height: 1.4;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>Soft Limit:</span>
+                        <strong>${formatCurrency(softLimit)}</strong>
                     </div>
-                    ${hardLimit > 0 ? `
-                    <div>
-                        <strong>Hard Limit:</strong><br>
-                        <span class="item-amount">${formatCurrency(hardLimit)}</span>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>Current:</span>
+                        <span class="${statusClass}">${formatCurrency(totalSpending)}</span>
                     </div>
-                    ` : '<div></div>'}
-                    <div>
-                        <strong>Status:</strong><br>
-                        <span class="item-amount ${statusClass}">${statusIcon} ${summaryData.spending_message || 'Within Budget'}</span>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>Status:</span>
+                        <span class="${statusClass}">${statusIcon}</span>
                     </div>
-                </div>
-                <div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
-                    <small class="item-details">
-                        Current spending: ${formatCurrency(totalSpending)} • 
-                        Left to spend: ${formatCurrency(leftToSpend)}
-                    </small>
                 </div>
             `;
         }
 
-        // NEW: Display current category budgets
+        // UPDATED: Compact summary for category budgets
         function displayCurrentCategoryBudgets(categoryBudgets) {
-            const container = document.getElementById('currentCategoryBudgets');
-            if (!container) return;
+            const summaryContainer = document.getElementById('currentCategoryBudgetsSummary');
+            const detailContainer = document.getElementById('currentCategoryBudgets');
+            const toggleBtn = document.getElementById('toggleDetailsBtn');
+            
+            if (!summaryContainer) return;
             
             if (!categoryBudgets || categoryBudgets.length === 0) {
-                container.innerHTML = `
-                    <div class="item-details" style="color: var(--text-secondary);">
-                        <em>No category budgets currently set</em>
+                summaryContainer.innerHTML = `
+                    <div class="item-details" style="color: var(--text-secondary); font-style: italic;">
+                        No budgets set
                     </div>
                 `;
+                if (toggleBtn) toggleBtn.style.display = 'none';
                 return;
             }
             
-            // Sort categories by budget amount (highest first)
-            const sortedBudgets = [...categoryBudgets].sort((a, b) => b.budget - a.budget);
+            // Show toggle button
+            if (toggleBtn) toggleBtn.style.display = 'block';
             
-            const budgetHTML = sortedBudgets.map(cat => {
-                const progressWidth = Math.min((cat.spent / cat.budget) * 100, 100);
-                const progressClass = cat.status ? cat.status.replace('budget-', 'progress-') : 'progress-good';
-                const statusClass = cat.status ? cat.status.replace('budget-', 'status-') : 'status-good';
-                
-                return `
-                    <div style="margin-bottom: 1rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color);">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
-                            <strong>${escapeHtml(cat.category)}</strong>
-                            <span class="item-amount ${statusClass}">
-                                ${formatCurrency(cat.spent)} / ${formatCurrency(cat.budget)}
-                            </span>
-                        </div>
-                        <div class="progress-bar" style="height: 6px;">
-                            <div class="progress-fill ${progressClass}" style="width: ${progressWidth}%"></div>
-                        </div>
-                        <div style="display: flex; justify-content: space-between; margin-top: 0.25rem;">
-                            <small class="item-details">${progressWidth.toFixed(1)}% used</small>
-                            <small class="item-details ${statusClass}">
-                                ${cat.remaining >= 0 ? 
-                                `${formatCurrency(cat.remaining)} remaining` : 
-                                `${formatCurrency(Math.abs(cat.remaining))} over budget`}
-                            </small>
-                        </div>
+            // Calculate totals
+            const totalBudget = categoryBudgets.reduce((sum, cat) => sum + cat.budget, 0);
+            const totalSpent = categoryBudgets.reduce((sum, cat) => sum + cat.spent, 0);
+            const overBudgetCount = categoryBudgets.filter(cat => cat.remaining < 0).length;
+            
+            // Compact summary
+            summaryContainer.innerHTML = `
+                <div style="font-size: 0.9rem; line-height: 1.4;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>Total Budget:</span>
+                        <strong>${formatCurrency(totalBudget)}</strong>
                     </div>
-                `;
-            }).join('');
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
+                        <span>Total Spent:</span>
+                        <span class="${totalSpent > totalBudget ? 'status-warning' : 'status-good'}">${formatCurrency(totalSpent)}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>Categories:</span>
+                        <span>${categoryBudgets.length} set${overBudgetCount > 0 ? `, ${overBudgetCount} over` : ''}</span>
+                    </div>
+                </div>
+            `;
             
-            container.innerHTML = budgetHTML;
+            // Detailed breakdown (for toggle)
+            if (detailContainer) {
+                const sortedBudgets = [...categoryBudgets].sort((a, b) => b.budget - a.budget);
+                
+                const budgetHTML = sortedBudgets.map(cat => {
+                    const progressWidth = Math.min((cat.spent / cat.budget) * 100, 100);
+                    const progressClass = cat.status ? cat.status.replace('budget-', 'progress-') : 'progress-good';
+                    const statusClass = cat.status ? cat.status.replace('budget-', 'status-') : 'status-good';
+                    
+                    return `
+                        <div style="margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--border-color);">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                                <span style="font-weight: 500; font-size: 0.9rem;">${escapeHtml(cat.category)}</span>
+                                <span class="item-amount ${statusClass}" style="font-size: 0.85rem;">
+                                    ${formatCurrency(cat.spent)} / ${formatCurrency(cat.budget)}
+                                </span>
+                            </div>
+                            <div class="progress-bar" style="height: 4px; margin-bottom: 0.25rem;">
+                                <div class="progress-fill ${progressClass}" style="width: ${progressWidth}%"></div>
+                            </div>
+                            <div style="display: flex; justify-content: space-between;">
+                                <small class="item-details">${progressWidth.toFixed(0)}% used</small>
+                                <small class="item-details ${statusClass}">
+                                    ${cat.remaining >= 0 ? 
+                                    `${formatCurrency(cat.remaining)} left` : 
+                                    `${formatCurrency(Math.abs(cat.remaining))} over`}
+                                </small>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+                
+                detailContainer.innerHTML = budgetHTML;
+            }
         }
 
         // Enhanced showTab function to load budget settings when budgets tab is shown
         const originalShowTab = window.showTab;
         window.showTab = function(tabName) {
-            // Call original showTab function
             originalShowTab.call(this, tabName);
             
-            // Load budget settings when budgets tab is shown
             if (tabName === 'budgets') {
                 setTimeout(() => {
                     loadCurrentBudgetSettings();
@@ -1957,9 +2063,15 @@
         window.setSpendingLimits = async function(event) {
             const result = await originalSetSpendingLimits.call(this, event);
             
-            // Refresh current settings display after successful update
             setTimeout(() => {
                 loadCurrentBudgetSettings();
+                // Auto-hide edit forms after successful update
+                const editSection = document.getElementById('editFormsSection');
+                if (editSection && editSection.style.display !== 'none') {
+                    setTimeout(() => {
+                        toggleEditForms();
+                    }, 1000);
+                }
             }, 500);
             
             return result;
@@ -1970,9 +2082,15 @@
         window.setCategoryBudgets = async function(event) {
             const result = await originalSetCategoryBudgets.call(this, event);
             
-            // Refresh current settings display after successful update
             setTimeout(() => {
                 loadCurrentBudgetSettings();
+                // Auto-hide edit forms after successful update
+                const editSection = document.getElementById('editFormsSection');
+                if (editSection && editSection.style.display !== 'none') {
+                    setTimeout(() => {
+                        toggleEditForms();
+                    }, 1000);
+                }
             }, 500);
             
             return result;
