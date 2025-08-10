@@ -1,0 +1,102 @@
+{
+  "timestamp": "2025-08-10T11:12:39.513859",
+  "duration_seconds": 33.252557,
+  "total_tests": 16,
+  "passed_tests": 14,
+  "failed_tests": 2,
+  "success_rate": 87.5,
+  "server_url": "http://localhost:5001",
+  "driver_available": true,
+  "features_tested": [
+    "Enhanced card management with editing",
+    "Budget settings display and toggles",
+    "Dashboard timestamp formatting",
+    "Form validation and submission",
+    "Console error checking",
+    "Transaction upload functionality",
+    "Responsive design",
+    "Tab navigation"
+  ],
+  "results": [
+    {
+      "test": "API Health check",
+      "passed": true,
+      "details": "Status: 200, Success field: True"
+    },
+    {
+      "test": "API Dashboard summary",
+      "passed": true,
+      "details": "Status: 200, Success field: True"
+    },
+    {
+      "test": "API Cards list",
+      "passed": true,
+      "details": "Status: 200, Success field: True"
+    },
+    {
+      "test": "API Mobile summary",
+      "passed": true,
+      "details": "Status: 200, Success field: True"
+    },
+    {
+      "test": "API Debug info",
+      "passed": true,
+      "details": "Status: 200, Success field: True"
+    },
+    {
+      "test": "Frontend page loading",
+      "passed": false,
+      "details": "Title: False, Tabs: 7, Dashboard: True"
+    },
+    {
+      "test": "Console errors check",
+      "passed": true,
+      "details": "No significant console errors found"
+    },
+    {
+      "test": "Dashboard timestamp format",
+      "passed": true,
+      "details": "Timestamp: 'Last updated: 11:12 AM', No seconds: True"
+    },
+    {
+      "test": "Dashboard spending summary",
+      "passed": true,
+      "details": "All spending summary elements visible and refresh works"
+    },
+    {
+      "test": "Enhanced card management",
+      "passed": false,
+      "details": "Message: element not interactable\n  (Session info: chrome=138.0.7204.185); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#elementnotinteractableexception\nStacktrace:\n0   chromedriver                        0x00000001048f4b38 cxxbridge1$str$ptr + 2722088\n1   chromedriver                        0x00000001048ecaa8 cxxbridge1$str$ptr + 2689176\n2   chromedriver                        0x000000010443e1b0 cxxbridge1$string$len + 90252\n3   chromedriver                        0x00000001044800d8 cxxbridge1$string$len + 360372\n4   chromedriver                        0x000000010447ee5c cxxbridge1$string$len + 355640\n5   chromedriver                        0x000000010447ad34 cxxbridge1$string$len + 338960\n6   chromedriver                        0x00000001044c6880 cxxbridge1$string$len + 649052\n7   chromedriver                        0x0000000104479784 cxxbridge1$string$len + 333408\n8   chromedriver                        0x00000001048b7eb4 cxxbridge1$str$ptr + 2473124\n9   chromedriver                        0x00000001048bb120 cxxbridge1$str$ptr + 2486032\n10  chromedriver                        0x00000001048996b4 cxxbridge1$str$ptr + 2348196\n11  chromedriver                        0x00000001048bb9dc cxxbridge1$str$ptr + 2488268\n12  chromedriver                        0x000000010488a730 cxxbridge1$str$ptr + 2286880\n13  chromedriver                        0x00000001048db5f8 cxxbridge1$str$ptr + 2618344\n14  chromedriver                        0x00000001048db784 cxxbridge1$str$ptr + 2618740\n15  chromedriver                        0x00000001048ec6e4 cxxbridge1$str$ptr + 2688212\n16  libsystem_pthread.dylib             0x000000018299bc0c _pthread_start + 136\n17  libsystem_pthread.dylib             0x0000000182996b80 thread_start + 8\n"
+    },
+    {
+      "test": "Budget settings display and toggle",
+      "passed": true,
+      "details": "Settings visible: True, Forms toggle: True, Button changed: True"
+    },
+    {
+      "test": "Category details toggle",
+      "passed": true,
+      "details": "Details toggle not visible (no budgets set)"
+    },
+    {
+      "test": "Form validation",
+      "passed": true,
+      "details": "Form validation message: 'Please fill out this field.'"
+    },
+    {
+      "test": "Transaction file upload",
+      "passed": true,
+      "details": "File upload and processing button activation successful"
+    },
+    {
+      "test": "Tab navigation",
+      "passed": true,
+      "details": "Successfully navigated through 7 tabs: 📊 Dashboard, 💳 Manage Cards, 🎯 Budgets & Limits, 📄 Import Transactions, 📈 Time Period Analysis, 🗂️ Historical Data, ⚙️ Settings"
+    },
+    {
+      "test": "Responsive design",
+      "passed": true,
+      "details": "Tested 3 screen sizes successfully"
+    }
+  ]
+}
