@@ -670,7 +670,7 @@ class FrontendTestSuite:
         return test_csv_path
     
     def run_all_tests(self):
-        """Run the complete enhanced frontend test suite."""
+        """Run the complete frontend test suite."""
         print("🧪 Starting Credit Card Tracker Frontend Test Suite")
         print("=" * 80)
         
@@ -778,7 +778,7 @@ class FrontendTestSuite:
             print(f"⚠️  Could not save detailed report: {e}")
 
 def main():
-    """Run the enhanced frontend test suite."""
+    """Run the frontend test suite."""
     if len(sys.argv) > 1 and sys.argv[1] in ['--help', '-h']:
         print("Credit Card Tracker Frontend Test Suite")
         print("\nUsage: python3 test_frontend.py")
@@ -798,7 +798,7 @@ def main():
         print("- Edit forms toggle functionality")
         print("- Category details toggle")
         print("- Timestamp without seconds")
-        print("- Enhanced form validation")
+        print("- Form validation")
         print("\nRequirements:")
         print("- Chrome browser installed")
         print("- ChromeDriver automatically managed")
