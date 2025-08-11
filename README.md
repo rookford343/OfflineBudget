@@ -2,9 +2,9 @@
 
 A secure, offline tool for analyzing credit card transactions and tracking spending across multiple cards. Features intelligent merchant name cleaning, category budget tracking, time period analysis with monthly/quarterly/yearly breakdowns, comprehensive financial insights, and a modern web interface - all without storing credentials or requiring internet access.
 
-[![Security](https://img.shields.io/badge/security-encrypted_local_storage-green.svg)](https://github.com/your-username/credit-card-tracker)
-[![Privacy](https://img.shields.io/badge/privacy-offline_processing-blue.svg)](https://github.com/your-username/credit-card-tracker)
-[![Platform](https://img.shields.io/badge/platform-cross_platform-orange.svg)](https://github.com/your-username/credit-card-tracker)
+[![Security](https://img.shields.io/badge/security-encrypted_local_storage-green.svg)](https://github.com/rookford343/OfflineBudget)
+[![Privacy](https://img.shields.io/badge/privacy-offline_processing-blue.svg)](https://github.com/rookford343/OfflineBudget)
+[![Platform](https://img.shields.io/badge/platform-cross_platform-orange.svg)](https://github.com/rookford343/OfflineBudget)
 
 ## 🌟 Key Features
 
@@ -278,6 +278,9 @@ credit-card-tracker/
 │   ├── templates/
 │   │   └── index.html           # Main web interface
 │   └── static/                  # CSS, JS, images
+│   │   └── css/
+│   │   └── images/ 
+│   │   └── js/
 ├── data/                        # Encrypted data storage
 │   ├── *.enc                    # Encrypted configuration files
 │   ├── uploads/                 # Temporary upload directory

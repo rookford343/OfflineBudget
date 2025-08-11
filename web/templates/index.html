@@ -302,7 +302,7 @@
                         <input type="file" id="csvFiles" multiple accept=".csv">
                         <div class="file-upload-icon">📁</div>
                         <p><strong>Click to select files</strong> or drag and drop CSV files here</p>
-                        <p class="item-details">Supports multiple files from any credit card provider</p>
+                        <p class="item-details">Supports CSV files from any bank - automatically converts format</p>
                     </div>
                     
                     <div id="selectedFiles" style="display: none; margin-top: 1rem;">
@@ -335,6 +335,10 @@
                         <button class="btn btn-secondary" onclick="analyzeOnly()" id="analyzeBtn" disabled>
                             📊 Analyze Only (No Updates)
                         </button>
+                    </div>
+                    
+                    <div style="margin-top: 1rem; padding: 10px; background: #f0f9ff; border-radius: 5px; border-left: 4px solid #0ea5e9;">
+                        <small><strong>✨ Universal CSV Support:</strong> Works with Chase, Bank of America, Wells Fargo, Citi, Capital One, Discover, American Express, and any other bank's CSV format.</small>
                     </div>
                 </div>
             </div>
@@ -523,8 +527,9 @@
         </div>
     </div>
 
-    <!-- JavaScript -->
+    <!-- JavaScript - Updated with Universal CSV Support -->
     <script src="/static/js/utils.js"></script>
+    <script src="/static/js/universal-csv-mapper.js"></script>
     <script src="/static/js/core.js"></script>
     <script src="/static/js/dashboard.js"></script>
     <script src="/static/js/cards.js"></script>

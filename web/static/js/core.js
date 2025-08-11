@@ -1,7 +1,14 @@
 // Core functionality - Tab management and main app functions
 
-// Tab Management
-function showTab(tabName) {
+// Enhanced Tab Management with proper event handling
+function showTab(tabName, event) {
+    console.log(`Core showTab called for: ${tabName}`);
+    
+    // Prevent default if called from event
+    if (event) {
+        event.preventDefault();
+    }
+    
     // Hide all tab content
     document.querySelectorAll('.tab-content').forEach(tab => {
         tab.classList.remove('active');
@@ -16,29 +23,136 @@ function showTab(tabName) {
     const targetTab = document.getElementById(tabName + '-tab');
     if (targetTab) {
         targetTab.classList.add('active');
+        console.log(`Activated tab: ${tabName}-tab`);
+    } else {
+        console.error(`Tab not found: ${tabName}-tab`);
     }
     
     // Add active class to clicked tab button
     if (event && event.target) {
         event.target.classList.add('active');
+    } else {
+        // Find and activate the correct button
+        const buttons = document.querySelectorAll('.tab-button');
+        buttons.forEach(button => {
+            if (button.textContent.toLowerCase().includes(getTabDisplayName(tabName).toLowerCase())) {
+                button.classList.add('active');
+            }
+        });
     }
     
-    // Load data for specific tabs
-    if (tabName === 'dashboard') {
-        loadDashboard();
-    } else if (tabName === 'cards') {
-        loadCardsManagement();
-    } else if (tabName === 'budgets') {
-        // Load budget settings with a small delay
-        setTimeout(() => {
-            loadCurrentBudgetSettings();
-        }, 100);
-    } else if (tabName === 'transactions') {
-        // Initialize file upload for transactions tab
-        setTimeout(setupFileUpload, 100);
-    } else if (tabName === 'historical') {
-        loadStoredAnalyses();
+    // Load data for specific tabs with proper error handling
+    try {
+        switch (tabName) {
+            case 'dashboard':
+                console.log('Loading dashboard data...');
+                if (typeof loadDashboard === 'function') {
+                    loadDashboard();
+                } else {
+                    console.warn('loadDashboard function not available');
+                }
+                break;
+                
+            case 'cards':
+                console.log('Loading cards management...');
+                if (typeof loadCardsManagement === 'function') {
+                    setTimeout(loadCardsManagement, 100);
+                } else {
+                    console.warn('loadCardsManagement function not available');
+                }
+                break;
+                
+            case 'budgets':
+                console.log('Loading budget settings...');
+                if (typeof loadCurrentBudgetSettings === 'function') {
+                    setTimeout(loadCurrentBudgetSettings, 100);
+                } else {
+                    console.warn('loadCurrentBudgetSettings function not available');
+                }
+                break;
+                
+            case 'transactions':
+                console.log('Initializing transactions tab...');
+                // Multiple attempts to ensure file upload is properly initialized
+                setTimeout(() => {
+                    initializeTransactionsTabSafely();
+                }, 100);
+                break;
+                
+            case 'historical':
+                console.log('Loading stored analyses...');
+                if (typeof loadStoredAnalyses === 'function') {
+                    setTimeout(loadStoredAnalyses, 100);
+                } else {
+                    console.warn('loadStoredAnalyses function not available');
+                }
+                break;
+                
+            case 'analysis':
+                console.log('Analysis tab activated');
+                break;
+                
+            case 'settings':
+                console.log('Settings tab activated');
+                break;
+                
+            default:
+                console.warn(`Unknown tab: ${tabName}`);
+        }
+    } catch (error) {
+        console.error(`Error initializing tab ${tabName}:`, error);
     }
+}
+
+// Helper function to safely initialize transactions tab
+function initializeTransactionsTabSafely() {
+    console.log('Safely initializing transactions tab...');
+    
+    try {
+        // Check if elements exist
+        const fileInput = document.getElementById('csvFiles');
+        const uploadArea = document.getElementById('fileUploadArea');
+        
+        if (!fileInput || !uploadArea) {
+            console.error('Required elements not found for transactions tab');
+            return;
+        }
+        
+        // Initialize file upload if function exists
+        if (typeof setupFileUpload === 'function') {
+            setupFileUpload();
+        } else if (typeof window.setupFileUpload === 'function') {
+            window.setupFileUpload();
+        } else {
+            console.error('setupFileUpload function not available');
+        }
+        
+        // Update button states if function exists
+        if (typeof updateButtonStates === 'function') {
+            updateButtonStates();
+        } else if (typeof window.updateButtonStates === 'function') {
+            window.updateButtonStates();
+        }
+        
+        console.log('Transactions tab initialization complete');
+        
+    } catch (error) {
+        console.error('Error in initializeTransactionsTabSafely:', error);
+    }
+}
+
+// Helper function to get display name for tab
+function getTabDisplayName(tabName) {
+    const displayNames = {
+        'dashboard': 'Dashboard',
+        'cards': 'Manage Cards',
+        'budgets': 'Budgets',
+        'transactions': 'Import Transactions',
+        'analysis': 'Time Period Analysis',
+        'historical': 'Historical Data',
+        'settings': 'Settings'
+    };
+    return displayNames[tabName] || tabName;
 }
 
 // Due dates helper
@@ -153,3 +267,6 @@ async function exportData(type) {
         showMessage(`Error exporting ${type} data: ` + err.message, 'error');
     }
 }
+
+// Make showTab globally available
+window.showTab = showTab;
