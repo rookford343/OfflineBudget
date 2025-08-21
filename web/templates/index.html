@@ -205,6 +205,10 @@
                     <button class="btn" onclick="loadCurrentBudgetSettings()" id="refreshBudgetsBtn">
                         🔄 Refresh
                     </button>
+                    <!-- NEW: Reset button in main controls -->
+                    <button class="btn btn-warning" onclick="resetCategorySpending()" id="mainResetBtn">
+                        🧹 Reset Categories
+                    </button>
                 </div>
             </div>
 
@@ -290,9 +294,14 @@
         <div id="transactions-tab" class="tab-content">
             <div class="controls">
                 <h2>📄 Import Transaction Files</h2>
-                <button class="btn btn-secondary" onclick="clearAllFiles()">
-                    🗑️ Clear All Files
-                </button>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-secondary" onclick="clearAllFiles()">
+                        🗑️ Clear All Files
+                    </button>
+                    <button class="btn btn-info" onclick="debugTransactionProcessing()">
+                        🔍 Debug Categories
+                    </button>
+                </div>
             </div>
 
             <div class="grid">
@@ -328,6 +337,15 @@
                         <small class="item-details">Update monthly category spending for budget tracking</small>
                     </div>
                     
+                    <!-- UPDATED: Default to unchecked to show all data first -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" id="currentMonthOnly" style="margin-right: 0.5rem;">
+                            Current month only for budgets
+                        </label>
+                        <small class="item-details">Only count current month transactions toward category budgets</small>
+                    </div>
+                    
                     <div class="form-group" style="margin-top: 2rem;">
                         <button class="btn btn-success" onclick="processTransactions()" id="processBtn" disabled>
                             🔄 Process & Update Balances
@@ -340,10 +358,25 @@
                     <div style="margin-top: 1rem; padding: 10px; background: #f0f9ff; border-radius: 5px; border-left: 4px solid #0ea5e9;">
                         <small><strong>✨ Universal CSV Support:</strong> Works with Chase, Bank of America, Wells Fargo, Citi, Capital One, Discover, American Express, and any other bank's CSV format.</small>
                     </div>
+                    
+                    <!-- UPDATED: Better explanation of filtering -->
+                    <div style="margin-top: 0.5rem; padding: 10px; background: #fef3c7; border-radius: 5px; border-left: 4px solid #f59e0b;">
+                        <small><strong>📅 Month Filtering Guide:</strong><br>
+                        • <strong>Unchecked (recommended for first upload):</strong> All transactions will be categorized and counted toward budgets<br>
+                        • <strong>Checked:</strong> Only current month transactions count toward category budgets (good for ongoing monthly tracking)</small>
+                    </div>
                 </div>
             </div>
 
             <div id="transactionResults" style="display: none; margin-top: 2rem;"></div>
+            
+            <!-- NEW: Debug information section -->
+            <div id="debugResults" style="display: none; margin-top: 2rem;">
+                <div class="card">
+                    <h3>🔍 Debug Information</h3>
+                    <div id="debugContent"></div>
+                </div>
+            </div>
         </div>
 
         <!-- Time Period Analysis Tab -->
