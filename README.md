@@ -264,7 +264,7 @@ COSTCO                          : $  189.34 (3 transactions)
 ## 🏗️ Project Structure
 
 ```
-credit-card-tracker/
+OfflineBudget/
 ├── README.md                    # This file
 ├── requirements.txt             # Python dependencies
 ├── LICENSE                      # MIT License
