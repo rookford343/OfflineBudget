@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Enhanced Credit Card Tracker with Time Period Analysis
+Credit Card Tracker with Time Period Analysis
 - Tracks spending across multiple credit cards
 - Manages credit limits, due dates, and balances
 - Soft/hard spending limits with alerts
@@ -9,6 +9,7 @@ Enhanced Credit Card Tracker with Time Period Analysis
 - Secure storage of card configurations
 - Time period analysis with monthly/quarterly/yearly breakdowns
 - Historical analysis storage and comparison
+- NEW: Category spending reset and current month filtering
 """
 import json
 import pandas as pd
@@ -286,7 +287,7 @@ class TimePeriodAnalyzer:
             elif trend_pct < -10:
                 trend_indicator = "📉 DECREASING"
             else:
-                trend_indicator = "➡️  STABLE"
+                trend_indicator = "➡️ STABLE"
             
             print(f"Overall Trend: {trend_indicator} ({trend_pct:+.1f}%)")
             
@@ -456,8 +457,226 @@ class CreditCardTracker:
             print(f"Error processing CSV file: {e}")
             return pd.DataFrame()
     
+    def _extract_meaningful_text(self, description):
+        """Extract meaningful text from potentially garbled descriptions."""
+        if not description or len(description) < 3:
+            return ""
+        
+        # Look for recognizable patterns even in garbled text
+        import re
+        
+        # Try to find brand names or meaningful words
+        meaningful_patterns = [
+            r'(amazon|amzn)',
+            r'(walmart|wal-mart)',
+            r'(target)',
+            r'(costco)',
+            r'(starbucks)',
+            r'(mcdonalds|mcdonald)',
+            r'(kroger)',
+            r'(whole foods|wholefoods)',
+            r'(netflix)',
+            r'(spotify)',
+            r'(uber|lyft)',
+            r'(chase|bank)',
+            r'(chevron|shell|exxon|bp)',
+            r'(home depot|lowes)',
+            r'(cvs|walgreens)',
+            r'(trader joe)',
+            r'(chipotle)',
+            r'(apple|itunes)'
+        ]
+        
+        text_lower = description.lower()
+        for pattern in meaningful_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                return match.group(1)
+        
+        return ""
+    
+    def _match_category_keywords(self, text, debug=False):
+        """Enhanced keyword matching with better patterns."""
+        
+        # More comprehensive and specific keyword matching
+        categories = {
+            'Groceries': [
+                # Major grocery chains - more specific patterns
+                'whole foods', 'wholefoods', 'kroger', 'safeway', 'publix', 
+                'trader joes', 'trader joe', 'aldi', 'food lion', 'giant', 
+                'harris teeter', 'stop shop', 'jewel', 'meijer', 'heb', 
+                'wegmans', 'fresh market', 'albertsons', 'vons', 'ralphs',
+                'acme', 'shoprite', 'king soopers', 'smiths', 'frys', 
+                'qfc', 'fred meyer', 'piggly wiggly', 'winn dixie',
+                # International chains
+                'tesco', 'sainsbury', 'asda', 'lidl',
+                # Generic terms
+                'grocery', 'supermarket', 'market', 'produce', 'deli', 'bakery',
+                # Warehouse stores when clearly for groceries
+                'costco wholesale', 'sams club', 'bjs wholesale'
+            ],
+            
+            'Food & Drinks': [
+                # Coffee shops
+                'starbucks', 'dunkin', 'dunkin donuts', 'peets coffee', 
+                'caribou coffee', 'coffee bean', 'tim hortons', 'panera bread',
+                # Fast food - specific patterns
+                'mcdonalds', 'mcdonald', 'burger king', 'subway sandwich',
+                'kfc', 'taco bell', 'pizza hut', 'dominos', 'papa johns',
+                'little caesars', 'chick-fil-a', 'chick fil a', 'popeyes',
+                'wendys', 'wendy', 'arbys', 'arby', 'jack in the box',
+                'in-n-out', 'whataburger', 'sonic drive', 'dairy queen',
+                'five guys', 'shake shack', 'white castle',
+                # Casual dining
+                'chipotle', 'panera', 'olive garden', 'red lobster', 'applebees',
+                'chilis', 'tgi fridays', 'outback', 'texas roadhouse', 
+                'cheesecake factory', 'buffalo wild wings', 'hooters',
+                # Delivery and food services
+                'doordash', 'uber eats', 'grubhub', 'postmates', 'seamless',
+                'instacart', 'fresh direct',
+                # Generic food terms
+                'restaurant', 'cafe', 'bar', 'pub', 'brewery', 'coffee',
+                'pizza', 'takeout', 'delivery', 'dining', 'food', 'drink',
+                'beverage', 'alcohol', 'wine', 'beer', 'bistro', 'grill', 'diner'
+            ],
+            
+            'Shopping': [
+                # Major retailers
+                'amazon', 'amzn', 'walmart', 'target', 'best buy', 'home depot', 
+                'lowes', 'macys', 'nordstrom', 'tjmaxx', 'tj maxx', 'marshalls', 
+                'kohls', 'jcpenney', 'sears', 'old navy', 'gap', 'banana republic',
+                # Department stores
+                'bloomingdales', 'saks', 'neiman marcus', 'dillards',
+                # Online retailers
+                'ebay', 'etsy', 'wayfair', 'overstock', 'zappos',
+                # Electronics
+                'apple store', 'microsoft store', 'gamestop', 'radioshack',
+                # Pharmacies when shopping
+                'cvs pharmacy', 'walgreens', 'rite aid', 'duane reade',
+                # Discount stores
+                'dollar tree', 'dollar general', 'family dollar', 'five below',
+                'big lots', '99 cent',
+                # General retail
+                'shopping', 'retail', 'store', 'mall', 'outlet', 'purchase'
+            ],
+            
+            'Services': [
+                # Utilities
+                'electric', 'electricity', 'gas company', 'water', 'trash', 
+                'sewer', 'utility', 'power company', 'energy',
+                # Telecom
+                'verizon', 'att', 'at&t', 't-mobile', 'sprint', 'comcast', 
+                'xfinity', 'spectrum', 'cox communications', 'directv',
+                'internet', 'phone', 'wireless', 'cable', 'satellite',
+                # Subscriptions and streaming
+                'netflix', 'spotify', 'hulu', 'disney plus', 'amazon prime',
+                'apple music', 'youtube premium', 'subscription', 'monthly',
+                # Professional services
+                'insurance', 'medical', 'dental', 'doctor', 'hospital', 
+                'clinic', 'pharmacy', 'lawyer', 'attorney', 'tax', 'accountant',
+                # Personal services
+                'haircut', 'salon', 'spa', 'gym', 'fitness', 'repair', 
+                'maintenance', 'dry clean', 'car wash', 'oil change',
+                # Financial services
+                'bank fee', 'atm', 'service charge', 'maintenance fee',
+                'paypal', 'venmo', 'zelle'
+            ],
+            
+            'Entertainment': [
+                # Movies and events
+                'movie', 'theater', 'theatre', 'cinema', 'amc', 'regal', 
+                'cinemark', 'fandango', 'concert', 'show', 'ticket', 'event',
+                # Travel and transportation
+                'uber', 'lyft', 'taxi', 'hotel', 'motel', 'resort', 'airbnb',
+                'booking.com', 'expedia', 'flight', 'airline', 'airport', 
+                'rental car', 'travel', 'vacation', 'trip',
+                # Recreation
+                'amusement', 'theme park', 'disneyland', 'disney world', 
+                'six flags', 'zoo', 'museum', 'aquarium', 'sports', 'game', 
+                'bowling', 'golf', 'mini golf',
+                # Gaming and hobbies
+                'steam', 'playstation', 'xbox', 'nintendo', 'twitch',
+                # General entertainment
+                'entertainment', 'recreation', 'fun', 'leisure', 'hobby'
+            ]
+        }
+        
+        # Check each category with enhanced matching
+        for category, keywords in categories.items():
+            for keyword in keywords:
+                if keyword in text:
+                    if debug:
+                        print(f"   ✅ Keyword match: '{keyword}' -> {category}")
+                    return category
+        
+        # Enhanced fallback - check for partial matches
+        for category, keywords in categories.items():
+            for keyword in keywords:
+                # Split keyword and check if all parts are in text
+                keyword_parts = keyword.split()
+                if len(keyword_parts) > 1:
+                    if all(part in text for part in keyword_parts):
+                        if debug:
+                            print(f"   ✅ Partial keyword match: '{keyword}' -> {category}")
+                        return category
+        
+        if debug:
+            print(f"   ❌ No match found -> Other")
+        
+        return 'Other'
+    
+    def _map_bank_category(self, bank_category):
+        """Map bank-specific categories to our standard categories."""
+        bank_category_lower = bank_category.lower()
+        
+        # Comprehensive mapping
+        mappings = {
+            # Groceries
+            'supermarket': 'Groceries',
+            'grocery': 'Groceries',
+            'groceries': 'Groceries',
+            
+            # Food & Drinks  
+            'restaurant': 'Food & Drinks',
+            'dining': 'Food & Drinks',
+            'food': 'Food & Drinks',
+            'fast food': 'Food & Drinks',
+            'coffee': 'Food & Drinks',
+            
+            # Shopping
+            'shopping': 'Shopping',
+            'merchandise': 'Shopping',
+            'retail': 'Shopping',
+            'clothing': 'Shopping',
+            'department store': 'Shopping',
+            
+            # Services
+            'gas': 'Services',
+            'gasoline': 'Services',
+            'automotive': 'Services',
+            'utilities': 'Services',
+            'bills': 'Services',
+            'insurance': 'Services',
+            'telecommunication': 'Services',
+            'subscription': 'Services',
+            
+            # Entertainment
+            'entertainment': 'Entertainment',
+            'travel': 'Entertainment',
+            'recreation': 'Entertainment',
+            'hotel': 'Entertainment',
+            'airline': 'Entertainment'
+        }
+        
+        for pattern, category in mappings.items():
+            if pattern in bank_category_lower:
+                return category
+        
+        return 'Other'
+    
     def _categorize_transaction(self, description, memo='', original_category=''):
-        """Categorize transaction based on original category first, then description/memo."""
+        """Enhanced categorization with comprehensive merchant matching."""
+        
         # Handle NaN values safely
         if pd.isna(description):
             description = ''
@@ -466,93 +685,213 @@ class CreditCardTracker:
         if pd.isna(original_category):
             original_category = ''
         
-        description = str(description)
-        memo = str(memo)
-        original_category = str(original_category)
+        description = str(description).strip()
+        memo = str(memo).strip()
+        original_category = str(original_category).strip()
         
-        target_categories = ['Shopping', 'Food & Drinks', 'Services', 'Entertainment', 'Groceries']
+        # Debug logging for troubleshooting
+        debug_this = hasattr(self, '_debug_count') and self._debug_count < 5
+        if not hasattr(self, '_debug_count'):
+            self._debug_count = 0
         
-        # First, check if the original category matches one of our target categories
-        if original_category and original_category.strip():
-            original_cat_lower = original_category.lower()
+        if debug_this:
+            print(f"\n🔍 Categorizing transaction #{self._debug_count + 1}:")
+            print(f"   Description: '{description}'")
+            if description in ['Unknown Transaction', '', 'Sale', 'Purchase', 'Transaction']:
+                print(f"   ⚠️  WARNING: Generic/missing description detected!")
+        
+        self._debug_count += 1
+        
+        # CRITICAL: Check if we have a real merchant description
+        if not description or description in ['Unknown Transaction', 'Sale', 'Purchase', 'Payment', 'Transaction']:
+            # Try to use original category as fallback
+            if original_category:
+                return self._map_bank_category(original_category)
+            return 'Other'
+        
+        # Clean and prepare text for matching
+        text = description.lower()
+        
+        # Remove common prefixes and suffixes but preserve merchant name
+        text = self._clean_merchant_text(text)
+        
+        # Comprehensive merchant database with specific patterns
+        merchant_categories = {
+            'Groceries': {
+                # Major chains
+                'whole foods', 'wholefoods', 'whole fds', 'wholefds',
+                'kroger', 'ralphs', 'fred meyer', 'qfc', 'smiths', 'king soopers',
+                'safeway', 'vons', 'pavilions', 'albertsons', 'jewel osco',
+                'publix', 'wegmans', 'harris teeter', 'heb', 'h-e-b',
+                'trader joe', 'traderjoe', 'aldi', 'lidl',
+                'sprouts', 'fresh market', 'food lion', 'giant eagle',
+                'stop & shop', 'stop and shop', 'shoprite', 'acme',
+                'meijer', 'winn dixie', 'piggly wiggly',
+                # Warehouse stores for groceries
+                'costco', 'sams club', 'sam\'s club', 'bjs wholesale', 'bj\'s',
+                # Generic patterns
+                'grocery', 'supermarket', 'market', 'foods', 'produce'
+            },
             
-            # Direct matches
-            if original_category in target_categories:
-                return original_category
+            'Food & Drinks': {
+                # Coffee shops
+                'starbucks', 'sbux', 'dunkin', 'peets', 'peet\'s',
+                'coffee bean', 'caribou', 'tim hortons', 'dutch bros',
+                # Fast food
+                'mcdonald', 'mcdonalds', 'mcd', 'burger king', 'wendys', 'wendy\'s',
+                'subway', 'taco bell', 'kfc', 'popeyes', 'chick-fil-a', 'chickfila',
+                'chipotle', 'qdoba', 'five guys', 'in-n-out', 'in n out',
+                'shake shack', 'whataburger', 'sonic', 'arbys', 'arby\'s',
+                'jack in the box', 'carl\'s jr', 'hardees', 'white castle',
+                # Pizza
+                'pizza hut', 'dominos', 'domino\'s', 'papa johns', 'papa john\'s',
+                'little caesars', 'papa murphy', 'blaze pizza', 'mod pizza',
+                # Casual dining
+                'panera', 'olive garden', 'red lobster', 'applebees', 'applebee\'s',
+                'chilis', 'chili\'s', 'outback', 'texas roadhouse', 'longhorn',
+                'cheesecake factory', 'pf changs', 'pf chang\'s', 'buffalo wild wings',
+                # Delivery services
+                'doordash', 'door dash', 'uber eats', 'ubereats', 'grubhub',
+                'postmates', 'seamless', 'caviar', 'delivery',
+                # Generic patterns
+                'restaurant', 'cafe', 'coffee', 'bar', 'grill', 'kitchen',
+                'diner', 'bakery', 'pizzeria', 'sushi', 'thai', 'chinese',
+                'mexican', 'indian', 'italian', 'bbq', 'barbecue', 'steakhouse'
+            },
             
-            # Map common bank categories to our categories
-            category_mapping = {
-                'shopping': 'Shopping',
-                'merchandise': 'Shopping',
-                'retail': 'Shopping',
-                'health & wellness': 'Services',
-                'healthcare': 'Services',
-                'professional services': 'Services',
-                'bills & utilities': 'Services',
-                'restaurants': 'Food & Drinks',
-                'fast food': 'Food & Drinks',
-                'coffee shops': 'Food & Drinks',
-                'dining': 'Food & Drinks',
-                'supermarkets': 'Groceries',
-                'grocery stores': 'Groceries',
-                'travel': 'Entertainment',
-                'recreation': 'Entertainment',
-                'entertainment': 'Entertainment'
+            'Shopping': {
+                # Online retail
+                'amazon', 'amzn', 'amazn', 'prime now',
+                'ebay', 'etsy', 'alibaba', 'wish', 'wayfair',
+                # Department stores
+                'target', 'tgt', 'walmart', 'wal-mart', 'wmt',
+                'macys', 'macy\'s', 'nordstrom', 'bloomingdales', 'saks',
+                'jcpenney', 'jc penney', 'kohls', 'kohl\'s', 'dillards',
+                # Electronics
+                'best buy', 'bestbuy', 'apple store', 'apple.com', 'microsoft',
+                'gamestop', 'game stop', 'newegg', 'b&h photo', 'b and h',
+                # Clothing
+                'gap', 'old navy', 'banana republic', 'h&m', 'h and m',
+                'zara', 'forever 21', 'forever21', 'uniqlo', 'nike',
+                'adidas', 'foot locker', 'footlocker', 'finish line',
+                # Home improvement
+                'home depot', 'homedepot', 'lowes', 'lowe\'s', 'menards',
+                'ace hardware', 'true value', 'harbor freight',
+                # Pharmacy/convenience
+                'cvs', 'walgreens', 'rite aid', 'duane reade',
+                # Discount stores
+                'tjmaxx', 'tj maxx', 'marshalls', 'ross', 'burlington',
+                'dollar tree', 'dollar general', 'family dollar', 'five below',
+                # Generic patterns
+                'store', 'shop', 'mart', 'retail', 'outlet', 'mall'
+            },
+            
+            'Services': {
+                # Streaming/subscriptions
+                'netflix', 'hulu', 'disney+', 'disney plus', 'hbo',
+                'spotify', 'apple music', 'youtube', 'amazon prime',
+                'audible', 'kindle', 'xbox', 'playstation', 'nintendo',
+                # Utilities
+                'electric', 'gas company', 'water', 'utility', 'utilities',
+                'comcast', 'xfinity', 'spectrum', 'cox', 'directv',
+                'verizon', 'vzw', 'at&t', 'att', 't-mobile', 'tmobile', 'sprint',
+                # Insurance/Financial
+                'insurance', 'geico', 'progressive', 'allstate', 'state farm',
+                'bank', 'credit union', 'chase', 'wells fargo', 'citi',
+                # Health
+                'pharmacy', 'medical', 'dental', 'doctor', 'hospital',
+                'clinic', 'health', 'therapy', 'lab', 'radiology',
+                # Auto
+                'gas station', 'shell', 'chevron', 'exxon', 'mobil', 'bp',
+                'valero', 'citgo', 'sunoco', '76', 'arco', 'speedway',
+                'auto', 'car wash', 'jiffy lube', 'oil change', 'tire',
+                # Personal services  
+                'salon', 'barber', 'spa', 'massage', 'nail', 'hair',
+                'gym', 'fitness', 'yoga', 'pilates', 'crossfit',
+                'dry clean', 'laundry', 'cleaners',
+                # Generic patterns
+                'service', 'repair', 'maintenance', 'subscription'
+            },
+            
+            'Entertainment': {
+                # Movies/Events
+                'amc', 'regal', 'cinemark', 'movie', 'theater', 'theatre',
+                'cinema', 'imax', 'fandango', 'ticketmaster', 'stubhub',
+                'concert', 'show', 'event', 'festival', 'fair',
+                # Travel
+                'uber', 'lyft', 'taxi', 'cab', 'airport', 'airline',
+                'united', 'american air', 'delta', 'southwest', 'jetblue',
+                'hotel', 'motel', 'hilton', 'marriott', 'hyatt', 'holiday inn',
+                'airbnb', 'vrbo', 'booking.com', 'expedia', 'priceline',
+                'rental car', 'hertz', 'enterprise', 'avis', 'budget',
+                # Recreation
+                'disney', 'universal', 'six flags', 'theme park', 'amusement',
+                'zoo', 'aquarium', 'museum', 'park', 'recreation',
+                'bowling', 'golf', 'mini golf', 'arcade', 'dave & busters',
+                'sporting', 'stadium', 'arena', 'ticketmaster',
+                # Gaming
+                'steam', 'epic games', 'twitch', 'gaming', 'esports',
+                # Generic patterns
+                'entertainment', 'fun', 'leisure', 'hobby', 'sport'
             }
-            
-            for bank_variant, our_category in category_mapping.items():
-                if bank_variant in original_cat_lower:
-                    return our_category
-        
-        # If original category doesn't match, fall back to description/memo analysis
-        text = f"{description} {memo}".lower()
-        
-        # Define keywords for each category
-        categories = {
-            'Shopping': [
-                'amazon', 'walmart', 'target', 'costco', 'home depot', 'lowes', 'best buy',
-                'macys', 'nordstrom', 'tjmaxx', 'marshalls', 'kohls', 'jcpenney',
-                'cvs', 'walgreens', 'rite aid', 'pharmacy', 'dollar tree', 'dollar general',
-                'shopping', 'retail', 'store', 'mall', 'outlet'
-            ],
-            'Food & Drinks': [
-                'mcdonalds', 'burger king', 'subway', 'kfc', 'pizza hut', 'dominos',
-                'starbucks', 'dunkin', 'chipotle', 'panera', 'chick-fil-a', 'taco bell',
-                'restaurant', 'cafe', 'bar', 'pub', 'brewery', 'coffee', 'pizza',
-                'fast food', 'takeout', 'delivery', 'doordash', 'uber eats', 'grubhub',
-                'dining', 'food', 'drink', 'beverage', 'alcohol', 'wine', 'beer'
-            ],
-            'Services': [
-                'bank', 'atm', 'fee', 'service charge', 'maintenance', 'overdraft',
-                'insurance', 'medical', 'dental', 'doctor', 'hospital', 'clinic',
-                'chiropr', 'lawyer', 'attorney', 'repair', 'cleaning', 'dry clean',
-                'haircut', 'salon', 'spa', 'gym', 'fitness', 'subscription',
-                'netflix', 'spotify', 'hulu', 'disney', 'internet', 'phone', 'cable',
-                'utility', 'electric', 'gas', 'water', 'trash', 'sewer'
-            ],
-            'Entertainment': [
-                'movie', 'theater', 'cinema', 'concert', 'show', 'ticket', 'event',
-                'amusement', 'theme park', 'zoo', 'museum', 'sports', 'game',
-                'bowling', 'golf', 'tennis', 'recreation', 'hobby', 'book', 'magazine',
-                'music', 'video game', 'gaming', 'entertainment', 'fun', 'leisure',
-                'vacation', 'travel', 'hotel', 'flight', 'airline', 'rental car'
-            ],
-            'Groceries': [
-                'grocery', 'supermarket', 'kroger', 'safeway', 'publix', 'whole foods',
-                'trader joes', 'aldi', 'food lion', 'giant', 'harris teeter',
-                'stop shop', 'jewel', 'meijer', 'heb', 'wegmans', 'fresh market',
-                'market', 'produce', 'deli', 'bakery', 'butcher', 'organic'
-            ]
         }
         
-        # Check each category for keyword matches
-        for category, keywords in categories.items():
+        # Check each category for matches
+        for category, keywords in merchant_categories.items():
             for keyword in keywords:
                 if keyword in text:
+                    if debug_this:
+                        print(f"   ✅ Match found: '{keyword}' -> {category}")
                     return category
         
-        # If no match found, categorize as Other
+        # Check original bank category as secondary fallback
+        if original_category:
+            mapped = self._map_bank_category(original_category)
+            if mapped != 'Other':
+                if debug_this:
+                    print(f"   ✅ Bank category mapped: '{original_category}' -> {mapped}")
+                return mapped
+        
+        if debug_this:
+            print(f"   ❌ No match found -> Other")
+        
         return 'Other'
+    
+    def _clean_transaction_text(self, text):
+        """Clean transaction text for better keyword matching."""
+        import re
+        
+        # Remove common prefixes/suffixes that don't help categorization
+        text = re.sub(r'^(tst\*|pos|pending|auth|)', text)
+        text = re.sub(r'\s*#\d+.*$', '', text)  # Remove store numbers
+        text = re.sub(r'\s*\*\d+.*$', '', text)  # Remove reference numbers
+        text = re.sub(r'\s+', ' ', text)  # Normalize spaces
+        
+        return text.strip()
+    
+    def _clean_merchant_text(self, text):
+        """Clean merchant text while preserving the actual merchant name."""
+        import re
+        
+        # Remove common transaction prefixes
+        prefixes_to_remove = [
+            'tst\\*', 'sq \\*', 'pos ', 'pos\\*', 'pending ', 'auth ',
+            'check card ', 'debit card ', 'credit card ', 'purchase ',
+            'payment ', 'direct debit ', 'recurring ', 'subscription '
+        ]
+        
+        for prefix in prefixes_to_remove:
+            text = re.sub(f'^{prefix}', '', text, flags=re.IGNORECASE)
+        
+        # Remove store numbers and reference codes but keep merchant name
+        text = re.sub(r'#\d{3,}.*$', '', text)  # Remove #123... at end
+        text = re.sub(r'\s+\d{10,}$', '', text)  # Remove long numbers at end
+        text = re.sub(r'\s+[A-Z]{2}\s*$', '', text)  # Remove state codes at end
+        
+        # Clean up extra spaces
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        return text
     
     def _clean_merchant_name(self, description):
         """Clean merchant names by removing store numbers and extra data."""
@@ -625,6 +964,244 @@ class CreditCardTracker:
         description = re.sub(r'\s+', ' ', description).strip()  # Clean up multiple spaces
         
         return description or "UNKNOWN MERCHANT"
+    
+    # NEW: Reset category spending functionality
+    def reset_category_spending(self, target_month=None):
+        """
+        Reset category spending for a specific month or current month.
+        
+        Args:
+            target_month: Month to reset in YYYY-MM format, or None for current month
+        """
+        if target_month is None:
+            target_month = datetime.now().strftime('%Y-%m')
+        
+        # Validate month format
+        try:
+            datetime.strptime(target_month, '%Y-%m')
+        except ValueError:
+            print(f"Invalid month format: {target_month}. Use YYYY-MM format.")
+            return False
+        
+        # Initialize month if not exists
+        if target_month not in self.category_spending:
+            self.category_spending[target_month] = {}
+        
+        # Reset all categories to 0
+        categories = ['Shopping', 'Food & Drinks', 'Services', 'Entertainment', 'Groceries', 'Other']
+        for category in categories:
+            self.category_spending[target_month][category] = 0.0
+        
+        # Save changes
+        self.save_category_spending()
+        
+        print(f"✅ Reset category spending for {target_month}")
+        print("All categories set to $0.00:")
+        for category in categories:
+            print(f"  {category}: $0.00")
+        
+        return True
+    
+    # Additional helper method for testing categorization
+    def test_categorization_debug(self, test_descriptions):
+        """Enhanced test method with detailed output."""
+        print(f"\n🧪 ENHANCED CATEGORIZATION TEST")
+        print("=" * 60)
+        
+        # Reset debug counter
+        self._debug_count = 0
+        
+        for i, desc in enumerate(test_descriptions, 1):
+            print(f"\n{i}. Testing: '{desc}'")
+            category = self._categorize_transaction(desc)
+            print(f"   Result: {category}")
+            
+            # Show what the cleaned text looks like
+            cleaned = self._clean_transaction_text(desc.lower())
+            if cleaned != desc.lower():
+                print(f"   Cleaned text: '{cleaned}'")
+        
+        print("=" * 60)
+        
+        # Test with some known problematic cases
+        print(f"\n🔍 TESTING KNOWN PROBLEM CASES:")
+        problem_cases = [
+            "Unknown Transaction",
+            "",
+            "Sale",
+            "Purchase",
+            "WHOLE FOODS MARKET #123",
+            "STARBUCKS STORE #456",
+            "AMAZON.COM AMZN.COM/BILL"
+        ]
+        
+        for case in problem_cases:
+            category = self._categorize_transaction(case)
+            status = "✅" if category != "Other" else "❌"
+            print(f"   {status} '{case}' -> {category}")
+    
+    # Filter transactions to current month only
+    def _filter_to_current_month(self, df):
+        """
+        Filter DataFrame to only include transactions from the current month.
+        
+        Args:
+            df: DataFrame with transaction data
+            
+        Returns:
+            DataFrame with only current month transactions
+        """
+        if df.empty:
+            return df
+        
+        # Ensure we have a date column
+        if 'Transaction Date' not in df.columns:
+            print("⚠️  Warning: No 'Transaction Date' column found, cannot filter by month")
+            return df
+        
+        try:
+            # Parse transaction dates
+            df = df.copy()
+            df['parsed_date'] = pd.to_datetime(df['Transaction Date'], errors='coerce')
+            
+            # Remove rows where date parsing failed
+            invalid_dates = df['parsed_date'].isna().sum()
+            if invalid_dates > 0:
+                print(f"⚠️  Warning: {invalid_dates} transactions had invalid dates")
+            
+            df = df.dropna(subset=['parsed_date'])
+            
+            if df.empty:
+                print("⚠️  Warning: No valid dates found in transaction data")
+                return df
+            
+            # Show date range of transactions
+            min_date = df['parsed_date'].min()
+            max_date = df['parsed_date'].max()
+            print(f"📅 Transaction date range: {min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}")
+            
+            # Get current month start and end
+            now = datetime.now()
+            month_start = datetime(now.year, now.month, 1)
+            if now.month == 12:
+                month_end = datetime(now.year + 1, 1, 1) - timedelta(days=1)
+            else:
+                month_end = datetime(now.year, now.month + 1, 1) - timedelta(days=1)
+            
+            print(f"📅 Current month filter: {month_start.strftime('%Y-%m-%d')} to {month_end.strftime('%Y-%m-%d')}")
+            
+            # Filter to current month
+            current_month_df = df[
+                (df['parsed_date'] >= month_start) & 
+                (df['parsed_date'] <= month_end)
+            ].copy()
+            
+            # Remove the helper column
+            current_month_df = current_month_df.drop('parsed_date', axis=1)
+            
+            return current_month_df
+            
+        except Exception as e:
+            print(f"❌ Error filtering to current month: {e}")
+            print("Using all transactions without date filtering")
+            return df
+    
+    # UPDATED: Modified to use current month filtering
+    def _update_category_spending(self, df, use_current_month_only=True):
+        """Update category spending based on transaction data with detailed logging."""
+        if df.empty:
+            print("⚠️  No transaction data to process for category spending")
+            return
+        
+        current_month = datetime.now().strftime('%Y-%m')
+        original_count = len(df)
+        
+        print(f"\n📊 PROCESSING CATEGORY SPENDING")
+        print(f"   Total transactions: {original_count}")
+        print(f"   Current month filter: {use_current_month_only}")
+        print(f"   Target month: {current_month}")
+        
+        # Reset debug counter for categorization
+        self._debug_count = 0
+        
+        # Filter to current month only if requested
+        if use_current_month_only:
+            df = self._filter_to_current_month(df)
+            if df.empty:
+                print(f"⚠️  No current month ({current_month}) transactions found")
+                return
+            filtered_count = len(df)
+            print(f"   After filtering: {filtered_count} transactions")
+        else:
+            print(f"   Using all months: {original_count} transactions")
+        
+        # Initialize month if not exists
+        if current_month not in self.category_spending:
+            self.category_spending[current_month] = {
+                'Shopping': 0.0,
+                'Food & Drinks': 0.0,
+                'Services': 0.0,
+                'Entertainment': 0.0,
+                'Groceries': 0.0,
+                'Other': 0.0
+            }
+        
+        # Process spending transactions only
+        spending_df = df[df['Amount'] < 0].copy()
+        if spending_df.empty:
+            print("⚠️  No spending transactions found (no negative amounts)")
+            return
+        
+        print(f"   Spending transactions: {len(spending_df)}")
+        
+        # Categorize transactions with debugging
+        print(f"\n🏷️  CATEGORIZING TRANSACTIONS...")
+        spending_df['custom_category'] = spending_df.apply(
+            lambda row: self._categorize_transaction(
+                row.get('Description', ''), 
+                row.get('Memo', ''),
+                row.get('Category', '')
+            ), axis=1
+        )
+        
+        # Calculate absolute amounts
+        spending_df['amount_abs'] = spending_df['Amount'].abs()
+        
+        # Group by category
+        category_totals = spending_df.groupby('custom_category')['amount_abs'].sum()
+        
+        print(f"\n📈 CATEGORY TOTALS:")
+        total_spending = 0
+        
+        # Update and display category spending
+        for category in self.category_spending[current_month].keys():
+            amount = float(category_totals.get(category, 0.0))
+            old_amount = self.category_spending[current_month][category]
+            self.category_spending[current_month][category] = amount
+            total_spending += amount
+            
+            if amount > 0:
+                print(f"   {category}: ${amount:,.2f} ({category_totals.get(category, 0)} transactions)")
+            else:
+                print(f"   {category}: $0.00")
+        
+        print(f"   TOTAL: ${total_spending:,.2f}")
+        
+        # Save the updated category spending
+        self.save_category_spending()
+        print(f"✅ Category spending saved for {current_month}")
+
+    # Add a method to manually test categorization
+    def test_categorization_manual(self, test_descriptions):
+        """Manual test method for categorization."""
+        print(f"\n🧪 MANUAL CATEGORIZATION TEST")
+        print("=" * 50)
+        
+        for i, desc in enumerate(test_descriptions, 1):
+            category = self._categorize_transaction(desc)
+            print(f"{i}. '{desc}' → {category}")
+        
+        print("=" * 50)
     
     # Time Period Analysis Methods
     def analyze_period(self, csv_files, start_date=None, end_date=None, group_by='month'):
@@ -848,8 +1425,15 @@ class CreditCardTracker:
         self.cards[name]['last_updated'] = datetime.now().isoformat()
         self.save_cards()
     
-    def process_transactions_auto(self, csv_files, card_patterns=None):
-        """Automatically process transaction files and update card balances."""
+    def process_transactions_auto(self, csv_files, card_patterns=None, use_current_month_only=False):
+        """
+        Automatically process transaction files and update card balances.
+        
+        Args:
+            csv_files: List of CSV file paths
+            card_patterns: Dictionary of card name patterns for auto-detection
+            use_current_month_only: If True, only count current month for category budgets
+        """
         if not csv_files:
             print("No transaction files provided")
             return
@@ -863,6 +1447,8 @@ class CreditCardTracker:
                 'citi': ['citi', 'citibank']
             }
         
+        total_transactions_processed = 0
+        
         # Process each file and try to match to cards
         for file_path in csv_files:
             file_name = Path(file_path).name.lower()
@@ -871,6 +1457,8 @@ class CreditCardTracker:
             if df.empty:
                 print(f"No valid data in {file_path}")
                 continue
+            
+            total_transactions_processed += len(df)
             
             # Try to match file to a credit card
             matched_card = None
@@ -896,11 +1484,12 @@ class CreditCardTracker:
                 print("Available cards:", list(self.cards.keys()))
                 continue
             
-            # Calculate new spending since last statement
+            # Calculate new spending since last statement (all transactions for card balance)
             new_spending = abs(df[df['Amount'] < 0]['Amount'].sum())
             
             # Update category spending based on transactions
-            self._update_category_spending(df)
+            # Use the parameter to control month filtering
+            self._update_category_spending(df, use_current_month_only=use_current_month_only)
             
             # Update the card's current balance
             old_balance = self.cards[matched_card]['current_balance']
@@ -908,6 +1497,10 @@ class CreditCardTracker:
             self.cards[matched_card]['last_updated'] = datetime.now().isoformat()
             
             print(f"Updated {matched_card}: ${old_balance:,.2f} → ${new_spending:,.2f} (from {len(df)} transactions)")
+        
+        print(f"\n📊 Processing Summary:")
+        print(f"   Total transactions: {total_transactions_processed}")
+        print(f"   Category filtering: {'Current month only' if use_current_month_only else 'All months'}")
         
         self.save_cards()
     
@@ -947,46 +1540,6 @@ class CreditCardTracker:
             'Groceries': 0.0,
             'Other': 0.0
         })
-    
-    def _update_category_spending(self, df):
-        """Update category spending based on transaction data."""
-        if df.empty:
-            return
-        
-        current_month = datetime.now().strftime('%Y-%m')
-        
-        if current_month not in self.category_spending:
-            self.category_spending[current_month] = {
-                'Shopping': 0.0,
-                'Food & Drinks': 0.0,
-                'Services': 0.0,
-                'Entertainment': 0.0,
-                'Groceries': 0.0,
-                'Other': 0.0
-            }
-        
-        # Categorize transactions and calculate spending
-        df['custom_category'] = df.apply(
-            lambda row: self._categorize_transaction(
-                row.get('Description', ''), 
-                row.get('Memo', ''),
-                row.get('Category', '')
-            ), axis=1
-        )
-        
-        # Calculate spending by category (negative amounts only)
-        spending_df = df[df['Amount'] < 0].copy()
-        spending_df['amount_abs'] = spending_df['Amount'].abs()
-        
-        category_totals = spending_df.groupby('custom_category')['amount_abs'].sum()
-        
-        # Update category spending
-        for category, amount in category_totals.items():
-            if category in self.category_spending[current_month]:
-                self.category_spending[current_month][category] = float(amount)
-        
-        # Save the updated category spending
-        self.save_category_spending()
     
     def show_summary(self):
         """Display current spending summary for all cards."""
@@ -1036,7 +1589,7 @@ class CreditCardTracker:
             if limits['hard_limit'] > 0 and total_new_spending > limits['hard_limit']:
                 spending_status = " 🚨 CRITICAL"
             elif total_new_spending > limits['soft_limit']:
-                spending_status = " ⚠️  CAUTION"
+                spending_status = " ⚠️ CAUTION"
         else:
             # No spending limits set, show available credit instead
             left_to_spend = total_available
@@ -1069,7 +1622,7 @@ class CreditCardTracker:
                     if remaining < 0:
                         status = " 🚨 OVER"
                     elif remaining < budget * 0.1:  # Less than 10% remaining
-                        status = " ⚠️  LOW"
+                        status = " ⚠️ LOW"
                     
                     print(f"{category:<15} ${spent:>8,.2f} / ${budget:>8,.2f} (${remaining:>8,.2f}){status}")
         
@@ -1117,7 +1670,7 @@ class CreditCardTracker:
         for name, due_date, days_until, total_balance, balance_due in due_dates:
             status = ""
             if days_until <= 3:
-                status = "⚠️  URGENT"
+                status = "⚠️ URGENT"
             elif days_until <= 7:
                 status = "⚡ SOON"
             
@@ -1347,6 +1900,10 @@ def main():
     parser.add_argument('--reset-statement', nargs='?', const='all',
                        help='Reset statement period for card (or all cards)')
     
+    # Category spending reset - use 'const' for default behavior
+    parser.add_argument('--reset-category-spending', nargs='?', const='current', metavar='YYYY-MM',
+                       help='Reset category spending for current month or specified month (YYYY-MM)')
+    
     # Spending limits and budgets
     parser.add_argument('--set-limits', nargs=2, metavar=('SOFT', 'HARD'),
                        help='Set monthly spending limits: soft_limit hard_limit')
@@ -1358,6 +1915,10 @@ def main():
                        help='Auto-process transaction files to update balances')
     parser.add_argument('--update-categories', nargs='+', metavar='CSV_FILE',
                        help='Update category spending from transaction files (for budget tracking)')
+    
+    # NEW: Option to disable current month filtering
+    parser.add_argument('--all-months', action='store_true',
+                       help='Include all months when updating categories (not just current month)')
     
     # Display
     parser.add_argument('--summary', action='store_true', help='Show spending summary')
@@ -1467,6 +2028,15 @@ def main():
         name, amount, balance_type = args.update_balance
         tracker.update_balance(name, float(amount), balance_type)
     
+    # Handle category spending reset properly
+    elif args.reset_category_spending is not None:
+        if args.reset_category_spending == 'current':
+            # Default behavior - reset current month
+            tracker.reset_category_spending()
+        else:
+            # Specific month provided
+            tracker.reset_category_spending(args.reset_category_spending)
+    
     elif args.set_limits:
         soft_limit, hard_limit = args.set_limits
         tracker.set_spending_limits(float(soft_limit), float(hard_limit))
@@ -1497,8 +2067,12 @@ def main():
         
         if all_dfs:
             combined_df = pd.concat(all_dfs, ignore_index=True) if len(all_dfs) > 1 else all_dfs[0]
-            tracker._update_category_spending(combined_df)
-            print(f"Updated category spending from {len(combined_df)} transactions")
+            # FIXED: Use --all-months flag to control filtering
+            use_current_month_only = not args.all_months
+            tracker._update_category_spending(combined_df, use_current_month_only=use_current_month_only)
+            
+            filter_msg = " (current month only)" if use_current_month_only else " (all months)"
+            print(f"Updated category spending from {len(combined_df)} transactions{filter_msg}")
         else:
             print("No transaction data found for category update")
     

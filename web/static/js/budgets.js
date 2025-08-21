@@ -1,4 +1,4 @@
-// Budget Management Functions
+// Budget Management Functions - Updated with Category Reset
 
 async function loadCurrentBudgetSettings() {
     const loadingElement = document.getElementById('currentSettingsLoading');
@@ -135,7 +135,7 @@ function displayCurrentSpendingLimits(summaryData) {
     `;
 }
 
-// UPDATED: Compact summary for category budgets
+// UPDATED: Compact summary for category budgets with reset functionality
 function displayCurrentCategoryBudgets(categoryBudgets) {
     const summaryContainer = document.getElementById('currentCategoryBudgetsSummary');
     const detailContainer = document.getElementById('currentCategoryBudgets');
@@ -166,7 +166,7 @@ function displayCurrentCategoryBudgets(categoryBudgets) {
     const totalSpent = categoryBudgets.reduce((sum, cat) => sum + (cat.spent || 0), 0);
     const overBudgetCount = categoryBudgets.filter(cat => (cat.remaining || 0) < 0).length;
     
-    // Create summary display
+    // Create summary display with reset button
     summaryContainer.innerHTML = `
         <div style="font-size: 0.9rem; line-height: 1.4;">
             <div style="display: flex; justify-content: space-between; margin-bottom: 0.25rem;">
@@ -177,9 +177,14 @@ function displayCurrentCategoryBudgets(categoryBudgets) {
                 <span>Total Spent:</span>
                 <span class="${totalSpent > totalBudget ? 'status-warning' : 'status-good'}">${formatCurrency(totalSpent)}</span>
             </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                 <span>Categories:</span>
                 <span>${categoryBudgets.length} set${overBudgetCount > 0 ? `, ${overBudgetCount} over` : ''}</span>
+            </div>
+            <div style="text-align: center;">
+                <button class="btn btn-small btn-warning" onclick="resetCategorySpending()" id="resetCategoriesBtn">
+                    🧹 Reset Category Spending
+                </button>
             </div>
         </div>
     `;
@@ -230,6 +235,76 @@ function displayCurrentCategoryBudgets(categoryBudgets) {
         }).join('');
         
         detailContainer.innerHTML = budgetHTML;
+    }
+}
+
+// NEW: Reset category spending function
+async function resetCategorySpending(targetMonth = null) {
+    const resetBtn = document.getElementById('resetCategoriesBtn');
+    
+    // Confirm reset action
+    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
+    const monthToReset = targetMonth || currentMonth;
+    
+    const confirmed = confirm(
+        `Are you sure you want to reset all category spending to $0.00 for ${monthToReset}?\n\n` +
+        `This action cannot be undone and will clear all current category spending data.`
+    );
+    
+    if (!confirmed) {
+        return;
+    }
+    
+    // Set loading state
+    const originalText = resetBtn ? resetBtn.textContent : '';
+    if (resetBtn) {
+        resetBtn.disabled = true;
+        resetBtn.textContent = '⏳ Resetting...';
+    }
+    
+    try {
+        console.log('Resetting category spending for month:', monthToReset);
+        
+        const response = await fetch('/api/reset-category-spending', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                month: targetMonth  // null for current month
+            })
+        });
+        
+        const result = await response.json();
+        console.log('Reset response:', result);
+        
+        if (result.success) {
+            showMessage(`✅ Category spending reset for ${result.month}`, 'success');
+            
+            // Auto-refresh budget settings after successful reset
+            setTimeout(() => {
+                loadCurrentBudgetSettings();
+                
+                // Also refresh dashboard if it's active
+                if (document.getElementById('dashboard-tab')?.classList.contains('active')) {
+                    if (typeof loadDashboard === 'function') {
+                        loadDashboard();
+                    }
+                }
+            }, 500);
+        } else {
+            throw new Error(result.error || 'Reset failed');
+        }
+        
+    } catch (err) {
+        console.error('Error resetting category spending:', err);
+        showMessage(`❌ Failed to reset category spending: ${err.message}`, 'error');
+    } finally {
+        // Restore button state
+        if (resetBtn) {
+            resetBtn.disabled = false;
+            resetBtn.textContent = originalText || '🧹 Reset Category Spending';
+        }
     }
 }
 
@@ -433,6 +508,50 @@ function toggleCategoryDetails() {
     } else {
         detailsSection.style.display = 'block';
         toggleBtn.innerHTML = '👁️ Hide Details';
+    }
+}
+
+// NEW: Debug function for troubleshooting
+async function debugBudgetData() {
+    try {
+        console.log('=== BUDGET DEBUG INFO ===');
+        
+        // Get summary data
+        const summaryResponse = await fetch('/api/summary');
+        const summaryData = await summaryResponse.json();
+        console.log('Summary API response:', summaryData);
+        
+        // Get category spending data
+        const categoryResponse = await fetch('/api/category-spending');
+        const categoryData = await categoryResponse.json();
+        console.log('Category spending API response:', categoryData);
+        
+        // Show debug info to user
+        const debugInfo = {
+            timestamp: new Date().toISOString(),
+            summary_api: summaryData,
+            category_api: categoryData,
+            current_month: new Date().toISOString().slice(0, 7)
+        };
+        
+        // Create debug display
+        const debugContainer = document.createElement('div');
+        debugContainer.innerHTML = `
+            <div style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 4px; padding: 1rem; margin-top: 1rem; font-family: monospace; font-size: 0.8rem;">
+                <h5>Debug Information</h5>
+                <pre style="white-space: pre-wrap; max-height: 300px; overflow-y: auto;">${JSON.stringify(debugInfo, null, 2)}</pre>
+                <button onclick="this.parentElement.parentElement.remove()" class="btn btn-small" style="margin-top: 0.5rem;">Close</button>
+            </div>
+        `;
+        
+        const contentElement = document.getElementById('currentSettingsContent');
+        if (contentElement) {
+            contentElement.appendChild(debugContainer);
+        }
+        
+    } catch (err) {
+        console.error('Debug error:', err);
+        alert('Debug failed: ' + err.message);
     }
 }
 
