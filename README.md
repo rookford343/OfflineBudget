@@ -493,7 +493,20 @@ python3 web_api_server.py
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the [Apache License 2.0](LICENSE).
+
+Copyright © [2025] Daniel (Dan) Ford
+
+You may not use this file except in compliance with the License.  
+You may obtain a copy of the License at:
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software  
+distributed under the License is distributed on an "AS IS" BASIS,  
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  
+See the License for the specific language governing permissions and  
+limitations under the License.
 
 ## 🙏 Acknowledgments
 
@@ -519,7 +532,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - ✅ Mobile-responsive design
 
 ### Version 2.2 (Planned)
-- 📱 Native mobile applications (iOS/Android)
+- 🏦 Checking account past and future view
 - 📊 Advanced visualization charts
 - 🔄 Automatic bank data synchronization (optional)
 - 🏦 Support for bank-specific CSV formats
@@ -527,7 +540,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Version 3.0 (Future)
 - 🌐 Multi-user support with role-based access
-- 🔗 Integration with personal finance platforms
+- 📱 Native mobile applications (iOS/Android)
 - 📊 Advanced reporting and analytics
 - 🔒 Hardware security module support
 - ☁️ Optional encrypted cloud backup
