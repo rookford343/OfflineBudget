@@ -418,44 +418,437 @@ class CreditCardTracker:
         return Fernet(encryption_key.encode())
     
     def _process_csv_file(self, file_path):
-        """Process CSV files from credit card providers."""
+        """Process CSV files from various credit card providers with format detection."""
         print(f"Processing CSV file: {file_path}")
         
         try:
             # Try different encodings
-            encodings = ['utf-8', 'latin-1', 'cp1252']
+            encodings = ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']
+            df = None
             
             for encoding in encodings:
                 try:
                     df = pd.read_csv(file_path, encoding=encoding)
+                    print(f"✅ Successfully read file with {encoding} encoding")
                     break
                 except UnicodeDecodeError:
                     continue
-            else:
+            
+            if df is None:
                 raise Exception("Could not decode file with any standard encoding")
+            
+            print(f"📊 Loaded {len(df)} rows, {len(df.columns)} columns")
+            print(f"📋 Columns found: {list(df.columns)}")
+            
+            # Detect and convert format
+            df = self._detect_and_convert_format(df, file_path)
+            
+            # Validate required columns
+            required_columns = ['Transaction Date', 'Description', 'Amount']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            
+            if missing_columns:
+                print(f"⚠️ Missing required columns: {missing_columns}")
+                print(f"   Available columns: {list(df.columns)}")
+                return pd.DataFrame()
             
             # Clean amount field
             if 'Amount' in df.columns:
-                df['Amount'] = df['Amount'].astype(str).str.replace(r'[\$,]', '', regex=True)
                 df['Amount'] = pd.to_numeric(df['Amount'], errors='coerce')
             
             # Remove empty rows
             df = df.dropna(subset=['Amount'])
             
-            # Sort by date
+            # Sort by date if possible
             if 'Transaction Date' in df.columns:
                 try:
-                    df['parsed_date'] = pd.to_datetime(df['Transaction Date'])
+                    df['parsed_date'] = pd.to_datetime(df['Transaction Date'], errors='coerce')
                     df = df.sort_values('parsed_date', ascending=False)
                     df = df.drop('parsed_date', axis=1)
                 except:
                     pass
             
+            print(f"✅ Processed {len(df)} valid transactions")
             return df
             
         except Exception as e:
-            print(f"Error processing CSV file: {e}")
+            print(f"❌ Error processing CSV file: {e}")
+            import traceback
+            traceback.print_exc()
             return pd.DataFrame()
+    
+    def _detect_and_convert_format(self, df, file_path):
+        """Detect CSV format and convert to standard format if needed."""
+        import os
+        
+        filename = os.path.basename(file_path).lower()
+        columns_lower = [col.lower() for col in df.columns]
+        
+        print(f"🔍 Detecting format for: {filename}")
+        
+        # Check if already in standard format (Chase format)
+        if 'transaction date' in columns_lower and 'amount' in columns_lower:
+            print("✅ Already in standard format (Chase)")
+            return df
+        
+        # Detect Citi format
+        if 'date' in columns_lower and 'debit' in columns_lower and 'credit' in columns_lower:
+            print("🔄 Converting Citi format...")
+            return self._convert_citi_format(df)
+        
+        # Detect Bank of America format
+        if 'posted date' in columns_lower and 'payee' in columns_lower:
+            print("🔄 Converting Bank of America format...")
+            return self._convert_bofa_format(df)
+        
+        # Detect Wells Fargo format
+        if 'date' in columns_lower and 'amount' in columns_lower and 'description' in columns_lower:
+            print("🔄 Converting Wells Fargo format...")
+            return self._convert_wells_fargo_format(df)
+        
+        # Detect Capital One format
+        if 'transaction date' in columns_lower and 'debit' in columns_lower:
+            print("🔄 Converting Capital One format...")
+            return self._convert_capital_one_format(df)
+        
+        # Try generic conversion
+        print("🔄 Attempting generic format conversion...")
+        return self._convert_generic_format(df)
+
+    def _convert_citi_format(self, df):
+        """Convert Citi CSV format to standard format."""
+        converted_df = pd.DataFrame()
+        
+        # Map column names (case-insensitive)
+        column_mapping = {}
+        for col in df.columns:
+            col_lower = col.lower()
+            if col_lower == 'date':
+                column_mapping[col] = 'Transaction Date'
+            elif 'description' in col_lower:
+                column_mapping[col] = 'Description'
+            elif 'category' in col_lower:
+                column_mapping[col] = 'Category'
+        
+        # Copy mapped columns
+        for old_col, new_col in column_mapping.items():
+            converted_df[new_col] = df[old_col]
+        
+        # Add Post Date (same as Transaction Date)
+        if 'Transaction Date' in converted_df.columns:
+            converted_df['Post Date'] = converted_df['Transaction Date']
+        
+        # Handle Debit/Credit columns -> Amount
+        debit_col = None
+        credit_col = None
+        
+        for col in df.columns:
+            col_lower = col.lower()
+            if 'debit' in col_lower:
+                debit_col = col
+            elif 'credit' in col_lower:
+                credit_col = col
+        
+        # Create Amount column (negative for debits, positive for credits)
+        amounts = []
+        types = []
+        
+        for idx, row in df.iterrows():
+            debit_val = row[debit_col] if debit_col else None
+            credit_val = row[credit_col] if credit_col else None
+            
+            # Clean and convert values
+            if pd.notna(debit_val) and str(debit_val).strip():
+                # Debit is spending (negative)
+                amount_str = str(debit_val).replace('$', '').replace(',', '').strip()
+                try:
+                    amount = -abs(float(amount_str))
+                    amounts.append(amount)
+                    types.append('Sale')
+                except:
+                    amounts.append(0)
+                    types.append('Unknown')
+            elif pd.notna(credit_val) and str(credit_val).strip():
+                # Credit is payment/refund (positive)
+                amount_str = str(credit_val).replace('$', '').replace(',', '').strip()
+                try:
+                    amount = float(amount_str)
+                    amounts.append(amount)
+                    types.append('Payment')
+                except:
+                    amounts.append(0)
+                    types.append('Unknown')
+            else:
+                amounts.append(0)
+                types.append('Unknown')
+        
+        converted_df['Amount'] = amounts
+        converted_df['Type'] = types
+        
+        # Add Memo column if not present
+        if 'Memo' not in converted_df.columns:
+            converted_df['Memo'] = ''
+        
+        # Ensure all required columns exist
+        required_columns = ['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount', 'Memo']
+        for col in required_columns:
+            if col not in converted_df.columns:
+                converted_df[col] = ''
+        
+        # Reorder columns
+        converted_df = converted_df[required_columns]
+        
+        # Remove rows with zero amount
+        converted_df = converted_df[converted_df['Amount'] != 0]
+        
+        print(f"✅ Converted {len(converted_df)} Citi transactions")
+        
+        # Debug: Show sample conversion
+        if len(converted_df) > 0:
+            sample = converted_df.head(3)
+            print("Sample converted transactions:")
+            for idx, row in sample.iterrows():
+                print(f"  {row['Description'][:30]}: ${row['Amount']:.2f}")
+        
+        return converted_df
+
+    def _convert_bofa_format(self, df):
+        """Convert Bank of America format to standard format."""
+        converted_df = pd.DataFrame()
+        
+        # Map columns
+        column_mapping = {}
+        for col in df.columns:
+            col_lower = col.lower()
+            if 'posted date' in col_lower or col_lower == 'date':
+                column_mapping[col] = 'Transaction Date'
+            elif 'payee' in col_lower or 'description' in col_lower:
+                column_mapping[col] = 'Description'
+            elif 'amount' in col_lower:
+                column_mapping[col] = 'Amount'
+            elif 'category' in col_lower:
+                column_mapping[col] = 'Category'
+        
+        # Copy mapped columns
+        for old_col, new_col in column_mapping.items():
+            converted_df[new_col] = df[old_col]
+        
+        # Add missing columns
+        if 'Post Date' not in converted_df.columns:
+            converted_df['Post Date'] = converted_df.get('Transaction Date', '')
+        
+        if 'Type' not in converted_df.columns:
+            # Determine type based on amount
+            if 'Amount' in converted_df.columns:
+                converted_df['Type'] = converted_df['Amount'].apply(
+                    lambda x: 'Payment' if x > 0 else 'Sale'
+                )
+            else:
+                converted_df['Type'] = 'Sale'
+        
+        if 'Memo' not in converted_df.columns:
+            converted_df['Memo'] = ''
+        
+        if 'Category' not in converted_df.columns:
+            converted_df['Category'] = ''
+        
+        # Ensure all required columns exist
+        required_columns = ['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount', 'Memo']
+        for col in required_columns:
+            if col not in converted_df.columns:
+                converted_df[col] = ''
+        
+        return converted_df[required_columns]
+
+    def _convert_wells_fargo_format(self, df):
+        """Convert Wells Fargo format to standard format."""
+        converted_df = pd.DataFrame()
+        
+        # Wells Fargo typically has Date, Amount, *, *, Description
+        column_mapping = {}
+        for col in df.columns:
+            col_lower = col.lower()
+            if col_lower == 'date':
+                column_mapping[col] = 'Transaction Date'
+            elif 'amount' in col_lower:
+                column_mapping[col] = 'Amount'
+            elif 'description' in col_lower or col == df.columns[-1]:  # Last column often description
+                column_mapping[col] = 'Description'
+        
+        # Copy mapped columns
+        for old_col, new_col in column_mapping.items():
+            converted_df[new_col] = df[old_col]
+        
+        # Wells Fargo amounts are typically positive for debits
+        if 'Amount' in converted_df.columns:
+            # Make spending negative
+            converted_df['Amount'] = converted_df['Amount'].apply(
+                lambda x: -abs(x) if x != 0 else 0
+            )
+        
+        # Add missing columns
+        converted_df['Post Date'] = converted_df.get('Transaction Date', '')
+        converted_df['Category'] = ''
+        converted_df['Type'] = 'Sale'
+        converted_df['Memo'] = ''
+        
+        # Ensure all required columns exist
+        required_columns = ['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount', 'Memo']
+        return converted_df[required_columns]
+
+    def _convert_capital_one_format(self, df):
+        """Convert Capital One format to standard format."""
+        converted_df = pd.DataFrame()
+        
+        # Map columns
+        column_mapping = {}
+        for col in df.columns:
+            col_lower = col.lower()
+            if 'transaction date' in col_lower:
+                column_mapping[col] = 'Transaction Date'
+            elif 'posted date' in col_lower:
+                column_mapping[col] = 'Post Date'
+            elif 'description' in col_lower or 'merchant' in col_lower:
+                column_mapping[col] = 'Description'
+            elif 'category' in col_lower:
+                column_mapping[col] = 'Category'
+            elif 'debit' in col_lower:
+                # Capital One uses Debit for spending
+                debit_col = col
+            elif 'credit' in col_lower:
+                credit_col = col
+        
+        # Copy mapped columns
+        for old_col, new_col in column_mapping.items():
+            converted_df[new_col] = df[old_col]
+        
+        # Handle Debit/Credit if present
+        if 'debit_col' in locals() or 'credit_col' in locals():
+            amounts = []
+            for idx, row in df.iterrows():
+                debit = row.get(debit_col, 0) if 'debit_col' in locals() else 0
+                credit = row.get(credit_col, 0) if 'credit_col' in locals() else 0
+                
+                if pd.notna(debit) and debit != 0:
+                    amounts.append(-abs(float(str(debit).replace('$', '').replace(',', ''))))
+                elif pd.notna(credit) and credit != 0:
+                    amounts.append(float(str(credit).replace('$', '').replace(',', '')))
+                else:
+                    amounts.append(0)
+            
+            converted_df['Amount'] = amounts
+        
+        # Add missing columns
+        if 'Post Date' not in converted_df.columns:
+            converted_df['Post Date'] = converted_df.get('Transaction Date', '')
+        
+        converted_df['Type'] = converted_df.get('Amount', pd.Series([0])).apply(
+            lambda x: 'Payment' if x > 0 else 'Sale'
+        )
+        converted_df['Memo'] = ''
+        
+        if 'Category' not in converted_df.columns:
+            converted_df['Category'] = ''
+        
+        # Ensure all required columns exist
+        required_columns = ['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount', 'Memo']
+        return converted_df[required_columns]
+
+    def _convert_generic_format(self, df):
+        """Generic format converter for unknown CSV formats."""
+        converted_df = pd.DataFrame()
+        
+        # Try to find best matches for required columns
+        columns_lower = {col: col.lower() for col in df.columns}
+        
+        # Find date column
+        date_col = None
+        for col, col_lower in columns_lower.items():
+            if 'date' in col_lower or 'posted' in col_lower:
+                date_col = col
+                break
+        
+        # Find description column
+        desc_col = None
+        for col, col_lower in columns_lower.items():
+            if 'description' in col_lower or 'merchant' in col_lower or 'payee' in col_lower:
+                desc_col = col
+                break
+        
+        # Find amount column(s)
+        amount_col = None
+        debit_col = None
+        credit_col = None
+        
+        for col, col_lower in columns_lower.items():
+            if 'amount' in col_lower:
+                amount_col = col
+            elif 'debit' in col_lower:
+                debit_col = col
+            elif 'credit' in col_lower:
+                credit_col = col
+        
+        # Find category column
+        category_col = None
+        for col, col_lower in columns_lower.items():
+            if 'category' in col_lower or 'type' in col_lower:
+                category_col = col
+                break
+        
+        # Build converted dataframe
+        if date_col:
+            converted_df['Transaction Date'] = df[date_col]
+            converted_df['Post Date'] = df[date_col]
+        else:
+            converted_df['Transaction Date'] = ''
+            converted_df['Post Date'] = ''
+        
+        if desc_col:
+            converted_df['Description'] = df[desc_col]
+        else:
+            # Try to find any text column that might be description
+            for col in df.columns:
+                if df[col].dtype == 'object':
+                    sample_val = df[col].dropna().iloc[0] if not df[col].dropna().empty else ''
+                    if len(str(sample_val)) > 5 and not str(sample_val).replace('.', '').replace('-', '').isdigit():
+                        converted_df['Description'] = df[col]
+                        break
+            
+            if 'Description' not in converted_df.columns:
+                converted_df['Description'] = 'Transaction'
+        
+        # Handle amount
+        if amount_col:
+            converted_df['Amount'] = pd.to_numeric(df[amount_col], errors='coerce')
+        elif debit_col and credit_col:
+            # Combine debit and credit
+            amounts = []
+            for idx, row in df.iterrows():
+                debit = row[debit_col]
+                credit = row[credit_col]
+                
+                if pd.notna(debit) and str(debit).strip():
+                    amounts.append(-abs(float(str(debit).replace('$', '').replace(',', ''))))
+                elif pd.notna(credit) and str(credit).strip():
+                    amounts.append(float(str(credit).replace('$', '').replace(',', '')))
+                else:
+                    amounts.append(0)
+            
+            converted_df['Amount'] = amounts
+        else:
+            converted_df['Amount'] = 0
+        
+        if category_col:
+            converted_df['Category'] = df[category_col]
+        else:
+            converted_df['Category'] = ''
+        
+        converted_df['Type'] = 'Sale'
+        converted_df['Memo'] = ''
+        
+        # Ensure all required columns exist
+        required_columns = ['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount', 'Memo']
+        return converted_df[required_columns]
     
     def _extract_meaningful_text(self, description):
         """Extract meaningful text from potentially garbled descriptions."""
