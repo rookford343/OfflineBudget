@@ -465,8 +465,8 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 ### Development Setup
 ```bash
 # Clone and set up development environment
-git clone https://github.com/your-username/credit-card-tracker.git
-cd credit-card-tracker
+git clone https://github.com/rookford343/OfflineBudget.git
+cd OfflineBudget
 
 # Create virtual environment
 python3 -m venv venv
@@ -475,10 +475,11 @@ source venv/bin/activate  # Linux/Mac
 venv\Scripts\activate     # Windows
 
 # Install development dependencies
-pip install -r requirements-dev.txt
+pip install -r requirements.txt
 
 # Run tests
-python3 -m pytest tests/
+python3 test_backend.py
+python3 test_frontend.py
 
 # Start development server
 cd web
