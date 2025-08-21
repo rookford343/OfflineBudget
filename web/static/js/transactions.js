@@ -126,32 +126,44 @@ async function addFiles(files) {
     for (const file of files) {
         const name = file.name.toLowerCase();
         
-        // Check if it's a CSV or TXT file
         if (name.endsWith('.csv') || name.endsWith('.txt')) {
-            console.log(`✅ Adding CSV file: ${file.name}`);
-            processedFiles.push(file);
+            console.log(`Processing CSV file: ${file.name}`);
+            
+            try {
+                // Check if conversion is needed
+                const needsConv = await needsConversion(file);
+                
+                if (needsConv) {
+                    console.log(`Converting ${file.name}...`);
+                    const convertedFile = await convertCSVToStandardFormat(file);
+                    processedFiles.push(convertedFile);
+                    console.log(`✅ Converted ${file.name} to standard format`);
+                } else {
+                    console.log(`✅ ${file.name} already in standard format`);
+                    processedFiles.push(file);
+                }
+            } catch (error) {
+                console.warn(`Conversion failed for ${file.name}, using original:`, error);
+                processedFiles.push(file);
+            }
         } else {
-            console.log(`❌ Skipping non-CSV file: ${file.name}`);
+            console.log(`Skipping non-CSV file: ${file.name}`);
         }
     }
     
     if (processedFiles.length === 0) {
-        showMessage('Please select CSV files only', 'error');
+        showMessage('No valid CSV files found', 'error');
         return;
     }
     
-    // Add files to selection (avoid duplicates)
+    // Add files to selection
     processedFiles.forEach(newFile => {
         const exists = selectedFiles.some(existingFile => existingFile.name === newFile.name);
         if (!exists) {
             selectedFiles.push(newFile);
             console.log(`Added to queue: ${newFile.name}`);
-        } else {
-            console.log(`Already in queue: ${newFile.name}`);
         }
     });
-    
-    console.log(`Total files ready for processing: ${selectedFiles.length}`);
     
     updateFileDisplay();
     updateButtonStates();
@@ -168,32 +180,29 @@ async function needsConversion(file) {
             reader.onload = function(e) {
                 try {
                     const content = e.target.result;
-                    const firstLine = content.split('\n')[0].toLowerCase();
+                    const firstLine = content.split('\n')[0];
+                    const headers = parseCSVRow(firstLine);
                     
-                    // Check if it already has standard headers
-                    const hasStandardHeaders = 
-                        firstLine.includes('transaction date') && 
-                        firstLine.includes('description') && 
-                        firstLine.includes('amount');
+                    const formatType = detectCSVFormat(headers);
                     
-                    resolve(!hasStandardHeaders);
+                    // Only Chase format doesn't need conversion
+                    resolve(formatType !== 'chase');
+                    
                 } catch (error) {
                     console.warn('Error checking file headers:', error);
-                    // If we can't determine, assume it needs conversion
-                    resolve(true);
+                    resolve(true); // Assume needs conversion if can't determine
                 }
             };
             
             reader.onerror = () => {
                 console.warn('Error reading file for header check');
-                resolve(true); // Assume needs conversion if can't read
+                resolve(true);
             };
             
-            // Only read first 1KB to check headers
             reader.readAsText(file.slice(0, 1024));
         } catch (error) {
             console.warn('Error in needsConversion:', error);
-            resolve(true); // Default to true if any error
+            resolve(true);
         }
     });
 }
@@ -206,109 +215,42 @@ async function convertCSVToStandardFormat(file) {
         reader.onload = function(e) {
             try {
                 const content = e.target.result;
-                console.log('Original CSV sample (first 500 chars):', content.substring(0, 500));
-                
-                // Parse CSV to understand structure
                 const lines = content.trim().split('\n');
+                
                 if (lines.length < 2) {
                     throw new Error('CSV must have header and data');
                 }
                 
                 const headers = parseCSVRow(lines[0]);
-                console.log('Found headers:', headers);
+                console.log('Original headers:', headers);
                 
-                // Find key columns with multiple fallback patterns
-                const descCol = findColumnByPatterns(headers, [
-                    'description', 'merchant', 'payee', 'vendor', 
-                    'transaction description', 'merchant name',
-                    'desc', 'details', 'memo'
-                ]);
+                // Detect format type
+                const formatType = detectCSVFormat(headers);
+                console.log(`Detected format: ${formatType}`);
                 
-                const amountCol = findColumnByPatterns(headers, [
-                    'amount', 'transaction amount', 'debit/credit'
-                ]);
+                let convertedContent;
                 
-                const dateCol = findColumnByPatterns(headers, [
-                    'transaction date', 'trans date', 'date', 'posting date'
-                ]);
-                
-                const categoryCol = findColumnByPatterns(headers, [
-                    'category', 'cat', 'type', 'transaction type'
-                ]);
-                
-                console.log('Column mapping:', {
-                    description: descCol,
-                    amount: amountCol,
-                    date: dateCol,
-                    category: categoryCol
-                });
-                
-                // Create standard format output
-                const standardHeader = 'Transaction Date,Post Date,Description,Category,Type,Amount,Memo';
-                const convertedLines = [standardHeader];
-                
-                // Process data rows
-                for (let i = 1; i < lines.length; i++) {
-                    const line = lines[i].trim();
-                    if (!line) continue;
-                    
-                    const columns = parseCSVRow(line);
-                    if (columns.length < headers.length - 2) continue; // Allow some flexibility
-                    
-                    // Extract data with fallbacks
-                    let description = '';
-                    if (descCol !== -1 && columns[descCol]) {
-                        description = columns[descCol].trim();
-                    }
-                    
-                    // CRITICAL: If no description found, try to build one from available data
-                    if (!description || description === '') {
-                        // Look for any non-empty, non-numeric column that might be description
-                        for (let j = 0; j < columns.length; j++) {
-                            const val = columns[j].trim();
-                            if (val && !isNumeric(val) && !isDate(val) && val.length > 3) {
-                                description = val;
-                                console.log(`Found fallback description in column ${j}: "${description}"`);
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // Final fallback
-                    if (!description) {
-                        description = 'Transaction ' + i;
-                        console.warn(`Row ${i}: No description found, using fallback`);
-                    }
-                    
-                    const transactionDate = dateCol !== -1 ? columns[dateCol] || '' : '';
-                    const amount = amountCol !== -1 ? columns[amountCol] || '0' : '0';
-                    const category = categoryCol !== -1 ? columns[categoryCol] || '' : '';
-                    
-                    // Build standard row
-                    const standardRow = [
-                        escapeCSVField(transactionDate),
-                        escapeCSVField(transactionDate), // Use same for post date
-                        escapeCSVField(description),
-                        escapeCSVField(category),
-                        escapeCSVField('Sale'),
-                        escapeCSVField(amount),
-                        escapeCSVField('') // Memo
-                    ].join(',');
-                    
-                    convertedLines.push(standardRow);
+                switch(formatType) {
+                    case 'chase':
+                        // Already in correct format
+                        console.log('Chase format detected - no conversion needed');
+                        resolve(file);
+                        return;
+                        
+                    case 'citi':
+                        convertedContent = convertCitiFormat(lines, headers);
+                        break;
+                        
+                    case 'generic':
+                        convertedContent = convertGenericFormat(lines, headers);
+                        break;
+                        
+                    default:
+                        console.warn('Unknown format, attempting generic conversion');
+                        convertedContent = convertGenericFormat(lines, headers);
                 }
                 
-                const convertedContent = convertedLines.join('\n');
-                console.log('Converted CSV sample (first 500 chars):', convertedContent.substring(0, 500));
-                
-                // Validate conversion
-                const dataRows = convertedLines.length - 1;
-                console.log(`✅ Conversion complete: ${dataRows} data rows`);
-                
-                // Check if descriptions were preserved
-                const sampleDescriptions = convertedLines.slice(1, 6)
-                    .map(line => parseCSVRow(line)[2]);
-                console.log('Sample descriptions after conversion:', sampleDescriptions);
+                console.log('Conversion complete');
                 
                 const blob = new Blob([convertedContent], { type: 'text/csv' });
                 const convertedFile = new File(
@@ -318,8 +260,9 @@ async function convertCSVToStandardFormat(file) {
                 );
                 
                 resolve(convertedFile);
+                
             } catch (error) {
-                console.error(`Conversion error for ${file.name}:`, error);
+                console.error(`Conversion error: ${error.message}`);
                 // Return original file if conversion fails
                 resolve(file);
             }
@@ -327,11 +270,167 @@ async function convertCSVToStandardFormat(file) {
         
         reader.onerror = () => {
             console.error('Failed to read file');
-            resolve(file); // Return original if can't read
+            resolve(file);
         };
         
         reader.readAsText(file);
     });
+}
+
+// Detect CSV format based on headers
+function detectCSVFormat(headers) {
+    const headerLower = headers.map(h => h.toLowerCase().trim());
+    
+    // Check for Chase format (already standard)
+    if (headerLower.includes('transaction date') && 
+        headerLower.includes('post date') && 
+        headerLower.includes('amount')) {
+        return 'chase';
+    }
+    
+    // Check for Citi format
+    if ((headerLower.includes('date') || headerLower.some(h => h === 'date')) && 
+        headerLower.includes('debit') && 
+        headerLower.includes('credit')) {
+        return 'citi';
+    }
+    
+    // Check for Bank of America format
+    if (headerLower.includes('posted date') && 
+        headerLower.includes('payee') && 
+        headerLower.includes('amount')) {
+        return 'bofa';
+    }
+    
+    return 'generic';
+}
+
+// Convert Citi format to standard format
+function convertCitiFormat(lines, headers) {
+    console.log('Converting Citi format...');
+    
+    // Find column indices
+    const dateCol = headers.findIndex(h => h.toLowerCase().trim() === 'date');
+    const descCol = headers.findIndex(h => h.toLowerCase().includes('description'));
+    const debitCol = headers.findIndex(h => h.toLowerCase().includes('debit'));
+    const creditCol = headers.findIndex(h => h.toLowerCase().includes('credit'));
+    const categoryCol = headers.findIndex(h => h.toLowerCase().includes('category'));
+    
+    console.log('Citi column mapping:', {
+        date: dateCol,
+        description: descCol,
+        debit: debitCol,
+        credit: creditCol,
+        category: categoryCol
+    });
+    
+    // Create standard header
+    const standardHeader = 'Transaction Date,Post Date,Description,Category,Type,Amount,Memo';
+    const convertedLines = [standardHeader];
+    
+    // Process data rows
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        const columns = parseCSVRow(line);
+        if (columns.length < headers.length - 1) continue;
+        
+        // Extract data
+        const date = dateCol !== -1 ? columns[dateCol] : '';
+        const description = descCol !== -1 ? columns[descCol] : '';
+        const debit = debitCol !== -1 ? columns[debitCol] : '';
+        const credit = creditCol !== -1 ? columns[creditCol] : '';
+        const category = categoryCol !== -1 ? columns[categoryCol] : '';
+        
+        // Convert amount: negative for debits (spending), positive for credits (payments)
+        let amount = '0';
+        let type = 'Sale';
+        
+        if (debit && debit.trim() !== '') {
+            // Remove any currency symbols and convert to negative
+            amount = '-' + debit.replace(/[$,]/g, '').trim();
+            type = 'Sale';
+        } else if (credit && credit.trim() !== '') {
+            // Credits are positive (payments)
+            amount = credit.replace(/[$,]/g, '').trim();
+            type = 'Payment';
+        }
+        
+        // Skip rows with no amount
+        if (amount === '0' || amount === '-' || amount === '') {
+            continue;
+        }
+        
+        // Build standard row
+        const standardRow = [
+            escapeCSVField(date),           // Transaction Date
+            escapeCSVField(date),           // Post Date (use same date)
+            escapeCSVField(description),    // Description
+            escapeCSVField(category),       // Category
+            escapeCSVField(type),           // Type
+            escapeCSVField(amount),         // Amount
+            escapeCSVField('')              // Memo
+        ].join(',');
+        
+        convertedLines.push(standardRow);
+    }
+    
+    const result = convertedLines.join('\n');
+    console.log(`Converted ${convertedLines.length - 1} Citi transactions`);
+    
+    // Log sample for debugging
+    if (convertedLines.length > 1) {
+        console.log('Sample converted row:', convertedLines[1]);
+    }
+    
+    return result;
+}
+
+// Generic converter for unknown formats
+function convertGenericFormat(lines, headers) {
+    console.log('Converting generic format...');
+    
+    const headerLower = headers.map(h => h.toLowerCase());
+    
+    // Find best matches for required columns
+    const dateCol = headerLower.findIndex(h => 
+        h.includes('date') || h.includes('posted') || h.includes('trans'));
+    const descCol = headerLower.findIndex(h => 
+        h.includes('description') || h.includes('merchant') || h.includes('payee'));
+    const amountCol = headerLower.findIndex(h => 
+        h.includes('amount') || h.includes('debit') || h.includes('charge'));
+    const categoryCol = headerLower.findIndex(h => 
+        h.includes('category') || h.includes('type'));
+    
+    const standardHeader = 'Transaction Date,Post Date,Description,Category,Type,Amount,Memo';
+    const convertedLines = [standardHeader];
+    
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (!line) continue;
+        
+        const columns = parseCSVRow(line);
+        
+        const date = dateCol !== -1 ? columns[dateCol] || '' : '';
+        const description = descCol !== -1 ? columns[descCol] || '' : `Transaction ${i}`;
+        const amount = amountCol !== -1 ? columns[amountCol] || '0' : '0';
+        const category = categoryCol !== -1 ? columns[categoryCol] || '' : '';
+        
+        const standardRow = [
+            escapeCSVField(date),
+            escapeCSVField(date),
+            escapeCSVField(description),
+            escapeCSVField(category),
+            escapeCSVField('Sale'),
+            escapeCSVField(amount),
+            escapeCSVField('')
+        ].join(',');
+        
+        convertedLines.push(standardRow);
+    }
+    
+    return convertedLines.join('\n');
 }
 
 // NEW: Comprehensive CSV analysis before processing
