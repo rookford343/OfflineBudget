@@ -34,13 +34,7 @@ class TimePeriodAnalyzer:
     
     def analyze_time_period(self, df, start_date=None, end_date=None, group_by='month'):
         """
-        Analyze transactions over a specific time period.
-        
-        Args:
-            df: DataFrame with transaction data
-            start_date: Start date (YYYY-MM-DD) or None for all data
-            end_date: End date (YYYY-MM-DD) or None for all data
-            group_by: 'month', 'quarter', or 'year'
+        Analyze transactions over a specific time period with enhanced date parsing.
         """
         if df.empty:
             print("No transaction data available for analysis")
@@ -51,12 +45,91 @@ class TimePeriodAnalyzer:
             print("No 'Transaction Date' column found in data")
             return {}
         
-        # Convert date column to datetime
+        # Convert date column to datetime with enhanced parsing
         df = df.copy()
         try:
-            df['parsed_date'] = pd.to_datetime(df['Transaction Date'])
-        except:
-            print("Could not parse transaction dates")
+            # Multiple date format attempts
+            date_formats = [
+                '%m/%d/%Y',     # MM/DD/YYYY (US format)
+                '%Y-%m-%d',     # YYYY-MM-DD (ISO format)
+                '%m/%d/%y',     # MM/DD/YY
+                '%d/%m/%Y',     # DD/MM/YYYY
+                '%Y/%m/%d',     # YYYY/MM/DD
+                '%m-%d-%Y',     # MM-DD-YYYY
+                '%Y%m%d',       # YYYYMMDD
+                '%b %d, %Y',    # Aug 19, 2025 (Citi format)
+                '%B %d, %Y',    # August 19, 2025 (Full month name)
+                '%d %b %Y',     # 19 Aug 2025
+                '%d %B %Y',     # 19 August 2025
+            ]
+            
+            print(f"🗓️ Attempting to parse {len(df)} transaction dates...")
+            
+            # First, try pandas automatic parsing
+            try:
+                df['parsed_date'] = pd.to_datetime(df['Transaction Date'], errors='coerce')
+                valid_dates = df['parsed_date'].notna().sum()
+                print(f"✅ Pandas auto-parse: {valid_dates}/{len(df)} dates parsed successfully")
+                
+                if valid_dates < len(df) * 0.5:  # Less than 50% success
+                    raise ValueError("Auto-parsing had low success rate")
+                    
+            except (ValueError, TypeError):
+                print("⚠️ Auto-parsing failed, trying manual formats...")
+                
+                # Try each format manually
+                best_format = None
+                best_count = 0
+                
+                for date_format in date_formats:
+                    try:
+                        test_dates = pd.to_datetime(df['Transaction Date'], format=date_format, errors='coerce')
+                        valid_count = test_dates.notna().sum()
+                        print(f"   Format {date_format}: {valid_count}/{len(df)} valid")
+                        
+                        if valid_count > best_count:
+                            best_count = valid_count
+                            best_format = date_format
+                            
+                    except:
+                        continue
+                
+                if best_format and best_count > 0:
+                    print(f"✅ Using best format: {best_format} ({best_count} valid dates)")
+                    df['parsed_date'] = pd.to_datetime(df['Transaction Date'], format=best_format, errors='coerce')
+                else:
+                    print("❌ All date parsing attempts failed")
+                    
+                    # Last resort: try to clean and parse
+                    print("🔧 Attempting date cleaning...")
+                    cleaned_dates = df['Transaction Date'].astype(str).str.strip()
+                    cleaned_dates = cleaned_dates.str.replace(r'[^\d/\-]', '', regex=True)
+                    df['parsed_date'] = pd.to_datetime(cleaned_dates, errors='coerce')
+                    
+                    final_valid = df['parsed_date'].notna().sum()
+                    print(f"🧹 After cleaning: {final_valid}/{len(df)} dates parsed")
+            
+            # Check final parsing results
+            valid_dates_final = df['parsed_date'].notna().sum()
+            invalid_dates = len(df) - valid_dates_final
+            
+            if invalid_dates > 0:
+                print(f"⚠️ Warning: {invalid_dates} transactions had invalid dates")
+                # Show sample of problematic dates
+                invalid_samples = df[df['parsed_date'].isna()]['Transaction Date'].head(5).tolist()
+                print(f"   Sample invalid dates: {invalid_samples}")
+            
+            # Remove rows with invalid dates
+            df = df.dropna(subset=['parsed_date'])
+            
+            if df.empty:
+                print("❌ No valid dates found after parsing - cannot perform analysis")
+                return {}
+            
+            print(f"✅ Successfully parsed {len(df)} transactions with valid dates")
+            
+        except Exception as e:
+            print(f"❌ Date parsing error: {e}")
             return {}
         
         # Filter by date range if specified
@@ -64,6 +137,7 @@ class TimePeriodAnalyzer:
             try:
                 start_dt = pd.to_datetime(start_date)
                 df = df[df['parsed_date'] >= start_dt]
+                print(f"📅 Filtered to dates >= {start_date}: {len(df)} transactions")
             except:
                 print(f"Invalid start date format: {start_date}")
                 return {}
@@ -72,6 +146,7 @@ class TimePeriodAnalyzer:
             try:
                 end_dt = pd.to_datetime(end_date)
                 df = df[df['parsed_date'] <= end_dt]
+                print(f"📅 Filtered to dates <= {end_date}: {len(df)} transactions")
             except:
                 print(f"Invalid end date format: {end_date}")
                 return {}
@@ -80,7 +155,13 @@ class TimePeriodAnalyzer:
             print("No transactions found in the specified date range")
             return {}
         
+        # Show date range of data
+        min_date = df['parsed_date'].min()
+        max_date = df['parsed_date'].max()
+        print(f"📊 Analyzing data from {min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}")
+        
         # Add categorization
+        print("🏷️ Categorizing transactions...")
         df['custom_category'] = df.apply(
             lambda row: self.tracker._categorize_transaction(
                 row.get('Description', ''), 
@@ -107,10 +188,18 @@ class TimePeriodAnalyzer:
         spending_df = df[df['Amount'] < 0].copy()
         spending_df['amount_abs'] = spending_df['Amount'].abs()
         
+        print(f"💰 Found {len(spending_df)} spending transactions (negative amounts)")
+        
+        if spending_df.empty:
+            print("⚠️ No spending transactions found (no negative amounts)")
+            return {}
+        
         # Group by period and category
         period_analysis = {}
+        periods = sorted(spending_df['period_str'].unique())
+        print(f"📅 Analysis periods: {periods}")
         
-        for period_str in sorted(spending_df['period_str'].unique()):
+        for period_str in periods:
             period_data = spending_df[spending_df['period_str'] == period_str]
             
             # Calculate category totals for this period
@@ -132,7 +221,10 @@ class TimePeriodAnalyzer:
                     'end': period_data['Transaction Date'].max()
                 }
             }
+            
+            print(f"   {period_str}: ${period_analysis[period_str]['total_spending']:,.2f} ({period_analysis[period_str]['transaction_count']} transactions)")
         
+        print(f"✅ Analysis complete: {len(period_analysis)} periods analyzed")
         return period_analysis
     
     def display_period_analysis(self, period_analysis, show_categories=True):
@@ -485,13 +577,29 @@ class CreditCardTracker:
         columns_lower = [col.lower() for col in df.columns]
         
         print(f"🔍 Detecting format for: {filename}")
+        print(f"📋 Columns: {list(df.columns)}")
         
-        # Check if already in standard format (Chase format)
-        if 'transaction date' in columns_lower and 'amount' in columns_lower:
-            print("✅ Already in standard format (Chase)")
-            return df
+        # ENHANCED: Check if already in standard format (Chase format) - more strict check
+        if ('transaction date' in columns_lower and 'post date' in columns_lower and 
+            'amount' in columns_lower and 'description' in columns_lower):
+            
+            # ADDITIONAL CHECK: Verify date format is correct
+            if 'Transaction Date' in df.columns and not df.empty:
+                sample_date = str(df['Transaction Date'].iloc[0]).strip()
+                print(f"🔍 Sample date from supposedly standard format: '{sample_date}'")
+                
+                # Check if dates are in expected MM/DD/YYYY format
+                if not self._is_standard_date_format(sample_date):
+                    print(f"⚠️ Dates not in standard MM/DD/YYYY format, converting...")
+                    return self._fix_date_format_in_standard(df)
+                else:
+                    print("✅ Already in standard format (Chase)")
+                    return df
+            else:
+                print("✅ Already in standard format (Chase)")
+                return df
         
-        # Detect Citi format
+        # Check for original Citi format (before any conversion)
         if 'date' in columns_lower and 'debit' in columns_lower and 'credit' in columns_lower:
             print("🔄 Converting Citi format...")
             return self._convert_citi_format(df)
@@ -515,6 +623,63 @@ class CreditCardTracker:
         print("🔄 Attempting generic format conversion...")
         return self._convert_generic_format(df)
 
+    def _is_standard_date_format(self, date_string):
+        """Check if date string is in expected MM/DD/YYYY format."""
+        try:
+            # Try to parse as MM/DD/YYYY
+            pd.to_datetime(date_string, format='%m/%d/%Y')
+            return True
+        except:
+            return False
+    
+    def _fix_date_format_in_standard(self, df):
+        """Fix date format in files that have standard columns but wrong date format."""
+        print("🔧 Fixing date format in standard format file...")
+        
+        df_fixed = df.copy()
+        
+        if 'Transaction Date' in df_fixed.columns:
+            converted_dates = []
+            successful_conversions = 0
+            failed_conversions = 0
+            
+            for date_str in df_fixed['Transaction Date']:
+                try:
+                    date_str = str(date_str).strip()
+                    
+                    # Try different date formats
+                    for date_format in ['%b %d, %Y', '%B %d, %Y', '%m/%d/%Y', '%Y-%m-%d', '%d/%m/%Y']:
+                        try:
+                            parsed_date = pd.to_datetime(date_str, format=date_format)
+                            standard_date = parsed_date.strftime('%m/%d/%Y')
+                            converted_dates.append(standard_date)
+                            successful_conversions += 1
+                            break
+                        except:
+                            continue
+                    else:
+                        # If all formats fail, keep original
+                        converted_dates.append(date_str)
+                        failed_conversions += 1
+                        
+                except Exception as e:
+                    converted_dates.append(str(date_str))
+                    failed_conversions += 1
+            
+            df_fixed['Transaction Date'] = converted_dates
+            
+            # Also fix Post Date if it exists
+            if 'Post Date' in df_fixed.columns:
+                df_fixed['Post Date'] = converted_dates
+            
+            print(f"✅ Date format fix complete: {successful_conversions} successful, {failed_conversions} failed")
+            
+            if successful_conversions > 0:
+                sample_dates = [d for d in converted_dates[:5] if '/' in d]
+                print(f"   Sample converted dates: {sample_dates}")
+        
+        return df_fixed
+    
     def _convert_citi_format(self, df):
         """Convert Citi CSV format to standard format."""
         converted_df = pd.DataFrame()
@@ -533,6 +698,58 @@ class CreditCardTracker:
         # Copy mapped columns
         for old_col, new_col in column_mapping.items():
             converted_df[new_col] = df[old_col]
+        
+        # CRITICAL FIX: Convert Citi date format to standard format
+        if 'Transaction Date' in converted_df.columns:
+            print("🔧 Converting Citi date format to standard format...")
+            
+            # Convert "Aug 19, 2025" to "08/19/2025" format
+            try:
+                converted_dates = []
+                successful_conversions = 0
+                failed_conversions = 0
+                
+                for date_str in converted_df['Transaction Date']:
+                    try:
+                        # Parse "Aug 19, 2025" format
+                        parsed_date = pd.to_datetime(str(date_str).strip(), format='%b %d, %Y')
+                        # Convert to MM/DD/YYYY format
+                        standard_date = parsed_date.strftime('%m/%d/%Y')
+                        converted_dates.append(standard_date)
+                        successful_conversions += 1
+                    except Exception as e:
+                        # If parsing fails, try alternative formats
+                        try:
+                            # Try other possible Citi formats
+                            for fmt in ['%B %d, %Y', '%m/%d/%Y', '%Y-%m-%d']:
+                                try:
+                                    parsed_date = pd.to_datetime(str(date_str).strip(), format=fmt)
+                                    standard_date = parsed_date.strftime('%m/%d/%Y')
+                                    converted_dates.append(standard_date)
+                                    successful_conversions += 1
+                                    break
+                                except:
+                                    continue
+                            else:
+                                # If all parsing attempts fail, keep original
+                                print(f"⚠️ Could not parse date: '{date_str}'")
+                                converted_dates.append(str(date_str))
+                                failed_conversions += 1
+                        except:
+                            converted_dates.append(str(date_str))
+                            failed_conversions += 1
+                
+                converted_df['Transaction Date'] = converted_dates
+                print(f"✅ Date conversion complete: {successful_conversions} successful, {failed_conversions} failed")
+                
+                # Show sample conversion for verification
+                if successful_conversions > 0:
+                    sample_dates = [d for d in converted_dates[:5] if '/' in d]
+                    print(f"   Sample converted dates: {sample_dates}")
+                
+            except Exception as e:
+                print(f"⚠️ Date conversion error: {e}")
+                print("   Using original dates...")
         
         # Add Post Date (same as Transaction Date)
         if 'Transaction Date' in converted_df.columns:
@@ -608,7 +825,7 @@ class CreditCardTracker:
             sample = converted_df.head(3)
             print("Sample converted transactions:")
             for idx, row in sample.iterrows():
-                print(f"  {row['Description'][:30]}: ${row['Amount']:.2f}")
+                print(f"  {row['Transaction Date']} | {row['Description'][:30]}: ${row['Amount']:.2f}")
         
         return converted_df
 

@@ -1237,6 +1237,176 @@ def analyze_csv_structure_quality(headers, sample_rows):
 # API ENDPOINTS - HISTORICAL ANALYSIS
 # =============================================================================
 
+@app.route('/api/run-time-period-analysis', methods=['POST'])
+def run_time_period_analysis():
+    """Run comprehensive time period analysis on uploaded CSV files."""
+    try:
+        print("\n🔍 TIME PERIOD ANALYSIS ENDPOINT CALLED")
+        
+        # Check if files were provided
+        if 'files' not in request.files:
+            return jsonify({'success': False, 'error': 'No files provided'}), 400
+        
+        files = request.files.getlist('files')
+        if not files or len(files) == 0:
+            return jsonify({'success': False, 'error': 'No files selected'}), 400
+        
+        # Get analysis parameters
+        start_date = request.form.get('start_date') or None
+        end_date = request.form.get('end_date') or None
+        group_by = request.form.get('group_by', 'month')
+        show_categories = request.form.get('show_categories', 'true').lower() == 'true'
+        show_comparison = request.form.get('show_comparison', 'false').lower() == 'true'
+        trend_category = request.form.get('trend_category') or None
+        analysis_name = request.form.get('analysis_name') or None
+        
+        print(f"📊 Analysis parameters:")
+        print(f"   Date range: {start_date} to {end_date}")
+        print(f"   Group by: {group_by}")
+        print(f"   Show categories: {show_categories}")
+        print(f"   Show comparison: {show_comparison}")
+        print(f"   Trend category: {trend_category}")
+        print(f"   Analysis name: {analysis_name}")
+        
+        # Save uploaded files temporarily
+        temp_files = []
+        for file in files:
+            if file and file.filename and file.filename.lower().endswith('.csv'):
+                safe_filename = secure_filename(file.filename)
+                filepath = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
+                file.save(filepath)
+                
+                if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                    temp_files.append(filepath)
+        
+        if not temp_files:
+            return jsonify({'success': False, 'error': 'No valid CSV files found'}), 400
+        
+        print(f"📁 Processing {len(temp_files)} files")
+        
+        # Run the analysis using existing backend functionality
+        analyzer, period_analysis = tracker.analyze_period(
+            csv_files=temp_files,
+            start_date=start_date,
+            end_date=end_date, 
+            group_by=group_by
+        )
+        
+        if not period_analysis:
+            return jsonify({'success': False, 'error': 'No analysis data generated - check date parsing'}), 400
+        
+        # Enhanced response data
+        response_data = {
+            'period_analysis': period_analysis,
+            'show_categories': show_categories,
+            'metadata': {
+                'date_range': f"{start_date or 'All'} to {end_date or 'All'}",
+                'group_by': group_by,
+                'file_count': len(temp_files),
+                'total_transactions': sum(
+                    period_data.get('transaction_count', 0) 
+                    for period_data in period_analysis.values()
+                ),
+                'analysis_name': analysis_name
+            }
+        }
+        
+        # Add trend analysis if requested
+        if show_comparison or trend_category is not None:
+            trends = []
+            
+            # Calculate trends for total spending or specific category
+            periods = sorted(period_analysis.keys())
+            if len(periods) >= 3:
+                if trend_category:
+                    # Specific category trend
+                    values = [period_analysis[p]['categories'].get(trend_category, 0) for p in periods]
+                    trend_info = calculate_trend_info(values, trend_category)
+                else:
+                    # Total spending trend  
+                    values = [period_analysis[p]['total_spending'] for p in periods]
+                    trend_info = calculate_trend_info(values, 'Total Spending')
+                
+                trends.append(trend_info)
+            
+            response_data['trends'] = trends
+        
+        # Store analysis if name provided
+        if analysis_name and analyzer:
+            try:
+                metadata = {
+                    'start_date': start_date or 'All data',
+                    'end_date': end_date or 'All data', 
+                    'group_by': group_by,
+                    'file_count': len(temp_files)
+                }
+                analyzer.store_period_analysis(analysis_name, period_analysis, metadata)
+                response_data['saved'] = True
+                print(f"💾 Analysis saved as: {analysis_name}")
+            except Exception as e:
+                print(f"⚠️ Could not save analysis: {e}")
+                response_data['save_error'] = str(e)
+        
+        # Clean up temp files
+        for filepath in temp_files:
+            try:
+                os.remove(filepath)
+            except:
+                pass
+        
+        print("✅ Time period analysis completed successfully")
+        
+        return jsonify({
+            'success': True,
+            'data': response_data,
+            'message': f'Analysis completed for {len(temp_files)} files'
+        })
+        
+    except Exception as e:
+        print(f"❌ Time period analysis error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def calculate_trend_info(values, category_name):
+    """Calculate trend information for a series of values."""
+    if len(values) < 3:
+        return {
+            'category': category_name,
+            'direction': 'insufficient_data',
+            'direction_text': 'Insufficient data',
+            'change_text': 'N/A',
+            'recent_average': 0,
+            'historical_average': 0
+        }
+    
+    # Calculate recent (last 3) vs historical average
+    recent_avg = sum(values[-3:]) / 3
+    historical_avg = sum(values[:-3]) / len(values[:-3]) if len(values) > 3 else values[0]
+    
+    # Determine trend direction
+    trend_change = recent_avg - historical_avg
+    trend_pct = (trend_change / historical_avg * 100) if historical_avg > 0 else 0
+    
+    if trend_pct > 10:
+        direction = 'increasing'
+        direction_text = f'Increasing ({trend_pct:+.1f}%)'
+    elif trend_pct < -10:
+        direction = 'decreasing'  
+        direction_text = f'Decreasing ({trend_pct:+.1f}%)'
+    else:
+        direction = 'stable'
+        direction_text = f'Stable ({trend_pct:+.1f}%)'
+    
+    return {
+        'category': category_name,
+        'direction': direction,
+        'direction_text': direction_text,
+        'change_text': f'${trend_change:+,.2f}',
+        'recent_average': recent_avg,
+        'historical_average': historical_avg
+    }
+
 @app.route('/api/historical-analyses', methods=['GET'])
 def get_historical_analyses():
     """Get list of stored historical analyses."""
