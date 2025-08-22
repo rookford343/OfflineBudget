@@ -3,6 +3,30 @@
 // Import the universal CSV mapper
 let csvMapper = null;
 
+// Global variable to store processed files for analysis
+window.lastProcessedFiles = [];
+
+// NEW: Store files for later analysis use
+async function storeFilesForAnalysis(files) {
+    window.lastProcessedFiles = [];
+    
+    for (let file of files) {
+        try {
+            const content = await file.text();
+            window.lastProcessedFiles.push({
+                name: file.name,
+                content: content,
+                size: file.size,
+                type: file.type
+            });
+        } catch (err) {
+            console.warn('Could not store file for analysis:', file.name, err);
+        }
+    }
+    
+    console.log(`📁 Stored ${window.lastProcessedFiles.length} files for analysis`);
+}
+
 function setupFileUpload() {
     console.log('Setting up file upload with universal CSV support...');
     
@@ -1685,6 +1709,9 @@ async function processTransactions() {
     processBtn.innerHTML = '🔄 Processing...';
 
     try {
+        // Store files for analysis BEFORE processing
+        await storeFilesForAnalysis(selectedFiles);
+
         const formData = new FormData();
         
         // Add each file to form data - CRITICAL: use 'files' as the field name
@@ -1766,6 +1793,9 @@ async function analyzeOnly() {
     analyzeBtn.innerHTML = '📊 Analyzing...';
 
     try {
+        // Store files for analysis BEFORE processing
+        await storeFilesForAnalysis(selectedFiles);
+
         const formData = new FormData();
         
         // Add each file to form data
@@ -2167,4 +2197,5 @@ if (typeof window !== 'undefined') {
     window.smartCSVProcessing = smartCSVProcessing;
     window.testCategorizationWithRealData = testCategorizationWithRealData;
     window.showCategorizationTips = showCategorizationTips;
+    window.storeFilesForAnalysis = storeFilesForAnalysis;
 }
