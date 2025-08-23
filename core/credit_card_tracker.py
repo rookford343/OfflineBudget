@@ -29,7 +29,11 @@ class TimePeriodAnalyzer:
         """Initialize with reference to main credit card tracker."""
         self.tracker = credit_card_tracker
         self.historical_data = {}
-        self.historical_file = 'historical_spending.enc'
+        
+        # FIX: Use the same data directory as the tracker
+        data_dir = self.tracker._get_data_directory()
+        self.historical_file = os.path.join(data_dir, 'historical_spending.enc')
+        
         self.load_historical_data()
     
     def analyze_time_period(self, df, start_date=None, end_date=None, group_by='month'):
@@ -1670,14 +1674,61 @@ class CreditCardTracker:
             return df
         
         try:
-            # Parse transaction dates
+            # Parse transaction dates with multiple format support
             df = df.copy()
-            df['parsed_date'] = pd.to_datetime(df['Transaction Date'], errors='coerce')
+            
+            print(f"🗓️  Parsing {len(df)} transaction dates for current month filtering...")
+            
+            # Enhanced date parsing with multiple formats
+            parsed_dates = []
+            successful_parses = 0
+            
+            for date_str in df['Transaction Date']:
+                parsed_date = None
+                date_str = str(date_str).strip()
+                
+                # Try multiple date formats
+                date_formats = [
+                    '%m/%d/%Y',     # MM/DD/YYYY (standard)
+                    '%Y-%m-%d',     # YYYY-MM-DD (ISO)
+                    '%m/%d/%y',     # MM/DD/YY
+                    '%d/%m/%Y',     # DD/MM/YYYY
+                    '%Y/%m/%d',     # YYYY/MM/DD
+                    '%m-%d-%Y',     # MM-DD-YYYY
+                    '%b %d, %Y',    # Aug 19, 2025
+                    '%B %d, %Y',    # August 19, 2025
+                ]
+                
+                for date_format in date_formats:
+                    try:
+                        parsed_date = pd.to_datetime(date_str, format=date_format)
+                        successful_parses += 1
+                        break
+                    except:
+                        continue
+                
+                if parsed_date is None:
+                    # Final attempt with pandas auto-parse
+                    try:
+                        parsed_date = pd.to_datetime(date_str, errors='coerce')
+                        if pd.notna(parsed_date):
+                            successful_parses += 1
+                    except:
+                        pass
+                
+                parsed_dates.append(parsed_date)
+            
+            df['parsed_date'] = parsed_dates
+            
+            print(f"   Successfully parsed: {successful_parses}/{len(df)} dates")
             
             # Remove rows where date parsing failed
             invalid_dates = df['parsed_date'].isna().sum()
             if invalid_dates > 0:
-                print(f"⚠️  Warning: {invalid_dates} transactions had invalid dates")
+                print(f"   Invalid dates: {invalid_dates}")
+                # Show sample invalid dates for debugging
+                invalid_samples = df[df['parsed_date'].isna()]['Transaction Date'].head(3).tolist()
+                print(f"   Sample invalid: {invalid_samples}")
             
             df = df.dropna(subset=['parsed_date'])
             
@@ -1688,7 +1739,7 @@ class CreditCardTracker:
             # Show date range of transactions
             min_date = df['parsed_date'].min()
             max_date = df['parsed_date'].max()
-            print(f"📅 Transaction date range: {min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}")
+            print(f"   Date range: {min_date.strftime('%Y-%m-%d')} to {max_date.strftime('%Y-%m-%d')}")
             
             # Get current month start and end
             now = datetime.now()
@@ -1698,13 +1749,15 @@ class CreditCardTracker:
             else:
                 month_end = datetime(now.year, now.month + 1, 1) - timedelta(days=1)
             
-            print(f"📅 Current month filter: {month_start.strftime('%Y-%m-%d')} to {month_end.strftime('%Y-%m-%d')}")
+            print(f"   Current month filter: {month_start.strftime('%Y-%m-%d')} to {month_end.strftime('%Y-%m-%d')}")
             
             # Filter to current month
             current_month_df = df[
                 (df['parsed_date'] >= month_start) & 
                 (df['parsed_date'] <= month_end)
             ].copy()
+            
+            print(f"   After current month filter: {len(current_month_df)} transactions")
             
             # Remove the helper column
             current_month_df = current_month_df.drop('parsed_date', axis=1)
@@ -2058,6 +2111,7 @@ class CreditCardTracker:
             }
         
         total_transactions_processed = 0
+        all_transaction_dfs = []  # Collect all transactions for category update
         
         # Process each file and try to match to cards
         for file_path in csv_files:
@@ -2069,6 +2123,7 @@ class CreditCardTracker:
                 continue
             
             total_transactions_processed += len(df)
+            all_transaction_dfs.append(df)  # Store for category processing
             
             # Try to match file to a credit card
             matched_card = None
@@ -2097,10 +2152,6 @@ class CreditCardTracker:
             # Calculate new spending since last statement (all transactions for card balance)
             new_spending = abs(df[df['Amount'] < 0]['Amount'].sum())
             
-            # Update category spending based on transactions
-            # Use the parameter to control month filtering
-            self._update_category_spending(df, use_current_month_only=use_current_month_only)
-            
             # Update the card's current balance
             old_balance = self.cards[matched_card]['current_balance']
             self.cards[matched_card]['current_balance'] = new_spending
@@ -2108,8 +2159,21 @@ class CreditCardTracker:
             
             print(f"Updated {matched_card}: ${old_balance:,.2f} → ${new_spending:,.2f} (from {len(df)} transactions)")
         
+        # FIXED: Update category spending using ALL transactions from ALL files
+        if all_transaction_dfs:
+            print(f"\n📊 UPDATING CATEGORY SPENDING FROM {len(all_transaction_dfs)} FILES")
+            
+            # Combine all transaction data
+            combined_df = pd.concat(all_transaction_dfs, ignore_index=True) if len(all_transaction_dfs) > 1 else all_transaction_dfs[0]
+            
+            print(f"   Combined transactions: {len(combined_df)}")
+            
+            # Update category spending with the combined data
+            self._update_category_spending(combined_df, use_current_month_only=use_current_month_only)
+        
         print(f"\n📊 Processing Summary:")
         print(f"   Total transactions: {total_transactions_processed}")
+        print(f"   Files processed: {len([df for df in all_transaction_dfs if not df.empty])}")
         print(f"   Category filtering: {'Current month only' if use_current_month_only else 'All months'}")
         
         self.save_cards()
