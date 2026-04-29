@@ -2,7 +2,8 @@ from datetime import date
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from backend import models, schemas
+from backend import models
+from backend import schemas
 from backend.dependencies import get_db, get_current_user
 
 router = APIRouter(prefix="/credit-cards", tags=["credit-cards"])

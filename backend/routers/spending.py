@@ -4,7 +4,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, cast, String
 from sqlalchemy.orm import Session
-from backend import models, schemas
+from backend import models
+from backend import schemas
 from backend.dependencies import get_db, get_current_user
 
 router = APIRouter(prefix="/spending", tags=["spending"])

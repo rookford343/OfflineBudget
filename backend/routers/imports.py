@@ -3,7 +3,8 @@ from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
-from backend import models, schemas
+from backend import models
+from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.csv_parser import parse_csv
 from backend.services.auto_categorizer import categorize

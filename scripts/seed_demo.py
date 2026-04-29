@@ -19,10 +19,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from decimal import Decimal
 from datetime import date
-from backend.database import SessionLocal, create_tables
-from backend.auth import hash_password
-from backend import models
-from backend.seed import seed_default_categories
+from OfflineBudget.backend.database import SessionLocal, create_tables
+from OfflineBudget.backend.auth import hash_password
+from OfflineBudget.backend import models
+from OfflineBudget.backend.seed import seed_default_categories
 
 create_tables()
 db = SessionLocal()
