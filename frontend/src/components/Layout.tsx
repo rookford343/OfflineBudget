@@ -1,0 +1,83 @@
+import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { clearAuth, getUser } from "../store/auth";
+import {
+  LayoutDashboard, CreditCard, TrendingUp, PieChart,
+  Repeat, ArrowLeftRight, Target, Settings, LogOut, Upload
+} from "lucide-react";
+import { cx } from "../lib/utils";
+
+const nav = [
+  { to: "/dashboard",    icon: LayoutDashboard, label: "Dashboard"      },
+  { to: "/credit-cards", icon: CreditCard,       label: "Credit Cards"   },
+  { to: "/forecast",     icon: TrendingUp,        label: "Forecast"       },
+  { to: "/spending",     icon: PieChart,          label: "Spending"       },
+  { to: "/recurring",    icon: Repeat,            label: "Recurring"      },
+  { to: "/transactions", icon: ArrowLeftRight,    label: "Transactions"   },
+  { to: "/import",       icon: Upload,            label: "Import"         },
+  { to: "/budget",       icon: Target,            label: "Budget"         },
+  { to: "/settings",     icon: Settings,          label: "Settings"       },
+];
+
+export default function Layout() {
+  const navigate = useNavigate();
+  const user = getUser();
+
+  function logout() {
+    clearAuth();
+    navigate("/login");
+  }
+
+  return (
+    <div className="flex h-screen overflow-hidden">
+      {/* Sidebar */}
+      <aside className="hidden md:flex w-60 flex-col bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 shrink-0">
+        <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+          <h1 className="text-lg font-bold text-indigo-600">OfflineBudget</h1>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{user?.display_name}</p>
+        </div>
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          {nav.map(({ to, icon: Icon, label }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) => cx(isActive ? "nav-link-active" : "nav-link")}
+            >
+              <Icon size={18} />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+        <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700">
+          <button onClick={logout} className="nav-link w-full text-red-600 hover:bg-red-50 hover:text-red-700">
+            <LogOut size={18} />
+            Sign out
+          </button>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+          <Outlet />
+        </div>
+      </main>
+
+      {/* Mobile bottom nav */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around px-2 py-2 z-50">
+        {nav.slice(0, 5).map(({ to, icon: Icon, label }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              cx("flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-xs font-medium",
+                isActive ? "text-indigo-600" : "text-gray-500")
+            }
+          >
+            <Icon size={20} />
+            <span>{label.split(" ")[0]}</span>
+          </NavLink>
+        ))}
+      </nav>
+    </div>
+  );
+}
