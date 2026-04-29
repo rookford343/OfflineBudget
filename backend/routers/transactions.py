@@ -1,7 +1,8 @@
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from backend import models, schemas
+from backend import models
+from backend import schemas
 from backend.dependencies import get_db, get_current_user
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
