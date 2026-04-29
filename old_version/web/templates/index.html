@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Budget Dashboard</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/components.css">
+    <link rel="stylesheet" href="/static/css/file-upload.css">
+    <link rel="stylesheet" href="/static/css/responsive.css">
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <h1>💵 Offline Budget Tracker</h1>
+            <p>Secure spending analysis and budget management</p>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Tab Navigation -->
+        <nav class="tab-navigation">
+            <ul class="tab-list">
+                <li class="tab-item">
+                    <button class="tab-button active" onclick="showTab('dashboard')">
+                        📊 Dashboard
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('checking')">
+                        🏦 Checking Accounts
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('cards')">
+                        💳 Manage Cards
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('budgets')">
+                        🎯 Budgets & Limits
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('transactions')">
+                        📄 Import Transactions
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('analysis')">
+                        📈 Time Period Analysis
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('historical')">
+                        🗂️ Historical Data
+                    </button>
+                </li>
+                <li class="tab-item">
+                    <button class="tab-button" onclick="showTab('settings')">
+                        ⚙️ Settings
+                    </button>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard-tab" class="tab-content active">
+            <div class="controls">
+                <button class="btn" onclick="loadDashboard()" id="refreshBtn">
+                    <span id="refreshIcon">🔄</span>
+                    <span id="refreshText">Refresh Data</span>
+                </button>
+                <div class="last-updated" id="lastUpdated"></div>
+            </div>
+
+            <div id="loading" class="loading">
+                <div class="loading-spinner"></div>
+                <p>Loading your financial data...</p>
+            </div>
+
+            <div id="error" class="error" style="display: none;"></div>
+
+            <div id="dashboard" style="display: none;">
+                <!-- Spending Summary -->
+                <div class="grid">
+                    <div class="card status-card">
+                        <h2>💰 Monthly Spending</h2>
+                        <div class="status-amount" id="totalSpending">$0.00</div>
+                        <div class="status-message" id="spendingMessage">Loading...</div>
+                    </div>
+
+                    <div class="card status-card">
+                        <h2>💸 Balance Due</h2>
+                        <div class="status-amount status-warning" id="balanceDue">$0.00</div>
+                        <div class="status-message">Previous statements</div>
+                    </div>
+
+                    <div class="card status-card">
+                        <h2>🎯 Left to Spend</h2>
+                        <div class="status-amount" id="leftToSpend">$0.00</div>
+                        <div class="status-message" id="budgetStatus">Within budget</div>
+                    </div>
+                </div>
+
+                <!-- Credit Cards and Categories -->
+                <div class="grid">
+                    <div class="card">
+                        <h2>💳 Credit Cards</h2>
+                        <div id="cardsList">
+                            <!-- Cards will be populated here -->
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <h2>📊 Category Budgets</h2>
+                        <div id="categoriesList">
+                            <!-- Categories will be populated here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Due Dates -->
+                <div class="card">
+                    <h2>📅 Upcoming Due Dates</h2>
+                    <div id="dueDatesList">
+                        <!-- Due dates will be populated here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Manage Cards Tab -->
+        <div id="cards-tab" class="tab-content">
+            <div class="controls">
+                <h2>💳 Credit Card Management</h2>
+                <button class="btn btn-success" onclick="showAddCardForm()">
+                    ➕ Add New Card
+                </button>
+            </div>
+
+            <div id="addCardForm" class="card" style="display: none; margin-bottom: 2rem;">
+                <h3>Add New Credit Card</h3>
+                <form onsubmit="return addCard(event)" id="addCardFormElement">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Card Name *</label>
+                            <input type="text" class="form-input" id="cardName" name="cardName" required 
+                                   placeholder="e.g., Chase Sapphire">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Credit Limit *</label>
+                            <input type="number" class="form-input" id="creditLimit" name="creditLimit" required 
+                                   placeholder="10000" step="0.01">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Statement Date *</label>
+                            <input type="number" class="form-input" id="statementDate" name="statementDate" required 
+                                   placeholder="15" min="1" max="31">
+                            <small class="item-details">Day of month (1-31)</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Due Date *</label>
+                            <input type="number" class="form-input" id="dueDate" name="dueDate" required 
+                                   placeholder="12" min="1" max="31">
+                            <small class="item-details">Day of month (1-31)</small>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Current Balance</label>
+                            <input type="number" class="form-input" id="currentBalance" name="currentBalance" 
+                                   placeholder="0.00" step="0.01">
+                            <small class="item-details">New spending since last statement</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Balance Due</label>
+                            <input type="number" class="form-input" id="balanceDue" name="balanceDue" 
+                                   placeholder="0.00" step="0.01">
+                            <small class="item-details">Previous statement balance</small>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Description</label>
+                        <input type="text" class="form-input" id="cardDescription" name="cardDescription" 
+                               placeholder="e.g., Primary rewards card">
+                    </div>
+                    <div class="form-group">
+                        <button type="submit" class="btn btn-success" id="addCardSubmitBtn">Add Card</button>
+                        <button type="button" class="btn btn-secondary" onclick="hideAddCardForm()">Cancel</button>
+                    </div>
+                </form>
+            </div>
+
+            <div id="cardsManagement">
+                <!-- Cards management will be populated here -->
+            </div>
+        </div>
+
+        <!-- Budgets & Limits Tab -->
+        <div id="budgets-tab" class="tab-content">
+            <div class="controls">
+                <h2>🎯 Budgets & Spending Limits</h2>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-secondary" onclick="toggleEditForms()" id="toggleEditBtn">
+                        ✏️ Edit Settings
+                    </button>
+                    <button class="btn" onclick="loadCurrentBudgetSettings()" id="refreshBudgetsBtn">
+                        🔄 Refresh
+                    </button>
+                    <!-- NEW: Reset button in main controls -->
+                    <button class="btn btn-warning" onclick="resetCategorySpending()" id="mainResetBtn">
+                        🧹 Reset Categories
+                    </button>
+                </div>
+            </div>
+
+            <!-- Compact Current Settings Display Section -->
+            <div class="card" id="currentSettingsCard" style="margin-bottom: 1.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                    <h3 style="margin: 0;">📊 Current Settings</h3>
+                </div>
+                
+                <div id="currentSettingsLoading" class="loading" style="display: none; padding: 1rem;">
+                    <div class="loading-spinner"></div>
+                    <p>Loading...</p>
+                </div>
+                
+                <div id="currentSettingsContent">
+                    <!-- Settings content will be populated here -->
+                </div>
+            </div>
+
+            <!-- Collapsible Forms Section -->
+            <div id="editFormsSection" style="display: none;">
+                <div class="grid">
+                    <div class="card">
+                        <h3>📈 Set Monthly Spending Limits</h3>
+                        <form onsubmit="return setSpendingLimits(event)" id="spendingLimitsForm">
+                            <div class="form-group">
+                                <label class="form-label" for="softLimit">Soft Limit (Savings Goal)</label>
+                                <input type="number" class="form-input" id="softLimit" name="softLimit"
+                                    placeholder="2000.00" step="0.01" min="0">
+                                <small class="item-details">Target monthly spending amount</small>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="hardLimit">Hard Limit (Emergency)</label>
+                                <input type="number" class="form-input" id="hardLimit" name="hardLimit"
+                                    placeholder="3000.00" step="0.01" min="0">
+                                <small class="item-details">Maximum emergency spending</small>
+                            </div>
+                            <button type="submit" class="btn btn-success" id="spendingLimitsSubmitBtn">Set Limits</button>
+                        </form>
+                    </div>
+
+                    <div class="card">
+                        <h3>📊 Set Category Budgets</h3>
+                        <form onsubmit="return setCategoryBudgets(event)" id="categoryBudgetsForm">
+                            <div class="form-group">
+                                <label class="form-label" for="budgetShopping">Shopping</label>
+                                <input type="number" class="form-input" id="budgetShopping" name="budgetShopping"
+                                    placeholder="800.00" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="budgetFoodDrinks">Food & Drinks</label>
+                                <input type="number" class="form-input" id="budgetFoodDrinks" name="budgetFoodDrinks"
+                                    placeholder="400.00" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="budgetServices">Services</label>
+                                <input type="number" class="form-input" id="budgetServices" name="budgetServices"
+                                    placeholder="300.00" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="budgetEntertainment">Entertainment</label>
+                                <input type="number" class="form-input" id="budgetEntertainment" name="budgetEntertainment"
+                                    placeholder="200.00" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="budgetGroceries">Groceries</label>
+                                <input type="number" class="form-input" id="budgetGroceries" name="budgetGroceries"
+                                    placeholder="350.00" step="0.01" min="0">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label" for="budgetOther">Other</label>
+                                <input type="number" class="form-input" id="budgetOther" name="budgetOther"
+                                    placeholder="150.00" step="0.01" min="0">
+                            </div>
+                            <button type="submit" class="btn btn-success" id="categoryBudgetsSubmitBtn">Set Category Budgets</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Import Transactions Tab -->
+        <div id="transactions-tab" class="tab-content">
+            <div class="controls">
+                <h2>📄 Import Transaction Files</h2>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-secondary" onclick="clearAllFiles()">
+                        🗑️ Clear All Files
+                    </button>
+                    <button class="btn btn-info" onclick="debugTransactionProcessing()">
+                        🔍 Debug Categories
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3>📁 Upload CSV Files</h3>
+                    <div class="file-upload" id="fileUploadArea">
+                        <input type="file" id="csvFiles" multiple accept=".csv">
+                        <div class="file-upload-icon">📁</div>
+                        <p><strong>Click to select files</strong> or drag and drop CSV files here</p>
+                        <p class="item-details">Supports CSV files from any bank - automatically converts format</p>
+                    </div>
+                    
+                    <div id="selectedFiles" style="display: none; margin-top: 1rem;">
+                        <h4>Selected Files (<span id="fileCount">0</span>)</h4>
+                        <div class="file-list" id="fileList"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>⚙️ Processing Options</h3>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" id="autoUpdateBalances" checked style="margin-right: 0.5rem;">
+                            Auto-update card balances
+                        </label>
+                        <small class="item-details">Automatically update current balances from transaction data</small>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" id="updateCategories" checked style="margin-right: 0.5rem;">
+                            Update category spending
+                        </label>
+                        <small class="item-details">Update monthly category spending for budget tracking</small>
+                    </div>
+                    
+                    <!-- UPDATED: Default to unchecked to show all data first -->
+                    <div class="form-group">
+                        <label class="form-label">
+                            <input type="checkbox" id="currentMonthOnly" style="margin-right: 0.5rem;">
+                            Current month only for budgets
+                        </label>
+                        <small class="item-details">Only count current month transactions toward category budgets</small>
+                    </div>
+                    
+                    <div class="form-group" style="margin-top: 2rem;">
+                        <button class="btn btn-success" onclick="processTransactions()" id="processBtn" disabled>
+                            🔄 Process & Update Balances
+                        </button>
+                        <button class="btn btn-secondary" onclick="analyzeOnly()" id="analyzeBtn" disabled>
+                            📊 Analyze Only (No Updates)
+                        </button>
+                    </div>
+                    
+                    <div style="margin-top: 1rem; padding: 10px; background: #f0f9ff; border-radius: 5px; border-left: 4px solid #0ea5e9;">
+                        <small><strong>✨ Universal CSV Support:</strong> Works with Chase, Bank of America, Wells Fargo, Citi, Capital One, Discover, American Express, and any other bank's CSV format.</small>
+                    </div>
+                    
+                    <!-- UPDATED: Better explanation of filtering -->
+                    <div style="margin-top: 0.5rem; padding: 10px; background: #fef3c7; border-radius: 5px; border-left: 4px solid #f59e0b;">
+                        <small><strong>📅 Month Filtering Guide:</strong><br>
+                        • <strong>Unchecked (recommended for first upload):</strong> All transactions will be categorized and counted toward budgets<br>
+                        • <strong>Checked:</strong> Only current month transactions count toward category budgets (good for ongoing monthly tracking)</small>
+                    </div>
+                </div>
+            </div>
+
+            <div id="transactionResults" style="display: none; margin-top: 2rem;"></div>
+            
+            <!-- NEW: Debug information section -->
+            <div id="debugResults" style="display: none; margin-top: 2rem;">
+                <div class="card">
+                    <h3>🔍 Debug Information</h3>
+                    <div id="debugContent"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Time Period Analysis Tab -->
+        <div id="analysis-tab" class="tab-content">
+            <div class="controls">
+                <h2>📈 Time Period Analysis</h2>
+            </div>
+
+            <div class="card">
+                <h3>🔍 Analysis Configuration</h3>
+                <form onsubmit="runAnalysis(event)">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Start Date</label>
+                            <input type="date" class="form-input" id="analysisStartDate" name="analysisStartDate">
+                            <small class="item-details">Leave empty for all data</small>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">End Date</label>
+                            <input type="date" class="form-input" id="analysisEndDate" name="analysisEndDate">
+                            <small class="item-details">Leave empty for all data</small>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">Group By</label>
+                            <select class="form-select" id="analysisGroupBy">
+                                <option value="month">Month</option>
+                                <option value="quarter">Quarter</option>
+                                <option value="year">Year</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Trend Category</label>
+                            <select class="form-select" id="analysisTrendCategory">
+                                <option value="total">Total Spending</option>
+                                <option value="Shopping">Shopping</option>
+                                <option value="Food & Drinks">Food & Drinks</option>
+                                <option value="Services">Services</option>
+                                <option value="Entertainment">Entertainment</option>
+                                <option value="Groceries">Groceries</option>
+                                <option value="Other">Other</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label">
+                                <input type="checkbox" id="showCategories" checked style="margin-right: 0.5rem;">
+                                Show category breakdown
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">
+                                <input type="checkbox" id="showComparison" style="margin-right: 0.5rem;">
+                                Show period comparison
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Save Analysis As (Optional)</label>
+                        <input type="text" class="form-input" id="analysisName" name="analysisName" 
+                               placeholder="e.g., Q1_2024_Analysis">
+                        <small class="item-details">Save this analysis for future comparison</small>
+                    </div>
+                    <button type="submit" class="btn btn-success">Run Analysis</button>
+                </form>
+            </div>
+
+            <div id="analysisResults"></div>
+        </div>
+
+        <!-- Historical Data Tab -->
+        <div id="historical-tab" class="tab-content">
+            <div class="controls">
+                <h2>🗂️ Historical Analysis Data</h2>
+                <button class="btn" onclick="loadStoredAnalyses()">
+                    🔄 Refresh List
+                </button>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3>📋 Stored Analyses</h3>
+                    <div id="storedAnalysesList">
+                        <!-- Stored analyses will be populated here -->
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>🔄 Compare Analyses</h3>
+                    <form onsubmit="compareAnalyses(event)">
+                        <div class="form-group">
+                            <label class="form-label">First Analysis</label>
+                            <select class="form-select" id="compareAnalysis1">
+                                <option value="">Select analysis...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Second Analysis</label>
+                            <select class="form-select" id="compareAnalysis2">
+                                <option value="">Select analysis...</option>
+                            </select>
+                        </div>
+                        <button type="submit" class="btn btn-success">Compare Analyses</button>
+                    </form>
+                </div>
+            </div>
+
+            <div id="historicalResults"></div>
+        </div>
+
+        <!-- Checking Account Tab -->
+        <div id="checking-tab" class="tab-content">
+            <div class="controls">
+                <h2>🏦 Checking Account Management</h2>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-success" onclick="showAddCheckingAccountForm()">
+                        ➕ Add Account
+                    </button>
+                    <button class="btn btn-secondary" onclick="showAddRecurringTransactionForm()">
+                        🔄 Add Recurring Transaction
+                    </button>
+                    <button class="btn btn-info" onclick="showPayCreditCardForm()">
+                        💳 Pay Credit Card
+                    </button>
+                </div>
+            </div>
+
+            <!-- Checking Accounts List -->
+            <div class="card">
+                <h3>💰 Your Checking Accounts</h3>
+                <div id="checkingAccountsList">
+                    <div class="loading">
+                        <div class="loading-spinner"></div>
+                        <p>Loading checking accounts...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recurring Transactions -->
+            <div class="card">
+                <h3>🔄 Recurring Transactions</h3>
+                <div id="recurringTransactionsList">
+                    <div class="loading">
+                        <div class="loading-spinner"></div>
+                        <p>Loading recurring transactions...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Forecast Results -->
+            <div id="forecastResults" style="display: none;"></div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="settings-tab" class="tab-content">
+            <div class="controls">
+                <h2>⚙️ Application Settings</h2>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3>🔄 Data Management</h3>
+                    <div class="form-group">
+                        <button class="btn btn-warning" onclick="resetStatementPeriod()">
+                            📅 Reset Statement Period
+                        </button>
+                        <small class="item-details">Move current balances to balance due for new statement</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-danger" onclick="resetBalances('current')">
+                            🧹 Reset Current Balances
+                        </button>
+                        <small class="item-details">Reset all current spending to $0.00</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-danger" onclick="resetBalances('due')">
+                            💸 Reset Due Balances
+                        </button>
+                        <small class="item-details">Reset all due balances to $0.00</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-danger" onclick="resetBalances('all')">
+                            🚨 Reset All Balances
+                        </button>
+                        <small class="item-details">Reset both current and due balances to $0.00</small>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>📊 Debug Information</h3>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" onclick="showDebugInfo()">
+                            🔍 Show Debug Info
+                        </button>
+                        <small class="item-details">View system status and file information</small>
+                    </div>
+                    <div id="debugInfo"></div>
+                </div>
+
+                <div class="card">
+                    <h3>💾 Data Export</h3>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" onclick="exportData('summary')">
+                            📋 Export Summary
+                        </button>
+                        <small class="item-details">Export current spending summary as JSON</small>
+                    </div>
+                    <div class="form-group">
+                        <button class="btn btn-secondary" onclick="exportData('cards')">
+                            💳 Export Cards Data
+                        </button>
+                        <small class="item-details">Export credit card configurations</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="container">
+            <p>🔒 All data processed securely on your local machine • No data transmitted externally</p>
+        </div>
+    </div>
+
+    <!-- JavaScript - Updated with Universal CSV Support -->
+    <script src="/static/js/utils.js"></script>
+    <script src="/static/js/universal-csv-mapper.js"></script>
+    <script src="/static/js/core.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+    <script src="/static/js/cards.js"></script>
+    <script src="/static/js/budgets.js"></script>
+    <script src="/static/js/transactions.js"></script>
+    <script src="/static/js/analysis.js"></script>
+    <script src="/static/js/main.js"></script>
+    <script src="/static/js/checking_accounts.js"></script>
+</body>
+</html>

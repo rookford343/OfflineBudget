@@ -1,41 +1,53 @@
+# Environment
+.env
+*.env
+
+# Database
+data/budget.db
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm
+
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-*.py[cod]
-*$py.class
-*.so
 .Python
-
-# Virtual environments
 venv/
+.venv/
 env/
-ENV/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.local
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
 
 # IDE
-.vscode/
 .idea/
+.vscode/
 *.swp
 *.swo
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Sensitive data
-*.enc
-*.csv
-transactions/
-data/
-
-# Test files
-test.py
-test_report_*.json
-frontend_test_*.json
-
 # Logs
 *.log
+logs/
 
-# Temporary files
-/web/uploads/
+# Secret files
+secrets/
+data/transactions/
