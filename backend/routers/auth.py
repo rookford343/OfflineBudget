@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from backend import models, schemas
+from backend import models
+from backend import schemas
 from backend.auth import hash_password, verify_password, create_access_token
 from backend.dependencies import get_db, get_current_user
 from backend.seed import seed_default_categories

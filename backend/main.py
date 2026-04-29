@@ -3,8 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
 from backend.database import create_tables, upgrade_schema
+from backend.routers import accounts, auth, budget, categories, credit_cards, forecast, recurring, transactions
 from backend.middleware import AuditMiddleware
-from backend.routers import auth, accounts, categories, recurring, forecast, transactions, budget, credit_cards, spending
+from backend.routers import spending
 from backend.routers import admin as admin_router_module
 from backend.routers import imports as imports_router_module
 

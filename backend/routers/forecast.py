@@ -1,7 +1,8 @@
 from datetime import date
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from backend import models, schemas
+from backend import models
+from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.forecast_engine import build_forecast, build_quarters
 

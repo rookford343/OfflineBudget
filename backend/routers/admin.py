@@ -2,7 +2,8 @@ from datetime import date
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from backend import models, schemas
+from backend import models
+from backend import schemas
 from backend.auth import hash_password
 from backend.dependencies import get_db, require_admin
 from backend.seed import seed_default_categories
