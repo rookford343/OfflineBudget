@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { recurringApi, accountsApi, categoriesApi } from "../api";
 import { fmt } from "../lib/utils";
-import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X } from "lucide-react";
+import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X, Sparkles } from "lucide-react";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -14,6 +14,13 @@ export default function Recurring() {
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoriesApi.list });
   const allCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]);
+
+  const { data: suggestions = [] } = useQuery<any[]>({
+    queryKey: ["recurring-suggestions"],
+    queryFn: () => recurringApi.suggestions(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
 
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState<any | null>(null);
@@ -34,6 +41,8 @@ export default function Recurring() {
     if (editItem) updateMut.mutate({ id: editItem.id, data });
     else createMut.mutate(data);
   }
+
+  const visibleSuggestions = suggestions.filter((s: any) => !dismissedSuggestions.has(s.description));
 
   const income = items.filter((i: any) => i.type === "income" && i.is_active);
   const expenses = items.filter((i: any) => i.type === "expense" && i.is_active);
@@ -89,13 +98,66 @@ export default function Recurring() {
         </div>
       </div>
 
+      {/* Detected patterns */}
+      {visibleSuggestions.length > 0 && (
+        <div className="card">
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
+            <Sparkles size={16} className="text-indigo-500" />
+            Suggested Recurring Items
+          </h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            Detected from your transaction history — add any that should be tracked.
+          </p>
+          <div className="space-y-2">
+            {visibleSuggestions.map((s: any) => (
+              <div key={s.description} className="flex items-center justify-between py-2 border-b border-gray-50 dark:border-gray-800 last:border-0 gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{s.description}</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-500 capitalize">{s.frequency} · {s.occurrences} occurrences</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-sm font-semibold text-red-600 dark:text-red-400 tabular-nums">
+                    -{fmt(parseFloat(s.median_amount))}
+                  </span>
+                  <button
+                    onClick={() => {
+                      const amount = parseFloat(s.median_amount).toFixed(2);
+                      setForm({
+                        ...emptyForm,
+                        name: s.description,
+                        amount,
+                        type: "expense",
+                        frequency: s.frequency,
+                        account_id: accounts[0]?.id?.toString() ?? "",
+                      });
+                      setEditItem(null);
+                      setShowForm(true);
+                    }}
+                    className="btn-primary py-1 px-2 text-xs"
+                  >
+                    Add
+                  </button>
+                  <button
+                    onClick={() => setDismissedSuggestions(prev => new Set([...prev, s.description]))}
+                    className="text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400"
+                    title="Dismiss"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid md:grid-cols-2 gap-6">
         <div className="card">
-          <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2"><TrendingUp size={16} className="text-green-500" /> Income ({income.length})</h3>
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><TrendingUp size={16} className="text-green-500" /> Income ({income.length})</h3>
           {income.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No income sources yet</p> : income.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
         </div>
         <div className="card">
-          <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2"><TrendingDown size={16} className="text-red-500" /> Bills & Expenses ({expenses.length})</h3>
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><TrendingDown size={16} className="text-red-500" /> Bills & Expenses ({expenses.length})</h3>
           {expenses.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No recurring bills yet</p> : expenses.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
         </div>
       </div>
