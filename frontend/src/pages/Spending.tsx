@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { spendingApi, accountsApi, cardsApi, analyticsApi } from "../api";
+import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyLeft } from "d3-sankey";
 import { fmt, firstOfMonth, today } from "../lib/utils";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
@@ -31,7 +32,9 @@ const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 const YEAR_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 
 export default function Spending() {
-  const [activeTab, setActiveTab] = useState<"overview" | "trends">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "trends" | "flow">("overview");
+  const [sankeyYear, setSankeyYear] = useState(new Date().getFullYear());
+  const [sankeyMonth, setSankeyMonth] = useState(new Date().getMonth() + 1);
   const [start, setStart] = useState(firstOfMonth());
   const [end, setEnd] = useState(today());
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -67,6 +70,12 @@ export default function Spending() {
     queryKey: ["rolling-monthly"],
     queryFn: () => analyticsApi.rollingMonthly(24),
     enabled: activeTab === "trends",
+  });
+
+  const { data: sankeyData } = useQuery({
+    queryKey: ["sankey", sankeyYear, sankeyMonth],
+    queryFn: () => spendingApi.sankey(sankeyYear, sankeyMonth),
+    enabled: activeTab === "flow",
   });
 
   const { data: monthlyByCat = [] } = useQuery({
@@ -211,7 +220,7 @@ export default function Spending() {
 
       {/* Tab switcher */}
       <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
-        {(["overview", "trends"] as const).map((tab) => (
+        {(["overview", "trends", "flow"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -221,7 +230,7 @@ export default function Spending() {
                 : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
             }`}
           >
-            {tab}
+            {tab === "flow" ? "Flow" : tab}
           </button>
         ))}
       </div>
@@ -449,6 +458,96 @@ export default function Spending() {
 
       {activeTab === "overview" && isLoading && <div className="text-center py-8 text-gray-400 dark:text-[#525d70] text-sm">Loading spending data…</div>}
       {activeTab === "overview" && !isLoading && !overview && <div className="card text-center py-8 text-gray-400 dark:text-[#525d70]">Select a date range to view spending.</div>}
+
+      {activeTab === "flow" && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-3">
+            <select className="input w-auto" value={sankeyYear} onChange={e => setSankeyYear(parseInt(e.target.value))}>
+              {[-1, 0, 1].map(d => { const y = new Date().getFullYear() + d; return <option key={y} value={y}>{y}</option>; })}
+            </select>
+            <select className="input w-auto" value={sankeyMonth} onChange={e => setSankeyMonth(parseInt(e.target.value))}>
+              {MONTH_NAMES.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+            </select>
+          </div>
+          <SankeyChart data={sankeyData} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SankeyChart({ data }: { data: any }) {
+  const WIDTH = 720;
+  const HEIGHT = 400;
+  const PADDING = 120;
+
+  if (!data || (!data.nodes?.length)) {
+    return <div className="card text-center py-12 text-gray-400 text-sm">No income or expense data for this period.</div>;
+  }
+
+  const nodeList = data.nodes.map((n: any, i: number) => ({ ...n, index: i }));
+  const nodeIndex: Record<string, number> = {};
+  nodeList.forEach((n: any, i: number) => { nodeIndex[n.id] = i; });
+
+  const links = data.links.map((l: any) => ({
+    source: nodeIndex[l.source],
+    target: nodeIndex[l.target],
+    value: parseFloat(l.value),
+  })).filter((l: any) => l.source !== undefined && l.target !== undefined && l.value > 0);
+
+  if (!links.length) {
+    return <div className="card text-center py-12 text-gray-400 text-sm">No flow data for this period.</div>;
+  }
+
+  const sankeyLayout = d3Sankey<{ id: string; name: string; type: string }, { value: number }>()
+    .nodeId((d: any) => d.index)
+    .nodeAlign(sankeyLeft)
+    .nodeWidth(14)
+    .nodePadding(16)
+    .extent([[PADDING, 10], [WIDTH - PADDING, HEIGHT - 10]]);
+
+  let graph: any;
+  try {
+    graph = sankeyLayout({ nodes: nodeList.map((n: any) => ({ ...n })), links: links.map((l: any) => ({ ...l })) });
+  } catch {
+    return <div className="card text-center py-12 text-gray-400 text-sm">Could not render flow diagram for this data.</div>;
+  }
+
+  const fmt2 = (v: number) => v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`;
+
+  return (
+    <div className="card overflow-x-auto">
+      <h3 className="font-semibold text-gray-900 mb-4">Income → Expense Flow</h3>
+      <svg width="100%" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="min-w-[520px]">
+        {graph.links.map((l: any, i: number) => (
+          <path
+            key={i}
+            d={sankeyLinkHorizontal()(l) ?? ""}
+            fill="none"
+            stroke="#6366f1"
+            strokeOpacity={0.25}
+            strokeWidth={Math.max(1, l.width)}
+          />
+        ))}
+        {graph.nodes.map((n: any, i: number) => {
+          const isLeft = n.x0 < WIDTH / 2;
+          const color = n.type === "income" ? "#10b981" : n.type === "income_total" ? "#6366f1" : "#f59e0b";
+          const labelX = isLeft ? n.x0 - 6 : n.x1 + 6;
+          const anchor = isLeft ? "end" : "start";
+          const midY = (n.y0 + n.y1) / 2;
+          return (
+            <g key={i}>
+              <rect x={n.x0} y={n.y0} width={n.x1 - n.x0} height={n.y1 - n.y0} fill={color} rx={2} />
+              <text x={labelX} y={midY - 5} textAnchor={anchor} fontSize={11} fill="#374151" fontWeight={500}>
+                {n.name}
+              </text>
+              <text x={labelX} y={midY + 8} textAnchor={anchor} fontSize={10} fill="#6b7280">
+                {fmt2(n.value)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
     </div>
   );
 }

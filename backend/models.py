@@ -76,6 +76,10 @@ class User(Base):
     savings_transfers: Mapped[list[SavingsTransfer]] = relationship(back_populates="user", cascade="all, delete-orphan")
     budget_allocations: Mapped[list[BudgetAllocation]] = relationship(back_populates="user", cascade="all, delete-orphan")
     savings_goals: Mapped[list[SavingsGoal]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    manual_assets: Mapped[list[ManualAsset]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    manual_liabilities: Mapped[list[ManualLiability]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    net_worth_snapshots: Mapped[list[NetWorthSnapshot]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    forecast_scenarios: Mapped[list[ForecastScenario]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 # ── Accounts ─────────────────────────────────────────────────────────────────
@@ -313,6 +317,73 @@ class SavingsGoal(Base):
 
     user: Mapped[User] = relationship(back_populates="savings_goals")
     linked_account: Mapped[Account | None] = relationship()
+
+
+# ── Net Worth ────────────────────────────────────────────────────────────────
+
+class ManualAsset(Base):
+    __tablename__ = "manual_assets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    asset_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    current_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="manual_assets")
+
+
+class ManualLiability(Base):
+    __tablename__ = "manual_liabilities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    liability_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    current_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    as_of_date: Mapped[date] = mapped_column(Date, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="manual_liabilities")
+
+
+class NetWorthSnapshot(Base):
+    __tablename__ = "net_worth_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    snapshot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    total_assets: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    total_liabilities: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    net_worth: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="net_worth_snapshots")
+
+
+# ── Forecast Scenarios ────────────────────────────────────────────────────────
+
+class ForecastScenario(Base):
+    __tablename__ = "forecast_scenarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="forecast_scenarios")
+    overrides: Mapped[list[ScenarioOverride]] = relationship(back_populates="scenario", cascade="all, delete-orphan")
+
+
+class ScenarioOverride(Base):
+    __tablename__ = "scenario_overrides"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scenario_id: Mapped[int] = mapped_column(Integer, ForeignKey("forecast_scenarios.id"), nullable=False)
+    recurring_item_id: Mapped[int] = mapped_column(Integer, ForeignKey("recurring_items.id"), nullable=False)
+    amount_delta: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+
+    scenario: Mapped[ForecastScenario] = relationship(back_populates="overrides")
+    recurring_item: Mapped[RecurringItem] = relationship()
 
 
 # ── Audit Log ─────────────────────────────────────────────────────────────────

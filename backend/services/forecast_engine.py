@@ -46,6 +46,8 @@ def build_forecast(
     account_id: int,
     start_date: date,
     end_date: date,
+    *,
+    overrides: list[dict] | None = None,
 ) -> list[ForecastEntry]:
     account: models.Account = db.query(models.Account).filter(
         models.Account.id == account_id,
@@ -59,6 +61,12 @@ def build_forecast(
         models.RecurringItem.account_id == account_id,
         models.RecurringItem.is_active == True,
     ).all()
+
+    # Build override map: recurring_item_id -> amount_delta
+    override_map: dict[int, Decimal] = {}
+    if overrides:
+        for ov in overrides:
+            override_map[ov["recurring_item_id"]] = Decimal(str(ov["amount_delta"]))
 
     actual_txns = db.query(models.Transaction).filter(
         models.Transaction.user_id == user_id,
@@ -115,8 +123,9 @@ def build_forecast(
                             transaction_id=actual.id,
                         ))
             else:
-                # Use projected recurring amount
-                signed = item.amount if item.type == models.RecurringType.income else -item.amount
+                # Use projected recurring amount, applying scenario delta if present
+                base_amount = item.amount + override_map.get(item.id, Decimal("0"))
+                signed = base_amount if item.type == models.RecurringType.income else -base_amount
                 balance += signed
                 day_transactions.append(ForecastTransaction(
                     name=item.name,
