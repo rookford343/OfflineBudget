@@ -8,6 +8,7 @@ from backend.middleware import AuditMiddleware
 from backend.routers import spending
 from backend.routers import admin as admin_router_module
 from backend.routers import imports as imports_router_module
+from backend.routers import goals as goals_router_module
 
 app = FastAPI(
     title="OfflineBudget",
@@ -37,6 +38,7 @@ app.include_router(credit_cards.router)
 app.include_router(spending.router)
 app.include_router(admin_router_module.router)
 app.include_router(imports_router_module.router)
+app.include_router(goals_router_module.router)
 
 
 @app.on_event("startup")

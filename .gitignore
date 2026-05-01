@@ -50,4 +50,4 @@ logs/
 
 # Secret files
 secrets/
-data/transactions/
+data/transaction_files/*

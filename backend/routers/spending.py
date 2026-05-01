@@ -1,3 +1,4 @@
+import calendar
 from datetime import date
 from decimal import Decimal
 from typing import Optional
@@ -330,6 +331,136 @@ def spending_by_card(
             children=children_out,
         ))
     return result
+
+
+@router.get("/available-to-spend", response_model=schemas.AvailableToSpend)
+def available_to_spend(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    today = date.today()
+    first = today.replace(day=1)
+    last = today.replace(day=calendar.monthrange(today.year, today.month)[1])
+
+    income_items = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user.id,
+        models.RecurringItem.type == models.RecurringType.income,
+        models.RecurringItem.is_active == True,
+        models.RecurringItem.frequency == models.RecurringFrequency.monthly,
+    ).all()
+    monthly_income = sum((item.amount for item in income_items), Decimal("0"))
+
+    expense_items = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user.id,
+        models.RecurringItem.type == models.RecurringType.expense,
+        models.RecurringItem.is_active == True,
+    ).all()
+    committed_expenses = Decimal("0")
+    for item in expense_items:
+        if item.frequency == models.RecurringFrequency.monthly:
+            committed_expenses += item.amount
+        elif item.frequency == models.RecurringFrequency.yearly and item.month_of_year == today.month:
+            committed_expenses += item.amount
+
+    txns = db.query(models.Transaction).filter(
+        models.Transaction.user_id == user.id,
+        models.Transaction.is_actual == True,
+        models.Transaction.date >= first,
+        models.Transaction.date <= last,
+        models.Transaction.amount < 0,
+    ).all()
+    spent_this_month = sum((abs(t.amount) for t in txns), Decimal("0"))
+
+    return schemas.AvailableToSpend(
+        monthly_income=monthly_income,
+        committed_expenses=committed_expenses,
+        spent_this_month=spent_this_month,
+        available=monthly_income - committed_expenses - spent_this_month,
+    )
+
+
+@router.get("/yearly-trends", response_model=list[schemas.YearlyTrendEntry])
+def spending_yearly_trends(
+    years: int = Query(default=3, ge=1, le=5),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    current_year = date.today().year
+    result = []
+    for year in range(current_year - years + 1, current_year + 1):
+        months_data: dict[str, Decimal] = {str(m): Decimal("0") for m in range(1, 13)}
+        txns = db.query(models.Transaction).filter(
+            models.Transaction.user_id == user.id,
+            models.Transaction.is_actual == True,
+            models.Transaction.date >= date(year, 1, 1),
+            models.Transaction.date <= date(year, 12, 31),
+            models.Transaction.amount < 0,
+        ).all()
+        for t in txns:
+            months_data[str(t.date.month)] += abs(t.amount)
+        card_txns = db.query(models.CreditCardTransaction).filter(
+            models.CreditCardTransaction.user_id == user.id,
+            models.CreditCardTransaction.date >= date(year, 1, 1),
+            models.CreditCardTransaction.date <= date(year, 12, 31),
+            models.CreditCardTransaction.amount > 0,
+        ).all()
+        for t in card_txns:
+            months_data[str(t.date.month)] += t.amount
+        result.append(schemas.YearlyTrendEntry(year=year, months=months_data))
+    return result
+
+
+@router.get("/rolling-monthly", response_model=list[schemas.RollingMonthEntry])
+def spending_rolling_monthly(
+    months: int = Query(default=24, ge=1, le=60),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    today = date.today()
+    # Calculate start: go back `months` calendar months
+    start_year = today.year
+    start_month = today.month - months + 1
+    while start_month <= 0:
+        start_month += 12
+        start_year -= 1
+    start = date(start_year, start_month, 1)
+
+    results: dict[str, Decimal] = {}
+    txns = db.query(models.Transaction).filter(
+        models.Transaction.user_id == user.id,
+        models.Transaction.is_actual == True,
+        models.Transaction.date >= start,
+        models.Transaction.date <= today,
+        models.Transaction.amount < 0,
+    ).all()
+    for t in txns:
+        key = t.date.strftime("%Y-%m")
+        results[key] = results.get(key, Decimal("0")) + abs(t.amount)
+    card_txns = db.query(models.CreditCardTransaction).filter(
+        models.CreditCardTransaction.user_id == user.id,
+        models.CreditCardTransaction.date >= start,
+        models.CreditCardTransaction.date <= today,
+        models.CreditCardTransaction.amount > 0,
+    ).all()
+    for t in card_txns:
+        key = t.date.strftime("%Y-%m")
+        results[key] = results.get(key, Decimal("0")) + t.amount
+
+    return [
+        schemas.RollingMonthEntry(month=m, total=results.get(m, Decimal("0")))
+        for m in sorted(results.keys())
+    ]
+
+
+@router.get("/summary/{year}/{month}", response_model=schemas.MonthlySummary)
+def monthly_summary(
+    year: int,
+    month: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    from backend.services.summary_generator import generate_summary
+    return generate_summary(db, user.id, year, month)
 
 
 def _months_in_range(start: date, end: date) -> list[int]:

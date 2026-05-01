@@ -52,6 +52,7 @@ class UserRole(str, PyEnum):
 class RecurringFrequency(str, PyEnum):
     monthly = "monthly"
     yearly = "yearly"
+    weekly = "weekly"
 
 
 # ── Users ────────────────────────────────────────────────────────────────────
@@ -74,6 +75,7 @@ class User(Base):
     credit_cards: Mapped[list[CreditCard]] = relationship(back_populates="user", cascade="all, delete-orphan")
     savings_transfers: Mapped[list[SavingsTransfer]] = relationship(back_populates="user", cascade="all, delete-orphan")
     budget_allocations: Mapped[list[BudgetAllocation]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    savings_goals: Mapped[list[SavingsGoal]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 # ── Accounts ─────────────────────────────────────────────────────────────────
@@ -114,6 +116,8 @@ class Category(Base):
     color: Mapped[str] = mapped_column(String(7), default="#6366f1")
     icon: Mapped[str | None] = mapped_column(String(64))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    rollover_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    rollover_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), server_default="0")
 
     user: Mapped[User] = relationship(back_populates="categories")
     parent: Mapped[Category | None] = relationship(remote_side="Category.id", back_populates="children")
@@ -289,6 +293,26 @@ class BudgetAllocation(Base):
 
     user: Mapped[User] = relationship(back_populates="budget_allocations")
     category: Mapped[Category] = relationship(back_populates="budget_allocations")
+
+
+# ── Savings Goals ─────────────────────────────────────────────────────────────
+
+class SavingsGoal(Base):
+    __tablename__ = "savings_goals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    target_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    target_date: Mapped[date | None] = mapped_column(Date)
+    linked_account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
+    current_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="savings_goals")
+    linked_account: Mapped[Account | None] = relationship()
 
 
 # ── Audit Log ─────────────────────────────────────────────────────────────────

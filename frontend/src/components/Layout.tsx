@@ -2,12 +2,15 @@ import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { clearAuth, getUser } from "../store/auth";
 import {
   LayoutDashboard, CreditCard, TrendingUp, PieChart,
-  Repeat, ArrowLeftRight, Target, Settings, LogOut, Upload
+  Repeat, ArrowLeftRight, Target, Settings, LogOut, Upload,
+  CalendarDays, Wallet,
 } from "lucide-react";
 import { cx } from "../lib/utils";
 
 const nav = [
   { to: "/dashboard",    icon: LayoutDashboard, label: "Dashboard"      },
+  { to: "/goals",        icon: Wallet,           label: "Goals"          },
+  { to: "/calendar",     icon: CalendarDays,     label: "Calendar"       },
   { to: "/credit-cards", icon: CreditCard,       label: "Credit Cards"   },
   { to: "/forecast",     icon: TrendingUp,        label: "Forecast"       },
   { to: "/spending",     icon: PieChart,          label: "Spending"       },

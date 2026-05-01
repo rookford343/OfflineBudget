@@ -265,6 +265,30 @@ class BudgetOverviewRow(BaseModel):
     actual_cards: Decimal
     actual_total: Decimal
     variance: Decimal  # budgeted - actual (positive = under budget)
+    rollover_enabled: bool = False
+    rollover_balance: Decimal = Decimal("0")
+
+
+class CategoryRolloverUpdate(BaseModel):
+    rollover_enabled: bool
+
+
+class RecurringSuggestion(BaseModel):
+    description: str
+    median_amount: Decimal
+    frequency: RecurringFrequency
+    occurrences: int
+
+
+class MonthlySummary(BaseModel):
+    year: int
+    month: int
+    top_category: Optional[str]
+    top_category_amount: Optional[Decimal]
+    mom_delta: Optional[Decimal]  # current - prior month total spending
+    mom_delta_pct: Optional[Decimal]  # percentage change, None if prior month was zero
+    net_cashflow: Decimal  # total credits - total debits
+    text: str  # plain-English narrative
 
 
 # ── Credit Cards ──────────────────────────────────────────────────────────────
@@ -463,3 +487,59 @@ class AuditLogOut(BaseModel):
 class AuditLogPage(BaseModel):
     total: int
     items: list[AuditLogOut]
+
+
+# ── Analytics ─────────────────────────────────────────────────────────────────
+
+class AvailableToSpend(BaseModel):
+    monthly_income: Decimal
+    committed_expenses: Decimal
+    spent_this_month: Decimal
+    available: Decimal
+
+
+class YearlyTrendEntry(BaseModel):
+    year: int
+    months: dict[str, Decimal]
+
+
+class RollingMonthEntry(BaseModel):
+    month: str  # "YYYY-MM"
+    total: Decimal
+
+
+# ── Savings Goals ─────────────────────────────────────────────────────────────
+
+class SavingsGoalCreate(BaseModel):
+    name: str
+    target_amount: Decimal
+    target_date: Optional[date] = None
+    linked_account_id: Optional[int] = None
+    current_amount: Decimal = Decimal("0")
+    notes: Optional[str] = None
+
+
+class SavingsGoalUpdate(BaseModel):
+    name: Optional[str] = None
+    target_amount: Optional[Decimal] = None
+    target_date: Optional[date] = None
+    linked_account_id: Optional[int] = None
+    current_amount: Optional[Decimal] = None
+    notes: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class SavingsGoalOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    target_amount: Decimal
+    target_date: Optional[date] = None
+    linked_account_id: Optional[int] = None
+    current_amount: Decimal
+    notes: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+    percent_complete: float = 0.0
+    monthly_needed: Optional[Decimal] = None
+    months_remaining: Optional[int] = None
