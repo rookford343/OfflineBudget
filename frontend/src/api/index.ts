@@ -33,6 +33,8 @@ export const recurringApi = {
   create: (data: object) => api.post("/recurring", data).then((r) => r.data),
   update: (id: number, data: object) => api.patch(`/recurring/${id}`, data).then((r) => r.data),
   remove: (id: number) => api.delete(`/recurring/${id}`),
+  suggestions: (minOccurrences = 2) =>
+    api.get("/recurring/suggestions", { params: { min_occurrences: minOccurrences } }).then((r) => r.data),
 };
 
 // ── Forecast ──────────────────────────────────────────────────────────────────
@@ -57,6 +59,10 @@ export const budgetApi = {
   upsert: (data: object) => api.post("/budget", data).then((r) => r.data),
   overview: (year: number, month: number) =>
     api.get("/budget/overview", { params: { year, month } }).then((r) => r.data),
+  applyRollover: (year: number, month: number) =>
+    api.post(`/budget/rollover/${year}/${month}`).then((r) => r.data),
+  setCategoryRollover: (categoryId: number, enabled: boolean) =>
+    api.patch(`/budget/categories/${categoryId}/rollover`, { rollover_enabled: enabled }).then((r) => r.data),
 };
 
 // ── Credit Cards ──────────────────────────────────────────────────────────────
@@ -99,4 +105,21 @@ export const adminApi = {
   createUser: (data: object) => api.post("/admin/users", data).then((r) => r.data),
   updateUser: (id: number, data: object) => api.patch(`/admin/users/${id}`, data).then((r) => r.data),
   logs: (params?: object) => api.get("/admin/logs", { params }).then((r) => r.data),
+};
+
+// ── Analytics ─────────────────────────────────────────────────────────────────
+export const analyticsApi = {
+  availableToSpend: () => api.get("/spending/available-to-spend").then((r) => r.data),
+  yearlyTrends: (years?: number) => api.get("/spending/yearly-trends", { params: { years } }).then((r) => r.data),
+  rollingMonthly: (months?: number) => api.get("/spending/rolling-monthly", { params: { months } }).then((r) => r.data),
+  monthlySummary: (year: number, month: number) =>
+    api.get(`/spending/summary/${year}/${month}`).then((r) => r.data),
+};
+
+// ── Savings Goals ─────────────────────────────────────────────────────────────
+export const goalsApi = {
+  list: () => api.get("/goals").then((r) => r.data),
+  create: (data: object) => api.post("/goals", data).then((r) => r.data),
+  update: (id: number, data: object) => api.patch(`/goals/${id}`, data).then((r) => r.data),
+  remove: (id: number) => api.delete(`/goals/${id}`),
 };
