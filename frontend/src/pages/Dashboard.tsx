@@ -1,14 +1,25 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { accountsApi, cardsApi, recurringApi } from "../api";
+import { accountsApi, cardsApi, recurringApi, analyticsApi } from "../api";
 import { fmt, utilColor, utilBg } from "../lib/utils";
-import { CreditCard, Calendar, AlertCircle, AlertTriangle } from "lucide-react";
+import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const now = new Date();
+  // Show previous month's summary once we're past the 3rd of the current month; otherwise current month
+  const summaryMonth = now.getDate() > 3 ? now.getMonth() + 1 : (now.getMonth() === 0 ? 12 : now.getMonth());
+  const summaryYear = now.getDate() > 3 ? now.getFullYear() : (now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear());
+
   const { data: accounts = [] } = useQuery<any[]>({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: cards = [] } = useQuery<any[]>({ queryKey: ["credit-cards"], queryFn: cardsApi.list });
   const { data: recurring = [] } = useQuery<any[]>({ queryKey: ["recurring"], queryFn: () => recurringApi.list(true) });
+  const { data: ats } = useQuery<any>({ queryKey: ["available-to-spend"], queryFn: analyticsApi.availableToSpend });
+  const { data: summary } = useQuery<any>({
+    queryKey: ["monthly-summary", summaryYear, summaryMonth],
+    queryFn: () => analyticsApi.monthlySummary(summaryYear, summaryMonth),
+  });
 
   const checkingAccounts = accounts.filter((a) => a.type === "checking");
   const totalChecking = checkingAccounts.reduce((s: number, a: any) => s + parseFloat(a.current_balance), 0);
@@ -48,6 +59,72 @@ export default function Dashboard() {
         <h2 className="text-xl font-bold text-gray-900">Dashboard</h2>
         <p className="text-sm text-gray-500">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
       </div>
+
+      {/* Available to Spend widget */}
+      {ats && (
+        <div className="card">
+          <div className="flex items-center gap-2 mb-3">
+            <Wallet size={16} className="text-indigo-500" />
+            <h3 className="font-semibold text-gray-900 dark:text-white">
+              Available to Spend —{" "}
+              {new Date().toLocaleDateString("en-US", { month: "long" })}
+            </h3>
+          </div>
+          <div className="space-y-1 text-sm">
+            <div className="flex justify-between text-gray-600 dark:text-gray-400">
+              <span>Monthly Income</span>
+              <span className="tabular-nums text-green-600 dark:text-green-400 font-medium">{fmt(parseFloat(ats.monthly_income))}</span>
+            </div>
+            <div className="flex justify-between text-gray-600 dark:text-gray-400">
+              <span>Committed Bills</span>
+              <span className="tabular-nums text-red-500 dark:text-red-400 font-medium">−{fmt(parseFloat(ats.committed_expenses))}</span>
+            </div>
+            <div className="flex justify-between text-gray-600 dark:text-gray-400">
+              <span>Spent So Far</span>
+              <span className="tabular-nums text-amber-600 dark:text-amber-400 font-medium">−{fmt(parseFloat(ats.spent_this_month))}</span>
+            </div>
+            <div className="border-t border-gray-200 dark:border-gray-700 mt-2 pt-2 flex justify-between">
+              <span className="font-semibold text-gray-900 dark:text-white">Available</span>
+              <span className={`tabular-nums text-lg font-bold ${parseFloat(ats.available) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                {fmt(parseFloat(ats.available))}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Month in Review */}
+      {summary && (
+        <div className="card">
+          <div className="flex items-center gap-2 mb-2">
+            <BookOpen size={16} className="text-indigo-500" />
+            <h3 className="font-semibold text-gray-900 dark:text-white">
+              Month in Review —{" "}
+              {new Date(summaryYear, summaryMonth - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+            </h3>
+          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">{summary.text}</p>
+          {summary.top_category && (
+            <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700 pt-3">
+              <span>Top category: <span className="font-medium text-gray-700 dark:text-gray-300">{summary.top_category}</span></span>
+              {summary.mom_delta_pct != null && (
+                <span>
+                  vs last month:{" "}
+                  <span className={`font-medium ${parseFloat(summary.mom_delta_pct) > 0 ? "text-red-500" : "text-green-500"}`}>
+                    {parseFloat(summary.mom_delta_pct) > 0 ? "+" : ""}{parseFloat(summary.mom_delta_pct).toFixed(1)}%
+                  </span>
+                </span>
+              )}
+              <span>
+                Net cash flow:{" "}
+                <span className={`font-medium ${parseFloat(summary.net_cashflow) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                  {fmt(Math.abs(parseFloat(summary.net_cashflow)))} {parseFloat(summary.net_cashflow) >= 0 ? "surplus" : "deficit"}
+                </span>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Hero stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

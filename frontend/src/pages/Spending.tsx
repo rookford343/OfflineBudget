@@ -1,10 +1,11 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { spendingApi, accountsApi, cardsApi } from "../api";
+import { spendingApi, accountsApi, cardsApi, analyticsApi } from "../api";
 import { fmt, firstOfMonth, today } from "../lib/utils";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine,
+  LineChart, Line,
 } from "recharts";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
@@ -26,12 +27,15 @@ function chartTheme() {
   };
 }
 
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const YEAR_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
+
 export default function Spending() {
+  const [activeTab, setActiveTab] = useState<"overview" | "trends">("overview");
   const [start, setStart] = useState(firstOfMonth());
   const [end, setEnd] = useState(today());
   const [expanded, setExpanded] = useState<number | null>(null);
   const [sourceKey, setSourceKey] = useState<string>("all");
-  // null = all categories selected; Set = explicit selection
   const [catFilter, setCatFilter] = useState<Set<number> | null>(null);
 
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
@@ -51,6 +55,18 @@ export default function Spending() {
     queryKey: ["spending-monthly", start, end, selectedAccountId, selectedCardId],
     queryFn: () => spendingApi.monthly(start, end, selectedAccountId, selectedCardId),
     enabled: !!start && !!end,
+  });
+
+  const { data: yearlyTrends = [] } = useQuery({
+    queryKey: ["yearly-trends"],
+    queryFn: () => analyticsApi.yearlyTrends(3),
+    enabled: activeTab === "trends",
+  });
+
+  const { data: rollingMonthly = [] } = useQuery({
+    queryKey: ["rolling-monthly"],
+    queryFn: () => analyticsApi.rollingMonthly(24),
+    enabled: activeTab === "trends",
   });
 
   const { data: monthlyByCat = [] } = useQuery({
@@ -155,6 +171,24 @@ export default function Spending() {
     else setCatFilter(next);
   }
 
+  const trendBarData = useMemo(() => {
+    if (!yearlyTrends.length) return [];
+    return MONTH_NAMES.map((name, i) => {
+      const entry: Record<string, number | string> = { month: name };
+      (yearlyTrends as any[]).forEach((yr: any) => {
+        entry[String(yr.year)] = parseFloat(yr.months[String(i + 1)] ?? "0");
+      });
+      return entry;
+    });
+  }, [yearlyTrends]);
+
+  const rollingBarData = useMemo(() => {
+    return (rollingMonthly as any[]).map((r: any) => ({
+      month: r.month,
+      total: parseFloat(r.total),
+    }));
+  }, [rollingMonthly]);
+
   return (
     <div className="space-y-6">
       {/* Header + controls */}
@@ -175,7 +209,72 @@ export default function Spending() {
         </div>
       </div>
 
-      {overview && (
+      {/* Tab switcher */}
+      <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
+        {(["overview", "trends"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors ${
+              activeTab === tab
+                ? "border-indigo-500 text-indigo-600 dark:text-indigo-400"
+                : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+            }`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* Trends tab */}
+      {activeTab === "trends" && (
+        <div className="space-y-6">
+          {trendBarData.length > 0 && yearlyTrends.length > 0 && (
+            <div className="card">
+              <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8] mb-4">Year-Over-Year Monthly Spending</h3>
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={trendBarData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: ct.tick }} axisLine={{ stroke: ct.grid }} tickLine={false} />
+                  <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
+                  <Tooltip content={({ active, payload, label }) => active && payload?.length ? (
+                    <TooltipBox label={label} rows={payload.map((p: any) => ({ name: p.dataKey, value: p.value, color: p.fill }))} />
+                  ) : null} cursor={{ fill: isDarkMode() ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }} />
+                  <Legend formatter={(v) => <span style={{ color: ct.tick }} className="text-sm">{v}</span>} />
+                  {(yearlyTrends as any[]).map((yr: any, i: number) => (
+                    <Bar key={yr.year} dataKey={String(yr.year)} fill={YEAR_COLORS[i % YEAR_COLORS.length]} radius={[3, 3, 0, 0]} name={String(yr.year)} />
+                  ))}
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {rollingBarData.length > 0 && (
+            <div className="card">
+              <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8] mb-4">24-Month Spending Trend</h3>
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={rollingBarData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
+                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: ct.tick }} interval={2} axisLine={{ stroke: ct.grid }} tickLine={false} />
+                  <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
+                  <Tooltip content={({ active, payload, label }) => active && payload?.length ? (
+                    <TooltipBox label={label} rows={[{ name: "Spending", value: payload[0].value as number }]} />
+                  ) : null} />
+                  <Line type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {trendBarData.length === 0 && rollingBarData.length === 0 && (
+            <div className="card text-center py-8 text-gray-400 dark:text-[#525d70] text-sm">
+              No transaction data yet. Add transactions to see spending trends.
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === "overview" && overview && (
         <>
           {/* Summary strip */}
           <div className="grid grid-cols-3 gap-4">
@@ -348,8 +447,8 @@ export default function Spending() {
         </>
       )}
 
-      {isLoading && <div className="text-center py-8 text-gray-400 dark:text-[#525d70] text-sm">Loading spending data…</div>}
-      {!isLoading && !overview && <div className="card text-center py-8 text-gray-400 dark:text-[#525d70]">Select a date range to view spending.</div>}
+      {activeTab === "overview" && isLoading && <div className="text-center py-8 text-gray-400 dark:text-[#525d70] text-sm">Loading spending data…</div>}
+      {activeTab === "overview" && !isLoading && !overview && <div className="card text-center py-8 text-gray-400 dark:text-[#525d70]">Select a date range to view spending.</div>}
     </div>
   );
 }
