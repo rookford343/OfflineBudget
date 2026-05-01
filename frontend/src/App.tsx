@@ -13,6 +13,7 @@ import Settings from "./pages/Settings";
 import Import from "./pages/Import";
 import Calendar from "./pages/Calendar";
 import Goals from "./pages/Goals";
+import NetWorth from "./pages/NetWorth";
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;
@@ -34,6 +35,7 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
           <Route path="goals" element={<Goals />} />
+          <Route path="net-worth" element={<NetWorth />} />
           <Route path="calendar" element={<Calendar />} />
           <Route path="credit-cards" element={<CreditCards />} />
           <Route path="forecast" element={<Forecast />} />

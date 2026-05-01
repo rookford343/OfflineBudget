@@ -543,3 +543,117 @@ class SavingsGoalOut(BaseModel):
     percent_complete: float = 0.0
     monthly_needed: Optional[Decimal] = None
     months_remaining: Optional[int] = None
+
+
+# ── Net Worth ─────────────────────────────────────────────────────────────────
+
+class ManualAssetCreate(BaseModel):
+    name: str
+    asset_type: str
+    current_value: Decimal
+    as_of_date: date
+
+
+class ManualAssetUpdate(BaseModel):
+    name: Optional[str] = None
+    asset_type: Optional[str] = None
+    current_value: Optional[Decimal] = None
+    as_of_date: Optional[date] = None
+
+
+class ManualAssetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    asset_type: str
+    current_value: Decimal
+    as_of_date: date
+
+
+class ManualLiabilityCreate(BaseModel):
+    name: str
+    liability_type: str
+    current_balance: Decimal
+    as_of_date: date
+
+
+class ManualLiabilityUpdate(BaseModel):
+    name: Optional[str] = None
+    liability_type: Optional[str] = None
+    current_balance: Optional[Decimal] = None
+    as_of_date: Optional[date] = None
+
+
+class ManualLiabilityOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    liability_type: str
+    current_balance: Decimal
+    as_of_date: date
+
+
+class NetWorthTotals(BaseModel):
+    total_assets: Decimal
+    account_balances: Decimal
+    card_balances: Decimal
+    total_liabilities: Decimal
+    net_worth: Decimal
+
+
+class NetWorthSnapshotOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    snapshot_date: date
+    total_assets: Decimal
+    total_liabilities: Decimal
+    net_worth: Decimal
+
+
+# ── Forecast Scenarios ────────────────────────────────────────────────────────
+
+class ScenarioCreate(BaseModel):
+    name: str
+
+
+class ScenarioUpdate(BaseModel):
+    name: Optional[str] = None
+
+
+class ScenarioOverrideCreate(BaseModel):
+    recurring_item_id: int
+    amount_delta: Decimal
+
+
+class ScenarioOverrideOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    recurring_item_id: int
+    amount_delta: Decimal
+
+
+class ScenarioOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    created_at: datetime
+    overrides: list[ScenarioOverrideOut] = []
+
+
+# ── Sankey ────────────────────────────────────────────────────────────────────
+
+class SankeyNode(BaseModel):
+    id: str
+    name: str
+    type: str  # "income" or "expense"
+
+
+class SankeyLink(BaseModel):
+    source: str
+    target: str
+    value: Decimal
+
+
+class SankeyResponse(BaseModel):
+    nodes: list[SankeyNode]
+    links: list[SankeyLink]

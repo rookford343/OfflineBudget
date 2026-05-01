@@ -43,6 +43,8 @@ export const forecastApi = {
     api.get("/forecast", { params: { account_id: accountId, start, end } }).then((r) => r.data),
   quarters: (accountId: number, year: number) =>
     api.get("/forecast/quarters", { params: { account_id: accountId, year } }).then((r) => r.data),
+  quartersWithScenario: (accountId: number, year: number, overrides: object[]) =>
+    api.post("/forecast/quarters-scenario", { account_id: accountId, year, overrides }).then((r) => r.data),
 };
 
 // ── Transactions ──────────────────────────────────────────────────────────────
@@ -90,6 +92,8 @@ export const spendingApi = {
     api.get("/spending/monthly", { params: { start, end, account_id: accountId, card_id: cardId } }).then((r) => r.data),
   monthlyByCategory: (start: string, end: string, accountId?: number, cardId?: number) =>
     api.get("/spending/monthly-by-category", { params: { start, end, account_id: accountId, card_id: cardId } }).then((r) => r.data),
+  sankey: (year: number, month: number) =>
+    api.get(`/spending/sankey/${year}/${month}`).then((r) => r.data),
 };
 
 // ── Import ────────────────────────────────────────────────────────────────────
@@ -122,4 +126,31 @@ export const goalsApi = {
   create: (data: object) => api.post("/goals", data).then((r) => r.data),
   update: (id: number, data: object) => api.patch(`/goals/${id}`, data).then((r) => r.data),
   remove: (id: number) => api.delete(`/goals/${id}`),
+};
+
+// ── Net Worth ─────────────────────────────────────────────────────────────────
+export const netWorthApi = {
+  totals: () => api.get("/net-worth").then((r) => r.data),
+  history: () => api.get("/net-worth/history").then((r) => r.data),
+  snapshot: () => api.post("/net-worth/snapshot").then((r) => r.data),
+  listAssets: () => api.get("/net-worth/assets").then((r) => r.data),
+  listLiabilities: () => api.get("/net-worth/liabilities").then((r) => r.data),
+  createAsset: (data: object) => api.post("/net-worth/assets", data).then((r) => r.data),
+  updateAsset: (id: number, data: object) => api.patch(`/net-worth/assets/${id}`, data).then((r) => r.data),
+  removeAsset: (id: number) => api.delete(`/net-worth/assets/${id}`),
+  createLiability: (data: object) => api.post("/net-worth/liabilities", data).then((r) => r.data),
+  updateLiability: (id: number, data: object) => api.patch(`/net-worth/liabilities/${id}`, data).then((r) => r.data),
+  removeLiability: (id: number) => api.delete(`/net-worth/liabilities/${id}`),
+};
+
+// ── Scenarios ─────────────────────────────────────────────────────────────────
+export const scenariosApi = {
+  list: () => api.get("/scenarios").then((r) => r.data),
+  create: (data: object) => api.post("/scenarios", data).then((r) => r.data),
+  update: (id: number, data: object) => api.patch(`/scenarios/${id}`, data).then((r) => r.data),
+  remove: (id: number) => api.delete(`/scenarios/${id}`),
+  createOverride: (scenarioId: number, data: object) =>
+    api.post(`/scenarios/${scenarioId}/overrides`, data).then((r) => r.data),
+  removeOverride: (scenarioId: number, overrideId: number) =>
+    api.delete(`/scenarios/${scenarioId}/overrides/${overrideId}`),
 };

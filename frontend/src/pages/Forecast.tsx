@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { accountsApi, forecastApi } from "../api";
+import { accountsApi, forecastApi, scenariosApi } from "../api";
 import { fmt } from "../lib/utils";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from "recharts";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 import { ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
 
 export default function Forecast() {
@@ -11,6 +11,7 @@ export default function Forecast() {
   const [accountId, setAccountId] = useState<number | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
   const [expandedQ, setExpandedQ] = useState<number | null>(null);
+  const [scenarioId, setScenarioId] = useState<number | null>(null);
 
   const activeAccountId = accountId ?? checkingAccounts[0]?.id;
   const activeAccount = checkingAccounts.find((a: any) => a.id === activeAccountId);
@@ -24,21 +25,61 @@ export default function Forecast() {
     enabled: !!activeAccountId,
   });
 
-  // Build chart data from all quarters
-  const chartData = quarters.flatMap((q: any) =>
+  const { data: scenarios = [] } = useQuery({
+    queryKey: ["scenarios"],
+    queryFn: scenariosApi.list,
+  });
+
+  const { data: scenarioQuarters = [] } = useQuery({
+    queryKey: ["forecast-quarters-scenario", activeAccountId, year, scenarioId],
+    queryFn: () => {
+      const scenario = (scenarios as any[]).find((s: any) => s.id === scenarioId);
+      if (!scenario) return [];
+      const overrides = scenario.overrides.map((o: any) => ({
+        recurring_item_id: o.recurring_item_id,
+        amount_delta: parseFloat(o.amount_delta),
+      }));
+      return forecastApi.quartersWithScenario(activeAccountId, year, overrides);
+    },
+    enabled: !!activeAccountId && scenarioId !== null && (scenarios as any[]).some((s: any) => s.id === scenarioId),
+  });
+
+  // Baseline chart data
+  const chartData = (quarters as any[]).flatMap((q: any) =>
     q.days.filter((_: any, i: number) => i % 3 === 0).map((d: any) => ({
       date: d.date,
-      balance: parseFloat(d.projected_balance),
+      baseline: parseFloat(d.projected_balance),
       label: new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }),
     }))
   );
+
+  // Merge scenario trace into chart data
+  const scenarioMap: Record<string, number> = {};
+  if (scenarioId !== null && (scenarioQuarters as any[]).length > 0) {
+    (scenarioQuarters as any[]).forEach((q: any) =>
+      q.days.filter((_: any, i: number) => i % 3 === 0).forEach((d: any) => {
+        scenarioMap[d.date] = parseFloat(d.projected_balance);
+      })
+    );
+  }
+
+  const mergedData = chartData.map(d => ({
+    ...d,
+    scenario: scenarioMap[d.date] ?? undefined,
+  }));
+
+  const hasScenario = scenarioId !== null && Object.keys(scenarioMap).length > 0;
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload?.length) {
       return (
         <div className="card py-2 px-3 shadow-lg text-sm">
           <p className="text-gray-500 text-xs mb-1">{label}</p>
-          <p className="font-bold text-gray-900">{fmt(payload[0].value)}</p>
+          {payload.map((p: any) => (
+            <p key={p.dataKey} className="font-bold" style={{ color: p.color }}>
+              {p.dataKey === "baseline" ? "Baseline" : "Scenario"}: {fmt(p.value)}
+            </p>
+          ))}
         </div>
       );
     }
@@ -59,6 +100,10 @@ export default function Forecast() {
           <select className="input w-auto" value={year} onChange={e => setYear(parseInt(e.target.value))}>
             {[-1, 0, 1, 2].map(d => <option key={d} value={new Date().getFullYear() + d}>{new Date().getFullYear() + d}</option>)}
           </select>
+          <select className="input w-auto" value={scenarioId ?? ""} onChange={e => setScenarioId(e.target.value === "" ? null : parseInt(e.target.value))}>
+            <option value="">Baseline only</option>
+            {(scenarios as any[]).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
         </div>
       </div>
 
@@ -70,13 +115,17 @@ export default function Forecast() {
         <div className="card">
           <h3 className="font-semibold text-gray-900 mb-4">Balance Over Time — {year}</h3>
           <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+            <LineChart data={mergedData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
               <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
               <Tooltip content={<CustomTooltip />} />
               <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
-              <Line type="monotone" dataKey="balance" stroke="#6366f1" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="baseline" name="Baseline" stroke="#6366f1" strokeWidth={2} dot={false} />
+              {hasScenario && (
+                <Line type="monotone" dataKey="scenario" name="Scenario" stroke="#10b981" strokeWidth={2} dot={false} strokeDasharray="5 3" />
+              )}
+              {hasScenario && <Legend />}
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -84,7 +133,7 @@ export default function Forecast() {
 
       {/* Quarter summaries */}
       <div className="space-y-3">
-        {quarters.map((q: any) => (
+        {(quarters as any[]).map((q: any) => (
           <div key={q.quarter} className="card">
             <button
               className="w-full flex items-center justify-between"

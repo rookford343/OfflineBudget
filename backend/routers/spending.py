@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, cast, String
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
@@ -473,3 +473,67 @@ def _months_in_range(start: date, end: date) -> list[int]:
         else:
             d = d.replace(month=d.month + 1)
     return list(months)
+
+
+@router.get("/sankey/{year}/{month}", response_model=schemas.SankeyResponse)
+def spending_sankey(
+    year: int,
+    month: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    first_day = date(year, month, 1)
+    last_day = date(year, month, calendar.monthrange(year, month)[1])
+
+    txns = db.query(models.Transaction).options(
+        joinedload(models.Transaction.category)
+    ).filter(
+        models.Transaction.user_id == user.id,
+        models.Transaction.is_actual == True,
+        models.Transaction.date >= first_day,
+        models.Transaction.date <= last_day,
+    ).all()
+
+    # Also include credit card transactions
+    card_txns = db.query(models.CreditCardTransaction).options(
+        joinedload(models.CreditCardTransaction.category)
+    ).filter(
+        models.CreditCardTransaction.user_id == user.id,
+        models.CreditCardTransaction.date >= first_day,
+        models.CreditCardTransaction.date <= last_day,
+    ).all()
+
+    income_totals: dict[str, Decimal] = {}
+    expense_totals: dict[str, Decimal] = {}
+
+    for t in txns:
+        cat_name = t.category.name if t.category else "Uncategorized"
+        cat_type = t.category.type if t.category else None
+        if t.amount > 0:
+            income_totals[cat_name] = income_totals.get(cat_name, Decimal("0")) + t.amount
+        elif t.amount < 0 and cat_type != models.CategoryType.income:
+            expense_totals[cat_name] = expense_totals.get(cat_name, Decimal("0")) + abs(t.amount)
+
+    for t in card_txns:
+        cat_name = t.category.name if t.category else "Uncategorized"
+        if t.amount > 0:
+            expense_totals[cat_name] = expense_totals.get(cat_name, Decimal("0")) + t.amount
+
+    nodes: list[schemas.SankeyNode] = []
+    links: list[schemas.SankeyLink] = []
+
+    for name in income_totals:
+        nodes.append(schemas.SankeyNode(id=f"income:{name}", name=name, type="income"))
+    for name in expense_totals:
+        nodes.append(schemas.SankeyNode(id=f"expense:{name}", name=name, type="expense"))
+
+    # Total income pool node that aggregates all income
+    total_income = sum(income_totals.values(), Decimal("0"))
+    if income_totals and expense_totals:
+        nodes.append(schemas.SankeyNode(id="income:__total__", name="Total Income", type="income_total"))
+        for name, amount in income_totals.items():
+            links.append(schemas.SankeyLink(source=f"income:{name}", target="income:__total__", value=amount))
+        for name, amount in expense_totals.items():
+            links.append(schemas.SankeyLink(source="income:__total__", target=f"expense:{name}", value=amount))
+
+    return schemas.SankeyResponse(nodes=nodes, links=links)
