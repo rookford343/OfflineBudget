@@ -54,3 +54,33 @@ def budget_overview(
 ):
     from backend.services.budget_calculator import compute_overview
     return compute_overview(db, user.id, year, month)
+
+
+@router.post("/rollover/{year}/{month}")
+def apply_rollover(
+    year: int,
+    month: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    from backend.services.budget_calculator import apply_rollover as _apply
+    updated = _apply(db, user.id, year, month)
+    return {"updated_categories": updated, "year": year, "month": month}
+
+
+@router.patch("/categories/{category_id}/rollover")
+def set_category_rollover(
+    category_id: int,
+    body: schemas.CategoryRolloverUpdate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    cat = db.query(models.Category).filter(
+        models.Category.id == category_id,
+        models.Category.user_id == user.id,
+    ).first()
+    if not cat:
+        raise HTTPException(status_code=404, detail="Category not found")
+    cat.rollover_enabled = body.rollover_enabled
+    db.commit()
+    return {"category_id": category_id, "rollover_enabled": cat.rollover_enabled}

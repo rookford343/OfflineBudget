@@ -33,6 +33,16 @@ def create_recurring(
     return item
 
 
+@router.get("/suggestions", response_model=list[schemas.RecurringSuggestion])
+def get_suggestions(
+    min_occurrences: int = 2,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    from backend.services.recurring_detector import detect_patterns
+    return detect_patterns(db, user.id, min_occurrences=min_occurrences)
+
+
 @router.get("/{item_id}", response_model=schemas.RecurringOut)
 def get_recurring(
     item_id: int,

@@ -71,5 +71,37 @@ def compute_overview(
             actual_cards=actual_cards,
             actual_total=actual_total,
             variance=budgeted - actual_total,
+            rollover_enabled=cat.rollover_enabled,
+            rollover_balance=cat.rollover_balance or Decimal("0"),
         ))
     return rows
+
+
+def apply_rollover(db: Session, user_id: int, year: int, month: int) -> int:
+    """Set each rollover-enabled category's rollover_balance to max(0, budgeted - actual) for the given month.
+
+    Returns the number of categories updated.
+    """
+    rows = compute_overview(db, user_id, year, month)
+    rollover_ids = [r.category_id for r in rows if r.rollover_enabled]
+    if not rollover_ids:
+        return 0
+
+    cat_map = {
+        c.id: c
+        for c in db.query(models.Category).filter(
+            models.Category.id.in_(rollover_ids),
+            models.Category.user_id == user_id,
+        ).all()
+    }
+
+    updated = 0
+    for row in rows:
+        if not row.rollover_enabled:
+            continue
+        cat = cat_map.get(row.category_id)
+        if cat:
+            cat.rollover_balance = max(Decimal("0"), row.budgeted - row.actual_total)
+            updated += 1
+    db.commit()
+    return updated
