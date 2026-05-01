@@ -64,12 +64,14 @@ def _parse_amount(s: str) -> Decimal | None:
 
 
 def _parse_row(fmt: ImportFormat, row: dict) -> ParsedRow | None:
-    # Normalize keys
-    keys = {k.strip().lower(): v.strip() for k, v in row.items()}
+    # Normalize keys; skip None keys (extra columns past header) and handle None values
+    keys = {k.strip().lower(): (v or "").strip() for k, v in row.items() if k is not None}
 
     if fmt == ImportFormat.chase:
         # Chase checking: columns = Details, Posting Date, Description, Amount, Type, Balance, Check or Slip #
         # Chase card: Transaction Date, Post Date, Description, Category, Type, Amount, Memo
+        if keys.get("type", "").lower() == "payment":
+            return None  # Skip card statement payment rows; they are not transactions
         d_str = keys.get("posting date") or keys.get("transaction date") or ""
         desc = keys.get("description") or ""
         amount_str = keys.get("amount") or ""
