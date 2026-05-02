@@ -4,6 +4,7 @@ import { goalsApi, accountsApi } from "../api";
 import { fmt } from "../lib/utils";
 import { Plus, Pencil, Trash2, Target, HelpCircle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import { ProgressRing } from "../components/ProgressRing";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -214,12 +215,14 @@ export default function Goals() {
         </div>
       ) : (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {goals.map((goal: any) => {
+          {goals.map((goal: any, idx: number) => {
             const pct = Math.min(parseFloat(goal.percent_complete), 100);
             const isComplete = pct >= 100;
+            const ringColor = pct >= 100 ? "#3b82f6" : pct >= 80 ? "#22c55e" : pct >= 50 ? "#6366f1" : "#f59e0b";
+            const delayClass = ["", "animate-delay-100", "animate-delay-200", "animate-delay-300"][idx % 4];
             return (
-              <div key={goal.id} className="card space-y-3">
-                <div className="flex items-start justify-between">
+              <div key={goal.id} className={`card animate-fade-slide-up ${delayClass}`}>
+                <div className="flex items-start justify-between mb-3">
                   <h3 className="font-semibold text-gray-900 dark:text-white leading-tight">{goal.name}</h3>
                   <div className="flex gap-1 shrink-0 ml-2">
                     <button onClick={() => startEdit(goal)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500">
@@ -230,46 +233,42 @@ export default function Goals() {
                     </button>
                   </div>
                 </div>
-
-                {/* Progress bar */}
-                <div>
-                  <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
-                    <span>{pct.toFixed(1)}% complete</span>
-                    <span>{isComplete ? "✓ Reached!" : `${fmt(parseFloat(goal.current_amount))} of ${fmt(parseFloat(goal.target_amount))}`}</span>
+                <div className="flex items-start gap-4">
+                  <ProgressRing
+                    pct={pct}
+                    size={80}
+                    color={ringColor}
+                    complete={isComplete}
+                    sublabel={fmt(parseFloat(goal.current_amount))}
+                  />
+                  <div className="flex-1 min-w-0 space-y-1 text-sm pt-1">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {pct.toFixed(1)}% complete{isComplete ? " · Reached!" : ""}
+                    </p>
+                    {goal.target_date && (
+                      <div className="flex justify-between text-gray-600 dark:text-gray-400">
+                        <span>Target</span>
+                        <span className="font-medium text-gray-900 dark:text-white">
+                          {new Date(goal.target_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </span>
+                      </div>
+                    )}
+                    {goal.monthly_needed != null && !isComplete && (
+                      <div className="flex justify-between text-gray-600 dark:text-gray-400">
+                        <span>Needed/mo</span>
+                        <span className="font-medium text-indigo-600 dark:text-indigo-400">{fmt(parseFloat(goal.monthly_needed))}</span>
+                      </div>
+                    )}
+                    {goal.months_remaining != null && !isComplete && (
+                      <div className="flex justify-between text-gray-600 dark:text-gray-400">
+                        <span>Est. completion</span>
+                        <span className="font-medium text-gray-900 dark:text-white">{projectedCompletion(goal.months_remaining)}</span>
+                      </div>
+                    )}
+                    {goal.notes && (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 pt-1">{goal.notes}</p>
+                    )}
                   </div>
-                  <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className={`h-2 rounded-full transition-all ${isComplete ? "bg-blue-500" : "bg-emerald-500"}`}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Stats */}
-                <div className="space-y-1 text-sm">
-                  {goal.target_date && (
-                    <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                      <span>Target date</span>
-                      <span className="font-medium text-gray-900 dark:text-white">
-                        {new Date(goal.target_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      </span>
-                    </div>
-                  )}
-                  {goal.monthly_needed != null && !isComplete && (
-                    <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                      <span>Needed per month</span>
-                      <span className="font-medium text-indigo-600 dark:text-indigo-400">{fmt(parseFloat(goal.monthly_needed))}</span>
-                    </div>
-                  )}
-                  {goal.months_remaining != null && !isComplete && (
-                    <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                      <span>Projected completion</span>
-                      <span className="font-medium text-gray-900 dark:text-white">{projectedCompletion(goal.months_remaining)}</span>
-                    </div>
-                  )}
-                  {goal.notes && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500 pt-1">{goal.notes}</p>
-                  )}
                 </div>
               </div>
             );

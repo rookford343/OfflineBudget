@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { netWorthApi } from "../api";
 import { fmt } from "../lib/utils";
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import { PlusCircle, Pencil, Trash2, Camera, HelpCircle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
@@ -13,6 +13,18 @@ type Liability = { id: number; name: string; liability_type: string; current_bal
 
 const ASSET_TYPES = ["Investment Account", "Real Estate", "Vehicle", "Cash", "Cryptocurrency", "Other"];
 const LIABILITY_TYPES = ["Mortgage", "Auto Loan", "Student Loan", "Personal Loan", "Other"];
+
+function isDarkMode(): boolean {
+  return document.documentElement.classList.contains("dark");
+}
+
+function chartTheme() {
+  const dark = isDarkMode();
+  return {
+    grid: dark ? "#2c3040" : "#e5e7eb",
+    tick: dark ? "#6e7888" : "#6b7280",
+  };
+}
 
 const today = new Date().toISOString().split("T")[0];
 const emptyAsset = { name: "", asset_type: ASSET_TYPES[0], current_value: "", as_of_date: today };
@@ -114,13 +126,19 @@ export default function NetWorth() {
         <div className="card">
           <h3 className="font-semibold text-gray-900 mb-4">Net Worth Over Time</h3>
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+              <defs>
+                <linearGradient id="netWorthGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={nw != null && nw >= 0 ? "#6366f1" : "#ef4444"} stopOpacity={0.18} />
+                  <stop offset="95%" stopColor={nw != null && nw >= 0 ? "#6366f1" : "#ef4444"} stopOpacity={0.01} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={chartTheme().grid} />
               <XAxis dataKey="date" tick={{ fontSize: 11 }} />
               <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
               <Tooltip formatter={(v: any) => fmt(v)} />
-              <Line type="monotone" dataKey="netWorth" stroke="#6366f1" strokeWidth={2} dot={{ r: 4 }} />
-            </LineChart>
+              <Area type="monotone" dataKey="netWorth" stroke={nw != null && nw >= 0 ? "#6366f1" : "#ef4444"} strokeWidth={2} fill="url(#netWorthGradient)" dot={{ r: 3 }} animationDuration={700} animationEasing="ease-out" />
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       ) : (

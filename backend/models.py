@@ -69,6 +69,7 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     ss_gross_per_paycheck: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     ss_wage_base: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    ss_bonus_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     accounts: Mapped[list[Account]] = relationship(back_populates="user", cascade="all, delete-orphan")
     categories: Mapped[list[Category]] = relationship(back_populates="user", cascade="all, delete-orphan")

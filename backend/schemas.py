@@ -22,12 +22,14 @@ class UserOut(BaseModel):
     created_at: datetime
     ss_gross_per_paycheck: Optional[Decimal] = None
     ss_wage_base: Optional[Decimal] = None
+    ss_bonus_ytd: Optional[Decimal] = None
 
 
 class UserUpdate(BaseModel):
     display_name: Optional[str] = None
     ss_gross_per_paycheck: Optional[Decimal] = None
     ss_wage_base: Optional[Decimal] = None
+    ss_bonus_ytd: Optional[Decimal] = None
 
 
 class UserAdminCreate(BaseModel):
