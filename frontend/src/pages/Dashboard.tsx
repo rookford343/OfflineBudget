@@ -2,11 +2,22 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { accountsApi, cardsApi, recurringApi, analyticsApi } from "../api";
 import { fmt, utilColor, utilBg } from "../lib/utils";
-import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen } from "lucide-react";
+import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
+
+const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
+
+Key sections:
+• Available to Spend — income minus bills minus what you've already spent
+• Account balances — all checking and savings accounts
+• Credit card balances and amounts due
+• Monthly narrative summary — plain-English recap
+• Upcoming bills — items due in the next 30 days`;
 import { useNavigate } from "react-router-dom";
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [showHelp, setShowHelp] = useState(false);
   const now = new Date();
   // Show previous month's summary once we're past the 3rd of the current month; otherwise current month
   const summaryMonth = now.getDate() > 3 ? now.getMonth() + 1 : (now.getMonth() === 0 ? 12 : now.getMonth());
@@ -56,7 +67,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-gray-900">Dashboard</h2>
+        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Dashboard <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
         <p className="text-sm text-gray-500">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
       </div>
 
@@ -267,6 +278,7 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      {showHelp && <HelpPanel title="Dashboard" body={DASHBOARD_HELP} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

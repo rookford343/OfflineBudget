@@ -61,6 +61,7 @@ async def preview_import(
             category_id=matched_cat.id if matched_cat else None,
             category_name=matched_cat.name if matched_cat else None,
             needs_review=needs_review,
+            is_transfer=row.is_transfer,
         ))
 
     return schemas.ImportPreviewResponse(

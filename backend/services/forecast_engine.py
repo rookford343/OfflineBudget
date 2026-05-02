@@ -11,13 +11,21 @@ from __future__ import annotations
 from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from backend import models
 from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
 
 
 def _last_day_of_month(d: date) -> int:
     return monthrange(d.year, d.month)[1]
+
+
+def _adjust_for_weekend(d: date) -> date:
+    if d.weekday() == 5:  # Saturday
+        return d - timedelta(days=1)
+    if d.weekday() == 6:  # Sunday
+        return d - timedelta(days=2)
+    return d
 
 
 def _fires_on(item: models.RecurringItem, d: date) -> bool:
@@ -62,6 +70,17 @@ def build_forecast(
         models.RecurringItem.is_active == True,
     ).all()
 
+    planned = db.query(models.PlannedExpense).options(
+        joinedload(models.PlannedExpense.category)
+    ).filter(
+        models.PlannedExpense.user_id == user_id,
+        models.PlannedExpense.expected_date >= start_date,
+        models.PlannedExpense.expected_date <= end_date,
+    ).all()
+    planned_by_date: dict[date, list[models.PlannedExpense]] = {}
+    for pe in planned:
+        planned_by_date.setdefault(pe.expected_date, []).append(pe)
+
     # Build override map: recurring_item_id -> amount_delta
     override_map: dict[int, Decimal] = {}
     if overrides:
@@ -104,12 +123,18 @@ def build_forecast(
         actual_recurring_ids = {t.recurring_item_id for t in actuals_today if t.recurring_item_id}
         actual_manual = [t for t in actuals_today if t.recurring_item_id is None]
 
-        # Apply recurring items, skipping any overridden by an actual
+        adj_actual_recurring_ids = set(actual_recurring_ids)
+        if current.weekday() == 4:
+            for offset in (1, 2):
+                for t in actuals_by_date.get(current + timedelta(offset), []):
+                    if t.recurring_item_id:
+                        adj_actual_recurring_ids.add(t.recurring_item_id)
+
         for item in recurring_items:
-            if not _fires_on(item, current):
-                continue
-            if item.id in actual_recurring_ids:
-                # Use the actual transaction instead
+            natural_fires = _fires_on(item, current)
+
+            # Actuals always appear on their real date (ISC-17: not shifted)
+            if natural_fires and item.id in actual_recurring_ids:
                 for actual in actuals_today:
                     if actual.recurring_item_id == item.id:
                         balance += Decimal(str(actual.amount))
@@ -122,19 +147,34 @@ def build_forecast(
                             recurring_item_id=item.id,
                             transaction_id=actual.id,
                         ))
-            else:
-                # Use projected recurring amount, applying scenario delta if present
-                base_amount = item.amount + override_map.get(item.id, Decimal("0"))
-                signed = base_amount if item.type == models.RecurringType.income else -base_amount
-                balance += signed
-                day_transactions.append(ForecastTransaction(
-                    name=item.name,
-                    amount=signed,
-                    type=item.type.value,
-                    category_name=item.category.name if item.category else None,
-                    is_actual=False,
-                    recurring_item_id=item.id,
-                ))
+                continue
+
+            if current.weekday() in (5, 6):
+                continue  # shifted to preceding Friday
+
+            fires_projected = natural_fires
+            if not fires_projected and current.weekday() == 4:
+                fires_projected = (
+                    _fires_on(item, current + timedelta(1)) or
+                    _fires_on(item, current + timedelta(2))
+                )
+
+            if not fires_projected:
+                continue
+            if item.id in adj_actual_recurring_ids:
+                continue
+
+            base_amount = item.amount + override_map.get(item.id, Decimal("0"))
+            signed = base_amount if item.type == models.RecurringType.income else -base_amount
+            balance += signed
+            day_transactions.append(ForecastTransaction(
+                name=item.name,
+                amount=signed,
+                type=item.type.value,
+                category_name=item.category.name if item.category else None,
+                is_actual=False,
+                recurring_item_id=item.id,
+            ))
 
         # Apply manual actual transactions (not linked to any recurring item)
         for actual in actual_manual:
@@ -146,6 +186,18 @@ def build_forecast(
                 category_name=actual.category.name if actual.category else None,
                 is_actual=True,
                 transaction_id=actual.id,
+            ))
+
+        for pe in planned_by_date.get(current, []):
+            signed = -abs(pe.amount)
+            balance += signed
+            day_transactions.append(ForecastTransaction(
+                name=pe.name,
+                amount=signed,
+                type="expense",
+                category_name=pe.category.name if pe.category else None,
+                is_actual=False,
+                is_planned=True,
             ))
 
         entries.append(ForecastEntry(

@@ -2,10 +2,12 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { budgetApi } from "../api";
 import { fmt } from "../lib/utils";
-import { Pencil, Check, X, RotateCcw } from "lucide-react";
+import { Pencil, Check, X, RotateCcw, HelpCircle } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
 
 export default function Budget() {
   const now = new Date();
+  const [showHelp, setShowHelp] = useState(false);
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [editId, setEditId] = useState<number | null>(null);
@@ -52,7 +54,7 @@ export default function Budget() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Budget</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-1.5">Budget <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">Set monthly targets and track actual spending</p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -178,6 +180,7 @@ export default function Budget() {
         )}
       </div>
       <p className="text-xs text-gray-400 dark:text-gray-500">Budgets set here apply to all months. Enable "rollover" on a category to carry unspent amounts forward each month.</p>
+      {showHelp && <HelpPanel title="Budget" body={"Set monthly spending targets for each category.\n\nActual spending is pulled from your imported transactions and credit card charges.\n\nEnable rollover on a category to carry unspent amounts into the next month — great for irregular expenses like car repair or medical bills."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

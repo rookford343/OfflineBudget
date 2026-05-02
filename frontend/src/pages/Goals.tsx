@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { goalsApi, accountsApi } from "../api";
 import { fmt } from "../lib/utils";
-import { Plus, Pencil, Trash2, Target } from "lucide-react";
+import { Plus, Pencil, Trash2, Target, HelpCircle } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -33,6 +34,7 @@ const EMPTY_FORM: GoalFormData = {
 
 export default function Goals() {
   const qc = useQueryClient();
+  const [showHelp, setShowHelp] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState<GoalFormData>(EMPTY_FORM);
@@ -102,7 +104,7 @@ export default function Goals() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Savings Goals</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-1.5">Savings Goals <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">Track progress toward your financial targets</p>
         </div>
         <button
@@ -274,6 +276,7 @@ export default function Goals() {
           })}
         </div>
       )}
+      {showHelp && <HelpPanel title="Savings Goals" body={"Track progress toward named financial targets.\n\nEach goal shows a progress bar, current vs. target amount, and projected completion date.\n\nUse the monthly contribution needed field to plan how much to set aside each month."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
