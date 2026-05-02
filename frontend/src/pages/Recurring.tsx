@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { recurringApi, accountsApi, categoriesApi } from "../api";
 import { fmt } from "../lib/utils";
-import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X, Sparkles } from "lucide-react";
+import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X, Sparkles, HelpCircle } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -10,6 +11,7 @@ const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly",
 
 export default function Recurring() {
   const qc = useQueryClient();
+  const [showHelp, setShowHelp] = useState(false);
   const { data: items = [] } = useQuery<any[]>({ queryKey: ["recurring"], queryFn: () => recurringApi.list(false) });
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoriesApi.list });
@@ -79,7 +81,7 @@ export default function Recurring() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Recurring Items</h2>
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Recurring Items <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500">Income and bills that repeat monthly</p>
         </div>
         <button onClick={openNew} className="btn-primary"><Plus size={16} /> Add Item</button>
@@ -256,6 +258,7 @@ export default function Recurring() {
           </div>
         </div>
       )}
+      {showHelp && <HelpPanel title="Recurring Items" body={"Recurring items drive the forecast engine and calendar.\n\nEach item has a day of the month, amount, and type (income or expense). Monthly items fire every month; yearly items fire in their designated month.\n\nItems falling on a weekend are automatically shifted to the preceding Friday in the forecast."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

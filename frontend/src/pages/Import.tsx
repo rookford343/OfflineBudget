@@ -1,8 +1,9 @@
 import { useState, useRef } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { importApi, accountsApi, cardsApi, categoriesApi } from "../api";
 import { fmt } from "../lib/utils";
-import { Upload, CheckCircle, AlertCircle, X } from "lucide-react";
+import { Upload, CheckCircle, AlertCircle, X, ArrowLeftRight, HelpCircle } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
 import { useNavigate } from "react-router-dom";
 
 type SourceTab = "checking" | "card";
@@ -14,18 +15,27 @@ interface PreviewRow {
   category_id: number | null;
   category_name: string | null;
   needs_review: boolean;
+  is_transfer: boolean;
+  included: boolean; // false for transfer rows by default
 }
 
+const COLOR_SWATCHES = ["#6366f1", "#22c55e", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6"];
+
 export default function Import() {
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [tab, setTab] = useState<SourceTab>("checking");
   const [sourceId, setSourceId] = useState<number | null>(null);
-  const [preview, setPreview] = useState<{ format: string; rows: PreviewRow[]; stats: any } | null>(null);
+  const [preview, setPreview] = useState<{ format: string; rows: any[]; stats: any } | null>(null);
   const [editedRows, setEditedRows] = useState<PreviewRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<{ imported: number; skipped_duplicates: number } | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const [inlineCatRow, setInlineCatRow] = useState<number | null>(null);
+  const [inlineCatName, setInlineCatName] = useState("");
+  const [inlineCatColor, setInlineCatColor] = useState("#6366f1");
 
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: cards = [] } = useQuery({ queryKey: ["cards"], queryFn: cardsApi.list });
@@ -38,7 +48,10 @@ export default function Import() {
     mutationFn: importApi.preview,
     onSuccess: (data) => {
       setPreview(data);
-      setEditedRows(data.rows.map((r: PreviewRow) => ({ ...r })));
+      setEditedRows(data.rows.map((r: any) => ({
+        ...r,
+        included: !r.is_transfer,
+      })));
       setError(null);
     },
     onError: (e: any) => setError(e?.response?.data?.detail ?? "Preview failed"),
@@ -51,6 +64,22 @@ export default function Import() {
       setPreview(null);
     },
     onError: (e: any) => setError(e?.response?.data?.detail ?? "Import failed"),
+  });
+
+  const createCatMut = useMutation({
+    mutationFn: (data: object) => categoriesApi.create(data),
+    onSuccess: (newCat: any) => {
+      qc.invalidateQueries({ queryKey: ["categories"] });
+      if (inlineCatRow !== null) {
+        setEditedRows(rows => rows.map((r, i) =>
+          i === inlineCatRow
+            ? { ...r, category_id: newCat.id, category_name: newCat.name, needs_review: false }
+            : r
+        ));
+      }
+      setInlineCatRow(null);
+      setInlineCatName("");
+    },
   });
 
   function handleFile(file: File) {
@@ -76,26 +105,48 @@ export default function Import() {
     if (file) handleFile(file);
   }
 
-  function setCategoryForRow(idx: number, catId: number) {
+  function setCategoryForRow(idx: number, value: string) {
+    if (value === "new") {
+      setInlineCatRow(idx);
+      setInlineCatName("");
+      return;
+    }
+    const catId = parseInt(value);
     const cat = allCats.find((c: any) => c.id === catId);
-    setEditedRows(rows => rows.map((r, i) => i === idx ? { ...r, category_id: catId, category_name: cat?.name ?? null, needs_review: false } : r));
+    setEditedRows(rows => rows.map((r, i) =>
+      i === idx ? { ...r, category_id: catId, category_name: cat?.name ?? null, needs_review: false } : r
+    ));
+    if (inlineCatRow === idx) setInlineCatRow(null);
+  }
+
+  function toggleIncluded(idx: number) {
+    setEditedRows(rows => rows.map((r, i) => i === idx ? { ...r, included: !r.included } : r));
+  }
+
+  function submitInlineCat(idx: number) {
+    if (!inlineCatName.trim()) return;
+    createCatMut.mutate({ name: inlineCatName.trim(), type: "expense", color: inlineCatColor });
   }
 
   function confirmImport() {
     if (!sourceId) return;
-    const payload: any = { rows: editedRows.map(r => ({ date: r.date, description: r.description, amount: r.amount, category_id: r.category_id })) };
+    const activeRows = editedRows.filter(r => r.included);
+    const payload: any = {
+      rows: activeRows.map(r => ({ date: r.date, description: r.description, amount: r.amount, category_id: r.category_id }))
+    };
     if (tab === "checking") payload.account_id = sourceId;
     else payload.card_id = sourceId;
     confirmMut.mutate(payload);
   }
 
-  const needsReviewCount = editedRows.filter(r => r.needs_review).length;
+  const includedRows = editedRows.filter(r => r.included);
+  const needsReviewCount = includedRows.filter(r => r.needs_review).length;
   const sources = tab === "checking" ? checkingAccounts : cards;
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Import Transactions</h2>
+        <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">Import Transactions <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">Upload a CSV file to import transactions with auto-categorization</p>
       </div>
 
@@ -172,6 +223,9 @@ export default function Import() {
                 {preview.stats.needs_review > 0 && (
                   <span className="text-amber-600 font-medium"> · {preview.stats.needs_review} need review</span>
                 )}
+                {editedRows.filter(r => r.is_transfer && !r.included).length > 0 && (
+                  <span className="text-gray-500 font-medium"> · {editedRows.filter(r => r.is_transfer && !r.included).length} transfers skipped</span>
+                )}
                 {" · "}format: {preview.format}
               </p>
             </div>
@@ -181,7 +235,7 @@ export default function Import() {
               className="btn-primary"
               title={needsReviewCount > 0 ? "Assign categories to all rows first" : undefined}
             >
-              {confirmMut.isPending ? "Importing…" : `Import ${editedRows.length} Transactions`}
+              {confirmMut.isPending ? "Importing…" : `Import ${includedRows.length} Transactions`}
             </button>
           </div>
 
@@ -195,6 +249,7 @@ export default function Import() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700">
+                  <th className="text-left py-2 pr-4 text-gray-500 font-medium w-8"></th>
                   <th className="text-left py-2 pr-4 text-gray-500 font-medium">Date</th>
                   <th className="text-left py-2 pr-4 text-gray-500 font-medium">Description</th>
                   <th className="text-right py-2 pr-4 text-gray-500 font-medium">Amount</th>
@@ -202,36 +257,83 @@ export default function Import() {
                 </tr>
               </thead>
               <tbody>
-                {editedRows.map((row, idx) => (
-                  <tr key={idx} className={`border-b border-gray-50 dark:border-gray-800 ${row.needs_review ? "bg-amber-50/50 dark:bg-amber-900/10" : ""}`}>
-                    <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">{row.date}</td>
-                    <td className="py-2 pr-4 text-gray-800 dark:text-gray-200 max-w-xs truncate">{row.description}</td>
-                    <td className={`py-2 pr-4 text-right font-semibold tabular-nums whitespace-nowrap ${row.amount < 0 ? "text-red-600" : "text-green-600"}`}>
-                      {fmt(row.amount)}
-                    </td>
-                    <td className="py-2">
-                      {row.needs_review ? (
-                        <select
-                          className="input py-1 text-xs"
-                          value={editedRows[idx].category_id ?? ""}
-                          onChange={e => setCategoryForRow(idx, parseInt(e.target.value))}
-                        >
-                          <option value="">Assign category…</option>
-                          {allCats.map((c: any) => (
-                            <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="badge-green">{row.category_name}</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {editedRows.map((row, idx) => {
+                  const isTransfer = row.is_transfer && !row.included;
+                  return (
+                    <tr key={idx} className={`border-b border-gray-50 dark:border-gray-800 ${
+                      isTransfer ? "opacity-50" : row.needs_review ? "bg-amber-50/50 dark:bg-amber-900/10" : ""
+                    }`}>
+                      <td className="py-2 pr-2">
+                        <input
+                          type="checkbox"
+                          checked={row.included}
+                          onChange={() => toggleIncluded(idx)}
+                          className="rounded border-gray-300"
+                        />
+                      </td>
+                      <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">{row.date}</td>
+                      <td className="py-2 pr-4 text-gray-800 dark:text-gray-200 max-w-xs">
+                        <div className="truncate">{row.description}</div>
+                        {row.is_transfer && (
+                          <div className="flex items-center gap-1 mt-0.5">
+                            <ArrowLeftRight size={11} className="text-gray-400" />
+                            <span className="text-xs text-gray-400">transfer — skip to avoid double-counting</span>
+                          </div>
+                        )}
+                      </td>
+                      <td className={`py-2 pr-4 text-right font-semibold tabular-nums whitespace-nowrap ${row.amount < 0 ? "text-red-600" : "text-green-600"}`}>
+                        {fmt(row.amount)}
+                      </td>
+                      <td className="py-2 min-w-[180px]">
+                        {inlineCatRow === idx ? (
+                          <div className="space-y-1">
+                            <input
+                              autoFocus
+                              className="input py-1 text-xs w-full"
+                              placeholder="Category name…"
+                              value={inlineCatName}
+                              onChange={e => setInlineCatName(e.target.value)}
+                              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); submitInlineCat(idx); } if (e.key === "Escape") setInlineCatRow(null); }}
+                            />
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {COLOR_SWATCHES.map(c => (
+                                <button key={c} type="button"
+                                  onClick={() => setInlineCatColor(c)}
+                                  className={`w-5 h-5 rounded-full border-2 ${inlineCatColor === c ? "border-gray-800" : "border-transparent"}`}
+                                  style={{ background: c }}
+                                />
+                              ))}
+                            </div>
+                            <div className="flex gap-1">
+                              <button onClick={() => submitInlineCat(idx)} disabled={createCatMut.isPending} className="btn-primary text-xs py-1 px-2">
+                                {createCatMut.isPending ? "…" : "Add"}
+                              </button>
+                              <button onClick={() => setInlineCatRow(null)} className="btn-secondary text-xs py-1 px-2">Cancel</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <select
+                            className={`input py-1 text-xs w-full ${row.needs_review ? "border-amber-300" : ""}`}
+                            value={editedRows[idx].category_id ?? ""}
+                            onChange={e => setCategoryForRow(idx, e.target.value)}
+                          >
+                            <option value="">No category</option>
+                            {allCats.map((c: any) => (
+                              <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
+                            ))}
+                            <option value="new">+ New category…</option>
+                          </select>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
+      {showHelp && <HelpPanel title="Import Transactions" body={"Upload a CSV file to import transactions from your bank.\n\nSupported formats: Chase checking, Chase card, Apple Card, and generic CSV.\n\nEach row gets auto-categorized. You can change any category using the dropdown — or create a new category inline with '+ New category…'\n\nTransfer rows (CC autopay, etc.) are detected and unchecked by default to prevent double-counting. You can re-check them if needed."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { accountsApi, categoriesApi, budgetApi, adminApi } from "../api";
+import { accountsApi, categoriesApi, budgetApi, adminApi, authApi } from "../api";
 import { fmt } from "../lib/utils";
 import { getTheme, setTheme } from "../store/theme";
 import { isAdmin } from "../store/auth";
@@ -103,6 +103,22 @@ export default function Settings() {
   const [dark, setDark] = useState(getTheme() === "dark");
   function toggleDark() { const next = !dark; setDark(next); setTheme(next); }
 
+  // ── Social Security ────────────────────────────────────────────────────────
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
+  const [ssGross, setSsGross] = useState("");
+  const [ssWageBase, setSsWageBase] = useState("");
+  const [ssSaved, setSsSaved] = useState(false);
+  React.useEffect(() => {
+    if (me) {
+      setSsGross(me.ss_gross_per_paycheck ?? "");
+      setSsWageBase(me.ss_wage_base ?? "176100");
+    }
+  }, [me]);
+  const updateMeMut = useMutation({
+    mutationFn: authApi.updateMe,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); setSsSaved(true); setTimeout(() => setSsSaved(false), 2000); },
+  });
+
   // ── User management ────────────────────────────────────────────────────────
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState({ ...emptyUser });
@@ -130,6 +146,32 @@ export default function Settings() {
           >
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${dark ? "translate-x-6" : "translate-x-1"}`} />
           </button>
+        </div>
+      </div>
+
+      {/* ── Social Security ── */}
+      <div className="card">
+        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">Social Security Tax</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Track when you hit the SS wage base so you can plan for the resulting paycheck increase.</p>
+        <div className="grid grid-cols-2 gap-4 max-w-md">
+          <div>
+            <label className="label">Gross Per Paycheck ($)</label>
+            <input type="number" step="0.01" className="input" placeholder="5000" value={ssGross} onChange={e => setSsGross(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">SS Wage Base ($)</label>
+            <input type="number" step="1" className="input" placeholder="176100" value={ssWageBase} onChange={e => setSsWageBase(e.target.value)} />
+          </div>
+        </div>
+        <div className="flex items-center gap-3 mt-3">
+          <button
+            onClick={() => updateMeMut.mutate({ ss_gross_per_paycheck: parseFloat(ssGross) || null, ss_wage_base: parseFloat(ssWageBase) || null })}
+            disabled={updateMeMut.isPending}
+            className="btn-primary text-sm"
+          >
+            {updateMeMut.isPending ? "Saving…" : "Save SS Settings"}
+          </button>
+          {ssSaved && <span className="text-sm text-green-600">Saved!</span>}
         </div>
       </div>
 

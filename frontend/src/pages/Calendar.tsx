@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { recurringApi } from "../api";
 import { fmt } from "../lib/utils";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, HelpCircle } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MONTH_NAMES = [
@@ -18,7 +19,11 @@ function nextOccurrence(item: any, refYear: number, refMonth: number): Date {
   const dom = item.day_of_month === 0
     ? lastDayOfMonth(refYear, refMonth)
     : Math.min(item.day_of_month, lastDayOfMonth(refYear, refMonth));
-  return new Date(refYear, refMonth, dom);
+  const d = new Date(refYear, refMonth, dom);
+  // Apply weekend shift: Sat → Fri, Sun → Fri
+  if (d.getDay() === 6) d.setDate(d.getDate() - 1);
+  else if (d.getDay() === 0) d.setDate(d.getDate() - 2);
+  return d;
 }
 
 export default function Calendar() {
@@ -26,6 +31,7 @@ export default function Calendar() {
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth()); // 0-indexed
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   const { data: recurring = [] } = useQuery<any[]>({
     queryKey: ["recurring"],
@@ -51,14 +57,16 @@ export default function Calendar() {
     return true;
   });
 
-  // Build day → items map
+  // Build day → items map with weekend shift applied
   const dayMap = new Map<number, any[]>();
   activeItems.forEach((r: any) => {
-    const dom = r.day_of_month === 0
-      ? lastDayOfMonth(year, month)
-      : Math.min(r.day_of_month, lastDayOfMonth(year, month));
-    if (!dayMap.has(dom)) dayMap.set(dom, []);
-    dayMap.get(dom)!.push(r);
+    const d = nextOccurrence(r, year, month);
+    // Only include if the shifted date is still in this month
+    if (d.getMonth() === month && d.getFullYear() === year) {
+      const dom = d.getDate();
+      if (!dayMap.has(dom)) dayMap.set(dom, []);
+      dayMap.get(dom)!.push(r);
+    }
   });
 
   // Build calendar grid
@@ -98,7 +106,7 @@ export default function Calendar() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Bill Calendar</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-1.5">Bill Calendar <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500 dark:text-gray-400">Recurring income and bills by day</p>
         </div>
         <div className="flex items-center gap-3">
@@ -135,13 +143,14 @@ export default function Calendar() {
             const hasIncome = items.some((r: any) => r.type === "income");
             const isSelected = d === selectedDay;
 
+            const isWeekend = i % 7 === 0 || i % 7 === 6;
             return (
               <div
                 key={i}
                 onClick={() => d != null && setSelectedDay(isSelected ? null : d)}
                 className={`min-h-[72px] p-2 border-b border-r border-gray-100 dark:border-gray-800 last:border-r-0 transition-colors ${
                   d != null ? "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50" : ""
-                } ${isSelected ? "bg-indigo-50 dark:bg-indigo-900/20" : ""}`}
+                } ${isSelected ? "bg-indigo-50 dark:bg-indigo-900/20" : isWeekend ? "bg-gray-50 dark:bg-gray-800/30" : ""}`}
               >
                 {d != null && (
                   <>
@@ -230,6 +239,7 @@ export default function Calendar() {
           </div>
         )}
       </div>
+      {showHelp && <HelpPanel title="Bill Calendar" body={"See all recurring bills and income on a monthly calendar.\n\nGreen dots = income · Red dots = bills. Click a day to see details.\n\nItems that fall on Saturday or Sunday are shifted to the preceding Friday.\nWeekend cells are shaded gray. Today is highlighted in indigo.\n\nThe 'Next 30 days' panel below the calendar lists upcoming items sorted by date."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

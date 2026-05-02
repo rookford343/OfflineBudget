@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cardsApi, accountsApi } from "../api";
 import { fmt, utilColor, utilBg, today } from "../lib/utils";
-import { Plus, Pencil, Trash2, CreditCard as CardIcon, DollarSign, X } from "lucide-react";
+import { Plus, Pencil, Trash2, CreditCard as CardIcon, DollarSign, X, HelpCircle } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
 
 interface Card {
   id: number; name: string; last_four?: string; credit_limit: string;
@@ -15,6 +16,7 @@ const emptyPayment = { checking_account_id: "", date: today(), amount: "", notes
 
 export default function CreditCards() {
   const qc = useQueryClient();
+  const [showHelp, setShowHelp] = useState(false);
   const { data: cards = [], isLoading } = useQuery({ queryKey: ["credit-cards"], queryFn: cardsApi.list });
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const checking = accounts.filter((a: any) => a.type === "checking");
@@ -54,7 +56,7 @@ export default function CreditCards() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Credit Cards</h2>
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Credit Cards <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500">{cards.length} card{cards.length !== 1 ? "s" : ""}</p>
         </div>
         <button onClick={openNew} className="btn-primary"><Plus size={16} /> Add Card</button>
@@ -191,6 +193,7 @@ export default function CreditCards() {
           </div>
         </div>
       )}
+      {showHelp && <HelpPanel title="Credit Cards" body={"Track credit card balances, utilization, and payments.\n\nImport card transactions via CSV to see spending by category.\n\nRecord payments to move money from a checking account to the card and reduce the balance due.\n\nUtilization percentage is highlighted when above 30%."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

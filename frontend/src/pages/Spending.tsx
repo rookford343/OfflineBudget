@@ -8,7 +8,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine,
   LineChart, Line,
 } from "recharts";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, HelpCircle } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
 
 function isDarkMode(): boolean {
   return document.documentElement.classList.contains("dark");
@@ -32,6 +33,7 @@ const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Se
 const YEAR_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 
 export default function Spending() {
+  const [showHelp, setShowHelp] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "trends" | "flow">("overview");
   const [sankeyYear, setSankeyYear] = useState(new Date().getFullYear());
   const [sankeyMonth, setSankeyMonth] = useState(new Date().getMonth() + 1);
@@ -203,7 +205,7 @@ export default function Spending() {
       {/* Header + controls */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900 dark:text-[#c4ccd8]">Spending</h2>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-[#c4ccd8] flex items-center gap-1.5">Spending <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500 dark:text-[#6e7888]">Across checking + all credit cards</p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -548,6 +550,7 @@ function SankeyChart({ data }: { data: any }) {
           );
         })}
       </svg>
+      {showHelp && <HelpPanel title="Spending Analysis" body={"Analyze your spending by category across any date range.\n\nOverview tab: budgeted vs. actual by category with breakdown by account and card.\nTrends tab: year-over-year comparison and 24-month rolling totals.\nFlow tab: Sankey diagram showing income sources flowing into expense categories."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
