@@ -8,11 +8,28 @@ from decimal import Decimal, InvalidOperation
 from backend.models import ImportFormat
 
 
+_CC_TRANSFER_PATTERNS = (
+    "CREDIT CRD AUTOPAY",
+    "CREDIT CRD AUTOPA",
+    "APPLECARD GSBANK",
+    "CITI AUTOPAY",
+    "AUTOPAY PAYMENT",
+    "ONLINE PAYMENT - THANK",
+    "AUTOMATIC PAYMENT",
+)
+
+
+def _is_cc_transfer(description: str) -> bool:
+    upper = description.upper()
+    return any(p in upper for p in _CC_TRANSFER_PATTERNS)
+
+
 @dataclass
 class ParsedRow:
     date: date
     description: str
     amount: Decimal  # positive = credit/income, negative = debit/charge
+    is_transfer: bool = False
 
 
 def detect_format(headers: list[str]) -> ImportFormat:
@@ -102,4 +119,9 @@ def _parse_row(fmt: ImportFormat, row: dict) -> ParsedRow | None:
     if not parsed_date or parsed_amount is None or not desc:
         return None
 
-    return ParsedRow(date=parsed_date, description=desc, amount=parsed_amount)
+    return ParsedRow(
+        date=parsed_date,
+        description=desc,
+        amount=parsed_amount,
+        is_transfer=_is_cc_transfer(desc),
+    )

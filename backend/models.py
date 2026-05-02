@@ -67,6 +67,8 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.admin, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    ss_gross_per_paycheck: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    ss_wage_base: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     accounts: Mapped[list[Account]] = relationship(back_populates="user", cascade="all, delete-orphan")
     categories: Mapped[list[Category]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -80,6 +82,7 @@ class User(Base):
     manual_liabilities: Mapped[list[ManualLiability]] = relationship(back_populates="user", cascade="all, delete-orphan")
     net_worth_snapshots: Mapped[list[NetWorthSnapshot]] = relationship(back_populates="user", cascade="all, delete-orphan")
     forecast_scenarios: Mapped[list[ForecastScenario]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    planned_expenses: Mapped[list[PlannedExpense]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 # ── Accounts ─────────────────────────────────────────────────────────────────
@@ -384,6 +387,24 @@ class ScenarioOverride(Base):
 
     scenario: Mapped[ForecastScenario] = relationship(back_populates="overrides")
     recurring_item: Mapped[RecurringItem] = relationship()
+
+
+# ── Planned Expenses ─────────────────────────────────────────────────────────
+
+class PlannedExpense(Base):
+    __tablename__ = "planned_expenses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    expected_date: Mapped[date] = mapped_column(Date, nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    user: Mapped[User] = relationship(back_populates="planned_expenses")
+    category: Mapped[Category | None] = relationship()
 
 
 # ── Audit Log ─────────────────────────────────────────────────────────────────

@@ -1,17 +1,24 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { accountsApi, forecastApi, scenariosApi } from "../api";
-import { fmt } from "../lib/utils";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi } from "../api";
+import { fmt, today } from "../lib/utils";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
-import { ChevronDown, ChevronUp, AlertTriangle } from "lucide-react";
+import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
+
+const emptyExpense = { name: "", amount: "", expected_date: today(), notes: "" };
 
 export default function Forecast() {
+  const qc = useQueryClient();
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const checkingAccounts = accounts.filter((a: any) => a.type === "checking");
   const [accountId, setAccountId] = useState<number | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
   const [expandedQ, setExpandedQ] = useState<number | null>(null);
   const [scenarioId, setScenarioId] = useState<number | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
+  const [showExpenseForm, setShowExpenseForm] = useState(false);
+  const [expenseForm, setExpenseForm] = useState({ ...emptyExpense });
 
   const activeAccountId = accountId ?? checkingAccounts[0]?.id;
   const activeAccount = checkingAccounts.find((a: any) => a.id === activeAccountId);
@@ -28,6 +35,25 @@ export default function Forecast() {
   const { data: scenarios = [] } = useQuery({
     queryKey: ["scenarios"],
     queryFn: scenariosApi.list,
+  });
+
+  const { data: plannedExpenses = [] } = useQuery({
+    queryKey: ["planned-expenses"],
+    queryFn: plannedExpensesApi.list,
+  });
+
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: authApi.me,
+  });
+
+  const createExpenseMut = useMutation({
+    mutationFn: plannedExpensesApi.create,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["planned-expenses"] }); setShowExpenseForm(false); setExpenseForm({ ...emptyExpense }); },
+  });
+  const deleteExpenseMut = useMutation({
+    mutationFn: plannedExpensesApi.remove,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["planned-expenses"] }),
   });
 
   const { data: scenarioQuarters = [] } = useQuery({
@@ -70,6 +96,20 @@ export default function Forecast() {
 
   const hasScenario = scenarioId !== null && Object.keys(scenarioMap).length > 0;
 
+  // SS limit estimate
+  const ssGross = me?.ss_gross_per_paycheck ? parseFloat(me.ss_gross_per_paycheck) : null;
+  const ssWageBase = me?.ss_wage_base ? parseFloat(me.ss_wage_base) : 176100;
+  const ssConfigured = ssGross !== null && ssGross > 0;
+  let ssLimitMonth: string | null = null;
+  let ssPerPaycheckIncrease: number | null = null;
+  if (ssConfigured) {
+    const payPeriodsToLimit = Math.ceil(ssWageBase / ssGross!);
+    const ssDate = new Date(year, 0, 1);
+    ssDate.setDate(ssDate.getDate() + (payPeriodsToLimit - 1) * 14);
+    ssLimitMonth = ssDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+    ssPerPaycheckIncrease = ssGross! * 0.062;
+  }
+
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload?.length) {
       return (
@@ -90,7 +130,7 @@ export default function Forecast() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Forecast</h2>
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Forecast <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500">Day-by-day balance projection</p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -130,6 +170,97 @@ export default function Forecast() {
           </ResponsiveContainer>
         </div>
       )}
+
+      {/* SS Tax Info */}
+      {ssConfigured && (
+        <div className="card bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
+          <div className="flex items-start gap-3">
+            <TrendingUp size={18} className="text-green-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="font-semibold text-green-800 dark:text-green-300 text-sm">Social Security Wage Base</p>
+              <p className="text-sm text-green-700 dark:text-green-400 mt-1">
+                Estimated SS limit reached: <strong>{ssLimitMonth}</strong>
+                {ssPerPaycheckIncrease !== null && (
+                  <> · Paycheck increases by ~<strong>{fmt(ssPerPaycheckIncrease)}</strong> after that</>
+                )}
+              </p>
+              <p className="text-xs text-green-600 dark:text-green-500 mt-0.5">Based on ${ssGross?.toLocaleString()}/paycheck gross · ${ssWageBase.toLocaleString()} wage base</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Planned Expenses */}
+      <div className="card">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Planned Expenses</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400">One-off future costs that appear in the balance projection</p>
+          </div>
+          <button onClick={() => setShowExpenseForm(true)} className="btn-primary btn-sm text-xs px-3 py-1.5"><Plus size={14} /> Add</button>
+        </div>
+
+        {(plannedExpenses as any[]).length === 0 && !showExpenseForm && (
+          <p className="text-sm text-gray-400 text-center py-4">No planned expenses yet — add a vacation, down payment, or other future cost</p>
+        )}
+
+        {(plannedExpenses as any[]).length > 0 && (
+          <div className="divide-y divide-gray-100 dark:divide-gray-700 mb-4">
+            {(plannedExpenses as any[]).map((pe: any) => (
+              <div key={pe.id} className="py-3 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{pe.name}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {new Date(pe.expected_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                    {pe.notes && <> · {pe.notes}</>}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="font-semibold text-red-600">{fmt(pe.amount)}</span>
+                  <button onClick={() => deleteExpenseMut.mutate(pe.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {showExpenseForm && (
+          <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
+            <div className="flex justify-between items-center mb-3">
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Planned Expense</p>
+              <button onClick={() => setShowExpenseForm(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="label">Name</label>
+                <input className="input" placeholder="Vacation, down payment…" value={expenseForm.name} onChange={e => setExpenseForm({ ...expenseForm, name: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Amount</label>
+                <input type="number" step="0.01" className="input" placeholder="5000" value={expenseForm.amount} onChange={e => setExpenseForm({ ...expenseForm, amount: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Expected Date</label>
+                <input type="date" className="input" value={expenseForm.expected_date} onChange={e => setExpenseForm({ ...expenseForm, expected_date: e.target.value })} />
+              </div>
+              <div className="col-span-2">
+                <label className="label">Notes (optional)</label>
+                <input className="input" value={expenseForm.notes} onChange={e => setExpenseForm({ ...expenseForm, notes: e.target.value })} />
+              </div>
+              <div className="col-span-2 flex gap-2">
+                <button
+                  onClick={() => createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null })}
+                  disabled={!expenseForm.name || !expenseForm.amount || createExpenseMut.isPending}
+                  className="btn-primary"
+                >
+                  {createExpenseMut.isPending ? "Saving…" : "Add Planned Expense"}
+                </button>
+                <button onClick={() => setShowExpenseForm(false)} className="btn-secondary">Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Quarter summaries */}
       <div className="space-y-3">
@@ -180,7 +311,8 @@ export default function Forecast() {
                                   {t.amount > 0 ? "+" : ""}{fmt(t.amount)}
                                 </span>
                                 <span className="text-gray-600">{t.name}</span>
-                                {!t.is_actual && <span className="badge-blue">projected</span>}
+                                {!t.is_actual && !t.is_planned && <span className="badge-blue">projected</span>}
+                                {t.is_planned && <span className="px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">planned</span>}
                               </div>
                             ))}
                           </td>
@@ -202,6 +334,7 @@ export default function Forecast() {
       </div>
 
       {isLoading && <div className="text-gray-400 text-sm text-center py-8">Building forecast…</div>}
+      {showHelp && <HelpPanel title="Forecast" body={"Day-by-day cash flow projection based on your recurring income and bills.\n\nSelect an account and year to see the balance line. Q1–Q4 summaries show open/close balances and net cash flow.\n\nScenarios let you model 'what if I cut dining by $200/month?' with a second line chart trace.\n\nPlanned Expenses are one-off future costs (vacation, down payment) injected into the forecast balance.\n\nWeekend bills are automatically shifted to the preceding Friday."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

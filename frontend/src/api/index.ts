@@ -9,6 +9,7 @@ export const authApi = {
   register: (username: string, password: string, display_name: string) =>
     api.post("/auth/register", { username, password, display_name }).then((r) => r.data),
   me: () => api.get("/auth/me").then((r) => r.data),
+  updateMe: (data: object) => api.patch("/auth/me", data).then((r) => r.data),
 };
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
@@ -141,6 +142,14 @@ export const netWorthApi = {
   createLiability: (data: object) => api.post("/net-worth/liabilities", data).then((r) => r.data),
   updateLiability: (id: number, data: object) => api.patch(`/net-worth/liabilities/${id}`, data).then((r) => r.data),
   removeLiability: (id: number) => api.delete(`/net-worth/liabilities/${id}`),
+};
+
+// ── Planned Expenses ─────────────────────────────────────────────────────────
+export const plannedExpensesApi = {
+  list: () => api.get("/planned-expenses").then((r) => r.data),
+  create: (data: object) => api.post("/planned-expenses", data).then((r) => r.data),
+  update: (id: number, data: object) => api.patch(`/planned-expenses/${id}`, data).then((r) => r.data),
+  remove: (id: number) => api.delete(`/planned-expenses/${id}`),
 };
 
 // ── Scenarios ─────────────────────────────────────────────────────────────────

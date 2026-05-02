@@ -20,6 +20,14 @@ class UserOut(BaseModel):
     display_name: str
     role: UserRole = UserRole.admin
     created_at: datetime
+    ss_gross_per_paycheck: Optional[Decimal] = None
+    ss_wage_base: Optional[Decimal] = None
+
+
+class UserUpdate(BaseModel):
+    display_name: Optional[str] = None
+    ss_gross_per_paycheck: Optional[Decimal] = None
+    ss_wage_base: Optional[Decimal] = None
 
 
 class UserAdminCreate(BaseModel):
@@ -217,6 +225,7 @@ class ForecastTransaction(BaseModel):
     type: str  # "income" | "expense"
     category_name: Optional[str]
     is_actual: bool
+    is_planned: bool = False
     recurring_item_id: Optional[int] = None
     transaction_id: Optional[int] = None
 
@@ -438,6 +447,7 @@ class ImportPreviewRow(BaseModel):
     category_id: Optional[int]
     category_name: Optional[str]
     needs_review: bool
+    is_transfer: bool = False
 
 
 class ImportPreviewStats(BaseModel):
@@ -638,6 +648,35 @@ class ScenarioOut(BaseModel):
     name: str
     created_at: datetime
     overrides: list[ScenarioOverrideOut] = []
+
+
+# ── Planned Expenses ─────────────────────────────────────────────────────────
+
+class PlannedExpenseCreate(BaseModel):
+    name: str
+    amount: Decimal
+    expected_date: date
+    notes: Optional[str] = None
+    category_id: Optional[int] = None
+
+
+class PlannedExpenseUpdate(BaseModel):
+    name: Optional[str] = None
+    amount: Optional[Decimal] = None
+    expected_date: Optional[date] = None
+    notes: Optional[str] = None
+    category_id: Optional[int] = None
+
+
+class PlannedExpenseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    amount: Decimal
+    expected_date: date
+    notes: Optional[str]
+    category_id: Optional[int]
+    created_at: datetime
 
 
 # ── Sankey ────────────────────────────────────────────────────────────────────

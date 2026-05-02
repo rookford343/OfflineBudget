@@ -5,7 +5,8 @@ import { fmt } from "../lib/utils";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
-import { PlusCircle, Pencil, Trash2, Camera } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Camera, HelpCircle } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
 
 type Asset = { id: number; name: string; asset_type: string; current_value: string; as_of_date: string };
 type Liability = { id: number; name: string; liability_type: string; current_balance: string; as_of_date: string };
@@ -19,6 +20,7 @@ const emptyLiability = { name: "", liability_type: LIABILITY_TYPES[0], current_b
 
 export default function NetWorth() {
   const qc = useQueryClient();
+  const [showHelp, setShowHelp] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [editingLiability, setEditingLiability] = useState<Liability | null>(null);
   const [assetForm, setAssetForm] = useState(emptyAsset);
@@ -70,7 +72,7 @@ export default function NetWorth() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold text-gray-900">Net Worth</h2>
+          <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Net Worth <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500">Assets, liabilities, and net worth over time</p>
         </div>
         <button
@@ -248,6 +250,7 @@ export default function NetWorth() {
           ))}
         </div>
       </div>
+      {showHelp && <HelpPanel title="Net Worth" body={"Your net worth = assets + account balances − credit card balances − liabilities.\n\nAdd manual assets (investments, real estate, vehicles) and liabilities (mortgage, loans).\n\nClick 'Capture Snapshot' to save today's net worth and build a trend line over time."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
