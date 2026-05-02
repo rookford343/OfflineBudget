@@ -2,9 +2,24 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi } from "../api";
 import { fmt, today } from "../lib/utils";
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
 import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+
+function isDarkMode(): boolean {
+  return document.documentElement.classList.contains("dark");
+}
+
+function chartTheme() {
+  const dark = isDarkMode();
+  return {
+    grid:    dark ? "#2c3040" : "#e5e7eb",
+    tick:    dark ? "#6e7888" : "#6b7280",
+    tooltip: dark ? "#1f2330" : "#ffffff",
+    tooltipBorder: dark ? "#2c3040" : "#e5e7eb",
+    tooltipText: dark ? "#c4ccd8" : "#111827",
+  };
+}
 
 const emptyExpense = { name: "", amount: "", expected_date: today(), notes: "" };
 
@@ -99,11 +114,13 @@ export default function Forecast() {
   // SS limit estimate
   const ssGross = me?.ss_gross_per_paycheck ? parseFloat(me.ss_gross_per_paycheck) : null;
   const ssWageBase = me?.ss_wage_base ? parseFloat(me.ss_wage_base) : 176100;
+  const ssBonus = me?.ss_bonus_ytd ? parseFloat(me.ss_bonus_ytd) : 0;
   const ssConfigured = ssGross !== null && ssGross > 0;
   let ssLimitMonth: string | null = null;
   let ssPerPaycheckIncrease: number | null = null;
   if (ssConfigured) {
-    const payPeriodsToLimit = Math.ceil(ssWageBase / ssGross!);
+    const remainingWageBase = ssWageBase - ssBonus;
+    const payPeriodsToLimit = Math.ceil(remainingWageBase / ssGross!);
     const ssDate = new Date(year, 0, 1);
     ssDate.setDate(ssDate.getDate() + (payPeriodsToLimit - 1) * 14);
     ssLimitMonth = ssDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
@@ -155,18 +172,28 @@ export default function Forecast() {
         <div className="card">
           <h3 className="font-semibold text-gray-900 mb-4">Balance Over Time — {year}</h3>
           <ResponsiveContainer width="100%" height={280}>
-            <LineChart data={mergedData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <AreaChart data={mergedData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+              <defs>
+                <linearGradient id="forecastBaselineGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.12} />
+                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0.01} />
+                </linearGradient>
+                <linearGradient id="forecastScenarioGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#10b981" stopOpacity={0.10} />
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0.01} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={chartTheme().grid} />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
               <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
               <Tooltip content={<CustomTooltip />} />
               <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
-              <Line type="monotone" dataKey="baseline" name="Baseline" stroke="#6366f1" strokeWidth={2} dot={false} />
+              <Area type="monotone" dataKey="baseline" name="Baseline" stroke="#6366f1" strokeWidth={2} fill="url(#forecastBaselineGradient)" dot={false} animationDuration={800} animationEasing="ease-out" />
               {hasScenario && (
-                <Line type="monotone" dataKey="scenario" name="Scenario" stroke="#10b981" strokeWidth={2} dot={false} strokeDasharray="5 3" />
+                <Area type="monotone" dataKey="scenario" name="Scenario" stroke="#10b981" strokeWidth={2} fill="url(#forecastScenarioGradient)" dot={false} strokeDasharray="5 3" animationDuration={800} animationEasing="ease-out" />
               )}
               {hasScenario && <Legend />}
-            </LineChart>
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       )}

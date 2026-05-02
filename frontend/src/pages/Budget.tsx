@@ -50,6 +50,13 @@ export default function Budget() {
   const subsByParent: Record<number, any[]> = {};
   subs.forEach((s: any) => { (subsByParent[s.parent_id] ??= []).push(s); });
 
+  function rowStatusClass(available: number, pctUsed: number): string {
+    if (available === 0) return "budget-row-unset";
+    if (pctUsed >= 100) return "budget-row-over";
+    if (pctUsed >= 80) return "budget-row-warn";
+    return "budget-row-ok";
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -98,10 +105,13 @@ export default function Budget() {
                 const rolloverBalance = parseFloat(row.rollover_balance || "0");
                 const budgeted = parseFloat(row.budgeted || "0");
                 const available = row.rollover_enabled ? budgeted + rolloverBalance : budgeted;
-                const left = available - parseFloat(row.actual_total || "0");
+                const actualTotal = parseFloat(row.actual_total || "0");
+                const left = available - actualTotal;
+                const pctUsed = available > 0 ? (actualTotal / available) * 100 : 0;
+                const statusClass = rowStatusClass(available, pctUsed);
                 return (
                   <React.Fragment key={row.category_id}>
-                    <tr className="bg-gray-50/60 dark:bg-gray-800/40">
+                    <tr className={`bg-gray-50/60 dark:bg-gray-800/40 ${statusClass}`}>
                       <td className="px-4 py-2.5 font-semibold text-gray-900 dark:text-white">
                         <div className="flex items-center gap-2">
                           {row.category_name}
@@ -145,7 +155,17 @@ export default function Budget() {
                       <td className="px-4 py-2.5 text-right text-gray-600 dark:text-gray-400">{fmt(row.actual_cards)}</td>
                       <td className="px-4 py-2.5 text-right font-semibold text-gray-900 dark:text-white">{fmt(row.actual_total)}</td>
                       <td className={`px-4 py-2.5 text-right font-semibold ${left < 0 ? "text-red-600 dark:text-red-400" : "text-green-600 dark:text-green-400"}`}>
-                        {budgeted > 0 || (row.rollover_enabled && rolloverBalance > 0) ? fmt(left) : "—"}
+                        {budgeted > 0 || (row.rollover_enabled && rolloverBalance > 0) ? (
+                          <div>
+                            <div>{fmt(left)}</div>
+                            <div className="mt-1 h-1 w-12 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden ml-auto">
+                              <div
+                                className={`h-full rounded-full ${pctUsed >= 100 ? "bg-red-500" : pctUsed >= 80 ? "bg-amber-500" : "bg-green-500"}`}
+                                style={{ width: `${Math.min(100, pctUsed)}%` }}
+                              />
+                            </div>
+                          </div>
+                        ) : "—"}
                       </td>
                       <td className="px-4 py-2.5">
                         <button onClick={() => { setEditId(row.category_id); setEditAmt(row.budgeted); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={13} /></button>

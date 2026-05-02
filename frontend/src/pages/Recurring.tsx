@@ -61,7 +61,10 @@ export default function Recurring() {
       <div className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
         <div>
           <p className="text-sm font-medium text-gray-900">{item.name}</p>
-          <p className="text-xs text-gray-400">{dayLabel}</p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className={isYearly ? "badge-amber" : "badge-blue"}>{isYearly ? "yearly" : "monthly"}</span>
+            <span className="text-xs text-gray-400">{dayLabel}</span>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <div className="text-right">
@@ -99,6 +102,18 @@ export default function Recurring() {
           <span className="text-xs text-gray-400">yearly items averaged</span>
         </div>
       </div>
+
+      {(income.length > 0 || expenses.length > 0) && (
+        <div className={`card flex items-center justify-between ${monthlyIncome - monthlyExpenses >= 0 ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"}`}>
+          <div>
+            <p className="text-sm font-semibold text-gray-900 dark:text-white">Monthly Cash Flow</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">{fmt(monthlyIncome)} income − {fmt(monthlyExpenses)} expenses</p>
+          </div>
+          <p className={`text-xl font-bold tabular-nums ${monthlyIncome - monthlyExpenses >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+            {monthlyIncome - monthlyExpenses >= 0 ? "+" : ""}{fmt(monthlyIncome - monthlyExpenses)}
+          </p>
+        </div>
+      )}
 
       {/* Detected patterns */}
       {visibleSuggestions.length > 0 && (
