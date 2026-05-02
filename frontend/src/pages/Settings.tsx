@@ -6,8 +6,9 @@ import { getTheme, setTheme } from "../store/theme";
 import { isAdmin } from "../store/auth";
 import {
   Plus, Pencil, Trash2, X, Check, Moon, Sun, ChevronRight, ChevronDown,
-  AlertTriangle, Shield, User, Activity
+  AlertTriangle, Shield, User, Activity, HelpCircle
 } from "lucide-react";
+import HelpPanel from "../components/HelpPanel";
 
 const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", notes: "" };
 const emptyCat = { name: "", type: "expense", parent_id: "", color: "#6366f1" };
@@ -107,11 +108,14 @@ export default function Settings() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
   const [ssGross, setSsGross] = useState("");
   const [ssWageBase, setSsWageBase] = useState("");
+  const [ssBonus, setSsBonus] = useState("");
   const [ssSaved, setSsSaved] = useState(false);
+  const [showSsHelp, setShowSsHelp] = useState(false);
   React.useEffect(() => {
     if (me) {
       setSsGross(me.ss_gross_per_paycheck ?? "");
       setSsWageBase(me.ss_wage_base ?? "176100");
+      setSsBonus(me.ss_bonus_ytd ?? "");
     }
   }, [me]);
   const updateMeMut = useMutation({
@@ -151,7 +155,10 @@ export default function Settings() {
 
       {/* ── Social Security ── */}
       <div className="card">
-        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">Social Security Tax</h3>
+        <div className="flex items-center gap-2 mb-1">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100">Social Security Tax</h3>
+          <button onClick={() => setShowSsHelp(true)} className="text-gray-400 hover:text-indigo-500"><HelpCircle size={15} /></button>
+        </div>
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Track when you hit the SS wage base so you can plan for the resulting paycheck increase.</p>
         <div className="grid grid-cols-2 gap-4 max-w-md">
           <div>
@@ -162,10 +169,14 @@ export default function Settings() {
             <label className="label">SS Wage Base ($)</label>
             <input type="number" step="1" className="input" placeholder="176100" value={ssWageBase} onChange={e => setSsWageBase(e.target.value)} />
           </div>
+          <div>
+            <label className="label">YTD Bonus Subject to SS ($)</label>
+            <input type="number" step="0.01" className="input" placeholder="0" value={ssBonus} onChange={e => setSsBonus(e.target.value)} />
+          </div>
         </div>
         <div className="flex items-center gap-3 mt-3">
           <button
-            onClick={() => updateMeMut.mutate({ ss_gross_per_paycheck: parseFloat(ssGross) || null, ss_wage_base: parseFloat(ssWageBase) || null })}
+            onClick={() => updateMeMut.mutate({ ss_gross_per_paycheck: parseFloat(ssGross) || null, ss_wage_base: parseFloat(ssWageBase) || null, ss_bonus_ytd: parseFloat(ssBonus) || null })}
             disabled={updateMeMut.isPending}
             className="btn-primary text-sm"
           >
@@ -174,6 +185,7 @@ export default function Settings() {
           {ssSaved && <span className="text-sm text-green-600">Saved!</span>}
         </div>
       </div>
+      {showSsHelp && <HelpPanel title="Social Security Tax" body={"Gross Per Paycheck: your total gross wages per paycheck before any deductions. This is used to estimate how many pay periods until you hit the SS wage base.\n\nSS Wage Base: the annual income limit above which Social Security tax is no longer withheld (default $176,100 for 2025). After reaching this limit, your paycheck increases by ~6.2% of gross.\n\nYTD Bonus Subject to SS: bonuses you've received this year that were subject to Social Security tax. Reduces the remaining wage base so the estimate stays accurate."} onClose={() => setShowSsHelp(false)} />}
 
       {/* ── Accounts ── */}
       <div className="card">

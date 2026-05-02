@@ -39,6 +39,7 @@ def upgrade_schema():
         "ALTER TABLE categories ADD COLUMN rollover_balance NUMERIC(14,2) DEFAULT 0",
         "ALTER TABLE users ADD COLUMN ss_gross_per_paycheck NUMERIC(14,2)",
         "ALTER TABLE users ADD COLUMN ss_wage_base NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN ss_bonus_ytd NUMERIC(14,2)",
     ]
     with engine.connect() as conn:
         for s in stmts:

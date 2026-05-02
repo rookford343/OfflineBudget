@@ -6,7 +6,7 @@ import { fmt, firstOfMonth, today } from "../lib/utils";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine,
-  LineChart, Line,
+  AreaChart, Area, Sector,
 } from "recharts";
 import { ChevronDown, ChevronRight, HelpCircle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
@@ -42,6 +42,7 @@ export default function Spending() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [sourceKey, setSourceKey] = useState<string>("all");
   const [catFilter, setCatFilter] = useState<Set<number> | null>(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
 
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: cards = [] } = useQuery({ queryKey: ["cards"], queryFn: cardsApi.list });
@@ -160,6 +161,20 @@ export default function Spending() {
       <TooltipBox rows={[{ name: payload[0].name, value: payload[0].value, color: payload[0].payload.color }]} />
     ) : null;
 
+  function renderActiveShape(props: any) {
+    const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload, value } = props;
+    const total = pieData.reduce((s: number, d: any) => s + d.value, 0);
+    const pctStr = total > 0 ? `${((value / total) * 100).toFixed(1)}%` : "";
+    return (
+      <g>
+        <Sector cx={cx} cy={cy} innerRadius={innerRadius} outerRadius={outerRadius + 8} startAngle={startAngle} endAngle={endAngle} fill={fill} />
+        <text x={cx} y={cy - 10} textAnchor="middle" fill={isDarkMode() ? "#c4ccd8" : "#111827"} fontSize={13} fontWeight={600}>{payload.name}</text>
+        <text x={cx} y={cy + 8} textAnchor="middle" fill={isDarkMode() ? "#c4ccd8" : "#111827"} fontSize={12}>{fmt(value)}</text>
+        <text x={cx} y={cy + 24} textAnchor="middle" fill={isDarkMode() ? "#6e7888" : "#6b7280"} fontSize={11}>{pctStr}</text>
+      </g>
+    );
+  }
+
   function ProgressBar({ actual, budgeted }: { actual: number; budgeted: number }) {
     if (budgeted === 0) return null;
     const pct = Math.min(100, (actual / budgeted) * 100);
@@ -264,15 +279,21 @@ export default function Spending() {
             <div className="card">
               <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8] mb-4">24-Month Spending Trend</h3>
               <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={rollingBarData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <AreaChart data={rollingBarData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="spendingTrendGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.20} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.00} />
+                    </linearGradient>
+                  </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis dataKey="month" tick={{ fontSize: 10, fill: ct.tick }} interval={2} axisLine={{ stroke: ct.grid }} tickLine={false} />
                   <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
                   <Tooltip content={({ active, payload, label }) => active && payload?.length ? (
                     <TooltipBox label={label} rows={[{ name: "Spending", value: payload[0].value as number }]} />
                   ) : null} />
-                  <Line type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={2} dot={false} />
-                </LineChart>
+                  <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={2} fill="url(#spendingTrendGradient)" dot={false} animationDuration={700} />
+                </AreaChart>
               </ResponsiveContainer>
             </div>
           )}
@@ -385,10 +406,21 @@ export default function Spending() {
               <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8] mb-4">Period Totals by Category</h3>
               <ResponsiveContainer width="100%" height={260}>
                 <PieChart>
-                  <Pie data={pieData} cx="50%" cy="50%" innerRadius={65} outerRadius={105} paddingAngle={2} dataKey="value">
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={65}
+                    outerRadius={105}
+                    paddingAngle={2}
+                    dataKey="value"
+                    activeIndex={activeIndex}
+                    activeShape={renderActiveShape}
+                    onMouseEnter={(_, index) => setActiveIndex(index)}
+                    onMouseLeave={() => setActiveIndex(-1)}
+                  >
                     {pieData.map((entry: any, i: number) => <Cell key={i} fill={entry.color} />)}
                   </Pie>
-                  <Tooltip content={<PieTooltip />} />
                   <Legend formatter={(v) => <span style={{ color: ct.tick }} className="text-sm">{v}</span>} />
                 </PieChart>
               </ResponsiveContainer>
@@ -474,6 +506,7 @@ export default function Spending() {
           <SankeyChart data={sankeyData} />
         </div>
       )}
+      {showHelp && <HelpPanel title="Spending Analysis" body={"Analyze your spending by category across any date range.\n\nOverview tab: budgeted vs. actual by category with breakdown by account and card.\nTrends tab: year-over-year comparison and 24-month rolling totals.\nFlow tab: Sankey diagram showing income sources flowing into expense categories."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
@@ -487,22 +520,20 @@ function SankeyChart({ data }: { data: any }) {
     return <div className="card text-center py-12 text-gray-400 text-sm">No income or expense data for this period.</div>;
   }
 
-  const nodeList = data.nodes.map((n: any, i: number) => ({ ...n, index: i }));
-  const nodeIndex: Record<string, number> = {};
-  nodeList.forEach((n: any, i: number) => { nodeIndex[n.id] = i; });
+  const nodeList = data.nodes.map((n: any) => ({ ...n }));
 
   const links = data.links.map((l: any) => ({
-    source: nodeIndex[l.source],
-    target: nodeIndex[l.target],
+    source: l.source,
+    target: l.target,
     value: parseFloat(l.value),
-  })).filter((l: any) => l.source !== undefined && l.target !== undefined && l.value > 0);
+  })).filter((l: any) => l.source && l.target && l.value > 0);
 
   if (!links.length) {
     return <div className="card text-center py-12 text-gray-400 text-sm">No flow data for this period.</div>;
   }
 
   const sankeyLayout = d3Sankey<{ id: string; name: string; type: string }, { value: number }>()
-    .nodeId((d: any) => d.index)
+    .nodeId((d: any) => d.id)
     .nodeAlign(sankeyLeft)
     .nodeWidth(14)
     .nodePadding(16)
@@ -540,7 +571,7 @@ function SankeyChart({ data }: { data: any }) {
           return (
             <g key={i}>
               <rect x={n.x0} y={n.y0} width={n.x1 - n.x0} height={n.y1 - n.y0} fill={color} rx={2} />
-              <text x={labelX} y={midY - 5} textAnchor={anchor} fontSize={11} fill="#374151" fontWeight={500}>
+              <text x={labelX} y={midY - 5} textAnchor={anchor} fontSize={11} fill={isDarkMode() ? "#c4ccd8" : "#374151"} fontWeight={500}>
                 {n.name}
               </text>
               <text x={labelX} y={midY + 8} textAnchor={anchor} fontSize={10} fill="#6b7280">
@@ -550,7 +581,6 @@ function SankeyChart({ data }: { data: any }) {
           );
         })}
       </svg>
-      {showHelp && <HelpPanel title="Spending Analysis" body={"Analyze your spending by category across any date range.\n\nOverview tab: budgeted vs. actual by category with breakdown by account and card.\nTrends tab: year-over-year comparison and 24-month rolling totals.\nFlow tab: Sankey diagram showing income sources flowing into expense categories."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

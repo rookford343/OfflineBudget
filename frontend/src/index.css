@@ -52,5 +52,28 @@
   .nav-link     { @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-[#909aaa] dark:hover:bg-[#272b38] dark:hover:text-[#c4ccd8]; }
   .nav-link-active { @apply nav-link bg-indigo-50 text-indigo-700 hover:bg-indigo-50 hover:text-indigo-700 dark:bg-[#1e2440] dark:text-indigo-400 dark:hover:bg-[#1e2440] dark:hover:text-indigo-400; }
   .progress-bar  { @apply h-1.5 w-full bg-gray-200 rounded-full overflow-hidden dark:bg-[#2c3040]; }
-  .progress-fill { @apply h-full rounded-full transition-all; }
+  .progress-fill { @apply h-full rounded-full; transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+  /* Stat card top-border accents */
+  .stat-card-accent-green  { border-top: 2px solid #22c55e; }
+  .stat-card-accent-red    { border-top: 2px solid #ef4444; }
+  .stat-card-accent-amber  { border-top: 2px solid #f59e0b; }
+  .stat-card-accent-indigo { border-top: 2px solid #6366f1; }
+
+  /* Budget row left-border status */
+  .budget-row-ok    { border-left: 3px solid #22c55e; }
+  .budget-row-warn  { border-left: 3px solid #f59e0b; }
+  .budget-row-over  { border-left: 3px solid #ef4444; }
+  .budget-row-unset { border-left: 3px solid transparent; }
+}
+
+@layer utilities {
+  @keyframes fadeSlideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-slide-up  { animation: fadeSlideUp 0.35s ease forwards; }
+  .animate-delay-100 { animation-delay: 0.10s; opacity: 0; }
+  .animate-delay-200 { animation-delay: 0.20s; opacity: 0; }
+  .animate-delay-300 { animation-delay: 0.30s; opacity: 0; }
 }
