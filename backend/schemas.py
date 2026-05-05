@@ -32,17 +32,24 @@ class UserUpdate(BaseModel):
     ss_bonus_ytd: Optional[Decimal] = None
 
 
+class UserPasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class UserAdminCreate(BaseModel):
     username: str
     password: str
     display_name: str
     role: UserRole = UserRole.viewer
+    linked_to_user_id: Optional[int] = None
 
 
 class UserAdminUpdate(BaseModel):
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
     display_name: Optional[str] = None
+    linked_to_user_id: Optional[int] = None
 
 
 class UserAdminOut(BaseModel):
@@ -53,6 +60,7 @@ class UserAdminOut(BaseModel):
     role: UserRole
     is_active: bool
     created_at: datetime
+    linked_to_user_id: Optional[int] = None
 
 
 class TokenOut(BaseModel):

@@ -28,9 +28,8 @@ DEFAULT_CATEGORIES = [
         ("Retirement", "expense", "#6d28d9", "trending-up"),
         ("Investment", "expense", "#5b21b6", "bar-chart"),
     ]),
-    ("Tithing / Giving", "expense", "#ec4899", "heart-handshake", [
+    ("Charity", "expense", "#ec4899", "heart-handshake", [
         ("Church / Tithe", "expense", "#db2777", "church"),
-        ("Charity", "expense", "#be185d", "gift"),
     ]),
     ("Other", "expense", "#6b7280", "more-horizontal", []),
 ]

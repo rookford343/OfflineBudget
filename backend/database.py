@@ -28,6 +28,26 @@ def create_tables():
     Base.metadata.create_all(bind=engine)
 
 
+def upgrade_categories():
+    """One-time rename: 'Tithing / Giving' → 'Charity'; remove orphan 'Charity' sub-category."""
+    with engine.connect() as conn:
+        try:
+            conn.execute(text(
+                "UPDATE categories SET name = 'Charity' WHERE name = 'Tithing / Giving' AND parent_id IS NULL"
+            ))
+            conn.commit()
+            conn.execute(text("""
+                DELETE FROM categories
+                WHERE name = 'Charity'
+                  AND parent_id IN (
+                      SELECT id FROM categories WHERE name = 'Charity' AND parent_id IS NULL
+                  )
+            """))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+
 def upgrade_schema():
     """Add new columns to existing tables. Ignores errors for already-existing columns."""
     stmts = [
@@ -41,6 +61,7 @@ def upgrade_schema():
         "ALTER TABLE users ADD COLUMN ss_wage_base NUMERIC(14,2)",
         "ALTER TABLE users ADD COLUMN ss_bonus_ytd NUMERIC(14,2)",
         "ALTER TABLE recurring_items ADD COLUMN card_id INTEGER",
+        "ALTER TABLE users ADD COLUMN linked_to_user_id INTEGER",
     ]
     with engine.connect() as conn:
         for s in stmts:

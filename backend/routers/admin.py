@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.auth import hash_password
-from backend.dependencies import get_db, require_admin
+from backend.dependencies import get_db, require_admin, get_requester
 from backend.seed import seed_default_categories
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -34,11 +34,13 @@ def create_user(
         hashed_password=hash_password(body.password),
         display_name=body.display_name,
         role=body.role,
+        linked_to_user_id=body.linked_to_user_id,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
-    seed_default_categories(db, user)
+    if not body.linked_to_user_id:
+        seed_default_categories(db, user)
     return user
 
 

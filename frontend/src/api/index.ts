@@ -10,6 +10,8 @@ export const authApi = {
     api.post("/auth/register", { username, password, display_name }).then((r) => r.data),
   me: () => api.get("/auth/me").then((r) => r.data),
   updateMe: (data: object) => api.patch("/auth/me", data).then((r) => r.data),
+  changePassword: (data: { current_password: string; new_password: string }) =>
+    api.patch("/auth/me/password", data),
 };
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
