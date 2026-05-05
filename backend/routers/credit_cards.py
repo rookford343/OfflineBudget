@@ -35,6 +35,38 @@ def create_card(
     return _enrich(card)
 
 
+@router.get("/upcoming-due", response_model=list[schemas.CreditCardDueEntry])
+def upcoming_due(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    today = date.today()
+    cards = db.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user.id,
+        models.CreditCard.is_active == True,
+    ).all()
+    result = []
+    for card in cards:
+        due_day = card.due_day
+        days_in_month = monthrange(today.year, today.month)[1]
+        clamped_day = min(due_day, days_in_month)
+        if today.day <= clamped_day:
+            next_due = today.replace(day=clamped_day)
+        else:
+            first_of_next = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
+            days_next = monthrange(first_of_next.year, first_of_next.month)[1]
+            next_due = first_of_next.replace(day=min(due_day, days_next))
+        result.append(schemas.CreditCardDueEntry(
+            card_id=card.id,
+            card_name=card.name,
+            due_day=due_day,
+            next_due_date=next_due,
+            balance_due=card.balance_due,
+            current_balance=card.current_balance,
+        ))
+    return result
+
+
 @router.get("/{card_id}", response_model=schemas.CreditCardOut)
 def get_card(
     card_id: int,
@@ -180,38 +212,6 @@ def update_card_transaction(
     db.commit()
     db.refresh(txn)
     return txn
-
-
-@router.get("/upcoming-due", response_model=list[schemas.CreditCardDueEntry])
-def upcoming_due(
-    db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
-):
-    today = date.today()
-    cards = db.query(models.CreditCard).filter(
-        models.CreditCard.user_id == user.id,
-        models.CreditCard.is_active == True,
-    ).all()
-    result = []
-    for card in cards:
-        due_day = card.due_day
-        days_in_month = monthrange(today.year, today.month)[1]
-        clamped_day = min(due_day, days_in_month)
-        if today.day <= clamped_day:
-            next_due = today.replace(day=clamped_day)
-        else:
-            first_of_next = (today.replace(day=1) + timedelta(days=32)).replace(day=1)
-            days_next = monthrange(first_of_next.year, first_of_next.month)[1]
-            next_due = first_of_next.replace(day=min(due_day, days_next))
-        result.append(schemas.CreditCardDueEntry(
-            card_id=card.id,
-            card_name=card.name,
-            due_day=due_day,
-            next_due_date=next_due,
-            balance_due=card.balance_due,
-            current_balance=card.current_balance,
-        ))
-    return result
 
 
 def _get_or_404(db: Session, user_id: int, card_id: int) -> models.CreditCard:
