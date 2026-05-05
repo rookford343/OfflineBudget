@@ -49,7 +49,7 @@ OfflineBudget is designed for **offline / home LAN use**. The threat model is:
 
 ## Enabling HTTPS on LAN
 
-For encrypted LAN connections (recommended if your wife accesses from another device):
+For encrypted LAN connections (recommended if other devices on your LAN access the app):
 
 ```bash
 # Install mkcert

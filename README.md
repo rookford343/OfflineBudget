@@ -110,11 +110,11 @@ Supported formats detected automatically from CSV headers:
 source .venv/bin/activate
 
 python cli/budget.py users create
-python cli/budget.py accounts list --username demo
-python cli/budget.py recurring list --username demo
-python cli/budget.py forecast quarters --username demo --account "Main Checking"
-python cli/budget.py forecast show --username demo --account "Main Checking" --quarter Q2-2026
-python cli/budget.py cards list --username demo
+python cli/budget.py accounts list --username alice
+python cli/budget.py recurring list --username alice
+python cli/budget.py forecast quarters --username alice --account "Main Checking"
+python cli/budget.py forecast show --username alice --account "Main Checking" --quarter Q2-2026
+python cli/budget.py cards list --username alice
 ```
 
 ---

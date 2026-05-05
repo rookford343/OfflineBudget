@@ -58,7 +58,7 @@ User ──< BudgetAllocation >── Category
 
 **Recurring items drive forecasting** — The forecast engine does not store projected transactions; it generates them on-the-fly from `recurring_items`. Only `is_actual=True` transactions are stored as real events.
 
-**Two-level category hierarchy** — `categories.parent_id` is self-referential. Top-level: Wants, Necessities, Savings, Tithing, Income. Sub-categories nest underneath. The spending analysis aggregates at both levels.
+**Two-level category hierarchy** — `categories.parent_id` is self-referential. Top-level: Wants, Necessities, Savings, Charity, Income. Sub-categories nest underneath. The spending analysis aggregates at both levels.
 
 **Decimal precision** — All monetary values use `Numeric(14, 2)` in SQLAlchemy and `Decimal` in Python — never floats. Frontend receives them as strings and parses with `parseFloat()`.
 

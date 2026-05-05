@@ -12,6 +12,7 @@ export const authApi = {
   updateMe: (data: object) => api.patch("/auth/me", data).then((r) => r.data),
   changePassword: (data: { current_password: string; new_password: string }) =>
     api.patch("/auth/me/password", data),
+  deleteAccount: (data: { password: string }) => api.delete("/auth/me", { data }),
 };
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
@@ -112,6 +113,7 @@ export const adminApi = {
   listUsers: () => api.get("/admin/users").then((r) => r.data),
   createUser: (data: object) => api.post("/admin/users", data).then((r) => r.data),
   updateUser: (id: number, data: object) => api.patch(`/admin/users/${id}`, data).then((r) => r.data),
+  removeUser: (id: number) => api.delete(`/admin/users/${id}`),
   logs: (params?: object) => api.get("/admin/logs", { params }).then((r) => r.data),
 };
 
