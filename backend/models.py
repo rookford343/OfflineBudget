@@ -24,6 +24,7 @@ class CategoryType(str, PyEnum):
 class RecurringType(str, PyEnum):
     income = "income"
     expense = "expense"
+    credit_card_payment = "credit_card_payment"
 
 
 class TransactionSource(str, PyEnum):
@@ -145,6 +146,7 @@ class RecurringItem(Base):
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
     category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
+    card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     type: Mapped[RecurringType] = mapped_column(Enum(RecurringType), nullable=False)
@@ -163,6 +165,7 @@ class RecurringItem(Base):
     user: Mapped[User] = relationship(back_populates="recurring_items")
     account: Mapped[Account] = relationship(back_populates="recurring_items")
     category: Mapped[Category | None] = relationship(back_populates="recurring_items")
+    card: Mapped[CreditCard | None] = relationship(foreign_keys=[card_id])
     transactions: Mapped[list[Transaction]] = relationship(back_populates="recurring_item")
 
 

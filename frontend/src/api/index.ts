@@ -81,6 +81,7 @@ export const cardsApi = {
     api.post(`/credit-cards/${id}/transactions`, data).then((r) => r.data),
   updateTransaction: (cardId: number, txnId: number, data: object) =>
     api.patch(`/credit-cards/${cardId}/transactions/${txnId}`, data).then((r) => r.data),
+  upcomingDue: () => api.get("/credit-cards/upcoming-due").then((r) => r.data),
 };
 
 // ── Spending ──────────────────────────────────────────────────────────────────
