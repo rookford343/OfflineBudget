@@ -72,6 +72,8 @@ class User(Base):
     ss_wage_base: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     ss_bonus_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
+    linked_to_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
+
     accounts: Mapped[list[Account]] = relationship(back_populates="user", cascade="all, delete-orphan")
     categories: Mapped[list[Category]] = relationship(back_populates="user", cascade="all, delete-orphan")
     recurring_items: Mapped[list[RecurringItem]] = relationship(back_populates="user", cascade="all, delete-orphan")

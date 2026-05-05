@@ -259,17 +259,15 @@ export default function Recurring() {
                   {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
               </div>
-              {form.type !== "credit_card_payment" && (
-                <div>
-                  <label className="label">Category</label>
-                  <select className="input" value={form.category_id} onChange={e => setForm({ ...form, category_id: e.target.value })}>
-                    <option value="">None</option>
-                    {allCats.filter((c: any) => c.type === form.type).map((c: any) => (
-                      <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <div>
+                <label className="label">Category</label>
+                <select className="input" value={form.category_id} onChange={e => setForm({ ...form, category_id: e.target.value })}>
+                  <option value="">None</option>
+                  {allCats.filter((c: any) => c.type === (form.type === "credit_card_payment" ? "expense" : form.type)).map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
+                  ))}
+                </select>
+              </div>
               <div>
                 <label className="label">Day of Month (0 = last day)</label>
                 <input type="number" min="0" max="31" className="input" value={form.day_of_month} onChange={e => setForm({ ...form, day_of_month: e.target.value })} required />

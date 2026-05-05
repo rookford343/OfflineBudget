@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
-from backend.database import create_tables, upgrade_schema
+from backend.database import create_tables, upgrade_schema, upgrade_categories
 from backend.routers import accounts, auth, budget, categories, credit_cards, forecast, recurring, transactions
 from backend.middleware import AuditMiddleware
 from backend.routers import spending
@@ -52,6 +52,7 @@ def on_startup():
     os.makedirs("data", exist_ok=True)
     create_tables()
     upgrade_schema()
+    upgrade_categories()
 
 
 @app.get("/health", tags=["health"])

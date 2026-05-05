@@ -116,12 +116,21 @@ KEYWORD_RULES: list[tuple[str, str]] = [
 def categorize(
     description: str,
     categories: list[models.Category],
+    history_map: dict[str, int] | None = None,
 ) -> models.Category | None:
-    """Return the best matching category for a transaction description, or None."""
+    """Return the best matching category for a transaction description, or None.
+
+    history_map: {description_lower: category_id} built from past transactions.
+    History match takes precedence over keyword rules.
+    """
     desc_lower = description.lower()
-    cat_by_name: dict[str, models.Category] = {}
-    for cat in categories:
-        cat_by_name[cat.name.lower()] = cat
+    cat_by_id: dict[int, models.Category] = {c.id: c for c in categories}
+    cat_by_name: dict[str, models.Category] = {c.name.lower(): c for c in categories}
+
+    if history_map:
+        cat_id = history_map.get(desc_lower)
+        if cat_id and cat_id in cat_by_id:
+            return cat_by_id[cat_id]
 
     for keyword, cat_name in KEYWORD_RULES:
         if keyword in desc_lower:

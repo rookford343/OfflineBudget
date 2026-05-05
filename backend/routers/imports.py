@@ -2,6 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
@@ -45,11 +46,37 @@ async def preview_import(
         models.Category.user_id == user.id,
     ).all()
 
+    # Build history map: description_lower → most-used category_id from past transactions
+    history_map: dict[str, int] = {}
+    checking_hist = (
+        db.query(models.Transaction.description, models.Transaction.category_id, func.count().label("cnt"))
+        .filter(models.Transaction.user_id == user.id, models.Transaction.category_id.isnot(None))
+        .group_by(models.Transaction.description, models.Transaction.category_id)
+        .order_by(func.count().desc())
+        .all()
+    )
+    for desc, cat_id, _ in checking_hist:
+        key = desc.lower()
+        if key not in history_map:
+            history_map[key] = cat_id
+
+    card_hist = (
+        db.query(models.CreditCardTransaction.merchant, models.CreditCardTransaction.category_id, func.count().label("cnt"))
+        .filter(models.CreditCardTransaction.user_id == user.id, models.CreditCardTransaction.category_id.isnot(None))
+        .group_by(models.CreditCardTransaction.merchant, models.CreditCardTransaction.category_id)
+        .order_by(func.count().desc())
+        .all()
+    )
+    for merchant, cat_id, _ in card_hist:
+        key = merchant.lower()
+        if key not in history_map:
+            history_map[key] = cat_id
+
     preview_rows: list[schemas.ImportPreviewRow] = []
     categorized = 0
 
     for i, row in enumerate(parsed_rows):
-        matched_cat = categorize(row.description, all_cats)
+        matched_cat = categorize(row.description, all_cats, history_map)
         needs_review = matched_cat is None
         if not needs_review:
             categorized += 1
