@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, categoriesApi, budgetApi, adminApi, authApi } from "../api";
 import { fmt } from "../lib/utils";
 import { getTheme, setTheme } from "../store/theme";
-import { isAdmin } from "../store/auth";
+import { clearAuth, isAdmin } from "../store/auth";
 import {
   Plus, Pencil, Trash2, X, Check, Moon, Sun, ChevronRight, ChevronDown,
   AlertTriangle, Shield, User, Activity, HelpCircle, KeyRound, Link
@@ -147,11 +147,22 @@ export default function Settings() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); setSsSaved(true); setTimeout(() => setSsSaved(false), 2000); },
   });
 
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteAccountMut = useMutation({
+    mutationFn: authApi.deleteAccount,
+    onSuccess: () => { clearAuth(); window.location.href = "/login"; },
+    onError: (e: any) => setDeleteError(e?.response?.data?.detail ?? "Failed to delete account"),
+  });
+  function handleDeleteAccount() { setDeleteError(null); deleteAccountMut.mutate({ password: deletePassword }); }
+
   // ── User management ────────────────────────────────────────────────────────
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState({ ...emptyUser });
   const createUserMut = useMutation({ mutationFn: adminApi.createUser, onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-users"] }); setShowUserForm(false); setUserForm({ ...emptyUser }); } });
   const updateUserMut = useMutation({ mutationFn: ({ id, data }: any) => adminApi.updateUser(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-users"] }); } });
+  const removeUserMut = useMutation({ mutationFn: adminApi.removeUser, onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }) });
 
   return (
     <div className="space-y-8">
@@ -199,6 +210,26 @@ export default function Settings() {
             {changePasswordMut.isPending ? "Updating…" : "Update Password"}
           </button>
         </form>
+        <div className="border-t border-red-100 dark:border-red-900/30 pt-4 space-y-2">
+          <h4 className="text-sm font-semibold text-red-600 dark:text-red-400">Danger Zone</h4>
+          {!showDeleteConfirm ? (
+            <button onClick={() => setShowDeleteConfirm(true)} className="text-sm text-red-600 hover:underline">
+              Delete my account and all data…
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-red-600">This permanently deletes all your accounts, transactions, and settings. Enter your password to confirm.</p>
+              <div className="flex flex-wrap items-center gap-2 max-w-sm">
+                <input type="password" className="input text-sm flex-1 min-w-0" placeholder="Your password" value={deletePassword} onChange={e => setDeletePassword(e.target.value)} />
+                <button onClick={handleDeleteAccount} disabled={deleteAccountMut.isPending || !deletePassword} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm px-3 py-2 rounded-lg font-medium">
+                  {deleteAccountMut.isPending ? "Deleting…" : "Delete"}
+                </button>
+                <button onClick={() => { setShowDeleteConfirm(false); setDeletePassword(""); setDeleteError(null); }} className="btn-secondary text-sm px-3">Cancel</button>
+              </div>
+              {deleteError && <p className="text-xs text-red-600">{deleteError}</p>}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Preferences ── */}
@@ -387,6 +418,15 @@ export default function Settings() {
                       <option value="admin">Admin</option>
                       <option value="viewer">View Only</option>
                     </select>
+                    {u.id !== me?.id && (
+                      <button
+                        onClick={() => removeUserMut.mutate(u.id)}
+                        className="btn-ghost p-1.5 text-red-400 hover:bg-red-50"
+                        title="Remove user"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -593,11 +633,9 @@ export default function Settings() {
                 <label className="label">Link to Account (shared data access)</label>
                 <select className="input" value={userForm.linked_to_user_id} onChange={e => setUserForm({ ...userForm, linked_to_user_id: e.target.value })}>
                   <option value="">Own account (standalone)</option>
-                  {users.filter((u: any) => !u.linked_to_user_id).map((u: any) => (
-                    <option key={u.id} value={u.id}>{u.display_name} (@{u.username})</option>
-                  ))}
+                  <option value={String(me?.id)}>Link to my account ({me?.display_name})</option>
                 </select>
-                <p className="text-xs text-gray-400 mt-1">Linked users see the same financial data as the linked account.</p>
+                <p className="text-xs text-gray-400 mt-1">Linked users see the same financial data as your account.</p>
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="btn-primary flex-1">Create User</button>

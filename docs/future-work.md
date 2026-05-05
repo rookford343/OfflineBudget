@@ -1,25 +1,23 @@
 # Future Work & Roadmap
 
-## Phase 4 — CSV Transaction Import (Next Priority)
+## Phase 4 — CSV Transaction Import ✓ Shipped
 
-The data model and duplicate-detection infrastructure is already in place. What's needed:
+CSV import is complete. Supported features:
 
-### Bank CSV Import (Checking Account)
-- Detect format from header row: Chase, Wells Fargo, BofA, generic
-- Map columns: date, description, amount, category
-- Clean merchant names (strip store numbers, trailing codes)
-- Deduplicate against existing transactions (same date + amount + description)
-- `POST /transactions/import` endpoint + frontend drag-and-drop on Transactions page
+### Bank CSV Import (Checking Account) ✓
+- Detects format from header row: Chase, Wells Fargo, BofA, Apple Card, generic
+- Maps columns: date, description, amount
+- Deduplicates against existing transactions (same date + amount + description)
+- Drag-and-drop or click-to-browse upload on the Import page
 
-### Credit Card CSV Import
-- Chase Sapphire, Amex, Apple Card formats (logic already exists in `OfflineBudget/core/transaction_processor.py`)
-- `POST /credit-cards/{id}/import` endpoint + import button on Credit Cards page
-- `CreditCardImport` table already tracks imports to prevent double-import
+### Credit Card CSV Import ✓
+- Chase Sapphire and Apple Card formats detected automatically
+- `CreditCardImport` table tracks imports to prevent double-import
 
-### Auto-Categorization
+### Auto-Categorization ✓
 - Keyword matching rules (merchant → category mapping)
-- User-editable rules stored in a new `categorization_rules` table
-- "You have 12 uncategorized transactions" prompt on Dashboard
+- History-based matching: past transaction descriptions are used to suggest categories for new imports
+- Manual override for uncategorized rows before confirming import
 
 ---
 
@@ -97,7 +95,7 @@ Match imported actual transactions against forecast recurring items:
 
 | Area | Limitation | Workaround |
 |------|-----------|------------|
-| CSV import | Not yet built (Phase 4) | Manual transaction entry |
+| CSV import | Built — Chase, Apple Card, generic | — |
 | Reconciliation | Not yet built (Phase 5) | Visual comparison only |
 | Month-specific budgets | month=0 applies to all months | Set per-month via API directly |
 | HTTPS on LAN | Not configured by default | Use mkcert (see SECURITY.md) |

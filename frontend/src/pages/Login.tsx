@@ -65,7 +65,7 @@ export default function Login() {
                 <label className="label">Your Name</label>
                 <input
                   className="input"
-                  placeholder="Dan Ford"
+                  placeholder="Alex Smith"
                   value={form.display_name}
                   onChange={(e) => setForm({ ...form, display_name: e.target.value })}
                 />
@@ -75,7 +75,7 @@ export default function Login() {
               <label className="label">Username</label>
               <input
                 className="input"
-                placeholder="danford"
+                placeholder="username"
                 autoComplete="username"
                 value={form.username}
                 onChange={(e) => setForm({ ...form, username: e.target.value })}

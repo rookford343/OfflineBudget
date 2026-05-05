@@ -14,7 +14,7 @@
 
 ```bash
 # Clone or copy the project
-cd /path/to/OfflineBudgetv2
+cd /path/to/OfflineBudget
 
 # Create and activate Python virtual environment
 python3 -m venv .venv
@@ -61,17 +61,18 @@ This starts:
 1. Open `http://localhost:5173` in your browser
 2. Click **Create Account**
 3. Enter a username, password, and your name
-4. Click **Create Account** — you'll land on the Dashboard
+4. Click **Create Account** — you'll land on the Dashboard with a Quick Start wizard
 
-> Your wife can create her own account by visiting the same URL and clicking **Create Account**.
+> Other users can create their own accounts by visiting the same URL and clicking **Create Account**.
 
 ---
 
 ## 4. Access from Another Device on Your Home Network
 
-1. Find your Mac's local IP address:
+1. Find your machine's local IP address:
    ```bash
-   ipconfig getifaddr en0
+   ipconfig getifaddr en0      # macOS
+   hostname -I | awk '{print $1}'  # Linux
    # e.g., 192.168.1.42
    ```
 2. In your `.env`, update `ALLOWED_ORIGINS`:
@@ -79,7 +80,7 @@ This starts:
    ALLOWED_ORIGINS=http://localhost:5173,http://192.168.1.42:5173
    ```
 3. Restart the app (`./scripts/start.sh`)
-4. On your wife's phone or laptop, open `http://192.168.1.42:5173`
+4. On another device, open `http://192.168.1.42:5173`
 
 ---
 
@@ -90,22 +91,21 @@ This starts:
 - **Money Market** or savings account (optional)
 
 ### Step 2 — Add Recurring Income (Recurring page)
-- "Danny Paycheck 1" — Income, $6,066.63, Day 15
-- "Danny Paycheck 2" — Income, $6,066.63, Day 0 (last day)
+- "Paycheck 1" — Income, your net amount, Day 15
+- "Paycheck 2" — Income, your net amount, Day 0 (last day)
 - Any bonus as a one-time or monthly averaged item
 
 ### Step 3 — Add Recurring Bills (Recurring page)
 Add each bill with its day-of-month. Examples:
 | Name | Amount | Day |
 |------|--------|-----|
-| Chevy Insurance | $194 | 2 |
-| Duke Electric | $180 | 8 |
-| HOA | $xxx | 1 |
-| Rivian R1T | $500.89 | 17 |
+| Auto Insurance | $194 | 2 |
+| Electric Utility | $180 | 8 |
+| HOA Fees | $125 | 1 |
+| Car Payment | $501 | 17 |
 
 ### Step 4 — Add Credit Cards (Credit Cards page)
-- Chase Sapphire, Apple Card, Amex, etc.
-- Enter current balance and balance due
+- Enter current balance and balance due for each card
 
 ### Step 5 — View Your Forecast (Forecast page)
 - Select your checking account
@@ -136,16 +136,16 @@ source .venv/bin/activate
 python cli/budget.py users create
 
 # List accounts
-python cli/budget.py accounts list --username danford
+python cli/budget.py accounts list --username alice
 
 # See quarterly forecast
-python cli/budget.py forecast quarters --username danford --account "Main Checking"
+python cli/budget.py forecast quarters --username alice --account "Main Checking"
 
 # See a specific quarter
-python cli/budget.py forecast show --username danford --account "Main Checking" --quarter Q2-2026
+python cli/budget.py forecast show --username alice --account "Main Checking" --quarter Q2-2026
 
 # List credit cards
-python cli/budget.py cards list --username danford
+python cli/budget.py cards list --username alice
 ```
 
 ---
@@ -165,5 +165,5 @@ cp data/budget_20260428.db data/budget.db
 Set up a daily cron backup:
 ```bash
 crontab -e
-# Add: 0 2 * * * cp /path/to/OfflineBudgetv2/data/budget.db /path/to/backups/budget_$(date +\%Y\%m\%d).db
+# Add: 0 2 * * * cp /path/to/OfflineBudget/data/budget.db /path/to/backups/budget_$(date +\%Y\%m\%d).db
 ```
