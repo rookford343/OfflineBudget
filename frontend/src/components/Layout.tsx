@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clearAuth, getUser } from "../store/auth";
-import { authApi } from "../api";
+import { authApi, accountsApi } from "../api";
+import QuickStartWizard from "./QuickStartWizard";
 import {
   LayoutDashboard, CreditCard, TrendingUp, PieChart,
   Repeat, ArrowLeftRight, Target, Settings, LogOut, Upload,
@@ -26,8 +28,16 @@ const nav = [
 
 export default function Layout() {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const user = getUser();
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me, staleTime: 60_000 });
+  const { data: accounts = [], isSuccess: accountsLoaded } = useQuery({
+    queryKey: ["accounts"],
+    queryFn: accountsApi.list,
+    staleTime: 30_000,
+  });
+  const [wizardDismissed, setWizardDismissed] = useState(false);
+  const showWizard = accountsLoaded && (accounts as any[]).length === 0 && !wizardDismissed;
 
   function logout() {
     clearAuth();
@@ -68,6 +78,13 @@ export default function Layout() {
           <Outlet />
         </div>
       </main>
+
+      {showWizard && (
+        <QuickStartWizard onComplete={() => {
+          qc.invalidateQueries({ queryKey: ["accounts"] });
+          setWizardDismissed(true);
+        }} />
+      )}
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around px-2 py-2 z-50">

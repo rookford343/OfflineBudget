@@ -250,7 +250,7 @@ export default function Recurring() {
                   </select>
                 </div>
               )}
-              <div><label className="label">Name</label><input className="input" placeholder="Duke Electric" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
+              <div><label className="label">Name</label><input className="input" placeholder="Electric Company" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
               <div><label className="label">Amount</label><input type="number" step="0.01" className="input" placeholder="180.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></div>
               <div>
                 <label className="label">{form.type === "credit_card_payment" ? "Pay From Account" : "Account"}</label>

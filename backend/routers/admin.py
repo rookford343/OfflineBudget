@@ -63,6 +63,21 @@ def update_user(
     return user
 
 
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(require_admin),
+):
+    user = db.get(models.User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.id == current_admin.id:
+        raise HTTPException(status_code=400, detail="Cannot remove your own account")
+    user.is_active = False
+    db.commit()
+
+
 # ── Audit Logs ────────────────────────────────────────────────────────────────
 
 @router.get("/logs", response_model=schemas.AuditLogPage)

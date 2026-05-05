@@ -37,6 +37,10 @@ class UserPasswordChange(BaseModel):
     new_password: str
 
 
+class DeleteAccountRequest(BaseModel):
+    password: str
+
+
 class UserAdminCreate(BaseModel):
     username: str
     password: str
