@@ -1,5 +1,7 @@
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { clearAuth, getUser } from "../store/auth";
+import { authApi } from "../api";
 import {
   LayoutDashboard, CreditCard, TrendingUp, PieChart,
   Repeat, ArrowLeftRight, Target, Settings, LogOut, Upload,
@@ -25,6 +27,7 @@ const nav = [
 export default function Layout() {
   const navigate = useNavigate();
   const user = getUser();
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me, staleTime: 60_000 });
 
   function logout() {
     clearAuth();
@@ -37,7 +40,7 @@ export default function Layout() {
       <aside className="hidden md:flex w-60 flex-col bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 shrink-0">
         <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
           <h1 className="text-lg font-bold text-indigo-600">OfflineBudget</h1>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{user?.display_name}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{me?.display_name ?? user?.display_name}</p>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {nav.map(({ to, icon: Icon, label }) => (

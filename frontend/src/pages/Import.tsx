@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { importApi, accountsApi, cardsApi, categoriesApi } from "../api";
 import { fmt } from "../lib/utils";
@@ -43,6 +43,14 @@ export default function Import() {
 
   const checkingAccounts = accounts.filter((a: any) => a.type === "checking");
   const allCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]).filter((c: any) => c.type === "expense");
+  const sources = tab === "checking" ? checkingAccounts : cards;
+
+  // Auto-select first source on initial load and when tab changes
+  useEffect(() => {
+    if (sourceId === null && sources.length > 0) {
+      setSourceId((sources[0] as any).id);
+    }
+  }, [tab, checkingAccounts, cards]);
 
   const previewMut = useMutation({
     mutationFn: importApi.preview,
@@ -141,7 +149,6 @@ export default function Import() {
 
   const includedRows = editedRows.filter(r => r.included);
   const needsReviewCount = includedRows.filter(r => r.needs_review).length;
-  const sources = tab === "checking" ? checkingAccounts : cards;
 
   return (
     <div className="space-y-6">
