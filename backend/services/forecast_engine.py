@@ -89,32 +89,22 @@ def build_forecast(
         for ov in overrides:
             override_map[ov["recurring_item_id"]] = Decimal(str(ov["amount_delta"]))
 
+    today = date.today()
+    # Only load actuals dated today or later — current_balance already reflects all past transactions.
+    # Including past actuals would double-count them against the live balance.
     actual_txns = db.query(models.Transaction).filter(
         models.Transaction.user_id == user_id,
         models.Transaction.account_id == account_id,
         models.Transaction.is_actual == True,
-        models.Transaction.date >= start_date,
+        models.Transaction.date >= today,
         models.Transaction.date <= end_date,
     ).all()
 
-    # Index actuals by date, then by recurring_item_id (or None for manual)
     actuals_by_date: dict[date, list[models.Transaction]] = {}
     for t in actual_txns:
         actuals_by_date.setdefault(t.date, []).append(t)
 
     balance = Decimal(str(account.current_balance))
-
-    # Walk balance UP TO start_date using actual transactions before start_date
-    prior_actuals = db.query(models.Transaction).filter(
-        models.Transaction.user_id == user_id,
-        models.Transaction.account_id == account_id,
-        models.Transaction.is_actual == True,
-        models.Transaction.date < start_date,
-    ).order_by(models.Transaction.date).all()
-
-    # The current_balance is the live balance — we project forward from today.
-    # If start_date is in the future we just use current_balance as starting point.
-    # If start_date is in the past we need to rewind — not supported in MVP; use current_balance.
 
     entries: list[ForecastEntry] = []
     current = start_date
