@@ -6,13 +6,13 @@ import { getTheme, setTheme } from "../store/theme";
 import { isAdmin } from "../store/auth";
 import {
   Plus, Pencil, Trash2, X, Check, Moon, Sun, ChevronRight, ChevronDown,
-  AlertTriangle, Shield, User, Activity, HelpCircle
+  AlertTriangle, Shield, User, Activity, HelpCircle, KeyRound, Link
 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
 const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", notes: "" };
 const emptyCat = { name: "", type: "expense", parent_id: "", color: "#6366f1" };
-const emptyUser = { username: "", display_name: "", password: "", role: "viewer" };
+const emptyUser = { username: "", display_name: "", password: "", role: "viewer", linked_to_user_id: "" };
 
 const COLOR_SWATCHES = ["#6366f1", "#22c55e", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6"];
 
@@ -104,21 +104,45 @@ export default function Settings() {
   const [dark, setDark] = useState(getTheme() === "dark");
   function toggleDark() { const next = !dark; setDark(next); setTheme(next); }
 
-  // ── Social Security ────────────────────────────────────────────────────────
+  // ── Profile ────────────────────────────────────────────────────────────────
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
-  const [ssGross, setSsGross] = useState("");
-  const [ssWageBase, setSsWageBase] = useState("");
-  const [ssBonus, setSsBonus] = useState("");
-  const [ssSaved, setSsSaved] = useState(false);
-  const [showSsHelp, setShowSsHelp] = useState(false);
+  const [profileName, setProfileName] = useState("");
+  const [profileSaved, setProfileSaved] = useState(false);
+  const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
+  const [pwError, setPwError] = useState<string | null>(null);
+  const [pwSaved, setPwSaved] = useState(false);
   React.useEffect(() => {
     if (me) {
+      setProfileName(me.display_name ?? "");
       setSsGross(me.ss_gross_per_paycheck ?? "");
       setSsWageBase(me.ss_wage_base ?? "176100");
       setSsBonus(me.ss_bonus_ytd ?? "");
     }
   }, [me]);
   const updateMeMut = useMutation({
+    mutationFn: authApi.updateMe,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); setProfileSaved(true); setTimeout(() => setProfileSaved(false), 2000); },
+  });
+  const changePasswordMut = useMutation({
+    mutationFn: authApi.changePassword,
+    onSuccess: () => { setPwForm({ current: "", next: "", confirm: "" }); setPwError(null); setPwSaved(true); setTimeout(() => setPwSaved(false), 2000); },
+    onError: (e: any) => setPwError(e?.response?.data?.detail ?? "Failed to change password"),
+  });
+  function submitPassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (pwForm.next !== pwForm.confirm) { setPwError("New passwords don't match"); return; }
+    if (pwForm.next.length < 6) { setPwError("Password must be at least 6 characters"); return; }
+    setPwError(null);
+    changePasswordMut.mutate({ current_password: pwForm.current, new_password: pwForm.next });
+  }
+
+  // ── Social Security ────────────────────────────────────────────────────────
+  const [ssGross, setSsGross] = useState("");
+  const [ssWageBase, setSsWageBase] = useState("");
+  const [ssBonus, setSsBonus] = useState("");
+  const [ssSaved, setSsSaved] = useState(false);
+  const [showSsHelp, setShowSsHelp] = useState(false);
+  const ssMut = useMutation({
     mutationFn: authApi.updateMe,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); setSsSaved(true); setTimeout(() => setSsSaved(false), 2000); },
   });
@@ -134,6 +158,47 @@ export default function Settings() {
       <div>
         <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Settings</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">Manage accounts, categories, and preferences</p>
+      </div>
+
+      {/* ── Profile ── */}
+      <div className="card space-y-5">
+        <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><User size={16} className="text-indigo-500" /> Profile</h3>
+        <div className="flex items-end gap-3">
+          <div className="flex-1 max-w-xs">
+            <label className="label">Display Name</label>
+            <input className="input" value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="Your name" />
+          </div>
+          <button
+            onClick={() => updateMeMut.mutate({ display_name: profileName })}
+            disabled={updateMeMut.isPending || !profileName.trim()}
+            className="btn-primary text-sm"
+          >
+            {updateMeMut.isPending ? "Saving…" : "Save"}
+          </button>
+          {profileSaved && <span className="text-sm text-green-600">Saved!</span>}
+        </div>
+        <form onSubmit={submitPassword} className="space-y-3 border-t border-gray-100 dark:border-gray-700 pt-4">
+          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2"><KeyRound size={14} /> Change Password</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl">
+            <div>
+              <label className="label">Current Password</label>
+              <input type="password" className="input" value={pwForm.current} onChange={e => setPwForm({ ...pwForm, current: e.target.value })} required />
+            </div>
+            <div>
+              <label className="label">New Password</label>
+              <input type="password" className="input" value={pwForm.next} onChange={e => setPwForm({ ...pwForm, next: e.target.value })} required />
+            </div>
+            <div>
+              <label className="label">Confirm New Password</label>
+              <input type="password" className="input" value={pwForm.confirm} onChange={e => setPwForm({ ...pwForm, confirm: e.target.value })} required />
+            </div>
+          </div>
+          {pwError && <p className="text-sm text-red-600">{pwError}</p>}
+          {pwSaved && <p className="text-sm text-green-600">Password changed!</p>}
+          <button type="submit" disabled={changePasswordMut.isPending} className="btn-primary text-sm">
+            {changePasswordMut.isPending ? "Updating…" : "Update Password"}
+          </button>
+        </form>
       </div>
 
       {/* ── Preferences ── */}
@@ -176,11 +241,11 @@ export default function Settings() {
         </div>
         <div className="flex items-center gap-3 mt-3">
           <button
-            onClick={() => updateMeMut.mutate({ ss_gross_per_paycheck: parseFloat(ssGross) || null, ss_wage_base: parseFloat(ssWageBase) || null, ss_bonus_ytd: parseFloat(ssBonus) || null })}
-            disabled={updateMeMut.isPending}
+            onClick={() => ssMut.mutate({ ss_gross_per_paycheck: parseFloat(ssGross) || null, ss_wage_base: parseFloat(ssWageBase) || null, ss_bonus_ytd: parseFloat(ssBonus) || null })}
+            disabled={ssMut.isPending}
             className="btn-primary text-sm"
           >
-            {updateMeMut.isPending ? "Saving…" : "Save SS Settings"}
+            {ssMut.isPending ? "Saving…" : "Save SS Settings"}
           </button>
           {ssSaved && <span className="text-sm text-green-600">Saved!</span>}
         </div>
@@ -290,36 +355,42 @@ export default function Settings() {
             <button onClick={() => setShowUserForm(true)} className="btn-primary btn-sm text-xs px-3 py-1.5"><Plus size={14} /> Add User</button>
           </div>
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
-            {users.map((u: any) => (
-              <div key={u.id} className="py-3 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
-                    <User size={14} className="text-gray-500" />
+            {users.map((u: any) => {
+              const linkedTo = u.linked_to_user_id ? users.find((x: any) => x.id === u.linked_to_user_id) : null;
+              return (
+                <div key={u.id} className="py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
+                      {linkedTo ? <Link size={14} className="text-indigo-500" /> : <User size={14} className="text-gray-500" />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{u.display_name}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">@{u.username}</p>
+                      {linkedTo && (
+                        <p className="text-xs text-indigo-500 dark:text-indigo-400">Linked to {linkedTo.display_name}'s data</p>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{u.display_name}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">@{u.username}</p>
+                  <div className="flex items-center gap-3">
+                    <span className={`badge-${u.role === "admin" ? "blue" : "amber"}`}>{u.role}</span>
+                    <button
+                      onClick={() => updateUserMut.mutate({ id: u.id, data: { is_active: !u.is_active } })}
+                      className={`text-xs px-2 py-1 rounded-md ${u.is_active ? "text-green-600 bg-green-50 dark:bg-green-900/20" : "text-gray-400 bg-gray-100 dark:bg-gray-700"}`}
+                    >
+                      {u.is_active ? "Active" : "Inactive"}
+                    </button>
+                    <select
+                      className="input text-xs w-auto py-1"
+                      value={u.role}
+                      onChange={e => updateUserMut.mutate({ id: u.id, data: { role: e.target.value } })}
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="viewer">View Only</option>
+                    </select>
                   </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className={`badge-${u.role === "admin" ? "blue" : "amber"}`}>{u.role}</span>
-                  <button
-                    onClick={() => updateUserMut.mutate({ id: u.id, data: { is_active: !u.is_active } })}
-                    className={`text-xs px-2 py-1 rounded-md ${u.is_active ? "text-green-600 bg-green-50 dark:bg-green-900/20" : "text-gray-400 bg-gray-100 dark:bg-gray-700"}`}
-                  >
-                    {u.is_active ? "Active" : "Inactive"}
-                  </button>
-                  <select
-                    className="input text-xs w-auto py-1"
-                    value={u.role}
-                    onChange={e => updateUserMut.mutate({ id: u.id, data: { role: e.target.value } })}
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="viewer">View Only</option>
-                  </select>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -501,7 +572,13 @@ export default function Settings() {
               <h3 className="font-bold text-gray-900 dark:text-gray-100">Add User</h3>
               <button onClick={() => setShowUserForm(false)} className="btn-ghost p-1"><X size={18} /></button>
             </div>
-            <form onSubmit={e => { e.preventDefault(); createUserMut.mutate(userForm); }} className="space-y-3">
+            <form onSubmit={e => {
+              e.preventDefault();
+              createUserMut.mutate({
+                ...userForm,
+                linked_to_user_id: userForm.linked_to_user_id ? parseInt(userForm.linked_to_user_id) : null,
+              });
+            }} className="space-y-3">
               <div><label className="label">Display Name</label><input className="input" placeholder="Jane Ford" value={userForm.display_name} onChange={e => setUserForm({ ...userForm, display_name: e.target.value })} required /></div>
               <div><label className="label">Username</label><input className="input" placeholder="janeford" value={userForm.username} onChange={e => setUserForm({ ...userForm, username: e.target.value })} required /></div>
               <div><label className="label">Password</label><input type="password" className="input" value={userForm.password} onChange={e => setUserForm({ ...userForm, password: e.target.value })} required /></div>
@@ -511,6 +588,16 @@ export default function Settings() {
                   <option value="viewer">View Only</option>
                   <option value="admin">Admin</option>
                 </select>
+              </div>
+              <div>
+                <label className="label">Link to Account (shared data access)</label>
+                <select className="input" value={userForm.linked_to_user_id} onChange={e => setUserForm({ ...userForm, linked_to_user_id: e.target.value })}>
+                  <option value="">Own account (standalone)</option>
+                  {users.filter((u: any) => !u.linked_to_user_id).map((u: any) => (
+                    <option key={u.id} value={u.id}>{u.display_name} (@{u.username})</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Linked users see the same financial data as the linked account.</p>
               </div>
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="btn-primary flex-1">Create User</button>

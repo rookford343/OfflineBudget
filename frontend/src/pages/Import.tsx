@@ -189,17 +189,17 @@ export default function Import() {
         </div>
 
         {/* Drop zone */}
-        <div
+        <label
+          htmlFor="csv-file-input"
           onDrop={handleDrop}
           onDragOver={e => e.preventDefault()}
-          onClick={() => fileRef.current?.click()}
-          className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 dark:hover:bg-indigo-900/10 transition-colors"
+          className="block border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-10 text-center cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/40 dark:hover:bg-indigo-900/10 transition-colors"
         >
           <Upload size={32} className="mx-auto text-gray-400 mb-3" />
           <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Drop a CSV file here or click to browse</p>
           <p className="text-xs text-gray-400 mt-1">Chase checking, Chase card, Apple Card, or generic CSV</p>
-          <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFileInput} />
-        </div>
+          <input id="csv-file-input" ref={fileRef} type="file" accept=".csv" className="hidden" onChange={handleFileInput} />
+        </label>
 
         {previewMut.isPending && <p className="text-sm text-gray-500 text-center">Parsing file…</p>}
 
