@@ -64,7 +64,9 @@ def build_forecast(
     if not account:
         return []
 
-    recurring_items = db.query(models.RecurringItem).filter(
+    recurring_items = db.query(models.RecurringItem).options(
+        joinedload(models.RecurringItem.card)
+    ).filter(
         models.RecurringItem.user_id == user_id,
         models.RecurringItem.account_id == account_id,
         models.RecurringItem.is_active == True,
@@ -165,14 +167,17 @@ def build_forecast(
                 continue
 
             base_amount = item.amount + override_map.get(item.id, Decimal("0"))
+            is_cc = item.type == models.RecurringType.credit_card_payment
             signed = base_amount if item.type == models.RecurringType.income else -base_amount
             balance += signed
+            cc_name = item.card.name if is_cc and item.card else None
             day_transactions.append(ForecastTransaction(
-                name=item.name,
+                name=f"CC Payment: {cc_name}" if cc_name else item.name,
                 amount=signed,
                 type=item.type.value,
                 category_name=item.category.name if item.category else None,
                 is_actual=False,
+                is_cc_payment=is_cc,
                 recurring_item_id=item.id,
             ))
 

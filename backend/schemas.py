@@ -141,6 +141,7 @@ class RecurringCreate(BaseModel):
     frequency: RecurringFrequency = RecurringFrequency.monthly
     account_id: int
     category_id: Optional[int] = None
+    card_id: Optional[int] = None
     day_of_month: int  # 1-31; 0 = last day
     month_of_year: Optional[int] = None  # 1-12 for yearly items
     start_date: date
@@ -160,6 +161,7 @@ class RecurringUpdate(BaseModel):
     amount: Optional[Decimal] = None
     frequency: Optional[RecurringFrequency] = None
     category_id: Optional[int] = None
+    card_id: Optional[int] = None
     day_of_month: Optional[int] = None
     month_of_year: Optional[int] = None
     end_date: Optional[date] = None
@@ -172,6 +174,7 @@ class RecurringOut(BaseModel):
     id: int
     account_id: int
     category_id: Optional[int]
+    card_id: Optional[int] = None
     name: str
     amount: Decimal
     type: RecurringType
@@ -224,10 +227,11 @@ class TransactionOut(BaseModel):
 class ForecastTransaction(BaseModel):
     name: str
     amount: Decimal
-    type: str  # "income" | "expense"
+    type: str  # "income" | "expense" | "credit_card_payment"
     category_name: Optional[str]
     is_actual: bool
     is_planned: bool = False
+    is_cc_payment: bool = False
     recurring_item_id: Optional[int] = None
     transaction_id: Optional[int] = None
 
@@ -359,6 +363,15 @@ class CreditCardPaymentOut(BaseModel):
     amount: Decimal
     notes: Optional[str]
     created_at: datetime
+
+
+class CreditCardDueEntry(BaseModel):
+    card_id: int
+    card_name: str
+    due_day: int
+    next_due_date: date
+    balance_due: Decimal
+    current_balance: Decimal
 
 
 class CardTransactionCreate(BaseModel):
