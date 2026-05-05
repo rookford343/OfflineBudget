@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi } from "../api";
+import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi } from "../api";
 import { fmt, today } from "../lib/utils";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
-import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle } from "lucide-react";
+import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle, CreditCard } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
 function isDarkMode(): boolean {
@@ -60,6 +60,11 @@ export default function Forecast() {
   const { data: me } = useQuery({
     queryKey: ["me"],
     queryFn: authApi.me,
+  });
+
+  const { data: upcomingDue = [] } = useQuery<any[]>({
+    queryKey: ["cards-upcoming-due"],
+    queryFn: cardsApi.upcomingDue,
   });
 
   const createExpenseMut = useMutation({
@@ -213,6 +218,34 @@ export default function Forecast() {
               </p>
               <p className="text-xs text-green-600 dark:text-green-500 mt-0.5">Based on ${ssGross?.toLocaleString()}/paycheck gross · ${ssWageBase.toLocaleString()} wage base</p>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Credit Cards Due */}
+      {(upcomingDue as any[]).length > 0 && (
+        <div className="card">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+            <CreditCard size={16} className="text-blue-500" /> Credit Cards Due
+          </h3>
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {(upcomingDue as any[]).map((entry: any) => (
+              <div key={entry.card_id} className="py-3 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{entry.card_name}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Due day {entry.due_day} · next{" "}
+                    {new Date(entry.next_due_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-sm font-bold tabular-nums ${parseFloat(entry.balance_due) > 0 ? "text-red-600 dark:text-red-400" : "text-gray-400"}`}>
+                    {parseFloat(entry.balance_due) > 0 ? fmt(entry.balance_due) : "—"}
+                  </p>
+                  <p className="text-xs text-gray-400">balance due</p>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
