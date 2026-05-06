@@ -13,6 +13,33 @@ from backend.services.auto_categorizer import categorize
 router = APIRouter(prefix="/import", tags=["import"])
 
 
+def _try_auto_match(
+    txn: models.Transaction,
+    db: Session,
+) -> None:
+    """Link txn to a recurring item if amount and day-of-month are close enough."""
+    recurring = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == txn.user_id,
+        models.RecurringItem.account_id == txn.account_id,
+        models.RecurringItem.is_active == True,
+        models.RecurringItem.type != models.RecurringType.income,
+    ).all()
+
+    txn_amount = abs(txn.amount)
+    txn_day = txn.date.day
+
+    for item in recurring:
+        item_day = item.day_of_month or 28
+        if abs(txn_day - item_day) > 3:
+            continue
+        if txn_amount == 0 or item.amount == 0:
+            continue
+        ratio = txn_amount / item.amount
+        if 0.9 <= ratio <= 1.1:
+            txn.recurring_item_id = item.id
+            return
+
+
 @router.post("/preview", response_model=schemas.ImportPreviewResponse)
 async def preview_import(
     file: UploadFile = File(...),
@@ -136,10 +163,14 @@ def confirm_import(
                 date=row.date,
                 amount=row.amount,
                 description=row.description,
+                notes=row.notes,
+                recurring_item_id=row.recurring_item_id,
                 is_actual=True,
                 source=models.TransactionSource.csv_import,
                 imported_at=now,
             )
+            if not row.recurring_item_id:
+                _try_auto_match(txn, db)
             db.add(txn)
 
             # Update account balance

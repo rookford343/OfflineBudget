@@ -13,6 +13,7 @@ export const authApi = {
   changePassword: (data: { current_password: string; new_password: string }) =>
     api.patch("/auth/me/password", data),
   deleteAccount: (data: { password: string }) => api.delete("/auth/me", { data }),
+  sendTestEmail: () => api.post("/auth/me/send-test-email"),
 };
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
@@ -99,6 +100,13 @@ export const spendingApi = {
     api.get("/spending/monthly-by-category", { params: { start, end, account_id: accountId, card_id: cardId } }).then((r) => r.data),
   sankey: (year: number, month: number) =>
     api.get(`/spending/sankey/${year}/${month}`).then((r) => r.data),
+  taxSummaryUrl: (year: number) => `/spending/tax-summary?year=${year}&format=csv`,
+};
+
+// ── Reconciliation ────────────────────────────────────────────────────────────
+export const reconciliationApi = {
+  get: (accountId: number, year: number, month: number) =>
+    api.get("/reconciliation", { params: { account_id: accountId, year, month } }).then((r) => r.data),
 };
 
 // ── Import ────────────────────────────────────────────────────────────────────
@@ -114,6 +122,8 @@ export const adminApi = {
   createUser: (data: object) => api.post("/admin/users", data).then((r) => r.data),
   updateUser: (id: number, data: object) => api.patch(`/admin/users/${id}`, data).then((r) => r.data),
   removeUser: (id: number) => api.delete(`/admin/users/${id}`),
+  resetPassword: (id: number, new_password: string) =>
+    api.post(`/admin/users/${id}/reset-password`, { new_password }),
   logs: (params?: object) => api.get("/admin/logs", { params }).then((r) => r.data),
 };
 
@@ -167,4 +177,12 @@ export const scenariosApi = {
     api.post(`/scenarios/${scenarioId}/overrides`, data).then((r) => r.data),
   removeOverride: (scenarioId: number, overrideId: number) =>
     api.delete(`/scenarios/${scenarioId}/overrides/${overrideId}`),
+};
+
+// ── Quarterly Checkpoints ─────────────────────────────────────────────────────
+export const checkpointsApi = {
+  list: (accountId: number) =>
+    api.get("/checkpoints", { params: { account_id: accountId } }).then((r) => r.data),
+  upsert: (year: number, quarter: number, accountId: number, actual_balance: number) =>
+    api.put(`/checkpoints/${year}/${quarter}`, { account_id: accountId, year, quarter, actual_balance }).then((r) => r.data),
 };

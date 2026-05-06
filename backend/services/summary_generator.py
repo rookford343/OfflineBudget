@@ -1,10 +1,126 @@
 import calendar
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from collections import defaultdict
 from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import MonthlySummary
+
+
+# ── Daily email summary ───────────────────────────────────────────────────────
+
+def _fires_soon(item: models.RecurringItem, today: date, days_ahead: int = 7) -> bool:
+    for offset in range(days_ahead + 1):
+        d = today + timedelta(days=offset)
+        if item.start_date > d:
+            continue
+        if item.end_date and item.end_date < d:
+            continue
+        if not item.is_active:
+            return False
+        target_day = item.day_of_month or calendar.monthrange(d.year, d.month)[1]
+        target_day = min(target_day, calendar.monthrange(d.year, d.month)[1])
+        if d.day == target_day:
+            return True
+    return False
+
+
+def generate_daily_summary(db: Session, user: models.User) -> tuple[str, str]:
+    """Return (html_body, text_body) for a daily budget summary email."""
+    today = date.today()
+    month_start = today.replace(day=1)
+
+    accounts = db.query(models.Account).filter(
+        models.Account.user_id == user.id,
+        models.Account.is_active == True,
+        models.Account.type == models.AccountType.checking,
+    ).all()
+
+    all_recurring = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user.id,
+        models.RecurringItem.is_active == True,
+    ).all()
+    upcoming = sorted(
+        [r for r in all_recurring if _fires_soon(r, today, 7)],
+        key=lambda x: x.day_of_month or 31,
+    )
+
+    mtd_txns = db.query(models.Transaction).filter(
+        models.Transaction.user_id == user.id,
+        models.Transaction.date >= month_start,
+        models.Transaction.date <= today,
+        models.Transaction.amount < 0,
+        models.Transaction.is_actual == True,
+    ).all()
+    mtd_expenses = sum(abs(t.amount) for t in mtd_txns)
+    monthly_income = sum(r.amount for r in all_recurring if r.type == models.RecurringType.income)
+
+    cards = db.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user.id,
+        models.CreditCard.is_active == True,
+    ).all()
+
+    def fmt(v: Decimal) -> str:
+        return f"${v:,.2f}"
+
+    acct_rows = "".join(
+        f"<tr><td style='padding:4px 12px 4px 0'>{a.name}</td>"
+        f"<td style='padding:4px 0;text-align:right'><b>{fmt(a.current_balance)}</b></td></tr>"
+        for a in accounts
+    ) or "<tr><td style='color:#888'>No checking accounts</td></tr>"
+
+    upcoming_rows = "".join(
+        f"<tr><td style='padding:4px 12px 4px 0'>{r.name}</td>"
+        f"<td style='padding:4px 0;text-align:right'>{fmt(r.amount)}</td></tr>"
+        for r in upcoming
+    ) or "<tr><td style='color:#888'>None in the next 7 days</td></tr>"
+
+    card_rows = "".join(
+        f"<tr><td style='padding:4px 12px 4px 0'>{c.name}</td>"
+        f"<td style='padding:4px 0;text-align:right'>{fmt(c.current_balance)}</td>"
+        f"<td style='padding:4px 0;text-align:right;color:#888'>due day&nbsp;{c.due_day}</td></tr>"
+        for c in cards
+    ) or "<tr><td colspan='3' style='color:#888'>No credit cards</td></tr>"
+
+    html = f"""<!DOCTYPE html>
+<html><body style='font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#1f2937'>
+<h2 style='color:#4f46e5;margin-bottom:4px'>OfflineBudget Daily Summary</h2>
+<p style='color:#6b7280;margin-top:0'>{today.strftime("%A, %B %-d, %Y")}</p>
+
+<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Checking Accounts</h3>
+<table style='width:100%'>{acct_rows}</table>
+
+<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Upcoming (next 7 days)</h3>
+<table style='width:100%'>{upcoming_rows}</table>
+
+<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Month-to-Date Spending</h3>
+<p>Expenses: <b>{fmt(mtd_expenses)}</b> &nbsp;|&nbsp; Monthly income: <b>{fmt(monthly_income)}</b></p>
+
+<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Credit Cards</h3>
+<table style='width:100%'>{card_rows}</table>
+
+<p style='color:#9ca3af;font-size:12px;margin-top:24px'>Sent by OfflineBudget</p>
+</body></html>"""
+
+    acct_text = "\n".join(f"  {a.name}: {fmt(a.current_balance)}" for a in accounts) or "  No checking accounts"
+    upcoming_text = "\n".join(f"  {r.name}: {fmt(r.amount)}" for r in upcoming) or "  None in the next 7 days"
+    card_text = "\n".join(f"  {c.name}: {fmt(c.current_balance)} (due day {c.due_day})" for c in cards) or "  No credit cards"
+
+    text = f"""OfflineBudget Daily Summary — {today.strftime("%B %-d, %Y")}
+
+CHECKING ACCOUNTS
+{acct_text}
+
+UPCOMING BILLS (next 7 days)
+{upcoming_text}
+
+MONTH-TO-DATE
+  Expenses: {fmt(mtd_expenses)} | Monthly income: {fmt(monthly_income)}
+
+CREDIT CARDS
+{card_text}
+"""
+    return html, text
 
 
 def _month_spending_by_category(

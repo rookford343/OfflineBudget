@@ -171,27 +171,61 @@ export default function Budget() {
                         <button onClick={() => { setEditId(row.category_id); setEditAmt(row.budgeted); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={13} /></button>
                       </td>
                     </tr>
-                    {(subsByParent[row.category_id] ?? []).map((sub: any) => (
-                      <tr key={sub.category_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
-                        <td className="pl-8 pr-4 py-2 text-gray-600 dark:text-gray-400">{sub.category_name}</td>
-                        <td className="px-4 py-2 text-right text-gray-400 text-xs">
-                          {parseFloat(sub.budgeted) > 0 ? fmt(sub.budgeted) : "—"}
-                        </td>
-                        <td className="px-4 py-2 text-right text-gray-300 dark:text-gray-600 text-xs">—</td>
-                        <td className="px-4 py-2 text-right text-gray-400 text-xs">
-                          {parseFloat(sub.budgeted) > 0 ? fmt(sub.budgeted) : "—"}
-                        </td>
-                        <td className="px-4 py-2 text-right text-gray-500 dark:text-gray-400 text-xs">{fmt(sub.actual_checking)}</td>
-                        <td className="px-4 py-2 text-right text-gray-500 dark:text-gray-400 text-xs">{fmt(sub.actual_cards)}</td>
-                        <td className="px-4 py-2 text-right text-gray-700 dark:text-gray-300 font-medium">{fmt(sub.actual_total)}</td>
-                        <td className={`px-4 py-2 text-right text-xs ${parseFloat(sub.variance) < 0 ? "text-red-500" : "text-green-500"}`}>
-                          {parseFloat(sub.budgeted) > 0 ? fmt(sub.variance) : "—"}
-                        </td>
-                        <td className="px-4 py-2">
-                          <button onClick={() => { setEditId(sub.category_id); setEditAmt(sub.budgeted); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={12} /></button>
-                        </td>
-                      </tr>
-                    ))}
+                    {(subsByParent[row.category_id] ?? []).map((sub: any) => {
+                      const subRolloverBalance = parseFloat(sub.rollover_balance || "0");
+                      const subBudgeted = parseFloat(sub.budgeted || "0");
+                      const subAvailable = sub.rollover_enabled ? subBudgeted + subRolloverBalance : subBudgeted;
+                      const subActualTotal = parseFloat(sub.actual_total || "0");
+                      const subVariance = subAvailable - subActualTotal;
+                      return (
+                        <tr key={sub.category_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                          <td className="pl-8 pr-4 py-2 text-gray-600 dark:text-gray-400">
+                            <div className="flex items-center gap-2">
+                              {sub.category_name}
+                              <label className="flex items-center gap-1 cursor-pointer" title="Enable rollover for this subcategory">
+                                <input
+                                  type="checkbox"
+                                  checked={!!sub.rollover_enabled}
+                                  onChange={e => rolloverToggleMut.mutate({ id: sub.category_id, enabled: e.target.checked })}
+                                  className="w-3 h-3 accent-indigo-500"
+                                />
+                                <span className="text-xs font-normal text-gray-400">rollover</span>
+                              </label>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-400 text-xs">
+                            {editId === sub.category_id ? (
+                              <div className="flex items-center justify-end gap-1">
+                                <input type="number" step="0.01" className="input w-20 py-1 text-right text-xs" value={editAmt} onChange={e => setEditAmt(e.target.value)} autoFocus />
+                                <button onClick={() => saveEdit(sub.category_id)} className="text-green-600 hover:text-green-700"><Check size={12} /></button>
+                                <button onClick={() => setEditId(null)} className="text-gray-400 hover:text-gray-600"><X size={12} /></button>
+                              </div>
+                            ) : (
+                              <span className="text-blue-500">{subBudgeted > 0 ? fmt(subBudgeted) : "—"}</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-right text-xs">
+                            {sub.rollover_enabled && subRolloverBalance > 0 ? (
+                              <span className="text-amber-600 dark:text-amber-400">+{fmt(subRolloverBalance)}</span>
+                            ) : (
+                              <span className="text-gray-300 dark:text-gray-600">—</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-400 text-xs">
+                            {subBudgeted > 0 || (sub.rollover_enabled && subRolloverBalance > 0) ? fmt(subAvailable) : "—"}
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-500 dark:text-gray-400 text-xs">{fmt(sub.actual_checking)}</td>
+                          <td className="px-4 py-2 text-right text-gray-500 dark:text-gray-400 text-xs">{fmt(sub.actual_cards)}</td>
+                          <td className="px-4 py-2 text-right text-gray-700 dark:text-gray-300 font-medium">{fmt(sub.actual_total)}</td>
+                          <td className={`px-4 py-2 text-right text-xs ${subVariance < 0 ? "text-red-500" : "text-green-500"}`}>
+                            {subBudgeted > 0 || (sub.rollover_enabled && subRolloverBalance > 0) ? fmt(subVariance) : "—"}
+                          </td>
+                          <td className="px-4 py-2">
+                            <button onClick={() => { setEditId(sub.category_id); setEditAmt(sub.budgeted); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={12} /></button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </React.Fragment>
                 );
               })}

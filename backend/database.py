@@ -62,6 +62,12 @@ def upgrade_schema():
         "ALTER TABLE users ADD COLUMN ss_bonus_ytd NUMERIC(14,2)",
         "ALTER TABLE recurring_items ADD COLUMN card_id INTEGER",
         "ALTER TABLE users ADD COLUMN linked_to_user_id INTEGER",
+        "ALTER TABLE users ADD COLUMN email TEXT",
+        "ALTER TABLE accounts ADD COLUMN interest_rate NUMERIC(14,4)",
+        "ALTER TABLE categories ADD COLUMN tax_deductible BOOLEAN DEFAULT 0",
+        "ALTER TABLE credit_cards ADD COLUMN next_payment_date DATE",
+        "ALTER TABLE planned_expenses ADD COLUMN account_id INTEGER REFERENCES accounts(id)",
+        "ALTER TABLE credit_cards ADD COLUMN monthly_spend_estimate NUMERIC(14,2)",
     ]
     with engine.connect() as conn:
         for s in stmts:

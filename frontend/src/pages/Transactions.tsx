@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { transactionsApi, accountsApi, categoriesApi, cardsApi } from "../api";
+import { transactionsApi, accountsApi, categoriesApi, cardsApi, reconciliationApi } from "../api";
 import { fmt, today, firstOfMonth } from "../lib/utils";
-import { Plus, Trash2, X, HelpCircle } from "lucide-react";
+import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
-type TxnTab = "checking" | "card";
+type TxnTab = "checking" | "card" | "reconcile";
 
 interface CategoryCellProps {
   txnId: number;
@@ -62,7 +62,13 @@ export default function Transactions() {
   const [form, setForm] = useState({ ...emptyForm });
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [editingCatId, setEditingCatId] = useState<number | null>(null);
+  const [editingNotesId, setEditingNotesId] = useState<number | null>(null);
+  const [notesValue, setNotesValue] = useState("");
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
+  const [reconcileAccountId, setReconcileAccountId] = useState<number | null>(null);
+  const now = new Date();
+  const [reconcileYear, setReconcileYear] = useState(now.getFullYear());
+  const [reconcileMonth, setReconcileMonth] = useState(now.getMonth() + 1);
 
   const { data: txns = [], isLoading } = useQuery({
     queryKey: ["transactions", start, end],
@@ -79,6 +85,13 @@ export default function Transactions() {
     queryKey: ["card-transactions", activeCardId, start, end],
     queryFn: () => cardsApi.transactions(activeCardId!, { start, end }),
     enabled: txnTab === "card" && !!activeCardId,
+  });
+
+  const activeReconcileAccountId = reconcileAccountId ?? ((accounts as any[]).filter((a: any) => a.type === "checking")[0]?.id ?? null);
+  const { data: reconcileData, isLoading: reconcileLoading } = useQuery({
+    queryKey: ["reconcile", activeReconcileAccountId, reconcileYear, reconcileMonth],
+    queryFn: () => reconciliationApi.get(activeReconcileAccountId!, reconcileYear, reconcileMonth),
+    enabled: txnTab === "reconcile" && !!activeReconcileAccountId,
   });
 
   const allCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]);
@@ -106,6 +119,10 @@ export default function Transactions() {
       qc.invalidateQueries({ queryKey: ["transactions"] });
       setEditingCatId(null);
     },
+  });
+  const updateNotesMut = useMutation({
+    mutationFn: ({ id, notes }: { id: number; notes: string | null }) => transactionsApi.update(id, { notes }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["transactions"] }); setEditingNotesId(null); },
   });
   const updateCardCatMut = useMutation({
     mutationFn: ({ cardId, txnId, data }: any) => cardsApi.updateTransaction(cardId, txnId, data),
@@ -143,17 +160,19 @@ export default function Transactions() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">Transactions <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {txnTab === "checking" ? `${txns.length} transaction${txns.length !== 1 ? "s" : ""}` : `${cardTxns.length} card charge${cardTxns.length !== 1 ? "s" : ""}`}
-          </p>
+          {txnTab !== "reconcile" && (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {txnTab === "checking" ? `${txns.length} transaction${txns.length !== 1 ? "s" : ""}` : `${cardTxns.length} card charge${cardTxns.length !== 1 ? "s" : ""}`}
+            </p>
+          )}
         </div>
         <div className="flex gap-2 flex-wrap">
           <div className="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
-            {(["checking", "card"] as TxnTab[]).map(t => (
+            {(["checking", "card", "reconcile"] as TxnTab[]).map(t => (
               <button key={t} type="button"
                 onClick={() => setTxnTab(t)}
                 className={`px-3 py-1 text-xs font-medium rounded-md capitalize transition-colors ${txnTab === t ? "bg-white dark:bg-gray-800 shadow-sm text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}`}>
-                {t === "checking" ? "Checking" : "Credit Cards"}
+                {t === "checking" ? "Checking" : t === "card" ? "Credit Cards" : "Reconcile"}
               </button>
             ))}
           </div>
@@ -162,16 +181,18 @@ export default function Transactions() {
               {cards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
-          <input type="date" className="input w-auto" value={start} onChange={e => setStart(e.target.value)} />
-          <span className="self-center text-gray-400">→</span>
-          <input type="date" className="input w-auto" value={end} onChange={e => setEnd(e.target.value)} />
+          {txnTab !== "reconcile" && <>
+            <input type="date" className="input w-auto" value={start} onChange={e => setStart(e.target.value)} />
+            <span className="self-center text-gray-400">→</span>
+            <input type="date" className="input w-auto" value={end} onChange={e => setEnd(e.target.value)} />
+          </>}
           {txnTab === "checking" && (
             <button onClick={() => setShowForm(true)} className="btn-primary"><Plus size={16} /> Add</button>
           )}
         </div>
       </div>
 
-      <div className="card overflow-hidden p-0">
+      {txnTab !== "reconcile" && <div className="card overflow-hidden p-0">
         {loading && <p className="text-sm text-gray-400 text-center py-8">Loading…</p>}
 
         {/* Checking transactions */}
@@ -196,7 +217,27 @@ export default function Transactions() {
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                         {new Date(t.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       </td>
-                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs truncate">{t.description}</td>
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
+                        <div className="truncate">{t.description}</div>
+                        {editingNotesId === t.id ? (
+                          <input
+                            autoFocus
+                            className="input py-0.5 text-xs mt-0.5 w-full"
+                            value={notesValue}
+                            onChange={e => setNotesValue(e.target.value)}
+                            onBlur={() => updateNotesMut.mutate({ id: t.id, notes: notesValue || null })}
+                            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); updateNotesMut.mutate({ id: t.id, notes: notesValue || null }); } if (e.key === "Escape") setEditingNotesId(null); }}
+                            placeholder="Add note…"
+                          />
+                        ) : (
+                          <button
+                            onClick={() => { setEditingNotesId(t.id); setNotesValue(t.notes ?? ""); }}
+                            className={`text-xs truncate block max-w-full text-left ${t.notes ? "text-gray-400 dark:text-gray-500 hover:text-indigo-500" : "text-gray-200 dark:text-gray-700 hover:text-gray-400"}`}
+                          >
+                            {t.notes || "add note…"}
+                          </button>
+                        )}
+                      </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
                         <CategoryCell txnId={t.id} catId={t.category_id} onSave={catId => handleCatChange(t.id, catId)} editingCatId={editingCatId} setEditingCatId={setEditingCatId} allCats={allCats} catMap={catMap} />
                       </td>
@@ -250,7 +291,131 @@ export default function Transactions() {
             )}
           </>
         )}
-      </div>
+      </div>}
+
+      {/* Reconcile tab */}
+      {txnTab === "reconcile" && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <select className="input w-auto text-sm" value={activeReconcileAccountId ?? ""} onChange={e => setReconcileAccountId(parseInt(e.target.value))}>
+              {(accounts as any[]).filter((a: any) => a.type === "checking").map((a: any) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            <select className="input w-auto text-sm" value={reconcileYear} onChange={e => setReconcileYear(parseInt(e.target.value))}>
+              {[-1, 0, 1].map(d => { const y = new Date().getFullYear() + d; return <option key={y} value={y}>{y}</option>; })}
+            </select>
+            <select className="input w-auto text-sm" value={reconcileMonth} onChange={e => setReconcileMonth(parseInt(e.target.value))}>
+              {["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].map((m, i) => (
+                <option key={i+1} value={i+1}>{m}</option>
+              ))}
+            </select>
+          </div>
+          {reconcileLoading && <p className="text-sm text-gray-400 text-center py-8">Loading…</p>}
+          {!reconcileLoading && reconcileData && (
+            <div className="space-y-4">
+              {reconcileData.matched.length > 0 && (
+                <div className="card p-0 overflow-hidden">
+                  <div className="px-4 py-3 bg-green-50 dark:bg-green-900/20 border-b border-green-100 dark:border-green-800 flex items-center gap-2">
+                    <CheckCircle2 size={15} className="text-green-600" />
+                    <h3 className="text-sm font-semibold text-green-800 dark:text-green-300">Matched ({reconcileData.matched.length})</h3>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 dark:bg-gray-800/50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Recurring Item</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Actual</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Expected</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Variance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                      {reconcileData.matched.map((item: any) => (
+                        <tr key={item.transaction_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                          <td className="px-4 py-2 text-gray-500 whitespace-nowrap">
+                            {new Date(item.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </td>
+                          <td className="px-4 py-2 text-gray-900 dark:text-gray-100 max-w-xs truncate">{item.description}</td>
+                          <td className="px-4 py-2 text-gray-500 hidden sm:table-cell">{item.recurring_name}</td>
+                          <td className={`px-4 py-2 text-right font-semibold tabular-nums ${parseFloat(item.actual_amount) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                            {fmt(item.actual_amount)}
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-500 tabular-nums hidden sm:table-cell">{fmt(item.expected_amount)}</td>
+                          <td className={`px-4 py-2 text-right tabular-nums hidden md:table-cell ${Math.abs(parseFloat(item.variance)) > 0.01 ? "text-amber-600" : "text-gray-400"}`}>
+                            {parseFloat(item.variance) > 0 ? "+" : ""}{fmt(item.variance)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {reconcileData.unmatched_recurring.length > 0 && (
+                <div className="card p-0 overflow-hidden">
+                  <div className="px-4 py-3 bg-amber-50 dark:bg-amber-900/20 border-b border-amber-100 dark:border-amber-800 flex items-center gap-2">
+                    <AlertCircle size={15} className="text-amber-600" />
+                    <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">Expected but not recorded ({reconcileData.unmatched_recurring.length})</h3>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 dark:bg-gray-800/50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Recurring Item</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Expected Amount</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Expected Day</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                      {reconcileData.unmatched_recurring.map((item: any) => (
+                        <tr key={item.recurring_item_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                          <td className="px-4 py-2 text-gray-900 dark:text-gray-100">{item.name}</td>
+                          <td className="px-4 py-2 text-right font-semibold tabular-nums text-red-600">{fmt(item.expected_amount)}</td>
+                          <td className="px-4 py-2 text-right text-gray-500 hidden sm:table-cell">{item.expected_day ?? "last"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {reconcileData.unmatched_transactions.length > 0 && (
+                <div className="card p-0 overflow-hidden">
+                  <div className="px-4 py-3 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-100 dark:border-blue-800 flex items-center gap-2">
+                    <AlertCircle size={15} className="text-blue-600" />
+                    <h3 className="text-sm font-semibold text-blue-800 dark:text-blue-300">Unlinked transactions ({reconcileData.unmatched_transactions.length})</h3>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 dark:bg-gray-800/50">
+                      <tr>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                      {reconcileData.unmatched_transactions.map((item: any) => (
+                        <tr key={item.transaction_id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                          <td className="px-4 py-2 text-gray-500 whitespace-nowrap">
+                            {new Date(item.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                          </td>
+                          <td className="px-4 py-2 text-gray-900 dark:text-gray-100 max-w-xs truncate">{item.description}</td>
+                          <td className={`px-4 py-2 text-right font-semibold tabular-nums ${parseFloat(item.amount) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                            {fmt(item.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {!reconcileData.matched.length && !reconcileData.unmatched_recurring.length && !reconcileData.unmatched_transactions.length && (
+                <div className="card text-center py-8 text-gray-400">No transactions or recurring items for this month.</div>
+              )}
+            </div>
+          )}
+          {!reconcileLoading && !reconcileData && <div className="card text-center py-8 text-gray-400">Select an account and month to reconcile.</div>}
+        </div>
+      )}
 
       {showForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">

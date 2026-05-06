@@ -54,6 +54,7 @@ class RecurringFrequency(str, PyEnum):
     monthly = "monthly"
     yearly = "yearly"
     weekly = "weekly"
+    biweekly = "biweekly"
 
 
 # ── Users ────────────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ class User(Base):
     ss_bonus_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     linked_to_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
+    email: Mapped[str | None] = mapped_column(String(256))
 
     accounts: Mapped[list[Account]] = relationship(back_populates="user", cascade="all, delete-orphan")
     categories: Mapped[list[Category]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -101,6 +103,7 @@ class Account(Base):
     current_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     currency: Mapped[str] = mapped_column(String(3), default="USD")
     low_balance_threshold: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    interest_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -129,6 +132,7 @@ class Category(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     rollover_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     rollover_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), server_default="0")
+    tax_deductible: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     user: Mapped[User] = relationship(back_populates="categories")
     parent: Mapped[Category | None] = relationship(remote_side="Category.id", back_populates="children")
@@ -210,6 +214,8 @@ class CreditCard(Base):
     due_day: Mapped[int] = mapped_column(Integer, nullable=False)        # 1-31
     current_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     balance_due: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    next_payment_date: Mapped[date | None] = mapped_column(Date)
+    monthly_spend_estimate: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -402,6 +408,7 @@ class PlannedExpense(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
     category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
@@ -410,6 +417,7 @@ class PlannedExpense(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="planned_expenses")
+    account: Mapped[Account | None] = relationship()
     category: Mapped[Category | None] = relationship()
 
 
@@ -427,3 +435,20 @@ class AuditLog(Base):
     status_code: Mapped[int] = mapped_column(Integer, nullable=False)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     body_summary: Mapped[str | None] = mapped_column(Text)
+
+
+# ── Quarterly Checkpoints ────────────────────────────────────────────────────
+
+class QuarterlyCheckpoint(Base):
+    __tablename__ = "quarterly_checkpoints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    quarter: Mapped[int] = mapped_column(Integer, nullable=False)
+    actual_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user: Mapped["User"] = relationship()
+    account: Mapped["Account"] = relationship()

@@ -21,54 +21,52 @@ CSV import is complete. Supported features:
 
 ---
 
-## Phase 5 — Reconciliation
+## Phase 5 — Reconciliation ✓ Shipped
 
 Match imported actual transactions against forecast recurring items:
 
-- When an actual transaction is imported that matches a recurring item (same day ± 2 days, same approximate amount), auto-link `transaction.recurring_item_id`
-- Reconciliation view: show month's forecast side-by-side with actuals
-- "Mark as reconciled" workflow — hide matched items, surface unmatched
-- Variance report: actual vs. forecast per category for closed months
+- Auto-link `transaction.recurring_item_id` on import when day ± 3 and amount within 10%
+- Reconciliation view in Transactions → Reconcile tab: matched, unmatched recurring, and unlinked transactions
+- Variance report: actual vs. expected per recurring item
 
 ---
 
-## Phase 6 — Enhanced Forecasting
+## Phase 6 — Enhanced Forecasting ✓ Shipped (partial)
 
-### Savings Transfer Automation
-- Define a quarterly savings target (e.g., "transfer $2,000 to Money Market each Q")
+### Money Market Interest Projection ✓
+- Annual interest rate field on accounts (Settings → Accounts → Edit)
+- Forecast engine applies monthly interest credit on last day of each month
+- Interest appears as a projected "Interest Credit" transaction in the forecast
+
+### Budget Scenario Planning ✓
+- Named forecast scenarios with per-recurring-item amount overrides
+- Side-by-side comparison: baseline vs. scenario traces on Forecast page
+
+### Savings Transfer Automation (future)
+- Define a quarterly savings target
 - Forecast engine includes the transfer on day 1 of each quarter
-- UI shows projected savings account balance over time
 
-### Money Market Interest Projection
-- Input annual interest rate on savings/money market accounts
-- Forecast engine adds monthly interest credit automatically
-- Net worth tracking view (checking + savings - card balances)
-
-### Multi-Year Forecast
+### Multi-Year Forecast (future)
 - Extend forecast beyond current year
-- Model salary increases: create new `RecurringItem` with a `start_date` in the future
-- Annual budget copy: clone current year's allocations to next year
-
-### Budget Scenario Planning
-- "What if I reduce Food & Drinks by $200/month?" — run a shadow forecast
-- Side-by-side comparison: current plan vs. modified plan
+- Annual budget copy
 
 ---
 
-## Phase 7 — Reporting & Notifications
+## Phase 7 — Reporting & Notifications ✓ Shipped
 
-### Annual Tax Summary
-- Export a year's spending by category in CSV
-- Highlight deductible categories (charitable giving, mortgage interest)
+### Annual Tax Summary ✓
+- Per-category `tax_deductible` flag (Settings → Categories → Edit)
+- Export a year's deductible transactions as CSV — Spending → Tax Export tab
 
-### Monthly Email/Push Summary
-- Cron job that generates a spending summary
-- "You're $342 over budget in Food & Drinks this month"
-- Sent to configured email address or as a push notification
+### Daily Email Summary ✓
+- Scheduler sends a daily summary at a configurable hour (DAILY_SUMMARY_HOUR env var, default 7am)
+- User sets email address in Settings → Profile → Email Notifications
+- Test email button to verify SMTP config
+- Summary includes: checking balances, upcoming bills (7-day window), MTD expenses, credit cards
+- Requires SMTP server config in `.env` (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS)
 
-### Spending Trend Analysis
-- Month-over-month and year-over-year charts by category
-- Anomaly detection: "Shopping is 40% higher than your 3-month average"
+### Spending Trend Analysis ✓
+- Month-over-month and year-over-year charts — Spending → Trends tab
 
 ---
 
@@ -96,11 +94,11 @@ Match imported actual transactions against forecast recurring items:
 | Area | Limitation | Workaround |
 |------|-----------|------------|
 | CSV import | Built — Chase, Apple Card, generic | — |
-| Reconciliation | Not yet built (Phase 5) | Visual comparison only |
+| Reconciliation | Built — Transactions → Reconcile tab | — |
 | Month-specific budgets | month=0 applies to all months | Set per-month via API directly |
 | HTTPS on LAN | Not configured by default | Use mkcert (see SECURITY.md) |
-| Notifications | Not yet built | Check app manually |
-| Savings interest | Not projected | Add as a recurring income item |
+| Notifications | Daily email summary (requires SMTP config) | Check app manually |
+| Savings interest | Projected when interest_rate set on account | — |
 | Budget.xlsx import | Not built | Re-enter data in the UI |
 
 ---

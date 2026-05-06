@@ -6,12 +6,12 @@ import { getTheme, setTheme } from "../store/theme";
 import { clearAuth, isAdmin } from "../store/auth";
 import {
   Plus, Pencil, Trash2, X, Check, Moon, Sun, ChevronRight, ChevronDown,
-  AlertTriangle, Shield, User, Activity, HelpCircle, KeyRound, Link
+  AlertTriangle, Shield, User, Activity, HelpCircle, KeyRound, Link, Mail, RotateCcw, Wand2
 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
-const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", notes: "" };
-const emptyCat = { name: "", type: "expense", parent_id: "", color: "#6366f1" };
+const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", interest_rate: "", notes: "" };
+const emptyCat = { name: "", type: "expense", parent_id: "", color: "#6366f1", tax_deductible: false };
 const emptyUser = { username: "", display_name: "", password: "", role: "viewer", linked_to_user_id: "" };
 
 const COLOR_SWATCHES = ["#6366f1", "#22c55e", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6"];
@@ -52,6 +52,7 @@ export default function Settings() {
       ...accForm,
       current_balance: parseFloat(accForm.current_balance),
       low_balance_threshold: accForm.low_balance_threshold ? parseFloat(accForm.low_balance_threshold) : null,
+      interest_rate: accForm.interest_rate ? parseFloat(accForm.interest_rate) : null,
     };
     if (editAcc) updateAccMut.mutate({ id: editAcc.id, data });
     else createAccMut.mutate(data);
@@ -59,7 +60,7 @@ export default function Settings() {
   function openNewAcc() { setAccForm({ ...emptyAccount }); setEditAcc(null); setShowAccForm(true); }
   function openEditAcc(a: any) {
     setEditAcc(a);
-    setAccForm({ name: a.name, type: a.type, current_balance: a.current_balance, low_balance_threshold: a.low_balance_threshold ?? "", notes: a.notes ?? "" });
+    setAccForm({ name: a.name, type: a.type, current_balance: a.current_balance, low_balance_threshold: a.low_balance_threshold ?? "", interest_rate: a.interest_rate ?? "", notes: a.notes ?? "" });
     setShowAccForm(true);
   }
 
@@ -93,7 +94,7 @@ export default function Settings() {
   }
   function openEditCat(c: any) {
     setEditCat(c);
-    setCatForm({ name: c.name, type: c.type, parent_id: c.parent_id?.toString() ?? "", color: c.color });
+    setCatForm({ name: c.name, type: c.type, parent_id: c.parent_id?.toString() ?? "", color: c.color, tax_deductible: c.tax_deductible ?? false });
     setShowCatForm(true);
   }
   function saveBudget(catId: number) {
@@ -111,9 +112,12 @@ export default function Settings() {
   const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
   const [pwError, setPwError] = useState<string | null>(null);
   const [pwSaved, setPwSaved] = useState(false);
+  const [profileEmail, setProfileEmail] = useState("");
+  const [testEmailStatus, setTestEmailStatus] = useState<"idle" | "sending" | "ok" | "err">("idle");
   React.useEffect(() => {
     if (me) {
       setProfileName(me.display_name ?? "");
+      setProfileEmail(me.email ?? "");
       setSsGross(me.ss_gross_per_paycheck ?? "");
       setSsWageBase(me.ss_wage_base ?? "176100");
       setSsBonus(me.ss_bonus_ytd ?? "");
@@ -122,6 +126,12 @@ export default function Settings() {
   const updateMeMut = useMutation({
     mutationFn: authApi.updateMe,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); setProfileSaved(true); setTimeout(() => setProfileSaved(false), 2000); },
+  });
+  const sendTestEmailMut = useMutation({
+    mutationFn: authApi.sendTestEmail,
+    onMutate: () => setTestEmailStatus("sending"),
+    onSuccess: () => { setTestEmailStatus("ok"); setTimeout(() => setTestEmailStatus("idle"), 3000); },
+    onError: () => { setTestEmailStatus("err"); setTimeout(() => setTestEmailStatus("idle"), 3000); },
   });
   const changePasswordMut = useMutation({
     mutationFn: authApi.changePassword,
@@ -160,76 +170,23 @@ export default function Settings() {
   // ── User management ────────────────────────────────────────────────────────
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState({ ...emptyUser });
+  const [resetPwUserId, setResetPwUserId] = useState<number | null>(null);
+  const [resetPwValue, setResetPwValue] = useState("");
+  const [resetPwError, setResetPwError] = useState<string | null>(null);
   const createUserMut = useMutation({ mutationFn: adminApi.createUser, onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-users"] }); setShowUserForm(false); setUserForm({ ...emptyUser }); } });
   const updateUserMut = useMutation({ mutationFn: ({ id, data }: any) => adminApi.updateUser(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin-users"] }); } });
   const removeUserMut = useMutation({ mutationFn: adminApi.removeUser, onSuccess: () => qc.invalidateQueries({ queryKey: ["admin-users"] }) });
+  const resetPwMut = useMutation({
+    mutationFn: ({ id, pw }: { id: number; pw: string }) => adminApi.resetPassword(id, pw),
+    onSuccess: () => { setResetPwUserId(null); setResetPwValue(""); setResetPwError(null); },
+    onError: (e: any) => setResetPwError(e?.response?.data?.detail ?? "Failed to reset password"),
+  });
 
   return (
     <div className="space-y-8">
       <div>
         <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Settings</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400">Manage accounts, categories, and preferences</p>
-      </div>
-
-      {/* ── Profile ── */}
-      <div className="card space-y-5">
-        <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><User size={16} className="text-indigo-500" /> Profile</h3>
-        <div className="flex items-end gap-3">
-          <div className="flex-1 max-w-xs">
-            <label className="label">Display Name</label>
-            <input className="input" value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="Your name" />
-          </div>
-          <button
-            onClick={() => updateMeMut.mutate({ display_name: profileName })}
-            disabled={updateMeMut.isPending || !profileName.trim()}
-            className="btn-primary text-sm"
-          >
-            {updateMeMut.isPending ? "Saving…" : "Save"}
-          </button>
-          {profileSaved && <span className="text-sm text-green-600">Saved!</span>}
-        </div>
-        <form onSubmit={submitPassword} className="space-y-3 border-t border-gray-100 dark:border-gray-700 pt-4">
-          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2"><KeyRound size={14} /> Change Password</h4>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl">
-            <div>
-              <label className="label">Current Password</label>
-              <input type="password" className="input" value={pwForm.current} onChange={e => setPwForm({ ...pwForm, current: e.target.value })} required />
-            </div>
-            <div>
-              <label className="label">New Password</label>
-              <input type="password" className="input" value={pwForm.next} onChange={e => setPwForm({ ...pwForm, next: e.target.value })} required />
-            </div>
-            <div>
-              <label className="label">Confirm New Password</label>
-              <input type="password" className="input" value={pwForm.confirm} onChange={e => setPwForm({ ...pwForm, confirm: e.target.value })} required />
-            </div>
-          </div>
-          {pwError && <p className="text-sm text-red-600">{pwError}</p>}
-          {pwSaved && <p className="text-sm text-green-600">Password changed!</p>}
-          <button type="submit" disabled={changePasswordMut.isPending} className="btn-primary text-sm">
-            {changePasswordMut.isPending ? "Updating…" : "Update Password"}
-          </button>
-        </form>
-        <div className="border-t border-red-100 dark:border-red-900/30 pt-4 space-y-2">
-          <h4 className="text-sm font-semibold text-red-600 dark:text-red-400">Danger Zone</h4>
-          {!showDeleteConfirm ? (
-            <button onClick={() => setShowDeleteConfirm(true)} className="text-sm text-red-600 hover:underline">
-              Delete my account and all data…
-            </button>
-          ) : (
-            <div className="space-y-2">
-              <p className="text-xs text-red-600">This permanently deletes all your accounts, transactions, and settings. Enter your password to confirm.</p>
-              <div className="flex flex-wrap items-center gap-2 max-w-sm">
-                <input type="password" className="input text-sm flex-1 min-w-0" placeholder="Your password" value={deletePassword} onChange={e => setDeletePassword(e.target.value)} />
-                <button onClick={handleDeleteAccount} disabled={deleteAccountMut.isPending || !deletePassword} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm px-3 py-2 rounded-lg font-medium">
-                  {deleteAccountMut.isPending ? "Deleting…" : "Delete"}
-                </button>
-                <button onClick={() => { setShowDeleteConfirm(false); setDeletePassword(""); setDeleteError(null); }} className="btn-secondary text-sm px-3">Cancel</button>
-              </div>
-              {deleteError && <p className="text-xs text-red-600">{deleteError}</p>}
-            </div>
-          )}
-        </div>
       </div>
 
       {/* ── Preferences ── */}
@@ -245,6 +202,21 @@ export default function Settings() {
             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${dark ? "bg-indigo-600" : "bg-gray-200"}`}
           >
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${dark ? "translate-x-6" : "translate-x-1"}`} />
+          </button>
+        </div>
+        <div className="flex items-center justify-between py-2 border-t border-gray-100 dark:border-gray-700">
+          <div className="flex items-center gap-3">
+            <Wand2 size={16} className="text-indigo-400" />
+            <div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Setup Wizard</span>
+              <p className="text-xs text-gray-400">Add an account and income recurring item</p>
+            </div>
+          </div>
+          <button
+            onClick={() => window.dispatchEvent(new Event("open-wizard"))}
+            className="btn-secondary text-sm px-3 py-1.5"
+          >
+            Open
           </button>
         </div>
       </div>
@@ -418,6 +390,13 @@ export default function Settings() {
                       <option value="admin">Admin</option>
                       <option value="viewer">View Only</option>
                     </select>
+                    <button
+                      onClick={() => { setResetPwUserId(u.id); setResetPwValue(""); setResetPwError(null); }}
+                      className="btn-ghost p-1.5 text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                      title="Reset password"
+                    >
+                      <RotateCcw size={14} />
+                    </button>
                     {u.id !== me?.id && (
                       <button
                         onClick={() => removeUserMut.mutate(u.id)}
@@ -500,6 +479,94 @@ export default function Settings() {
         </div>
       )}
 
+      {/* ── Profile ── */}
+      <div className="card space-y-5">
+        <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><User size={16} className="text-indigo-500" /> Profile</h3>
+        <div className="flex items-end gap-3">
+          <div className="flex-1 max-w-xs">
+            <label className="label">Display Name</label>
+            <input className="input" value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="Your name" />
+          </div>
+          <button
+            onClick={() => updateMeMut.mutate({ display_name: profileName })}
+            disabled={updateMeMut.isPending || !profileName.trim()}
+            className="btn-primary text-sm"
+          >
+            {updateMeMut.isPending ? "Saving…" : "Save"}
+          </button>
+          {profileSaved && <span className="text-sm text-green-600">Saved!</span>}
+        </div>
+        <div className="space-y-2">
+          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2"><Mail size={14} /> Email Notifications</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Used for daily summary emails. Requires SMTP to be configured on the server.</p>
+          <div className="flex items-end gap-3">
+            <div className="flex-1 max-w-xs">
+              <label className="label">Email Address</label>
+              <input type="email" className="input" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} placeholder="you@example.com" />
+            </div>
+            <button
+              onClick={() => updateMeMut.mutate({ email: profileEmail || null })}
+              disabled={updateMeMut.isPending}
+              className="btn-primary text-sm"
+            >
+              Save
+            </button>
+            <button
+              onClick={() => sendTestEmailMut.mutate()}
+              disabled={sendTestEmailMut.isPending || !me?.email}
+              className="btn-secondary text-sm"
+              title={!me?.email ? "Save an email address first" : "Send a test email"}
+            >
+              {testEmailStatus === "sending" ? "Sending…" : testEmailStatus === "ok" ? "Sent!" : testEmailStatus === "err" ? "Failed" : "Test"}
+            </button>
+          </div>
+        </div>
+        <form onSubmit={submitPassword} className="space-y-3 border-t border-gray-100 dark:border-gray-700 pt-4">
+          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2"><KeyRound size={14} /> Change Password</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl">
+            <div>
+              <label className="label">Current Password</label>
+              <input type="password" className="input" value={pwForm.current} onChange={e => setPwForm({ ...pwForm, current: e.target.value })} required />
+            </div>
+            <div>
+              <label className="label">New Password</label>
+              <input type="password" className="input" value={pwForm.next} onChange={e => setPwForm({ ...pwForm, next: e.target.value })} required />
+            </div>
+            <div>
+              <label className="label">Confirm New Password</label>
+              <input type="password" className="input" value={pwForm.confirm} onChange={e => setPwForm({ ...pwForm, confirm: e.target.value })} required />
+            </div>
+          </div>
+          {pwError && <p className="text-sm text-red-600">{pwError}</p>}
+          {pwSaved && <p className="text-sm text-green-600">Password changed!</p>}
+          <button type="submit" disabled={changePasswordMut.isPending} className="btn-primary text-sm">
+            {changePasswordMut.isPending ? "Updating…" : "Update Password"}
+          </button>
+        </form>
+      </div>
+
+      {/* ── Danger Zone ── */}
+      <div className="card border-red-100 dark:border-red-900/30 space-y-2">
+        <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">Danger Zone</h3>
+        {!showDeleteConfirm ? (
+          <button onClick={() => setShowDeleteConfirm(true)} className="text-sm text-red-600 hover:underline">
+            Delete my account and all data…
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-red-600">This permanently deletes all your accounts, transactions, and settings. Enter your password to confirm.</p>
+            <div className="flex flex-wrap items-center gap-2 max-w-sm">
+              <input type="password" className="input text-sm flex-1 min-w-0" placeholder="Your password" value={deletePassword} onChange={e => setDeletePassword(e.target.value)} />
+              <button onClick={handleDeleteAccount} disabled={deleteAccountMut.isPending || !deletePassword} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm px-3 py-2 rounded-lg font-medium">
+                {deleteAccountMut.isPending ? "Deleting…" : "Delete"}
+              </button>
+              <button onClick={() => { setShowDeleteConfirm(false); setDeletePassword(""); setDeleteError(null); }} className="btn-secondary text-sm px-3">Cancel</button>
+            </div>
+            {deleteError && <p className="text-xs text-red-600">{deleteError}</p>}
+          </div>
+        )}
+      </div>
+
       {/* ── Add/Edit Account modal ── */}
       {showAccForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -520,6 +587,7 @@ export default function Settings() {
               </div>
               <div><label className="label">Current Balance</label><input type="number" step="0.01" className="input" value={accForm.current_balance} onChange={e => setAccForm({ ...accForm, current_balance: e.target.value })} /></div>
               <div><label className="label">Warn When Balance Drops Below (optional)</label><input type="number" step="0.01" className="input" placeholder="e.g. 1000" value={accForm.low_balance_threshold} onChange={e => setAccForm({ ...accForm, low_balance_threshold: e.target.value })} /></div>
+              <div><label className="label">Annual Interest Rate % (optional, for savings/HYSA)</label><input type="number" step="0.01" className="input" placeholder="e.g. 4.5" value={accForm.interest_rate} onChange={e => setAccForm({ ...accForm, interest_rate: e.target.value })} /></div>
               <div><label className="label">Notes</label><input className="input" value={accForm.notes} onChange={e => setAccForm({ ...accForm, notes: e.target.value })} /></div>
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="btn-primary flex-1">{editAcc ? "Save" : "Add"}</button>
@@ -581,6 +649,17 @@ export default function Settings() {
                   <input type="color" className="w-7 h-7 rounded-full cursor-pointer border-0 p-0" value={catForm.color} onChange={e => setCatForm({ ...catForm, color: e.target.value })} />
                 </div>
               </div>
+              {catForm.type === "expense" && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={catForm.tax_deductible}
+                    onChange={e => setCatForm({ ...catForm, tax_deductible: e.target.checked })}
+                    className="w-4 h-4 rounded accent-indigo-600"
+                  />
+                  <span className="text-sm text-gray-700 dark:text-gray-300">Tax deductible (include in Tax Export)</span>
+                </label>
+              )}
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="btn-primary flex-1">{editCat ? "Save" : "Add"}</button>
                 <button type="button" onClick={() => setShowCatForm(false)} className="btn-secondary flex-1">Cancel</button>
@@ -599,6 +678,45 @@ export default function Settings() {
             <div className="flex gap-3">
               <button onClick={() => deleteCatMut.mutate(deleteCatId)} className="btn-danger flex-1">Delete</button>
               <button onClick={() => setDeleteCatId(null)} className="btn-secondary flex-1">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reset Password modal ── */}
+      {resetPwUserId !== null && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="card w-full max-w-sm">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="font-bold text-gray-900 dark:text-gray-100">Reset Password</h3>
+              <button onClick={() => { setResetPwUserId(null); setResetPwValue(""); setResetPwError(null); }} className="btn-ghost p-1"><X size={18} /></button>
+            </div>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              Set a new password for <strong>{users.find((u: any) => u.id === resetPwUserId)?.display_name ?? "this user"}</strong>. They will be able to change it again after logging in.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="label">New Password</label>
+                <input
+                  type="password"
+                  className="input"
+                  value={resetPwValue}
+                  onChange={e => setResetPwValue(e.target.value)}
+                  placeholder="At least 6 characters"
+                  autoFocus
+                />
+              </div>
+              {resetPwError && <p className="text-sm text-red-600">{resetPwError}</p>}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => resetPwMut.mutate({ id: resetPwUserId, pw: resetPwValue })}
+                  disabled={resetPwMut.isPending || resetPwValue.length < 6}
+                  className="btn-primary flex-1"
+                >
+                  {resetPwMut.isPending ? "Saving…" : "Set Password"}
+                </button>
+                <button onClick={() => { setResetPwUserId(null); setResetPwValue(""); setResetPwError(null); }} className="btn-secondary flex-1">Cancel</button>
+              </div>
             </div>
           </div>
         </div>

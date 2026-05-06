@@ -20,6 +20,7 @@ class UserOut(BaseModel):
     display_name: str
     role: UserRole = UserRole.admin
     created_at: datetime
+    email: Optional[str] = None
     ss_gross_per_paycheck: Optional[Decimal] = None
     ss_wage_base: Optional[Decimal] = None
     ss_bonus_ytd: Optional[Decimal] = None
@@ -27,6 +28,7 @@ class UserOut(BaseModel):
 
 class UserUpdate(BaseModel):
     display_name: Optional[str] = None
+    email: Optional[str] = None
     ss_gross_per_paycheck: Optional[Decimal] = None
     ss_wage_base: Optional[Decimal] = None
     ss_bonus_ytd: Optional[Decimal] = None
@@ -54,6 +56,10 @@ class UserAdminUpdate(BaseModel):
     is_active: Optional[bool] = None
     display_name: Optional[str] = None
     linked_to_user_id: Optional[int] = None
+
+
+class AdminPasswordReset(BaseModel):
+    new_password: str
 
 
 class UserAdminOut(BaseModel):
@@ -92,6 +98,7 @@ class AccountUpdate(BaseModel):
     name: Optional[str] = None
     current_balance: Optional[Decimal] = None
     low_balance_threshold: Optional[Decimal] = None
+    interest_rate: Optional[Decimal] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -104,6 +111,7 @@ class AccountOut(BaseModel):
     current_balance: Decimal
     currency: str
     low_balance_threshold: Optional[Decimal]
+    interest_rate: Optional[Decimal] = None
     is_active: bool
     notes: Optional[str]
     created_at: datetime
@@ -127,6 +135,7 @@ class CategoryUpdate(BaseModel):
     icon: Optional[str] = None
     sort_order: Optional[int] = None
     parent_id: Optional[int] = None
+    tax_deductible: Optional[bool] = None
 
 
 class CategoryOut(BaseModel):
@@ -138,6 +147,7 @@ class CategoryOut(BaseModel):
     color: str
     icon: Optional[str]
     sort_order: int
+    tax_deductible: bool = False
     children: list["CategoryOut"] = []
 
 
@@ -328,6 +338,8 @@ class CreditCardCreate(BaseModel):
     due_day: int
     current_balance: Decimal = Decimal("0")
     balance_due: Decimal = Decimal("0")
+    next_payment_date: Optional[date] = None
+    monthly_spend_estimate: Optional[Decimal] = None
     notes: Optional[str] = None
 
 
@@ -339,6 +351,8 @@ class CreditCardUpdate(BaseModel):
     due_day: Optional[int] = None
     current_balance: Optional[Decimal] = None
     balance_due: Optional[Decimal] = None
+    next_payment_date: Optional[date] = None
+    monthly_spend_estimate: Optional[Decimal] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
 
@@ -353,6 +367,8 @@ class CreditCardOut(BaseModel):
     due_day: int
     current_balance: Decimal
     balance_due: Decimal
+    next_payment_date: Optional[date]
+    monthly_spend_estimate: Optional[Decimal]
     is_active: bool
     notes: Optional[str]
     utilization_pct: float = 0.0
@@ -494,6 +510,8 @@ class ImportConfirmRow(BaseModel):
     description: str
     amount: Decimal
     category_id: Optional[int] = None
+    notes: Optional[str] = None
+    recurring_item_id: Optional[int] = None
 
 
 class ImportConfirmRequest(BaseModel):
@@ -685,6 +703,7 @@ class PlannedExpenseCreate(BaseModel):
     expected_date: date
     notes: Optional[str] = None
     category_id: Optional[int] = None
+    account_id: Optional[int] = None
 
 
 class PlannedExpenseUpdate(BaseModel):
@@ -693,6 +712,7 @@ class PlannedExpenseUpdate(BaseModel):
     expected_date: Optional[date] = None
     notes: Optional[str] = None
     category_id: Optional[int] = None
+    account_id: Optional[int] = None
 
 
 class PlannedExpenseOut(BaseModel):
@@ -703,6 +723,7 @@ class PlannedExpenseOut(BaseModel):
     expected_date: date
     notes: Optional[str]
     category_id: Optional[int]
+    account_id: Optional[int]
     created_at: datetime
 
 
@@ -723,3 +744,73 @@ class SankeyLink(BaseModel):
 class SankeyResponse(BaseModel):
     nodes: list[SankeyNode]
     links: list[SankeyLink]
+
+
+# ── Tax Summary ───────────────────────────────────────────────────────────────
+
+class TaxSummaryRow(BaseModel):
+    date: date
+    description: str
+    amount: Decimal
+    category_name: str
+
+
+class TaxSummaryResponse(BaseModel):
+    year: int
+    rows: list[TaxSummaryRow]
+    total_amount: Decimal
+
+
+# ── Reconciliation ────────────────────────────────────────────────────────────
+
+class ReconcileMatchedItem(BaseModel):
+    transaction_id: int
+    date: date
+    description: str
+    actual_amount: Decimal
+    recurring_item_id: int
+    recurring_name: str
+    expected_amount: Decimal
+    variance: Decimal
+
+
+class ReconcileUnmatchedRecurring(BaseModel):
+    recurring_item_id: int
+    name: str
+    expected_amount: Decimal
+    expected_day: int
+
+
+class ReconcileUnmatchedTransaction(BaseModel):
+    transaction_id: int
+    date: date
+    description: str
+    amount: Decimal
+
+
+class ReconcileResponse(BaseModel):
+    account_id: int
+    year: int
+    month: int
+    matched: list[ReconcileMatchedItem]
+    unmatched_recurring: list[ReconcileUnmatchedRecurring]
+    unmatched_transactions: list[ReconcileUnmatchedTransaction]
+
+
+
+
+class QuarterlyCheckpointUpsert(BaseModel):
+    account_id: int
+    year: int
+    quarter: int
+    actual_balance: Decimal
+
+
+class QuarterlyCheckpointOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    account_id: int
+    year: int
+    quarter: int
+    actual_balance: Decimal
+    updated_at: datetime
