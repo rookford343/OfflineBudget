@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clearAuth, getUser } from "../store/auth";
@@ -36,8 +36,24 @@ export default function Layout() {
     queryFn: accountsApi.list,
     staleTime: 30_000,
   });
-  const [wizardDismissed, setWizardDismissed] = useState(false);
-  const showWizard = accountsLoaded && (accounts as any[]).length === 0 && !wizardDismissed;
+  const [wizardOpen, setWizardOpen] = useState(false);
+
+  // Latch open once on first load if no accounts exist — don't re-derive from live query
+  // so the wizard stays visible after step 1 creates the first account.
+  useEffect(() => {
+    if (accountsLoaded && (accounts as any[]).length === 0) {
+      setWizardOpen(true);
+    }
+  }, [accountsLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Allow Settings (or any page) to open the wizard via a custom event.
+  useEffect(() => {
+    const handler = () => setWizardOpen(true);
+    window.addEventListener("open-wizard", handler);
+    return () => window.removeEventListener("open-wizard", handler);
+  }, []);
+
+  const showWizard = wizardOpen;
 
   function logout() {
     clearAuth();
@@ -80,10 +96,13 @@ export default function Layout() {
       </main>
 
       {showWizard && (
-        <QuickStartWizard onComplete={() => {
-          qc.invalidateQueries({ queryKey: ["accounts"] });
-          setWizardDismissed(true);
-        }} />
+        <QuickStartWizard
+          onComplete={() => {
+            qc.invalidateQueries({ queryKey: ["accounts"] });
+            setWizardOpen(false);
+          }}
+          onDismiss={() => setWizardOpen(false)}
+        />
       )}
 
       {/* Mobile bottom nav */}

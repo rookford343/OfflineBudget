@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { importApi, accountsApi, cardsApi, categoriesApi } from "../api";
+import { importApi, accountsApi, cardsApi, categoriesApi, recurringApi } from "../api";
 import { fmt } from "../lib/utils";
 import { Upload, CheckCircle, AlertCircle, X, ArrowLeftRight, HelpCircle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
@@ -16,7 +16,9 @@ interface PreviewRow {
   category_name: string | null;
   needs_review: boolean;
   is_transfer: boolean;
-  included: boolean; // false for transfer rows by default
+  included: boolean;
+  notes: string;
+  recurring_item_id: number | null;
 }
 
 const COLOR_SWATCHES = ["#6366f1", "#22c55e", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6"];
@@ -40,9 +42,12 @@ export default function Import() {
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: cards = [] } = useQuery({ queryKey: ["cards"], queryFn: cardsApi.list });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoriesApi.list });
+  const { data: recurringItems = [] } = useQuery({ queryKey: ["recurring"], queryFn: () => recurringApi.list(), enabled: tab === "checking" });
 
   const checkingAccounts = accounts.filter((a: any) => a.type === "checking");
-  const allCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]).filter((c: any) => c.type === "expense");
+  const incomeCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]).filter((c: any) => c.type === "income");
+  const expenseCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]).filter((c: any) => c.type === "expense");
+  const allCats = [...incomeCats, ...expenseCats];
   const sources = tab === "checking" ? checkingAccounts : cards;
 
   // Auto-select first source on initial load and when tab changes
@@ -59,6 +64,8 @@ export default function Import() {
       setEditedRows(data.rows.map((r: any) => ({
         ...r,
         included: !r.is_transfer,
+        notes: "",
+        recurring_item_id: null,
       })));
       setError(null);
     },
@@ -133,14 +140,27 @@ export default function Import() {
 
   function submitInlineCat(idx: number) {
     if (!inlineCatName.trim()) return;
-    createCatMut.mutate({ name: inlineCatName.trim(), type: "expense", color: inlineCatColor });
+    const rowType = editedRows[idx]?.amount > 0 ? "income" : "expense";
+    createCatMut.mutate({ name: inlineCatName.trim(), type: rowType, color: inlineCatColor });
+  }
+
+  function toggleSelectAll() {
+    const allIncluded = editedRows.every(r => r.included);
+    setEditedRows(rows => rows.map(r => ({ ...r, included: !allIncluded })));
   }
 
   function confirmImport() {
     if (!sourceId) return;
     const activeRows = editedRows.filter(r => r.included);
     const payload: any = {
-      rows: activeRows.map(r => ({ date: r.date, description: r.description, amount: r.amount, category_id: r.category_id }))
+      rows: activeRows.map(r => ({
+        date: r.date,
+        description: r.description,
+        amount: r.amount,
+        category_id: r.category_id,
+        notes: r.notes || null,
+        recurring_item_id: r.recurring_item_id || null,
+      }))
     };
     if (tab === "checking") payload.account_id = sourceId;
     else payload.card_id = sourceId;
@@ -236,14 +256,19 @@ export default function Import() {
                 {" · "}format: {preview.format}
               </p>
             </div>
-            <button
-              onClick={confirmImport}
-              disabled={confirmMut.isPending || needsReviewCount > 0}
-              className="btn-primary"
-              title={needsReviewCount > 0 ? "Assign categories to all rows first" : undefined}
-            >
-              {confirmMut.isPending ? "Importing…" : `Import ${includedRows.length} Transactions`}
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={toggleSelectAll} className="btn-secondary text-xs px-3 py-1.5">
+                {editedRows.every(r => r.included) ? "Deselect All" : "Select All"}
+              </button>
+              <button
+                onClick={confirmImport}
+                disabled={confirmMut.isPending || needsReviewCount > 0}
+                className="btn-primary"
+                title={needsReviewCount > 0 ? "Assign categories to all rows first" : undefined}
+              >
+                {confirmMut.isPending ? "Importing…" : `Import ${includedRows.length} Transactions`}
+              </button>
+            </div>
           </div>
 
           {needsReviewCount > 0 && (
@@ -260,7 +285,9 @@ export default function Import() {
                   <th className="text-left py-2 pr-4 text-gray-500 font-medium">Date</th>
                   <th className="text-left py-2 pr-4 text-gray-500 font-medium">Description</th>
                   <th className="text-right py-2 pr-4 text-gray-500 font-medium">Amount</th>
-                  <th className="text-left py-2 text-gray-500 font-medium">Category</th>
+                  <th className="text-left py-2 pr-4 text-gray-500 font-medium">Category</th>
+                  <th className="text-left py-2 pr-4 text-gray-500 font-medium">Notes</th>
+                  {tab === "checking" && <th className="text-left py-2 text-gray-500 font-medium">Recurring</th>}
                 </tr>
               </thead>
               <tbody>
@@ -325,13 +352,44 @@ export default function Import() {
                             onChange={e => setCategoryForRow(idx, e.target.value)}
                           >
                             <option value="">No category</option>
-                            {allCats.map((c: any) => (
-                              <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
-                            ))}
+                            {tab === "checking" && incomeCats.length > 0 && (
+                              <optgroup label="── Income ──">
+                                {incomeCats.map((c: any) => (
+                                  <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
+                                ))}
+                              </optgroup>
+                            )}
+                            <optgroup label="── Expenses ──">
+                              {expenseCats.map((c: any) => (
+                                <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
+                              ))}
+                            </optgroup>
                             <option value="new">+ New category…</option>
                           </select>
                         )}
                       </td>
+                      <td className="py-2 pr-4 min-w-[120px]">
+                        <input
+                          className="input py-1 text-xs w-full"
+                          placeholder="note…"
+                          value={row.notes}
+                          onChange={e => setEditedRows(rows => rows.map((r, i) => i === idx ? { ...r, notes: e.target.value } : r))}
+                        />
+                      </td>
+                      {tab === "checking" && (
+                        <td className="py-2 min-w-[160px]">
+                          <select
+                            className="input py-1 text-xs w-full"
+                            value={row.recurring_item_id ?? ""}
+                            onChange={e => setEditedRows(rows => rows.map((r, i) => i === idx ? { ...r, recurring_item_id: e.target.value ? parseInt(e.target.value) : null } : r))}
+                          >
+                            <option value="">None</option>
+                            {(recurringItems as any[]).map((item: any) => (
+                              <option key={item.id} value={item.id}>{item.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

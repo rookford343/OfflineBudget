@@ -36,8 +36,12 @@ def _fires_on(item: models.RecurringItem, d: date) -> bool:
         return False
     if not item.is_active:
         return False
-    # Yearly items only fire in their designated month
     frequency = getattr(item, "frequency", None)
+    if frequency == models.RecurringFrequency.weekly:
+        return (d - item.start_date).days % 7 == 0
+    if frequency == models.RecurringFrequency.biweekly:
+        return (d - item.start_date).days % 14 == 0
+    # Yearly items only fire in their designated month
     if frequency == models.RecurringFrequency.yearly:
         month_of_year = getattr(item, "month_of_year", None)
         if month_of_year and d.month != month_of_year:
@@ -72,6 +76,27 @@ def build_forecast(
         models.RecurringItem.is_active == True,
     ).all()
 
+    # SS paycheck boost setup
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    ss_paycheck_item_ids: set[int] = set()
+    ss_remaining_gross: Decimal | None = None
+    ss_boost_per_check = Decimal("0")
+    ss_limit_reached = False
+    if (
+        user
+        and user.ss_gross_per_paycheck and user.ss_gross_per_paycheck > 0
+        and user.ss_wage_base and user.ss_wage_base > 0
+    ):
+        ss_gross = user.ss_gross_per_paycheck
+        ss_bonus_ytd = user.ss_bonus_ytd or Decimal("0")
+        ss_remaining_gross = user.ss_wage_base - ss_bonus_ytd
+        ss_boost_per_check = ss_gross * Decimal("0.062")
+        for item in recurring_items:
+            if item.type == models.RecurringType.income and item.amount > 0:
+                ratio = item.amount / ss_gross
+                if Decimal("0.9") <= ratio <= Decimal("1.1"):
+                    ss_paycheck_item_ids.add(item.id)
+
     planned = db.query(models.PlannedExpense).options(
         joinedload(models.PlannedExpense.category)
     ).filter(
@@ -81,7 +106,40 @@ def build_forecast(
     ).all()
     planned_by_date: dict[date, list[models.PlannedExpense]] = {}
     for pe in planned:
-        planned_by_date.setdefault(pe.expected_date, []).append(pe)
+        # Only include planned expenses for this account (or unlinked ones)
+        if pe.account_id is None or pe.account_id == account_id:
+            planned_by_date.setdefault(pe.expected_date, []).append(pe)
+
+    # CC payment injections: cards with next_payment_date set, balance_due > 0,
+    # and no existing recurring CC payment item already handling this card (avoid double-count).
+    recurring_cc_card_ids = {item.card_id for item in recurring_items if item.type == models.RecurringType.credit_card_payment}
+    cc_payments: dict[date, list[tuple[str, Decimal]]] = {}
+    cc_estimates_by_date: dict[date, list[tuple[str, Decimal]]] = {}
+
+    all_active_cards = db.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user_id,
+        models.CreditCard.is_active == True,
+    ).all()
+    for card in all_active_cards:
+        if card.id in recurring_cc_card_ids:
+            continue  # recurring CC payment item already handles this card
+        if (
+            card.next_payment_date is not None
+            and start_date <= card.next_payment_date <= end_date
+            and card.balance_due and card.balance_due > 0
+        ):
+            cc_payments.setdefault(card.next_payment_date, []).append(
+                (card.name, Decimal(str(card.balance_due)))
+            )
+        if card.monthly_spend_estimate and card.monthly_spend_estimate > 0:
+            estimate = Decimal(str(card.monthly_spend_estimate))
+            cur = date(start_date.year, start_date.month, 1)
+            while cur <= end_date:
+                due_day = min(card.due_day, _last_day_of_month(cur))
+                inject_date = date(cur.year, cur.month, due_day)
+                if start_date <= inject_date <= end_date:
+                    cc_estimates_by_date.setdefault(inject_date, []).append((card.name, estimate))
+                cur = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
 
     # Build override map: recurring_item_id -> amount_delta
     override_map: dict[int, Decimal] = {}
@@ -158,7 +216,19 @@ def build_forecast(
 
             base_amount = item.amount + override_map.get(item.id, Decimal("0"))
             is_cc = item.type == models.RecurringType.credit_card_payment
-            signed = base_amount if item.type == models.RecurringType.income else -base_amount
+
+            # SS paycheck boost: accumulate gross, apply boost once wage base is hit
+            ss_boost = Decimal("0")
+            if ss_remaining_gross is not None and item.id in ss_paycheck_item_ids:
+                if ss_limit_reached:
+                    ss_boost = ss_boost_per_check
+                else:
+                    ss_remaining_gross -= item.amount
+                    if ss_remaining_gross <= 0:
+                        ss_limit_reached = True
+                        ss_boost = ss_boost_per_check
+
+            signed = (base_amount + ss_boost) if item.type == models.RecurringType.income else -base_amount
             balance += signed
             cc_name = item.card.name if is_cc and item.card else None
             day_transactions.append(ForecastTransaction(
@@ -195,6 +265,47 @@ def build_forecast(
                 is_planned=True,
             ))
 
+        for card_name, amount in cc_payments.get(current, []):
+            signed = -amount
+            balance += signed
+            day_transactions.append(ForecastTransaction(
+                name=f"CC Payment: {card_name}",
+                amount=signed,
+                type="expense",
+                category_name=None,
+                is_actual=False,
+                is_cc_payment=True,
+            ))
+
+        for card_name, amount in cc_estimates_by_date.get(current, []):
+            signed = -amount
+            balance += signed
+            day_transactions.append(ForecastTransaction(
+                name=f"CC Estimate: {card_name}",
+                amount=signed,
+                type="expense",
+                category_name="Credit Card Estimate",
+                is_actual=False,
+                is_cc_payment=True,
+            ))
+
+        interest_rate = getattr(account, "interest_rate", None)
+        if (
+            interest_rate
+            and interest_rate > 0
+            and current.day == _last_day_of_month(current)
+        ):
+            rate = Decimal(str(interest_rate))
+            monthly_interest = round(balance * rate / Decimal("100") / Decimal("12"), 2)
+            if monthly_interest > 0:
+                balance += monthly_interest
+                day_transactions.append(ForecastTransaction(
+                    name="Interest Credit",
+                    amount=monthly_interest,
+                    type="income",
+                    is_actual=False,
+                ))
+
         entries.append(ForecastEntry(
             date=current,
             projected_balance=balance,
@@ -210,7 +321,15 @@ def build_quarters(
     user_id: int,
     account_id: int,
     year: int,
+    overrides: list[dict] | None = None,
 ) -> list[QuarterSummary]:
+    # Build the full year in one pass so Q2+ open balances chain from Q1 close.
+    full_start = date(year, 1, 1)
+    full_end = date(year, 12, 31)
+    all_days = build_forecast(db, user_id, account_id, full_start, full_end, overrides=overrides)
+    if not all_days:
+        return []
+
     quarters = []
     for q in range(1, 5):
         month_start = (q - 1) * 3 + 1
@@ -218,7 +337,7 @@ def build_quarters(
         end_month = month_start + 2
         end = date(year, end_month, monthrange(year, end_month)[1])
 
-        days = build_forecast(db, user_id, account_id, start, end)
+        days = [d for d in all_days if start <= d.date <= end]
         if not days:
             continue
 

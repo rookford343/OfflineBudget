@@ -10,6 +10,14 @@ class Settings(BaseSettings):
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
+    # Email / SMTP (all optional — app runs fine without these)
+    SMTP_HOST: str | None = None
+    SMTP_PORT: int = 587
+    SMTP_USER: str | None = None
+    SMTP_PASS: str | None = None
+    SMTP_FROM: str | None = None
+    DAILY_SUMMARY_HOUR: int = 7  # 24-hour local time to send daily summaries
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @property

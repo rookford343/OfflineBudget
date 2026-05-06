@@ -8,10 +8,10 @@ import HelpPanel from "../components/HelpPanel";
 interface Card {
   id: number; name: string; last_four?: string; credit_limit: string;
   statement_day: number; due_day: number; current_balance: string;
-  balance_due: string; is_active: boolean; notes?: string; utilization_pct: number;
+  balance_due: string; next_payment_date?: string; monthly_spend_estimate?: string; is_active: boolean; notes?: string; utilization_pct: number;
 }
 
-const emptyCard = { name: "", last_four: "", credit_limit: "", statement_day: "26", due_day: "23", current_balance: "0", balance_due: "0", notes: "" };
+const emptyCard = { name: "", last_four: "", credit_limit: "", statement_day: "26", due_day: "23", current_balance: "0", balance_due: "0", next_payment_date: "", monthly_spend_estimate: "", notes: "" };
 const emptyPayment = { checking_account_id: "", date: today(), amount: "", notes: "" };
 
 export default function CreditCards() {
@@ -34,12 +34,21 @@ export default function CreditCards() {
   const payMut = useMutation({ mutationFn: ({ id, data }: any) => cardsApi.pay(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); setPayCard(null); } });
 
   function openNew() { setForm({ ...emptyCard }); setEditCard(null); setShowForm(true); }
-  function openEdit(c: Card) { setEditCard(c); setForm({ name: c.name, last_four: c.last_four || "", credit_limit: c.credit_limit, statement_day: String(c.statement_day), due_day: String(c.due_day), current_balance: c.current_balance, balance_due: c.balance_due, notes: c.notes || "" }); setShowForm(true); }
+  function openEdit(c: Card) { setEditCard(c); setForm({ name: c.name, last_four: c.last_four || "", credit_limit: c.credit_limit, statement_day: String(c.statement_day), due_day: String(c.due_day), current_balance: c.current_balance, balance_due: c.balance_due, next_payment_date: c.next_payment_date || "", monthly_spend_estimate: c.monthly_spend_estimate || "", notes: c.notes || "" }); setShowForm(true); }
   function close() { setShowForm(false); setEditCard(null); }
 
   function submitCard(e: React.FormEvent) {
     e.preventDefault();
-    const data = { ...form, credit_limit: parseFloat(form.credit_limit), statement_day: parseInt(form.statement_day), due_day: parseInt(form.due_day), current_balance: parseFloat(form.current_balance), balance_due: parseFloat(form.balance_due) };
+    const data = {
+      ...form,
+      credit_limit: parseFloat(form.credit_limit),
+      statement_day: parseInt(form.statement_day),
+      due_day: parseInt(form.due_day),
+      current_balance: parseFloat(form.current_balance),
+      balance_due: parseFloat(form.balance_due),
+      next_payment_date: form.next_payment_date || null,
+      monthly_spend_estimate: form.monthly_spend_estimate ? parseFloat(form.monthly_spend_estimate) : null,
+    };
     if (editCard) updateMut.mutate({ id: editCard.id, data });
     else createMut.mutate(data);
   }
@@ -116,6 +125,11 @@ export default function CreditCards() {
               <span>Statement: day {c.statement_day}</span>
               <span>Due: day {c.due_day}</span>
             </div>
+            {c.next_payment_date && parseFloat(c.balance_due) > 0 && (
+              <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                Pay {fmt(c.balance_due)} by {new Date(c.next_payment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -138,8 +152,10 @@ export default function CreditCards() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="label">Current Balance</label><input type="number" step="0.01" className="input" value={form.current_balance} onChange={e => setForm({ ...form, current_balance: e.target.value })} /></div>
-                <div><label className="label">Balance Due</label><input type="number" step="0.01" className="input" value={form.balance_due} onChange={e => setForm({ ...form, balance_due: e.target.value })} /></div>
+                <div><label className="label">Statement Balance Due</label><input type="number" step="0.01" className="input" placeholder="0.00" value={form.balance_due} onChange={e => setForm({ ...form, balance_due: e.target.value })} /></div>
               </div>
+              <div><label className="label">Next Payment Date <span className="text-gray-400 font-normal">(for forecast)</span></label><input type="date" className="input" value={form.next_payment_date} onChange={e => setForm({ ...form, next_payment_date: e.target.value })} /></div>
+              <div><label className="label">Monthly Spend Estimate <span className="text-gray-400 font-normal">(for forecast projection)</span></label><input type="number" step="0.01" className="input" placeholder="e.g. 800" value={form.monthly_spend_estimate} onChange={e => setForm({ ...form, monthly_spend_estimate: e.target.value })} /></div>
               <div><label className="label">Notes</label><input className="input" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="btn-primary flex-1">{editCard ? "Save Changes" : "Add Card"}</button>

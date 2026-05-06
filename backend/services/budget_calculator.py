@@ -74,6 +74,17 @@ def compute_overview(
             rollover_enabled=cat.rollover_enabled,
             rollover_balance=cat.rollover_balance or Decimal("0"),
         ))
+
+    # Roll subcategory actuals up into parent rows
+    row_by_cat_id = {r.category_id: r for r in rows}
+    for row in rows:
+        if row.parent_id is not None and row.parent_id in row_by_cat_id:
+            parent = row_by_cat_id[row.parent_id]
+            parent.actual_checking += row.actual_checking
+            parent.actual_cards += row.actual_cards
+            parent.actual_total += row.actual_total
+            parent.variance = parent.budgeted - parent.actual_total
+
     return rows
 
 
