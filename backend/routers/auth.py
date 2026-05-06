@@ -67,6 +67,21 @@ def change_password(
     db.commit()
 
 
+@router.post("/me/send-test-email", status_code=status.HTTP_204_NO_CONTENT)
+def send_test_email(
+    current_user: models.User = Depends(get_requester),
+):
+    if not current_user.email:
+        raise HTTPException(status_code=400, detail="No email address set on your account")
+    from backend.services.email_service import send_email
+    send_email(
+        current_user.email,
+        "OfflineBudget — Test Email",
+        "<h2 style='color:#4f46e5'>It works!</h2><p>Your OfflineBudget email is configured correctly.</p>",
+        "OfflineBudget — Test Email\n\nYour email is configured correctly.",
+    )
+
+
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
 def delete_account(
     body: schemas.DeleteAccountRequest,

@@ -537,3 +537,58 @@ def spending_sankey(
             links.append(schemas.SankeyLink(source="income:__total__", target=f"expense:{name}", value=amount))
 
     return schemas.SankeyResponse(nodes=nodes, links=links)
+
+
+# ── Tax Summary ───────────────────────────────────────────────────────────────
+
+@router.get("/tax-summary")
+def tax_summary(
+    year: int,
+    format: str = "json",
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    start = date(year, 1, 1)
+    end = date(year, 12, 31)
+    rows_q = (
+        db.query(models.Transaction)
+        .join(models.Category, models.Transaction.category_id == models.Category.id)
+        .filter(
+            models.Transaction.user_id == user.id,
+            models.Transaction.date >= start,
+            models.Transaction.date <= end,
+            models.Transaction.is_actual == True,
+            models.Category.tax_deductible == True,
+        )
+        .order_by(models.Transaction.date)
+        .all()
+    )
+    rows = [
+        schemas.TaxSummaryRow(
+            date=t.date,
+            description=t.description,
+            amount=t.amount,
+            category_name=t.category.name if t.category else "",
+        )
+        for t in rows_q
+    ]
+    total = sum(r.amount for r in rows)
+
+    if format == "csv":
+        import csv
+        import io
+        from fastapi.responses import StreamingResponse
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["Date", "Description", "Amount", "Category"])
+        for r in rows:
+            writer.writerow([str(r.date), r.description, float(r.amount), r.category_name])
+        writer.writerow(["", "TOTAL", float(total), ""])
+        buf.seek(0)
+        return StreamingResponse(
+            iter([buf.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=tax_summary_{year}.csv"},
+        )
+
+    return schemas.TaxSummaryResponse(year=year, rows=rows, total_amount=total)

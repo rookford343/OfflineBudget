@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi } from "../api";
+import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi, checkpointsApi } from "../api";
 import { fmt, today } from "../lib/utils";
+import { Link } from "react-router-dom";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
-import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle, CreditCard } from "lucide-react";
+import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle, CreditCard, Pencil } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
 function isDarkMode(): boolean {
@@ -21,7 +22,7 @@ function chartTheme() {
   };
 }
 
-const emptyExpense = { name: "", amount: "", expected_date: today(), notes: "" };
+const emptyExpense = { name: "", amount: "", expected_date: today(), notes: "", account_id: "" };
 
 export default function Forecast() {
   const qc = useQueryClient();
@@ -34,6 +35,8 @@ export default function Forecast() {
   const [showHelp, setShowHelp] = useState(false);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [expenseForm, setExpenseForm] = useState({ ...emptyExpense });
+  const [editExpenseId, setEditExpenseId] = useState<number | null>(null);
+  const [editExpenseForm, setEditExpenseForm] = useState({ ...emptyExpense });
 
   const activeAccountId = accountId ?? checkingAccounts[0]?.id;
   const activeAccount = checkingAccounts.find((a: any) => a.id === activeAccountId);
@@ -67,6 +70,36 @@ export default function Forecast() {
     queryFn: cardsApi.upcomingDue,
   });
 
+  const { data: checkpoints = [] } = useQuery<any[]>({
+    queryKey: ["checkpoints", activeAccountId],
+    queryFn: () => checkpointsApi.list(activeAccountId!),
+    enabled: !!activeAccountId,
+  });
+
+  const [checkpoint, setCheckpoint] = useState<{ key: string; value: string } | null>(null);
+
+  const saveCheckpointMut = useMutation({
+    mutationFn: ({ year, quarter, actual_balance }: { year: number; quarter: number; actual_balance: number }) =>
+      checkpointsApi.upsert(year, quarter, activeAccountId!, actual_balance),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["checkpoints"] });
+      setCheckpoint(null);
+    },
+  });
+
+  const checkpointMap: Record<string, number> = {};
+  (checkpoints as any[]).forEach((c: any) => {
+    checkpointMap[`${c.year}-${c.quarter}`] = parseFloat(c.actual_balance);
+  });
+
+  const today_date = new Date();
+  const quarterEndDates: Record<number, Date> = {
+    1: new Date(year, 2, 31),  // Mar 31
+    2: new Date(year, 5, 30),  // Jun 30
+    3: new Date(year, 8, 30),  // Sep 30
+    4: new Date(year, 11, 31), // Dec 31
+  };
+
   const createExpenseMut = useMutation({
     mutationFn: plannedExpensesApi.create,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["planned-expenses"] }); setShowExpenseForm(false); setExpenseForm({ ...emptyExpense }); },
@@ -74,6 +107,10 @@ export default function Forecast() {
   const deleteExpenseMut = useMutation({
     mutationFn: plannedExpensesApi.remove,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["planned-expenses"] }),
+  });
+  const updateExpenseMut = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: object }) => plannedExpensesApi.update(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["planned-expenses"] }); setEditExpenseId(null); },
   });
 
   const { data: scenarioQuarters = [] } = useQuery({
@@ -267,18 +304,61 @@ export default function Forecast() {
         {(plannedExpenses as any[]).length > 0 && (
           <div className="divide-y divide-gray-100 dark:divide-gray-700 mb-4">
             {(plannedExpenses as any[]).map((pe: any) => (
-              <div key={pe.id} className="py-3 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{pe.name}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {new Date(pe.expected_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                    {pe.notes && <> · {pe.notes}</>}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="font-semibold text-red-600">{fmt(pe.amount)}</span>
-                  <button onClick={() => deleteExpenseMut.mutate(pe.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
-                </div>
+              <div key={pe.id}>
+                {editExpenseId === pe.id ? (
+                  <div className="py-3 space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="col-span-2">
+                        <label className="label">Name</label>
+                        <input className="input" value={editExpenseForm.name} onChange={e => setEditExpenseForm({ ...editExpenseForm, name: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className="label">Amount</label>
+                        <input type="number" step="0.01" className="input" value={editExpenseForm.amount} onChange={e => setEditExpenseForm({ ...editExpenseForm, amount: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className="label">Expected Date</label>
+                        <input type="date" className="input" value={editExpenseForm.expected_date} onChange={e => setEditExpenseForm({ ...editExpenseForm, expected_date: e.target.value })} />
+                      </div>
+                      <div>
+                        <label className="label">Account (optional)</label>
+                        <select className="input" value={editExpenseForm.account_id} onChange={e => setEditExpenseForm({ ...editExpenseForm, account_id: e.target.value })}>
+                          <option value="">Any account</option>
+                          {checkingAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="label">Notes (optional)</label>
+                        <input className="input" value={editExpenseForm.notes} onChange={e => setEditExpenseForm({ ...editExpenseForm, notes: e.target.value })} />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => updateExpenseMut.mutate({ id: pe.id, data: { name: editExpenseForm.name, amount: parseFloat(editExpenseForm.amount), expected_date: editExpenseForm.expected_date, notes: editExpenseForm.notes || null, account_id: editExpenseForm.account_id ? parseInt(editExpenseForm.account_id) : null } })}
+                        disabled={!editExpenseForm.name || !editExpenseForm.amount || updateExpenseMut.isPending}
+                        className="btn-primary text-sm"
+                      >
+                        {updateExpenseMut.isPending ? "Saving…" : "Save"}
+                      </button>
+                      <button onClick={() => setEditExpenseId(null)} className="btn-secondary text-sm">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-3 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{pe.name}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {new Date(pe.expected_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        {pe.notes && <> · {pe.notes}</>}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-semibold text-red-600">{fmt(pe.amount)}</span>
+                      <button onClick={() => { setEditExpenseId(pe.id); setEditExpenseForm({ name: pe.name, amount: String(pe.amount), expected_date: pe.expected_date, notes: pe.notes ?? "", account_id: pe.account_id ? String(pe.account_id) : "" }); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={14} /></button>
+                      <button onClick={() => deleteExpenseMut.mutate(pe.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -303,13 +383,20 @@ export default function Forecast() {
                 <label className="label">Expected Date</label>
                 <input type="date" className="input" value={expenseForm.expected_date} onChange={e => setExpenseForm({ ...expenseForm, expected_date: e.target.value })} />
               </div>
-              <div className="col-span-2">
+              <div>
+                <label className="label">Account (optional)</label>
+                <select className="input" value={expenseForm.account_id} onChange={e => setExpenseForm({ ...expenseForm, account_id: e.target.value })}>
+                  <option value="">Any account</option>
+                  {checkingAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+              <div>
                 <label className="label">Notes (optional)</label>
                 <input className="input" value={expenseForm.notes} onChange={e => setExpenseForm({ ...expenseForm, notes: e.target.value })} />
               </div>
               <div className="col-span-2 flex gap-2">
                 <button
-                  onClick={() => createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null })}
+                  onClick={() => createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null, account_id: expenseForm.account_id ? parseInt(expenseForm.account_id) : null })}
                   disabled={!expenseForm.name || !expenseForm.amount || createExpenseMut.isPending}
                   className="btn-primary"
                 >
@@ -324,7 +411,16 @@ export default function Forecast() {
 
       {/* Quarter summaries */}
       <div className="space-y-3">
-        {(quarters as any[]).map((q: any) => (
+        {(quarters as any[]).map((q: any) => {
+          const qKey = `${q.year}-${q.quarter}`;
+          const qEndDate = quarterEndDates[q.quarter];
+          const isPastQuarter = qEndDate < today_date;
+          const savedBalance = checkpointMap[qKey];
+          const forecastClose = parseFloat(q.close_balance);
+          const delta = savedBalance !== undefined ? savedBalance - forecastClose : null;
+          const hasConflict = delta !== null && Math.abs(delta) > 1;
+
+          return (
           <div key={q.quarter} className="card">
             <button
               className="w-full flex items-center justify-between"
@@ -342,6 +438,49 @@ export default function Forecast() {
                 {expandedQ === q.quarter ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
               </div>
             </button>
+
+            {/* Quarterly checkpoint for past quarters */}
+            {isPastQuarter && (
+              <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 flex flex-wrap items-center gap-3">
+                <span className="text-xs text-gray-500 dark:text-gray-400">Q{q.quarter} actual close:</span>
+                {checkpoint?.key === qKey ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="input py-1 w-32 text-sm"
+                      value={checkpoint.value}
+                      onChange={e => setCheckpoint({ key: qKey, value: e.target.value })}
+                      autoFocus
+                      onKeyDown={e => {
+                        if (e.key === "Enter") saveCheckpointMut.mutate({ year: q.year, quarter: q.quarter, actual_balance: parseFloat(checkpoint.value) });
+                        if (e.key === "Escape") setCheckpoint(null);
+                      }}
+                    />
+                    <button
+                      onClick={() => saveCheckpointMut.mutate({ year: q.year, quarter: q.quarter, actual_balance: parseFloat(checkpoint.value) })}
+                      disabled={!checkpoint.value || saveCheckpointMut.isPending}
+                      className="btn-primary text-xs px-2 py-1"
+                    >Save</button>
+                    <button onClick={() => setCheckpoint(null)} className="btn-secondary text-xs px-2 py-1">Cancel</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setCheckpoint({ key: qKey, value: savedBalance !== undefined ? String(savedBalance) : "" })}
+                    className="text-xs text-indigo-500 hover:text-indigo-700 underline"
+                  >
+                    {savedBalance !== undefined ? fmt(savedBalance) : "Enter actual balance"}
+                  </button>
+                )}
+                {hasConflict && (
+                  <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                    <AlertTriangle size={12} />
+                    {delta! > 0 ? "+" : ""}{fmt(delta!)} vs forecast ·{" "}
+                    <Link to="/transactions" className="underline hover:text-amber-700">Reconcile</Link>
+                  </span>
+                )}
+              </div>
+            )}
 
             {expandedQ === q.quarter && (
               <div className="mt-4 border-t border-gray-100 pt-4">
@@ -390,7 +529,8 @@ export default function Forecast() {
               </div>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {isLoading && <div className="text-gray-400 text-sm text-center py-8">Building forecast…</div>}

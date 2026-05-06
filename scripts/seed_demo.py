@@ -20,10 +20,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from decimal import Decimal
 from datetime import date
-from OfflineBudget.backend.database import SessionLocal, create_tables
-from OfflineBudget.backend.auth import hash_password
-from OfflineBudget.backend import models
-from OfflineBudget.backend.seed import seed_default_categories
+from backend.database import SessionLocal, create_tables
+from backend.auth import hash_password
+from backend import models
+from backend.seed import seed_default_categories
 
 create_tables()
 db = SessionLocal()
@@ -136,8 +136,8 @@ other_id        = cat("Other")
 
 recurring_items = [
     # ── Income ────────────────────────────────────────────────────────────────
-    dict(name="Paycheck 1",            amount="3600.00",  type="income",  day=1,  cat=income_id),
-    dict(name="Paycheck 2",            amount="3600.00",  type="income",  day=15, cat=income_id),
+    dict(name="Paycheck 1",            amount="3600.00",  type="income",  day=15, cat=income_id),
+    dict(name="Paycheck 2",            amount="3600.00",  type="income",  day=0,  cat=income_id),
 
     # ── Housing ───────────────────────────────────────────────────────────────
     # $2,185 includes P&I ($1,640 on $265k loan at 4.125% / 30yr, 2020 purchase)
@@ -184,6 +184,7 @@ for r in recurring_items:
     db.add(ri)
     ri_objects.append(ri)
 
+db.flush()   # ensure IDs are assigned before paycheck_ri lookup below
 db.commit()
 print(f"✓ Created {len(ri_objects)} recurring items")
 
@@ -229,10 +230,15 @@ actuals = [
     (date(2026, 5, 31), Decimal("3600.00"),  "Paycheck 2",             checking.id, income_id),
 ]
 
+# Map paycheck names to their recurring item objects for linking
+paycheck_ri = {ri.name: ri for ri in ri_objects if ri.name.startswith("Paycheck")}
+
 for dt, amount, desc, acc_id, cat_id in actuals:
+    ri_id = paycheck_ri[desc].id if desc in paycheck_ri else None
     db.add(models.Transaction(
         user_id=user.id, account_id=acc_id, category_id=cat_id,
         date=dt, amount=amount, description=desc, is_actual=True, source="manual",
+        recurring_item_id=ri_id,
     ))
 
 db.commit()

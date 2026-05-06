@@ -18,7 +18,7 @@ def list_users(
     db: Session = Depends(get_db),
     _: models.User = Depends(require_admin),
 ):
-    return db.query(models.User).order_by(models.User.created_at).all()
+    return db.query(models.User).filter(models.User.username != "demo").order_by(models.User.created_at).all()
 
 
 @router.post("/users", response_model=schemas.UserAdminOut, status_code=status.HTTP_201_CREATED)
@@ -61,6 +61,22 @@ def update_user(
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.post("/users/{user_id}/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+def reset_user_password(
+    user_id: int,
+    body: schemas.AdminPasswordReset,
+    db: Session = Depends(get_db),
+    current_admin: models.User = Depends(require_admin),
+):
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    user = db.get(models.User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.hashed_password = hash_password(body.new_password)
+    db.commit()
 
 
 @router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)

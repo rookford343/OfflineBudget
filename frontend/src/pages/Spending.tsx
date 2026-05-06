@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { spendingApi, accountsApi, cardsApi, analyticsApi } from "../api";
+import { api } from "../api/client";
 import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyLeft } from "d3-sankey";
 import { fmt, firstOfMonth, today } from "../lib/utils";
 import {
@@ -34,7 +35,8 @@ const YEAR_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 
 export default function Spending() {
   const [showHelp, setShowHelp] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "trends" | "flow">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "trends" | "flow" | "tax">("overview");
+  const [taxYear, setTaxYear] = useState(new Date().getFullYear());
   const [sankeyYear, setSankeyYear] = useState(new Date().getFullYear());
   const [sankeyMonth, setSankeyMonth] = useState(new Date().getMonth() + 1);
   const [start, setStart] = useState(firstOfMonth());
@@ -237,7 +239,7 @@ export default function Spending() {
 
       {/* Tab switcher */}
       <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
-        {(["overview", "trends", "flow"] as const).map((tab) => (
+        {(["overview", "trends", "flow", "tax"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -247,7 +249,7 @@ export default function Spending() {
                 : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
             }`}
           >
-            {tab === "flow" ? "Flow" : tab}
+            {tab === "flow" ? "Flow" : tab === "tax" ? "Tax Export" : tab}
           </button>
         ))}
       </div>
@@ -506,7 +508,37 @@ export default function Spending() {
           <SankeyChart data={sankeyData} />
         </div>
       )}
-      {showHelp && <HelpPanel title="Spending Analysis" body={"Analyze your spending by category across any date range.\n\nOverview tab: budgeted vs. actual by category with breakdown by account and card.\nTrends tab: year-over-year comparison and 24-month rolling totals.\nFlow tab: Sankey diagram showing income sources flowing into expense categories."} onClose={() => setShowHelp(false)} />}
+      {activeTab === "tax" && (
+        <div className="card max-w-md space-y-4">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100">Tax Summary Export</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Download a CSV of all transactions in tax-deductible categories for the selected year. Mark categories as tax deductible in Settings → Categories.</p>
+          <div className="flex items-center gap-3">
+            <div>
+              <label className="label">Year</label>
+              <select className="input w-auto" value={taxYear} onChange={e => setTaxYear(parseInt(e.target.value))}>
+                {[-1, 0, 1].map(d => { const y = new Date().getFullYear() + d; return <option key={y} value={y}>{y}</option>; })}
+              </select>
+            </div>
+            <div className="pt-5">
+              <button
+                className="btn-primary text-sm"
+                onClick={async () => {
+                  const res = await api.get(`/spending/tax-summary?year=${taxYear}&format=csv`, { responseType: "blob" });
+                  const url = URL.createObjectURL(res.data);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `tax-summary-${taxYear}.csv`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                Download CSV
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showHelp && <HelpPanel title="Spending Analysis" body={"Analyze your spending by category across any date range.\n\nOverview tab: budgeted vs. actual by category with breakdown by account and card.\nTrends tab: year-over-year comparison and 24-month rolling totals.\nFlow tab: Sankey diagram showing income sources flowing into expense categories.\nTax Export tab: download a CSV of deductible transactions for tax filing."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
