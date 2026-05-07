@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi, checkpointsApi } from "../api";
 import { fmt, today } from "../lib/utils";
 import { Link } from "react-router-dom";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar } from "recharts";
 import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle, CreditCard, Pencil } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
@@ -32,6 +32,7 @@ export default function Forecast() {
   const [year, setYear] = useState(new Date().getFullYear());
   const [expandedQ, setExpandedQ] = useState<number | null>(null);
   const [scenarioId, setScenarioId] = useState<number | null>(null);
+  const [chartView, setChartView] = useState<"balance" | "net">("balance");
   const [showHelp, setShowHelp] = useState(false);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [expenseForm, setExpenseForm] = useState({ ...emptyExpense });
@@ -127,13 +128,19 @@ export default function Forecast() {
     enabled: !!activeAccountId && scenarioId !== null && (scenarios as any[]).some((s: any) => s.id === scenarioId),
   });
 
-  // Baseline chart data
+  // Baseline chart data split at today for actual vs projected
+  const todayStr = today();
   const chartData = (quarters as any[]).flatMap((q: any) =>
-    q.days.filter((_: any, i: number) => i % 3 === 0).map((d: any) => ({
-      date: d.date,
-      baseline: parseFloat(d.projected_balance),
-      label: new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-    }))
+    q.days.filter((_: any, i: number) => i % 3 === 0).map((d: any) => {
+      const balance = parseFloat(d.projected_balance);
+      return {
+        date: d.date,
+        baseline: balance,
+        actual: d.date <= todayStr ? balance : null,
+        projected: d.date >= todayStr ? balance : null,
+        label: new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      };
+    })
   );
 
   // Merge scenario trace into chart data
@@ -153,6 +160,14 @@ export default function Forecast() {
 
   const hasScenario = scenarioId !== null && Object.keys(scenarioMap).length > 0;
 
+  // Net view: one bar per quarter
+  const netBarData = (quarters as any[]).map((q: any) => ({
+    name: `Q${q.quarter}`,
+    net: parseFloat(q.net),
+    income: parseFloat(q.total_income),
+    expenses: parseFloat(q.total_expenses),
+  }));
+
   // SS limit estimate
   const ssGross = me?.ss_gross_per_paycheck ? parseFloat(me.ss_gross_per_paycheck) : null;
   const ssWageBase = me?.ss_wage_base ? parseFloat(me.ss_wage_base) : 176100;
@@ -171,12 +186,13 @@ export default function Forecast() {
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload?.length) {
+      const nameMap: Record<string, string> = { actual: "Actual", projected: "Projected", scenario: "Scenario", baseline: "Balance" };
       return (
         <div className="card py-2 px-3 shadow-lg text-sm">
           <p className="text-gray-500 text-xs mb-1">{label}</p>
-          {payload.map((p: any) => (
+          {payload.filter((p: any) => p.value != null).map((p: any) => (
             <p key={p.dataKey} className="font-bold" style={{ color: p.color }}>
-              {p.dataKey === "baseline" ? "Baseline" : "Scenario"}: {fmt(p.value)}
+              {nameMap[p.dataKey] ?? p.dataKey}: {fmt(p.value)}
             </p>
           ))}
         </div>
@@ -199,6 +215,10 @@ export default function Forecast() {
           <select className="input w-auto" value={year} onChange={e => setYear(parseInt(e.target.value))}>
             {[-1, 0, 1, 2].map(d => <option key={d} value={new Date().getFullYear() + d}>{new Date().getFullYear() + d}</option>)}
           </select>
+          <select className="input w-auto" value={chartView} onChange={e => setChartView(e.target.value as "balance" | "net")}>
+            <option value="balance">Running Balance</option>
+            <option value="net">Net Income/Expense</option>
+          </select>
           <select className="input w-auto" value={scenarioId ?? ""} onChange={e => setScenarioId(e.target.value === "" ? null : parseInt(e.target.value))}>
             <option value="">Baseline only</option>
             {(scenarios as any[]).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -212,30 +232,50 @@ export default function Forecast() {
 
       {!isLoading && chartData.length > 0 && (
         <div className="card">
-          <h3 className="font-semibold text-gray-900 mb-4">Balance Over Time — {year}</h3>
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
+            {chartView === "balance" ? `Balance Over Time — ${year}` : `Quarterly Net Income/Expense — ${year}`}
+          </h3>
           <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={mergedData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-              <defs>
-                <linearGradient id="forecastBaselineGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.12} />
-                  <stop offset="95%" stopColor="#6366f1" stopOpacity={0.01} />
-                </linearGradient>
-                <linearGradient id="forecastScenarioGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#10b981" stopOpacity={0.10} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0.01} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke={chartTheme().grid} />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-              <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
-              <Tooltip content={<CustomTooltip />} />
-              <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
-              <Area type="monotone" dataKey="baseline" name="Baseline" stroke="#6366f1" strokeWidth={2} fill="url(#forecastBaselineGradient)" dot={false} animationDuration={800} animationEasing="ease-out" />
-              {hasScenario && (
-                <Area type="monotone" dataKey="scenario" name="Scenario" stroke="#10b981" strokeWidth={2} fill="url(#forecastScenarioGradient)" dot={false} strokeDasharray="5 3" animationDuration={800} animationEasing="ease-out" />
-              )}
-              {hasScenario && <Legend />}
-            </AreaChart>
+            {chartView === "net" ? (
+              <BarChart data={netBarData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme().grid} />
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
+                <Tooltip formatter={(v: any, name: string) => [fmt(v), name]} />
+                <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
+                <Bar dataKey="income" name="Income" fill="#10b981" />
+                <Bar dataKey="expenses" name="Expenses" fill="#ef4444" />
+                <Legend />
+              </BarChart>
+            ) : (
+              <AreaChart data={mergedData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="forecastActualGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.15} />
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0.01} />
+                  </linearGradient>
+                  <linearGradient id="forecastProjectedGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.06} />
+                    <stop offset="95%" stopColor="#6366f1" stopOpacity={0.00} />
+                  </linearGradient>
+                  <linearGradient id="forecastScenarioGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#10b981" stopOpacity={0.10} />
+                    <stop offset="95%" stopColor="#10b981" stopOpacity={0.01} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme().grid} />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
+                <Tooltip content={<CustomTooltip />} />
+                <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
+                <Area type="monotone" dataKey="actual" name="Actual" stroke="#6366f1" strokeWidth={2} fill="url(#forecastActualGradient)" dot={false} connectNulls={false} animationDuration={600} />
+                <Area type="monotone" dataKey="projected" name="Projected" stroke="#6366f1" strokeWidth={2} strokeDasharray="5 3" fill="url(#forecastProjectedGradient)" dot={false} connectNulls={false} animationDuration={600} />
+                {hasScenario && (
+                  <Area type="monotone" dataKey="scenario" name="Scenario" stroke="#10b981" strokeWidth={2} fill="url(#forecastScenarioGradient)" dot={false} strokeDasharray="5 3" animationDuration={800} animationEasing="ease-out" />
+                )}
+                <Legend />
+              </AreaChart>
+            )}
           </ResponsiveContainer>
         </div>
       )}
@@ -434,7 +474,7 @@ export default function Forecast() {
               </div>
               <div className="flex items-center gap-6 text-sm text-gray-600">
                 <span>Open: <strong className="text-gray-900">{fmt(q.open_balance)}</strong></span>
-                <span>Close: <strong className={parseFloat(q.close_balance) >= 0 ? "text-gray-900" : "text-red-600"}>{fmt(q.close_balance)}</strong></span>
+                <span>Close: {lowBalanceThreshold !== null && parseFloat(q.close_balance) < lowBalanceThreshold && <AlertTriangle size={12} className="inline mr-1 text-amber-500" />}<strong className={parseFloat(q.close_balance) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600"}>{fmt(q.close_balance)}</strong></span>
                 {expandedQ === q.quarter ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
               </div>
             </button>
@@ -510,6 +550,7 @@ export default function Forecast() {
                                   {t.amount > 0 ? "+" : ""}{fmt(t.amount)}
                                 </span>
                                 <span className="text-gray-600">{t.name}</span>
+                                {t.is_actual && <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">actual</span>}
                                 {!t.is_actual && !t.is_planned && <span className="badge-blue">projected</span>}
                                 {t.is_planned && <span className="px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">planned</span>}
                               </div>

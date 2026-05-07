@@ -68,6 +68,19 @@ def upgrade_schema():
         "ALTER TABLE credit_cards ADD COLUMN next_payment_date DATE",
         "ALTER TABLE planned_expenses ADD COLUMN account_id INTEGER REFERENCES accounts(id)",
         "ALTER TABLE credit_cards ADD COLUMN monthly_spend_estimate NUMERIC(14,2)",
+        """CREATE TABLE IF NOT EXISTS transaction_rules (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name VARCHAR(128) NOT NULL,
+            field VARCHAR(20) NOT NULL,
+            pattern_type VARCHAR(20) NOT NULL,
+            pattern VARCHAR(256) NOT NULL,
+            action VARCHAR(20) NOT NULL,
+            category_id INTEGER REFERENCES categories(id),
+            priority INTEGER DEFAULT 0,
+            is_active BOOLEAN DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
     ]
     with engine.connect() as conn:
         for s in stmts:

@@ -137,7 +137,14 @@ def build_forecast(
             while cur <= end_date:
                 due_day = min(card.due_day, _last_day_of_month(cur))
                 inject_date = date(cur.year, cur.month, due_day)
-                if start_date <= inject_date <= end_date:
+                # Skip estimate when we already have the real balance_due for this payment
+                payment_covers_this_date = (
+                    card.next_payment_date is not None
+                    and card.next_payment_date.year == cur.year
+                    and card.next_payment_date.month == cur.month
+                    and card.balance_due and card.balance_due > 0
+                )
+                if start_date <= inject_date <= end_date and not payment_covers_this_date:
                     cc_estimates_by_date.setdefault(inject_date, []).append((card.name, estimate))
                 cur = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
 
