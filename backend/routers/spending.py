@@ -711,14 +711,34 @@ def tax_estimate(
     ).scalar() or Decimal("0")
     deductible_amount = abs(deductible)
 
+    # Add manually entered itemized deductions from the user's tax profile
+    itemized_total = sum(
+        Decimal(str(v)) for v in [
+            user.itemized_mortgage_interest,
+            user.itemized_donations,
+            user.itemized_salt,
+            user.itemized_property_tax,
+            user.itemized_other,
+        ] if v is not None
+    )
+    total_deductible = deductible_amount + itemized_total
+
     result = estimate_taxes(
         filing_status=user.tax_filing_status or "single",
         state=user.tax_state or "TX",
         gross_income=Decimal(str(user.annual_salary)),
         other_income=Decimal(str(user.other_income or 0)),
-        deductible_expenses=deductible_amount,
+        deductible_expenses=total_deductible,
         federal_withheld=Decimal(str(user.federal_withholding_ytd or 0)),
         state_withheld=Decimal(str(user.state_withholding_ytd or 0)),
     )
     result["year"] = year
+    result["itemized_breakdown"] = {
+        "mortgage_interest": float(user.itemized_mortgage_interest or 0),
+        "donations": float(user.itemized_donations or 0),
+        "salt": float(user.itemized_salt or 0),
+        "property_tax": float(user.itemized_property_tax or 0),
+        "other": float(user.itemized_other or 0),
+        "transaction_deductibles": float(deductible_amount),
+    }
     return result

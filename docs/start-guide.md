@@ -23,7 +23,6 @@ source .venv/bin/activate           # macOS/Linux
 
 # Install Python dependencies
 pip install -r backend/requirements.txt
-pip install typer rich               # CLI extras
 
 # Install frontend dependencies
 cd frontend && npm install && cd ..
@@ -84,19 +83,41 @@ This starts:
 
 ---
 
-## 5. Initial Budget Setup (Recommended Order)
+## 5. Enable HTTPS on LAN (Optional but Recommended)
 
-### Step 1 — Add Accounts (Settings page)
+For encrypted connections when accessing from other devices:
+
+```bash
+./scripts/setup-ssl.sh
+```
+
+This generates `ssl/cert.pem` and `ssl/key.pem` with your current LAN IP in the Subject Alternative Name. The start script detects these files automatically and enables HTTPS for both the API and frontend.
+
+After setup, access the app at `https://localhost:5173` and `https://192.168.1.42:5173`.
+
+> Browsers will show a security warning for self-signed certificates. To eliminate warnings, install `mkcert` and use CA-signed certs instead — see [SECURITY.md](../SECURITY.md).
+
+---
+
+## 6. Initial Budget Setup (Recommended Order)
+
+### Step 1 — Add Accounts (Settings → Accounts)
 - **Main Checking** — enter your current balance
 - **Money Market** or savings account (optional)
 
-### Step 2 — Add Recurring Income (Recurring page)
+### Step 2 — Add Categories (Settings → Categories)
+- The Quick Start wizard seeds a default category tree on registration
+- Add sub-categories under the default parents to match your budget
+- Set the **type** to `savings` for any category used for savings transfers — these are excluded from spending totals
+
+### Step 3 — Add Recurring Income (Recurring page)
 - "Paycheck 1" — Income, your net amount, Day 15
-- "Paycheck 2" — Income, your net amount, Day 0 (last day)
+- "Paycheck 2" — Income, your net amount, Day 0 (last day of month)
 - Any bonus as a one-time or monthly averaged item
 
-### Step 3 — Add Recurring Bills (Recurring page)
+### Step 4 — Add Recurring Bills (Recurring page)
 Add each bill with its day-of-month. Examples:
+
 | Name | Amount | Day |
 |------|--------|-----|
 | Auto Insurance | $194 | 2 |
@@ -104,27 +125,51 @@ Add each bill with its day-of-month. Examples:
 | HOA Fees | $125 | 1 |
 | Car Payment | $501 | 17 |
 
-### Step 4 — Add Credit Cards (Credit Cards page)
-- Enter current balance and balance due for each card
+### Step 5 — Add Credit Cards (Credit Cards page)
+- Enter current balance and minimum payment for each card
 
-### Step 5 — View Your Forecast (Forecast page)
+### Step 6 — View Your Forecast (Forecast page)
 - Select your checking account
 - Choose the current year
-- See day-by-day projected balances
+- See day-by-day projected balances and quarterly summaries
 
 ---
 
-## 6. Recording Transactions
+## 7. Importing Transactions
 
-**Manual entry:** Go to **Transactions → Add** and fill in the date, amount (negative for expenses), and category.
+### From the web UI
+1. Go to **Import** in the sidebar
+2. Choose **Checking Account** or **Credit Card** and select the target account
+3. Upload a CSV or OFX/QFX file
+4. Review the preview — auto-categorized rows show a green badge; amber rows need a category assigned
+5. Click **Import** — duplicates are skipped automatically
 
-**Credit card charges:** Go to **Credit Cards → [card name] → Add Transaction**.
+**Supported CSV formats:** Chase checking, Chase credit card, Apple Card, generic (date/description/amount).
+**OFX/QFX:** Auto-detected by file extension — works with most bank "Download Transactions" exports.
 
-**Credit card payments:** Go to **Credit Cards → [card name] → Record Payment** — this automatically deducts from checking.
+### Speeding up categorization
+
+1. **Transaction Rules** (Settings → Transaction Rules) — define rules like "any description containing SPOTIFY → Subscriptions". These run on every future import.
+2. **Import history** — once you categorize a merchant, the same description is categorized automatically next time.
 
 ---
 
-## 7. CLI Usage
+## 8. Tax Profile Setup
+
+Configure your tax information under **Settings → Profile → Tax Profile**:
+
+1. **Filing Status** — Single, Married Filing Jointly, Married Separately, or Head of Household
+2. **State** — 2-letter code (e.g., TX, CA)
+3. **Annual Gross Salary** — your W-2 gross wages
+4. **Federal/State Withholding YTD** — from your pay stubs
+5. **Itemized Deductions** — enter mortgage interest (Form 1098), charitable donations, SALT, property taxes, and other deductions
+6. **Social Security Tracker** — enter your gross per paycheck and YTD bonus to track when you'll hit the wage base
+
+After saving, go to **Spending → Tax Export** to see your full estimated tax liability for any year.
+
+---
+
+## 9. CLI Usage
 
 The CLI uses the same database as the web app — no server required.
 
@@ -150,7 +195,7 @@ python cli/budget.py cards list --username alice
 
 ---
 
-## 8. Backing Up Your Data
+## 10. Backing Up Your Data
 
 All data lives in one file: `data/budget.db`
 
@@ -167,3 +212,23 @@ Set up a daily cron backup:
 crontab -e
 # Add: 0 2 * * * cp /path/to/OfflineBudget/data/budget.db /path/to/backups/budget_$(date +\%Y\%m\%d).db
 ```
+
+---
+
+## Troubleshooting
+
+**Backend won't start — ImportError**
+Make sure you're running from the project root with the venv active:
+```bash
+source .venv/bin/activate
+./scripts/start.sh
+```
+
+**Frontend shows "Cannot connect to API"**
+Check that `ALLOWED_ORIGINS` in `.env` includes the URL you're accessing from. Restart the backend after changing `.env`.
+
+**"Invalid token" after restarting**
+If you changed `JWT_SECRET` in `.env`, all existing tokens are invalidated. Log in again.
+
+**HTTPS cert not trusted by browser**
+Self-signed certificates from `setup-ssl.sh` will show a warning. Click "Advanced → Proceed" once per browser. For permanent trust, use `mkcert` — see [SECURITY.md](../SECURITY.md).

@@ -45,6 +45,8 @@ export default function Spending() {
   const [sourceKey, setSourceKey] = useState<string>("all");
   const [catFilter, setCatFilter] = useState<Set<number> | null>(null);
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [merchantSortCol, setMerchantSortCol] = useState<"name" | "count" | "total">("total");
+  const [merchantSortDir, setMerchantSortDir] = useState<"asc" | "desc">("desc");
 
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: cards = [] } = useQuery({ queryKey: ["cards"], queryFn: cardsApi.list });
@@ -519,20 +521,41 @@ export default function Spending() {
             <div className="card text-center py-8 text-gray-400">No spending data for this range.</div>
           )}
           {!merchantLoading && merchantData.length > 0 && (() => {
-            const maxTotal = Math.max(...(merchantData as any[]).map((m: any) => Number(m.total)));
+            function toggleMerchantSort(col: "name" | "count" | "total") {
+              if (merchantSortCol === col) setMerchantSortDir(d => d === "asc" ? "desc" : "asc");
+              else { setMerchantSortCol(col); setMerchantSortDir(col === "name" ? "asc" : "desc"); }
+            }
+            const sorted = [...(merchantData as any[])].sort((a, b) => {
+              let cmp = 0;
+              if (merchantSortCol === "name") cmp = a.name.localeCompare(b.name);
+              else if (merchantSortCol === "count") cmp = Number(a.count) - Number(b.count);
+              else cmp = Number(a.total) - Number(b.total);
+              return merchantSortDir === "asc" ? cmp : -cmp;
+            });
+            const maxTotal = Math.max(...sorted.map((m: any) => Number(m.total)));
+            function SortArrow({ col }: { col: "name" | "count" | "total" }) {
+              if (merchantSortCol !== col) return <span className="ml-1 text-gray-300 dark:text-gray-600">↕</span>;
+              return <span className="ml-1">{merchantSortDir === "asc" ? "↑" : "↓"}</span>;
+            }
             return (
               <div className="card p-0 overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 dark:bg-gray-800/50">
                     <tr>
                       <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-8">#</th>
-                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Merchant / Description</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Transactions</th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleMerchantSort("name")}>
+                        Merchant / Description <SortArrow col="name" />
+                      </th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase hidden sm:table-cell cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleMerchantSort("count")}>
+                        Transactions <SortArrow col="count" />
+                      </th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase cursor-pointer select-none hover:text-gray-700 dark:hover:text-gray-300" onClick={() => toggleMerchantSort("total")}>
+                        Total <SortArrow col="total" />
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                    {(merchantData as any[]).map((m: any, i: number) => {
+                    {sorted.map((m: any, i: number) => {
                       const pct = maxTotal > 0 ? (Number(m.total) / maxTotal) * 100 : 0;
                       return (
                         <tr key={m.name} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 relative">
@@ -641,9 +664,20 @@ export default function Spending() {
                       <div className="flex justify-between"><dt className="text-gray-500">Gross salary</dt><dd className="tabular-nums">{fmt(te.federal_withheld + Number(te.federal_tax) > 0 ? (Number(te.annual_salary ?? 0)) : 0)}{fmt(Number((taxEstimate as any).taxable_income) + Number((taxEstimate as any).deduction_used))}</dd></div>
                       <div className="flex justify-between"><dt className="text-gray-500">Deduction ({te.used_itemized ? "itemized" : "standard"})</dt><dd className="tabular-nums text-green-600">−{fmt(te.deduction_used)}</dd></div>
                       <div className="flex justify-between border-t border-gray-100 dark:border-gray-700 pt-1 font-medium"><dt>Taxable income</dt><dd className="tabular-nums">{fmt(te.taxable_income)}</dd></div>
-                      {te.deductible_expenses > 0 && te.used_itemized && (
-                        <div className="flex justify-between text-xs text-gray-400"><dt>Deductible transactions</dt><dd>{fmt(te.deductible_expenses)}</dd></div>
-                      )}
+                      {te.used_itemized && te.itemized_breakdown && (() => {
+                        const bd = te.itemized_breakdown;
+                        const rows = [
+                          { label: "Mortgage interest", val: bd.mortgage_interest },
+                          { label: "Charitable donations", val: bd.donations },
+                          { label: "SALT", val: bd.salt },
+                          { label: "Property taxes", val: bd.property_tax },
+                          { label: "Other deductions", val: bd.other },
+                          { label: "Deductible transactions", val: bd.transaction_deductibles },
+                        ].filter(r => r.val > 0);
+                        return rows.map(r => (
+                          <div key={r.label} className="flex justify-between text-xs text-gray-400 pl-2"><dt>{r.label}</dt><dd className="tabular-nums">{fmt(r.val)}</dd></div>
+                        ));
+                      })()}
                     </dl>
                   </div>
                   <div className="card space-y-2">
