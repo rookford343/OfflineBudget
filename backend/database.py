@@ -81,6 +81,12 @@ def upgrade_schema():
             is_active BOOLEAN DEFAULT 1,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )""",
+        "ALTER TABLE users ADD COLUMN tax_filing_status VARCHAR(32)",
+        "ALTER TABLE users ADD COLUMN tax_state VARCHAR(2)",
+        "ALTER TABLE users ADD COLUMN annual_salary NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN other_income NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN federal_withholding_ytd NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN state_withholding_ytd NUMERIC(14,2)",
     ]
     with engine.connect() as conn:
         for s in stmts:

@@ -3,13 +3,18 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, cast, String
+from sqlalchemy import func, cast, String, or_
 from sqlalchemy.orm import Session, joinedload
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 
 router = APIRouter(prefix="/spending", tags=["spending"])
+
+_NOT_SAVINGS = or_(
+    models.Transaction.category_id.is_(None),
+    models.Category.type != models.CategoryType.savings,
+)
 
 
 @router.get("/monthly", response_model=list[schemas.MonthlySpendingEntry])
@@ -23,13 +28,18 @@ def spending_monthly(
 ):
     results: dict[str, dict] = {}
 
-    # Checking transactions (expenses only = negative amounts)
-    checking_q = db.query(models.Transaction).filter(
-        models.Transaction.user_id == user.id,
-        models.Transaction.is_actual == True,
-        models.Transaction.date >= start,
-        models.Transaction.date <= end,
-        models.Transaction.amount < 0,
+    # Checking transactions (expenses only = negative amounts, exclude savings categories)
+    checking_q = (
+        db.query(models.Transaction)
+        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
+        .filter(
+            models.Transaction.user_id == user.id,
+            models.Transaction.is_actual == True,
+            models.Transaction.date >= start,
+            models.Transaction.date <= end,
+            models.Transaction.amount < 0,
+            _NOT_SAVINGS,
+        )
     )
     if account_id:
         checking_q = checking_q.filter(models.Transaction.account_id == account_id)
@@ -85,12 +95,17 @@ def spending_monthly_by_category(
 
     results: dict[str, dict[int, Decimal]] = {}
 
-    checking_q = db.query(models.Transaction).filter(
-        models.Transaction.user_id == user.id,
-        models.Transaction.is_actual == True,
-        models.Transaction.date >= start,
-        models.Transaction.date <= end,
-        models.Transaction.amount < 0,
+    checking_q = (
+        db.query(models.Transaction)
+        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
+        .filter(
+            models.Transaction.user_id == user.id,
+            models.Transaction.is_actual == True,
+            models.Transaction.date >= start,
+            models.Transaction.date <= end,
+            models.Transaction.amount < 0,
+            _NOT_SAVINGS,
+        )
     )
     if account_id:
         checking_q = checking_q.filter(models.Transaction.account_id == account_id)
@@ -164,12 +179,17 @@ def spending_by_category(
     ).all()
     card_map = {c.id: c.name for c in cards}
 
-    # Checking actuals (expenses only)
-    checking_q = db.query(models.Transaction).filter(
-        models.Transaction.user_id == user.id,
-        models.Transaction.is_actual == True,
-        models.Transaction.date >= start,
-        models.Transaction.date <= end,
+    # Checking actuals (expenses only, exclude savings categories)
+    checking_q = (
+        db.query(models.Transaction)
+        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
+        .filter(
+            models.Transaction.user_id == user.id,
+            models.Transaction.is_actual == True,
+            models.Transaction.date >= start,
+            models.Transaction.date <= end,
+            _NOT_SAVINGS,
+        )
     )
     if account_id:
         checking_q = checking_q.filter(models.Transaction.account_id == account_id)
@@ -362,12 +382,17 @@ def available_to_spend(
         elif item.frequency == models.RecurringFrequency.yearly and item.month_of_year == today.month:
             committed_expenses += item.amount
 
-    txns = db.query(models.Transaction).filter(
-        models.Transaction.user_id == user.id,
-        models.Transaction.is_actual == True,
-        models.Transaction.date >= first,
-        models.Transaction.date <= last,
-        models.Transaction.amount < 0,
+    txns = (
+        db.query(models.Transaction)
+        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
+        .filter(
+            models.Transaction.user_id == user.id,
+            models.Transaction.is_actual == True,
+            models.Transaction.date >= first,
+            models.Transaction.date <= last,
+            models.Transaction.amount < 0,
+            _NOT_SAVINGS,
+        )
     ).all()
     spent_this_month = sum((abs(t.amount) for t in txns), Decimal("0"))
 
@@ -389,12 +414,17 @@ def spending_yearly_trends(
     result = []
     for year in range(current_year - years + 1, current_year + 1):
         months_data: dict[str, Decimal] = {str(m): Decimal("0") for m in range(1, 13)}
-        txns = db.query(models.Transaction).filter(
-            models.Transaction.user_id == user.id,
-            models.Transaction.is_actual == True,
-            models.Transaction.date >= date(year, 1, 1),
-            models.Transaction.date <= date(year, 12, 31),
-            models.Transaction.amount < 0,
+        txns = (
+            db.query(models.Transaction)
+            .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
+            .filter(
+                models.Transaction.user_id == user.id,
+                models.Transaction.is_actual == True,
+                models.Transaction.date >= date(year, 1, 1),
+                models.Transaction.date <= date(year, 12, 31),
+                models.Transaction.amount < 0,
+                _NOT_SAVINGS,
+            )
         ).all()
         for t in txns:
             months_data[str(t.date.month)] += abs(t.amount)
@@ -426,12 +456,17 @@ def spending_rolling_monthly(
     start = date(start_year, start_month, 1)
 
     results: dict[str, Decimal] = {}
-    txns = db.query(models.Transaction).filter(
-        models.Transaction.user_id == user.id,
-        models.Transaction.is_actual == True,
-        models.Transaction.date >= start,
-        models.Transaction.date <= today,
-        models.Transaction.amount < 0,
+    txns = (
+        db.query(models.Transaction)
+        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
+        .filter(
+            models.Transaction.user_id == user.id,
+            models.Transaction.is_actual == True,
+            models.Transaction.date >= start,
+            models.Transaction.date <= today,
+            models.Transaction.amount < 0,
+            _NOT_SAVINGS,
+        )
     ).all()
     for t in txns:
         key = t.date.strftime("%Y-%m")
@@ -539,6 +574,60 @@ def spending_sankey(
     return schemas.SankeyResponse(nodes=nodes, links=links)
 
 
+# ── Merchant Spending ─────────────────────────────────────────────────────────
+
+@router.get("/by-merchant", response_model=list[schemas.MerchantSpendingEntry])
+def spending_by_merchant(
+    start: date = Query(...),
+    end: date = Query(...),
+    account_id: Optional[int] = None,
+    card_id: Optional[int] = None,
+    limit: int = Query(default=50, le=200),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    totals: dict[str, Decimal] = {}
+    counts: dict[str, int] = {}
+
+    checking_q = (
+        db.query(models.Transaction)
+        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
+        .filter(
+            models.Transaction.user_id == user.id,
+            models.Transaction.is_actual == True,
+            models.Transaction.date >= start,
+            models.Transaction.date <= end,
+            models.Transaction.amount < 0,
+            _NOT_SAVINGS,
+        )
+    )
+    if account_id:
+        checking_q = checking_q.filter(models.Transaction.account_id == account_id)
+    for t in checking_q.all():
+        key = t.description or "Unknown"
+        totals[key] = totals.get(key, Decimal("0")) + abs(t.amount)
+        counts[key] = counts.get(key, 0) + 1
+
+    card_q = db.query(models.CreditCardTransaction).filter(
+        models.CreditCardTransaction.user_id == user.id,
+        models.CreditCardTransaction.date >= start,
+        models.CreditCardTransaction.date <= end,
+        models.CreditCardTransaction.amount > 0,
+    )
+    if card_id:
+        card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
+    for t in card_q.all():
+        key = t.merchant or "Unknown"
+        totals[key] = totals.get(key, Decimal("0")) + t.amount
+        counts[key] = counts.get(key, 0) + 1
+
+    sorted_entries = sorted(totals.items(), key=lambda x: x[1], reverse=True)[:limit]
+    return [
+        schemas.MerchantSpendingEntry(name=name, total=total, count=counts[name])
+        for name, total in sorted_entries
+    ]
+
+
 # ── Tax Summary ───────────────────────────────────────────────────────────────
 
 @router.get("/tax-summary")
@@ -592,3 +681,44 @@ def tax_summary(
         )
 
     return schemas.TaxSummaryResponse(year=year, rows=rows, total_amount=total)
+
+
+@router.get("/tax-estimate")
+def tax_estimate(
+    year: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Return full tax liability estimate using the user's saved tax profile."""
+    from backend.services.tax_service import estimate_taxes
+
+    if not user.annual_salary:
+        return {"error": "No tax profile configured. Add salary and filing info in Settings → Profile."}
+
+    # Sum deductible transactions for the year
+    from datetime import date as _date
+    deductible = db.query(
+        func.sum(models.Transaction.amount)
+    ).join(
+        models.Category, models.Transaction.category_id == models.Category.id
+    ).filter(
+        models.Transaction.user_id == user.id,
+        models.Transaction.date >= _date(year, 1, 1),
+        models.Transaction.date <= _date(year, 12, 31),
+        models.Transaction.is_actual == True,
+        models.Category.tax_deductible == True,
+        models.Transaction.amount < 0,
+    ).scalar() or Decimal("0")
+    deductible_amount = abs(deductible)
+
+    result = estimate_taxes(
+        filing_status=user.tax_filing_status or "single",
+        state=user.tax_state or "TX",
+        gross_income=Decimal(str(user.annual_salary)),
+        other_income=Decimal(str(user.other_income or 0)),
+        deductible_expenses=deductible_amount,
+        federal_withheld=Decimal(str(user.federal_withholding_ytd or 0)),
+        state_withheld=Decimal(str(user.state_withholding_ytd or 0)),
+    )
+    result["year"] = year
+    return result
