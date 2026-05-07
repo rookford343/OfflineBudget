@@ -87,6 +87,11 @@ def upgrade_schema():
         "ALTER TABLE users ADD COLUMN other_income NUMERIC(14,2)",
         "ALTER TABLE users ADD COLUMN federal_withholding_ytd NUMERIC(14,2)",
         "ALTER TABLE users ADD COLUMN state_withholding_ytd NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN itemized_mortgage_interest NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN itemized_donations NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN itemized_salt NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN itemized_property_tax NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN itemized_other NUMERIC(14,2)",
     ]
     with engine.connect() as conn:
         for s in stmts:

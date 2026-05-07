@@ -6,7 +6,7 @@ import { getTheme, setTheme } from "../store/theme";
 import { clearAuth, isAdmin } from "../store/auth";
 import {
   Plus, Pencil, Trash2, X, Check, Moon, Sun, ChevronRight, ChevronDown, ChevronUp,
-  AlertTriangle, Shield, User, Activity, HelpCircle, KeyRound, Link, Mail, RotateCcw, Wand2
+  AlertTriangle, Shield, User, Activity, KeyRound, Link, Mail, RotateCcw, Wand2
 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
@@ -126,6 +126,11 @@ export default function Settings() {
   const [taxOtherIncome, setTaxOtherIncome] = useState("");
   const [taxFedWithheld, setTaxFedWithheld] = useState("");
   const [taxStateWithheld, setTaxStateWithheld] = useState("");
+  const [taxMortgageInterest, setTaxMortgageInterest] = useState("");
+  const [taxDonations, setTaxDonations] = useState("");
+  const [taxSalt, setTaxSalt] = useState("");
+  const [taxPropertyTax, setTaxPropertyTax] = useState("");
+  const [taxOther, setTaxOther] = useState("");
   const [taxSaved, setTaxSaved] = useState(false);
   const taxMut = useMutation({
     mutationFn: authApi.updateMe,
@@ -145,6 +150,11 @@ export default function Settings() {
       setTaxOtherIncome(me.other_income ?? "");
       setTaxFedWithheld(me.federal_withholding_ytd ?? "");
       setTaxStateWithheld(me.state_withholding_ytd ?? "");
+      setTaxMortgageInterest(me.itemized_mortgage_interest ?? "");
+      setTaxDonations(me.itemized_donations ?? "");
+      setTaxSalt(me.itemized_salt ?? "");
+      setTaxPropertyTax(me.itemized_property_tax ?? "");
+      setTaxOther(me.itemized_other ?? "");
     }
   }, [me]);
   const updateMeMut = useMutation({
@@ -174,12 +184,6 @@ export default function Settings() {
   const [ssGross, setSsGross] = useState("");
   const [ssWageBase, setSsWageBase] = useState("");
   const [ssBonus, setSsBonus] = useState("");
-  const [ssSaved, setSsSaved] = useState(false);
-  const [showSsHelp, setShowSsHelp] = useState(false);
-  const ssMut = useMutation({
-    mutationFn: authApi.updateMe,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); setSsSaved(true); setTimeout(() => setSsSaved(false), 2000); },
-  });
 
   // ── Nav order ─────────────────────────────────────────────────────────────
   const ALL_NAV_ITEMS = [
@@ -358,45 +362,6 @@ export default function Settings() {
         </div>
         </div>}
       </div>
-
-      {/* ── Social Security ── */}
-      <div className="card">
-        <button onClick={() => toggleSection("ss")} className="w-full flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Social Security Tax</h3>
-            <button onClick={e => { e.stopPropagation(); setShowSsHelp(true); }} className="text-gray-400 hover:text-indigo-500"><HelpCircle size={15} /></button>
-          </div>
-          <ChevronDown size={16} className={`text-gray-400 transition-transform ${openSections.has("ss") ? "" : "-rotate-90"}`} />
-        </button>
-        {openSections.has("ss") && <div className="mt-3">
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Track when you hit the SS wage base so you can plan for the resulting paycheck increase.</p>
-        <div className="grid grid-cols-2 gap-4 max-w-md">
-          <div>
-            <label className="label">Gross Per Paycheck ($)</label>
-            <input type="number" step="0.01" className="input" placeholder="5000" value={ssGross} onChange={e => setSsGross(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">SS Wage Base ($)</label>
-            <input type="number" step="1" className="input" placeholder="176100" value={ssWageBase} onChange={e => setSsWageBase(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">YTD Bonus Subject to SS ($)</label>
-            <input type="number" step="0.01" className="input" placeholder="0" value={ssBonus} onChange={e => setSsBonus(e.target.value)} />
-          </div>
-        </div>
-        <div className="flex items-center gap-3 mt-3">
-          <button
-            onClick={() => ssMut.mutate({ ss_gross_per_paycheck: parseFloat(ssGross) || null, ss_wage_base: parseFloat(ssWageBase) || null, ss_bonus_ytd: parseFloat(ssBonus) || null })}
-            disabled={ssMut.isPending}
-            className="btn-primary text-sm"
-          >
-            {ssMut.isPending ? "Saving…" : "Save SS Settings"}
-          </button>
-          {ssSaved && <span className="text-sm text-green-600">Saved!</span>}
-        </div>
-        </div>}
-      </div>
-      {showSsHelp && <HelpPanel title="Social Security Tax" body={"Gross Per Paycheck: your total gross wages per paycheck before any deductions. This is used to estimate how many pay periods until you hit the SS wage base.\n\nSS Wage Base: the annual income limit above which Social Security tax is no longer withheld (default $176,100 for 2025). After reaching this limit, your paycheck increases by ~6.2% of gross.\n\nYTD Bonus Subject to SS: bonuses you've received this year that were subject to Social Security tax. Reduces the remaining wage base so the estimate stays accurate."} onClose={() => setShowSsHelp(false)} />}
 
       {/* ── Accounts ── */}
       <div className="card">
@@ -764,6 +729,52 @@ export default function Settings() {
               <input type="number" step="1" className="input" placeholder="From your pay stubs" value={taxStateWithheld} onChange={e => setTaxStateWithheld(e.target.value)} />
             </div>
           </div>
+          <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
+            <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Itemized Deductions (from tax documents)</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">These are added to any transactions marked tax-deductible. If the total exceeds the standard deduction, itemized will be used automatically.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+              <div>
+                <label className="label">Mortgage Interest (Form 1098)</label>
+                <input type="number" step="0.01" className="input" placeholder="e.g. 35919.55" value={taxMortgageInterest} onChange={e => setTaxMortgageInterest(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Charitable Donations</label>
+                <input type="number" step="0.01" className="input" placeholder="e.g. 15600.00" value={taxDonations} onChange={e => setTaxDonations(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">State &amp; Local Taxes (SALT)</label>
+                <input type="number" step="0.01" className="input" placeholder="e.g. 10506.24" value={taxSalt} onChange={e => setTaxSalt(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Property Taxes</label>
+                <input type="number" step="0.01" className="input" placeholder="e.g. 6000.00" value={taxPropertyTax} onChange={e => setTaxPropertyTax(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Other Deductions (vehicle tax, etc.)</label>
+                <input type="number" step="0.01" className="input" placeholder="e.g. 713.00" value={taxOther} onChange={e => setTaxOther(e.target.value)} />
+              </div>
+            </div>
+          </div>
+          <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Social Security Tracker</p>
+            </div>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">Track when you hit the SS wage base to plan for your resulting paycheck increase (~6.2% of gross). The 2025 wage base is $176,100.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl">
+              <div>
+                <label className="label">Gross Per Paycheck ($)</label>
+                <input type="number" step="0.01" className="input" placeholder="5000" value={ssGross} onChange={e => setSsGross(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">SS Wage Base ($)</label>
+                <input type="number" step="1" className="input" placeholder="176100" value={ssWageBase} onChange={e => setSsWageBase(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">YTD Bonus Subject to SS ($)</label>
+                <input type="number" step="0.01" className="input" placeholder="0" value={ssBonus} onChange={e => setSsBonus(e.target.value)} />
+              </div>
+            </div>
+          </div>
           <div className="flex items-center gap-3">
             <button
               className="btn-primary text-sm"
@@ -775,6 +786,14 @@ export default function Settings() {
                 other_income: taxOtherIncome ? parseFloat(taxOtherIncome) : null,
                 federal_withholding_ytd: taxFedWithheld ? parseFloat(taxFedWithheld) : null,
                 state_withholding_ytd: taxStateWithheld ? parseFloat(taxStateWithheld) : null,
+                itemized_mortgage_interest: taxMortgageInterest ? parseFloat(taxMortgageInterest) : null,
+                itemized_donations: taxDonations ? parseFloat(taxDonations) : null,
+                itemized_salt: taxSalt ? parseFloat(taxSalt) : null,
+                itemized_property_tax: taxPropertyTax ? parseFloat(taxPropertyTax) : null,
+                itemized_other: taxOther ? parseFloat(taxOther) : null,
+                ss_gross_per_paycheck: ssGross ? parseFloat(ssGross) : null,
+                ss_wage_base: ssWageBase ? parseFloat(ssWageBase) : null,
+                ss_bonus_ytd: ssBonus ? parseFloat(ssBonus) : null,
               })}
             >
               {taxMut.isPending ? "Saving…" : "Save Tax Profile"}

@@ -30,6 +30,11 @@ class UserOut(BaseModel):
     other_income: Optional[Decimal] = None
     federal_withholding_ytd: Optional[Decimal] = None
     state_withholding_ytd: Optional[Decimal] = None
+    itemized_mortgage_interest: Optional[Decimal] = None
+    itemized_donations: Optional[Decimal] = None
+    itemized_salt: Optional[Decimal] = None
+    itemized_property_tax: Optional[Decimal] = None
+    itemized_other: Optional[Decimal] = None
 
 
 class UserUpdate(BaseModel):
@@ -44,6 +49,11 @@ class UserUpdate(BaseModel):
     other_income: Optional[Decimal] = None
     federal_withholding_ytd: Optional[Decimal] = None
     state_withholding_ytd: Optional[Decimal] = None
+    itemized_mortgage_interest: Optional[Decimal] = None
+    itemized_donations: Optional[Decimal] = None
+    itemized_salt: Optional[Decimal] = None
+    itemized_property_tax: Optional[Decimal] = None
+    itemized_other: Optional[Decimal] = None
 
 
 class UserPasswordChange(BaseModel):
