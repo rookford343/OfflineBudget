@@ -1,9 +1,18 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { transactionsApi, accountsApi, categoriesApi, cardsApi, reconciliationApi } from "../api";
-import { fmt, today, firstOfMonth } from "../lib/utils";
-import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle } from "lucide-react";
+import { transactionsApi, accountsApi, categoriesApi, cardsApi, reconciliationApi, exportsApi } from "../api";
+import { fmt, today, firstOfMonth, quickRange } from "../lib/utils";
+import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 type TxnTab = "checking" | "card" | "reconcile";
 
@@ -70,9 +79,28 @@ export default function Transactions() {
   const [reconcileYear, setReconcileYear] = useState(now.getFullYear());
   const [reconcileMonth, setReconcileMonth] = useState(now.getMonth() + 1);
 
+  // Search & filter state
+  const [searchQ, setSearchQ] = useState("");
+  const [debouncedQ, setDebouncedQ] = useState("");
+  const [filterCatId, setFilterCatId] = useState<number | null>(null);
+  const [filterAmountMin, setFilterAmountMin] = useState("");
+  const [filterAmountMax, setFilterAmountMax] = useState("");
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => setDebouncedQ(searchQ), 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [searchQ]);
+
   const { data: txns = [], isLoading } = useQuery({
-    queryKey: ["transactions", start, end],
-    queryFn: () => transactionsApi.list({ start, end }),
+    queryKey: ["transactions", start, end, debouncedQ, filterCatId, filterAmountMin, filterAmountMax],
+    queryFn: () => transactionsApi.list({
+      start, end,
+      q: debouncedQ || undefined,
+      category_id: filterCatId || undefined,
+      amount_min: filterAmountMin || undefined,
+      amount_max: filterAmountMax || undefined,
+    }),
     enabled: txnTab === "checking",
   });
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
@@ -182,15 +210,62 @@ export default function Transactions() {
             </select>
           )}
           {txnTab !== "reconcile" && <>
+            <div className="flex gap-1">
+              {([["Mo", "month"], ["3 Mo", "3months"], ["YTD", "ytd"], ["Last Yr", "lastyear"]] as const).map(([label, p]) => (
+                <button key={p} type="button" className="px-2 py-1 text-xs rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-400" onClick={() => { const r = quickRange(p); setStart(r.start); setEnd(r.end); }}>{label}</button>
+              ))}
+            </div>
             <input type="date" className="input w-auto" value={start} onChange={e => setStart(e.target.value)} />
             <span className="self-center text-gray-400">→</span>
             <input type="date" className="input w-auto" value={end} onChange={e => setEnd(e.target.value)} />
           </>}
           {txnTab === "checking" && (
-            <button onClick={() => setShowForm(true)} className="btn-primary"><Plus size={16} /> Add</button>
+            <>
+              <button
+                onClick={() => exportsApi.downloadTransactions({ start, end }).then(blob => downloadBlob(blob, "transactions.csv"))}
+                className="btn-secondary text-sm"
+                title="Export CSV"
+              >
+                <Download size={15} />
+              </button>
+              <button onClick={() => setShowForm(true)} className="btn-primary"><Plus size={16} /> Add</button>
+            </>
           )}
         </div>
       </div>
+
+      {/* Filter bar — checking tab only */}
+      {txnTab === "checking" && (
+        <div className="flex flex-wrap gap-2">
+          <input
+            className="input flex-1 min-w-[12rem] text-sm"
+            placeholder="Search descriptions…"
+            value={searchQ}
+            onChange={e => setSearchQ(e.target.value)}
+          />
+          <select
+            className="input w-auto text-sm"
+            value={filterCatId ?? ""}
+            onChange={e => setFilterCatId(e.target.value ? parseInt(e.target.value) : null)}
+          >
+            <option value="">All categories</option>
+            {allCats.map((c: any) => (
+              <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
+            ))}
+          </select>
+          <input type="number" className="input w-28 text-sm" placeholder="Min $" step="0.01"
+            value={filterAmountMin} onChange={e => setFilterAmountMin(e.target.value)} />
+          <input type="number" className="input w-28 text-sm" placeholder="Max $" step="0.01"
+            value={filterAmountMax} onChange={e => setFilterAmountMax(e.target.value)} />
+          {(searchQ || filterCatId || filterAmountMin || filterAmountMax) && (
+            <button
+              onClick={() => { setSearchQ(""); setFilterCatId(null); setFilterAmountMin(""); setFilterAmountMax(""); }}
+              className="btn-ghost text-sm text-gray-400 px-2"
+              title="Clear filters"
+            ><X size={14} /></button>
+          )}
+        </div>
+      )}
 
       {txnTab !== "reconcile" && <div className="card overflow-hidden p-0">
         {loading && <p className="text-sm text-gray-400 text-center py-8">Loading…</p>}

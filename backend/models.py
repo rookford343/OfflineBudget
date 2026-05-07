@@ -43,6 +43,7 @@ class ImportFormat(str, PyEnum):
     amex = "amex"
     apple = "apple"
     generic = "generic"
+    ofx = "ofx"
 
 
 class UserRole(str, PyEnum):
@@ -55,6 +56,22 @@ class RecurringFrequency(str, PyEnum):
     yearly = "yearly"
     weekly = "weekly"
     biweekly = "biweekly"
+
+
+class RuleField(str, PyEnum):
+    description = "description"
+    merchant = "merchant"
+
+
+class RulePatternType(str, PyEnum):
+    contains = "contains"
+    startswith = "startswith"
+    regex = "regex"
+
+
+class RuleAction(str, PyEnum):
+    set_category = "set_category"
+    mark_transfer = "mark_transfer"
 
 
 # ── Users ────────────────────────────────────────────────────────────────────
@@ -418,6 +435,27 @@ class PlannedExpense(Base):
 
     user: Mapped[User] = relationship(back_populates="planned_expenses")
     account: Mapped[Account | None] = relationship()
+    category: Mapped[Category | None] = relationship()
+
+
+# ── Transaction Rules ─────────────────────────────────────────────────────────
+
+class TransactionRule(Base):
+    __tablename__ = "transaction_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    field: Mapped[RuleField] = mapped_column(Enum(RuleField), nullable=False)
+    pattern_type: Mapped[RulePatternType] = mapped_column(Enum(RulePatternType), nullable=False)
+    pattern: Mapped[str] = mapped_column(String(256), nullable=False)
+    action: Mapped[RuleAction] = mapped_column(Enum(RuleAction), nullable=False)
+    category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
+    priority: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    user: Mapped[User] = relationship()
     category: Mapped[Category | None] = relationship()
 
 

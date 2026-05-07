@@ -1,5 +1,7 @@
 from datetime import date
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
@@ -14,19 +16,28 @@ def list_transactions(
     category_id: int | None = None,
     start: date | None = None,
     end: date | None = None,
+    q: str | None = Query(None, description="Search description (case-insensitive)"),
+    amount_min: Decimal | None = Query(None, description="Minimum amount (inclusive)"),
+    amount_max: Decimal | None = Query(None, description="Maximum amount (inclusive)"),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    q = db.query(models.Transaction).filter(models.Transaction.user_id == user.id)
+    query = db.query(models.Transaction).filter(models.Transaction.user_id == user.id)
     if account_id:
-        q = q.filter(models.Transaction.account_id == account_id)
+        query = query.filter(models.Transaction.account_id == account_id)
     if category_id:
-        q = q.filter(models.Transaction.category_id == category_id)
+        query = query.filter(models.Transaction.category_id == category_id)
     if start:
-        q = q.filter(models.Transaction.date >= start)
+        query = query.filter(models.Transaction.date >= start)
     if end:
-        q = q.filter(models.Transaction.date <= end)
-    return q.order_by(models.Transaction.date.desc()).all()
+        query = query.filter(models.Transaction.date <= end)
+    if q:
+        query = query.filter(func.lower(models.Transaction.description).like(f"%{q.lower()}%"))
+    if amount_min is not None:
+        query = query.filter(models.Transaction.amount >= amount_min)
+    if amount_max is not None:
+        query = query.filter(models.Transaction.amount <= amount_max)
+    return query.order_by(models.Transaction.date.desc()).all()
 
 
 @router.post("", response_model=schemas.TransactionOut, status_code=status.HTTP_201_CREATED)

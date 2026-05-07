@@ -1,43 +1,25 @@
-from datetime import datetime
-from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
-from backend.services.csv_parser import parse_csv
-from backend.services.auto_categorizer import categorize
+from backend.services.csv_parser import parse_csv, detect_format
+from backend.services.import_service import build_preview, run_import
 
 router = APIRouter(prefix="/import", tags=["import"])
 
 
-def _try_auto_match(
-    txn: models.Transaction,
-    db: Session,
-) -> None:
-    """Link txn to a recurring item if amount and day-of-month are close enough."""
-    recurring = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == txn.user_id,
-        models.RecurringItem.account_id == txn.account_id,
-        models.RecurringItem.is_active == True,
-        models.RecurringItem.type != models.RecurringType.income,
-    ).all()
-
-    txn_amount = abs(txn.amount)
-    txn_day = txn.date.day
-
-    for item in recurring:
-        item_day = item.day_of_month or 28
-        if abs(txn_day - item_day) > 3:
-            continue
-        if txn_amount == 0 or item.amount == 0:
-            continue
-        ratio = txn_amount / item.amount
-        if 0.9 <= ratio <= 1.1:
-            txn.recurring_item_id = item.id
-            return
+def _detect_and_parse(content: bytes, filename: str) -> tuple[list, models.ImportFormat]:
+    """Parse file content and return (parsed_rows, format). Detects OFX/QFX by extension."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext in ("ofx", "qfx"):
+        from backend.services.ofx_parser import parse_ofx
+        return parse_ofx(content), models.ImportFormat.ofx
+    import csv, io
+    text = content.decode("utf-8-sig", errors="replace")
+    headers = list(csv.DictReader(io.StringIO(text)).fieldnames or [])
+    return parse_csv(content), detect_format(headers)
 
 
 @router.post("/preview", response_model=schemas.ImportPreviewResponse)
@@ -45,6 +27,7 @@ async def preview_import(
     file: UploadFile = File(...),
     account_id: Optional[int] = Form(None),
     card_id: Optional[int] = Form(None),
+    skip_categorization: bool = Form(False),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
@@ -53,70 +36,15 @@ async def preview_import(
 
     content = await file.read()
     try:
-        parsed_rows = parse_csv(content)
+        parsed_rows, fmt = _detect_and_parse(content, file.filename or "")
     except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Failed to parse CSV: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to parse file: {e}")
 
     if not parsed_rows:
-        raise HTTPException(status_code=422, detail="No valid rows found in CSV")
+        raise HTTPException(status_code=422, detail="No valid rows found in file")
 
-    # Detect format from the file content
-    import csv, io
-    text = content.decode("utf-8-sig", errors="replace")
-    reader = csv.DictReader(io.StringIO(text))
-    headers = list(reader.fieldnames or [])
-    from backend.services.csv_parser import detect_format
-    fmt = detect_format(headers)
-
-    # Load all user categories for auto-categorization
-    all_cats = db.query(models.Category).filter(
-        models.Category.user_id == user.id,
-    ).all()
-
-    # Build history map: description_lower → most-used category_id from past transactions
-    history_map: dict[str, int] = {}
-    checking_hist = (
-        db.query(models.Transaction.description, models.Transaction.category_id, func.count().label("cnt"))
-        .filter(models.Transaction.user_id == user.id, models.Transaction.category_id.isnot(None))
-        .group_by(models.Transaction.description, models.Transaction.category_id)
-        .order_by(func.count().desc())
-        .all()
-    )
-    for desc, cat_id, _ in checking_hist:
-        key = desc.lower()
-        if key not in history_map:
-            history_map[key] = cat_id
-
-    card_hist = (
-        db.query(models.CreditCardTransaction.merchant, models.CreditCardTransaction.category_id, func.count().label("cnt"))
-        .filter(models.CreditCardTransaction.user_id == user.id, models.CreditCardTransaction.category_id.isnot(None))
-        .group_by(models.CreditCardTransaction.merchant, models.CreditCardTransaction.category_id)
-        .order_by(func.count().desc())
-        .all()
-    )
-    for merchant, cat_id, _ in card_hist:
-        key = merchant.lower()
-        if key not in history_map:
-            history_map[key] = cat_id
-
-    preview_rows: list[schemas.ImportPreviewRow] = []
-    categorized = 0
-
-    for i, row in enumerate(parsed_rows):
-        matched_cat = categorize(row.description, all_cats, history_map)
-        needs_review = matched_cat is None
-        if not needs_review:
-            categorized += 1
-        preview_rows.append(schemas.ImportPreviewRow(
-            row_index=i,
-            date=row.date,
-            description=row.description,
-            amount=row.amount,
-            category_id=matched_cat.id if matched_cat else None,
-            category_name=matched_cat.name if matched_cat else None,
-            needs_review=needs_review,
-            is_transfer=row.is_transfer,
-        ))
+    preview_rows = build_preview(db, user, parsed_rows, skip_categorization=skip_categorization)
+    categorized = sum(1 for r in preview_rows if not r.needs_review)
 
     return schemas.ImportPreviewResponse(
         format=fmt,
@@ -138,78 +66,4 @@ def confirm_import(
     if not body.account_id and not body.card_id:
         raise HTTPException(status_code=400, detail="Provide either account_id or card_id")
 
-    imported = 0
-    skipped = 0
-    now = datetime.utcnow()
-
-    for row in body.rows:
-        if body.account_id:
-            # Check for duplicate in checking transactions
-            dup = db.query(models.Transaction).filter(
-                models.Transaction.user_id == user.id,
-                models.Transaction.account_id == body.account_id,
-                models.Transaction.date == row.date,
-                models.Transaction.amount == row.amount,
-                models.Transaction.description == row.description,
-            ).first()
-            if dup:
-                skipped += 1
-                continue
-
-            txn = models.Transaction(
-                user_id=user.id,
-                account_id=body.account_id,
-                category_id=row.category_id,
-                date=row.date,
-                amount=row.amount,
-                description=row.description,
-                notes=row.notes,
-                recurring_item_id=row.recurring_item_id,
-                is_actual=True,
-                source=models.TransactionSource.csv_import,
-                imported_at=now,
-            )
-            if not row.recurring_item_id:
-                _try_auto_match(txn, db)
-            db.add(txn)
-
-            # Update account balance
-            account = db.get(models.Account, body.account_id)
-            if account and account.user_id == user.id:
-                account.current_balance += row.amount
-
-            imported += 1
-
-        elif body.card_id:
-            # Check for duplicate in card transactions
-            dup = db.query(models.CreditCardTransaction).filter(
-                models.CreditCardTransaction.user_id == user.id,
-                models.CreditCardTransaction.card_id == body.card_id,
-                models.CreditCardTransaction.date == row.date,
-                models.CreditCardTransaction.amount == abs(row.amount),
-                models.CreditCardTransaction.merchant == row.description,
-            ).first()
-            if dup:
-                skipped += 1
-                continue
-
-            ct = models.CreditCardTransaction(
-                card_id=body.card_id,
-                user_id=user.id,
-                category_id=row.category_id,
-                date=row.date,
-                amount=abs(row.amount),
-                merchant=row.description,
-                source=models.CardTransactionSource.csv_import,
-            )
-            db.add(ct)
-
-            # Update card balance
-            card = db.get(models.CreditCard, body.card_id)
-            if card and card.user_id == user.id:
-                card.current_balance += abs(row.amount)
-
-            imported += 1
-
-    db.commit()
-    return schemas.ImportConfirmResponse(imported=imported, skipped_duplicates=skipped)
+    return run_import(db, user, body.rows, body.account_id, body.card_id)

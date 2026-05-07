@@ -24,7 +24,12 @@ export default function Recurring() {
     queryFn: () => recurringApi.suggestions(),
     staleTime: 5 * 60 * 1000,
   });
-  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(new Set());
+  const [dismissedSuggestions, setDismissedSuggestions] = useState<Set<string>>(() => {
+    try {
+      const saved = sessionStorage.getItem("dismissedSuggestions");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
 
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState<any | null>(null);
@@ -164,7 +169,11 @@ export default function Recurring() {
                     Add
                   </button>
                   <button
-                    onClick={() => setDismissedSuggestions(prev => new Set([...prev, s.description]))}
+                    onClick={() => {
+                      const next = new Set([...dismissedSuggestions, s.description]);
+                      setDismissedSuggestions(next);
+                      try { sessionStorage.setItem("dismissedSuggestions", JSON.stringify([...next])); } catch {}
+                    }}
                     className="text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400"
                     title="Dismiss"
                   >
