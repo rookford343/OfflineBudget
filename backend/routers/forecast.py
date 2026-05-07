@@ -32,6 +32,20 @@ def get_quarters(
     return build_quarters(db, user.id, account_id, year)
 
 
+@router.get("/multi-year", response_model=list[schemas.QuarterSummary])
+def get_multi_year(
+    account_id: int,
+    start_year: int = Query(default=date.today().year),
+    years: int = Query(default=3, ge=1, le=5),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    all_quarters = []
+    for y in range(start_year, start_year + years):
+        all_quarters.extend(build_quarters(db, user.id, account_id, y))
+    return all_quarters
+
+
 class ScenarioForecastRequest(BaseModel):
     account_id: int
     year: int

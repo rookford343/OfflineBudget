@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { transactionsApi, accountsApi, categoriesApi, cardsApi, reconciliationApi, exportsApi } from "../api";
+import { transactionsApi, accountsApi, categoriesApi, cardsApi, reconciliationApi, exportsApi, checkpointsApi, recurringApi } from "../api";
 import { fmt, today, firstOfMonth, quickRange } from "../lib/utils";
-import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download } from "lucide-react";
+import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -78,6 +78,9 @@ export default function Transactions() {
   const now = new Date();
   const [reconcileYear, setReconcileYear] = useState(now.getFullYear());
   const [reconcileMonth, setReconcileMonth] = useState(now.getMonth() + 1);
+  const [linkingTxnId, setLinkingTxnId] = useState<number | null>(null);
+  const [addForRecurringId, setAddForRecurringId] = useState<number | null>(null);
+  const [markReconciledBalance, setMarkReconciledBalance] = useState("");
 
   // Search & filter state
   const [searchQ, setSearchQ] = useState("");
@@ -121,6 +124,11 @@ export default function Transactions() {
     queryFn: () => reconciliationApi.get(activeReconcileAccountId!, reconcileYear, reconcileMonth),
     enabled: txnTab === "reconcile" && !!activeReconcileAccountId,
   });
+  const { data: recurringItems = [] } = useQuery({
+    queryKey: ["recurring"],
+    queryFn: () => recurringApi.list(),
+    enabled: txnTab === "reconcile",
+  });
 
   const allCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]);
 
@@ -157,6 +165,33 @@ export default function Transactions() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["card-transactions"] });
       setEditingCatId(null);
+    },
+  });
+
+  const linkRecurringMut = useMutation({
+    mutationFn: ({ txnId, recurringItemId }: { txnId: number; recurringItemId: number }) =>
+      transactionsApi.update(txnId, { recurring_item_id: recurringItemId }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["reconcile"] });
+      setLinkingTxnId(null);
+    },
+  });
+
+  const addRecurringTxnMut = useMutation({
+    mutationFn: (data: object) => transactionsApi.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["reconcile"] });
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      setAddForRecurringId(null);
+    },
+  });
+
+  const markReconciledMut = useMutation({
+    mutationFn: ({ year, quarter, balance }: { year: number; quarter: number; balance: number }) =>
+      checkpointsApi.upsert(year, quarter, activeReconcileAccountId!, balance),
+    onSuccess: () => {
+      setMarkReconciledBalance("");
     },
   });
 
@@ -385,6 +420,26 @@ export default function Transactions() {
                 <option key={i+1} value={i+1}>{m}</option>
               ))}
             </select>
+            {/* Mark reconciled */}
+            <div className="flex items-center gap-2 ml-auto">
+              <input
+                type="number" step="0.01" placeholder="Actual balance"
+                className="input w-36 text-sm"
+                value={markReconciledBalance}
+                onChange={e => setMarkReconciledBalance(e.target.value)}
+              />
+              <button
+                className="btn-primary text-xs px-3 py-2 flex items-center gap-1"
+                disabled={!markReconciledBalance || markReconciledMut.isPending}
+                onClick={() => {
+                  const quarter = Math.ceil(reconcileMonth / 3);
+                  markReconciledMut.mutate({ year: reconcileYear, quarter, balance: parseFloat(markReconciledBalance) });
+                }}
+              >
+                <Check size={13} />
+                {markReconciledMut.isPending ? "Saving…" : "Mark Reconciled"}
+              </button>
+            </div>
           </div>
           {reconcileLoading && <p className="text-sm text-gray-400 text-center py-8">Loading…</p>}
           {!reconcileLoading && reconcileData && (
@@ -439,6 +494,7 @@ export default function Transactions() {
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Recurring Item</th>
                         <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Expected Amount</th>
                         <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Expected Day</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
@@ -447,6 +503,33 @@ export default function Transactions() {
                           <td className="px-4 py-2 text-gray-900 dark:text-gray-100">{item.name}</td>
                           <td className="px-4 py-2 text-right font-semibold tabular-nums text-red-600">{fmt(item.expected_amount)}</td>
                           <td className="px-4 py-2 text-right text-gray-500 hidden sm:table-cell">{item.expected_day ?? "last"}</td>
+                          <td className="px-4 py-2 text-right">
+                            {addForRecurringId === item.recurring_item_id ? (
+                              <div className="flex items-center gap-2 justify-end">
+                                <span className="text-xs text-gray-500">Add {reconcileYear}-{String(reconcileMonth).padStart(2, "0")}-{String(item.expected_day ?? 28).padStart(2, "0")} for {fmt(item.expected_amount)}?</span>
+                                <button
+                                  className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded font-medium"
+                                  disabled={addRecurringTxnMut.isPending}
+                                  onClick={() => addRecurringTxnMut.mutate({
+                                    account_id: activeReconcileAccountId,
+                                    recurring_item_id: item.recurring_item_id,
+                                    date: `${reconcileYear}-${String(reconcileMonth).padStart(2, "0")}-${String(Math.min(item.expected_day ?? 28, 28)).padStart(2, "0")}`,
+                                    amount: -Math.abs(Number(item.expected_amount)),
+                                    description: item.name,
+                                    is_actual: true,
+                                  })}
+                                >Confirm</button>
+                                <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => setAddForRecurringId(null)}>Cancel</button>
+                              </div>
+                            ) : (
+                              <button
+                                className="text-xs text-blue-600 hover:text-blue-700 flex items-center gap-1 ml-auto"
+                                onClick={() => setAddForRecurringId(item.recurring_item_id)}
+                              >
+                                <Plus size={12} /> Add transaction
+                              </button>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -465,6 +548,7 @@ export default function Transactions() {
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
                         <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                        <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Link</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
@@ -476,6 +560,37 @@ export default function Transactions() {
                           <td className="px-4 py-2 text-gray-900 dark:text-gray-100 max-w-xs truncate">{item.description}</td>
                           <td className={`px-4 py-2 text-right font-semibold tabular-nums ${parseFloat(item.amount) >= 0 ? "text-green-600" : "text-red-600"}`}>
                             {fmt(item.amount)}
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            {linkingTxnId === item.transaction_id ? (
+                              <div className="flex items-center gap-2 justify-end">
+                                <select
+                                  className="input text-xs py-1 w-44"
+                                  onChange={e => {
+                                    if (e.target.value) {
+                                      linkRecurringMut.mutate({ txnId: item.transaction_id, recurringItemId: parseInt(e.target.value) });
+                                    }
+                                  }}
+                                  defaultValue=""
+                                >
+                                  <option value="">Select recurring…</option>
+                                  {(recurringItems as any[])
+                                    .filter((r: any) => r.account_id === activeReconcileAccountId || !r.account_id)
+                                    .map((r: any) => (
+                                      <option key={r.id} value={r.id}>{r.name} ({fmt(r.amount)})</option>
+                                    ))
+                                  }
+                                </select>
+                                <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => setLinkingTxnId(null)}>✕</button>
+                              </div>
+                            ) : (
+                              <button
+                                className="text-xs text-indigo-600 hover:text-indigo-700 flex items-center gap-1 ml-auto"
+                                onClick={() => setLinkingTxnId(item.transaction_id)}
+                              >
+                                <Link2 size={12} /> Link
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))}

@@ -19,6 +19,7 @@ class AccountType(str, PyEnum):
 class CategoryType(str, PyEnum):
     income = "income"
     expense = "expense"
+    savings = "savings"
 
 
 class RecurringType(str, PyEnum):
@@ -92,6 +93,14 @@ class User(Base):
 
     linked_to_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
     email: Mapped[str | None] = mapped_column(String(256))
+
+    # Tax profile
+    tax_filing_status: Mapped[str | None] = mapped_column(String(32))   # single | married_jointly | married_separately | head_of_household
+    tax_state: Mapped[str | None] = mapped_column(String(2))            # 2-letter state code
+    annual_salary: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    other_income: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    federal_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    state_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     accounts: Mapped[list[Account]] = relationship(back_populates="user", cascade="all, delete-orphan")
     categories: Mapped[list[Category]] = relationship(back_populates="user", cascade="all, delete-orphan")
