@@ -35,8 +35,8 @@ const YEAR_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 
 export default function Spending() {
   const [showHelp, setShowHelp] = useState(false);
-  const [activeTab, setActiveTab] = useState<"overview" | "trends" | "flow" | "tax">("overview");
-  const [taxYear, setTaxYear] = useState(new Date().getFullYear());
+  const [activeTab, setActiveTab] = useState<"overview" | "trends" | "merchants" | "flow" | "tax">("overview");
+  const [taxYear, setTaxYear] = useState(new Date().getFullYear() - 1);
   const [sankeyYear, setSankeyYear] = useState(new Date().getFullYear());
   const [sankeyMonth, setSankeyMonth] = useState(new Date().getMonth() + 1);
   const [start, setStart] = useState(firstOfMonth());
@@ -81,6 +81,18 @@ export default function Spending() {
     queryKey: ["sankey", sankeyYear, sankeyMonth],
     queryFn: () => spendingApi.sankey(sankeyYear, sankeyMonth),
     enabled: activeTab === "flow",
+  });
+
+  const { data: merchantData = [], isLoading: merchantLoading } = useQuery({
+    queryKey: ["spending-merchants", start, end, selectedAccountId, selectedCardId],
+    queryFn: () => spendingApi.byMerchant(start, end, selectedAccountId, selectedCardId),
+    enabled: activeTab === "merchants" && !!start && !!end,
+  });
+
+  const { data: taxEstimate, isLoading: taxEstimateLoading } = useQuery({
+    queryKey: ["tax-estimate", taxYear],
+    queryFn: () => spendingApi.taxEstimate(taxYear),
+    enabled: activeTab === "tax",
   });
 
   const { data: monthlyByCat = [] } = useQuery({
@@ -244,7 +256,7 @@ export default function Spending() {
 
       {/* Tab switcher */}
       <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
-        {(["overview", "trends", "flow", "tax"] as const).map((tab) => (
+        {(["overview", "trends", "merchants", "flow", "tax"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -500,6 +512,50 @@ export default function Spending() {
       {activeTab === "overview" && isLoading && <div className="text-center py-8 text-gray-400 dark:text-[#525d70] text-sm">Loading spending data…</div>}
       {activeTab === "overview" && !isLoading && !overview && <div className="card text-center py-8 text-gray-400 dark:text-[#525d70]">Select a date range to view spending.</div>}
 
+      {activeTab === "merchants" && (
+        <div className="space-y-4">
+          {merchantLoading && <div className="text-center py-8 text-gray-400 text-sm">Loading…</div>}
+          {!merchantLoading && merchantData.length === 0 && (
+            <div className="card text-center py-8 text-gray-400">No spending data for this range.</div>
+          )}
+          {!merchantLoading && merchantData.length > 0 && (() => {
+            const maxTotal = Math.max(...(merchantData as any[]).map((m: any) => Number(m.total)));
+            return (
+              <div className="card p-0 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 dark:bg-gray-800/50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase w-8">#</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Merchant / Description</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Transactions</th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {(merchantData as any[]).map((m: any, i: number) => {
+                      const pct = maxTotal > 0 ? (Number(m.total) / maxTotal) * 100 : 0;
+                      return (
+                        <tr key={m.name} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 relative">
+                          <td className="px-4 py-2 text-gray-400 tabular-nums">{i + 1}</td>
+                          <td className="px-4 py-2 text-gray-900 dark:text-gray-100 max-w-xs">
+                            <div className="relative">
+                              <div className="absolute inset-0 bg-indigo-50 dark:bg-indigo-900/20 rounded" style={{ width: `${pct}%` }} />
+                              <span className="relative">{m.name}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-2 text-right text-gray-400 tabular-nums hidden sm:table-cell">{m.count}×</td>
+                          <td className="px-4 py-2 text-right font-semibold tabular-nums text-red-600 dark:text-red-400">{fmt(m.total)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
       {activeTab === "flow" && (
         <div className="space-y-4">
           <div className="flex items-center gap-3">
@@ -514,33 +570,121 @@ export default function Spending() {
         </div>
       )}
       {activeTab === "tax" && (
-        <div className="card max-w-md space-y-4">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100">Tax Summary Export</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Download a CSV of all transactions in tax-deductible categories for the selected year. Mark categories as tax deductible in Settings → Categories.</p>
+        <div className="space-y-4">
+          {/* Year selector */}
           <div className="flex items-center gap-3">
-            <div>
-              <label className="label">Year</label>
-              <select className="input w-auto" value={taxYear} onChange={e => setTaxYear(parseInt(e.target.value))}>
-                {[-1, 0, 1].map(d => { const y = new Date().getFullYear() + d; return <option key={y} value={y}>{y}</option>; })}
-              </select>
-            </div>
-            <div className="pt-5">
-              <button
-                className="btn-primary text-sm"
-                onClick={async () => {
-                  const res = await api.get(`/spending/tax-summary?year=${taxYear}&format=csv`, { responseType: "blob" });
-                  const url = URL.createObjectURL(res.data);
-                  const a = document.createElement("a");
-                  a.href = url;
-                  a.download = `tax-summary-${taxYear}.csv`;
-                  a.click();
-                  URL.revokeObjectURL(url);
-                }}
-              >
-                Download CSV
-              </button>
-            </div>
+            <label className="label mb-0">Tax Year</label>
+            <select className="input w-auto" value={taxYear} onChange={e => setTaxYear(parseInt(e.target.value))}>
+              {[-2, -1, 0].map(d => { const y = new Date().getFullYear() + d; return <option key={y} value={y}>{y}</option>; })}
+            </select>
+            <button
+              className="btn-secondary text-sm ml-auto"
+              onClick={async () => {
+                const res = await api.get(`/spending/tax-summary?year=${taxYear}&format=csv`, { responseType: "blob" });
+                const url = URL.createObjectURL(res.data);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `tax-summary-${taxYear}.csv`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              Download Deductibles CSV
+            </button>
           </div>
+
+          {taxEstimateLoading && <div className="text-center py-8 text-gray-400 text-sm">Calculating…</div>}
+
+          {taxEstimate?.error && (
+            <div className="card bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 text-sm">
+              {taxEstimate.error} <a href="/settings" className="underline ml-1">Go to Settings</a>
+            </div>
+          )}
+
+          {taxEstimate && !taxEstimate.error && (() => {
+            const te = taxEstimate as any;
+            const refund = Number(te.total_refund_or_owed);
+            const fedRefund = Number(te.federal_refund_or_owed);
+            const stateRefund = Number(te.state_refund_or_owed);
+            return (
+              <div className="space-y-4">
+                {/* Summary banner */}
+                <div className={`card border-2 ${refund >= 0 ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20" : "border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20"}`}>
+                  <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div>
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{refund >= 0 ? "Estimated Refund" : "Estimated Amount Owed"}</p>
+                      <p className={`text-3xl font-bold ${refund >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                        {refund >= 0 ? "+" : "-"}{fmt(Math.abs(refund))}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">Effective rate: {(Number(te.effective_rate) * 100).toFixed(1)}% · Filing: {te.filing_status.replace("_", " ")} · {te.state}</p>
+                    </div>
+                    <div className="text-sm space-y-1">
+                      <div className="flex gap-6">
+                        <span className="text-gray-500">Federal {fedRefund >= 0 ? "refund" : "owed"}</span>
+                        <span className={`font-semibold ${fedRefund >= 0 ? "text-green-600" : "text-red-600"}`}>{fedRefund >= 0 ? "+" : ""}{fmt(fedRefund)}</span>
+                      </div>
+                      {!te.state_no_income_tax && (
+                        <div className="flex gap-6">
+                          <span className="text-gray-500">State {stateRefund >= 0 ? "refund" : "owed"}</span>
+                          <span className={`font-semibold ${stateRefund >= 0 ? "text-green-600" : "text-red-600"}`}>{stateRefund >= 0 ? "+" : ""}{fmt(stateRefund)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Breakdown */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="card space-y-2">
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Income</h4>
+                    <dl className="space-y-1 text-sm">
+                      <div className="flex justify-between"><dt className="text-gray-500">Gross salary</dt><dd className="tabular-nums">{fmt(te.federal_withheld + Number(te.federal_tax) > 0 ? (Number(te.annual_salary ?? 0)) : 0)}{fmt(Number((taxEstimate as any).taxable_income) + Number((taxEstimate as any).deduction_used))}</dd></div>
+                      <div className="flex justify-between"><dt className="text-gray-500">Deduction ({te.used_itemized ? "itemized" : "standard"})</dt><dd className="tabular-nums text-green-600">−{fmt(te.deduction_used)}</dd></div>
+                      <div className="flex justify-between border-t border-gray-100 dark:border-gray-700 pt-1 font-medium"><dt>Taxable income</dt><dd className="tabular-nums">{fmt(te.taxable_income)}</dd></div>
+                      {te.deductible_expenses > 0 && te.used_itemized && (
+                        <div className="flex justify-between text-xs text-gray-400"><dt>Deductible transactions</dt><dd>{fmt(te.deductible_expenses)}</dd></div>
+                      )}
+                    </dl>
+                  </div>
+                  <div className="card space-y-2">
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Tax Breakdown</h4>
+                    <dl className="space-y-1 text-sm">
+                      <div className="flex justify-between"><dt className="text-gray-500">Federal income tax</dt><dd className="tabular-nums text-red-600">{fmt(te.federal_tax)}</dd></div>
+                      {!te.state_no_income_tax && <div className="flex justify-between"><dt className="text-gray-500">State income tax ({(te.state_rate * 100).toFixed(2)}%)</dt><dd className="tabular-nums text-red-600">{fmt(te.state_tax)}</dd></div>}
+                      {te.state_no_income_tax && <div className="flex justify-between"><dt className="text-gray-500">State income tax</dt><dd className="text-green-600 text-xs">No state income tax</dd></div>}
+                      <div className="flex justify-between"><dt className="text-gray-500">Social Security (6.2%)</dt><dd className="tabular-nums text-red-600">{fmt(te.fica_ss)}</dd></div>
+                      <div className="flex justify-between"><dt className="text-gray-500">Medicare (1.45%)</dt><dd className="tabular-nums text-red-600">{fmt(te.fica_medicare)}</dd></div>
+                      <div className="flex justify-between border-t border-gray-100 dark:border-gray-700 pt-1 font-medium"><dt>Total taxes</dt><dd className="tabular-nums text-red-600">{fmt(te.total_tax)}</dd></div>
+                    </dl>
+                  </div>
+                </div>
+
+                {/* Federal bracket ladder */}
+                {te.brackets?.length > 0 && (
+                  <div className="card">
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">Federal Bracket Breakdown</h4>
+                    <table className="w-full text-sm">
+                      <thead><tr className="text-xs font-medium text-gray-500 uppercase">
+                        <th className="pb-2 text-left">Rate</th>
+                        <th className="pb-2 text-right">Income in bracket</th>
+                        <th className="pb-2 text-right">Tax</th>
+                      </tr></thead>
+                      <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                        {(te.brackets as any[]).map((b: any, i: number) => (
+                          <tr key={i}>
+                            <td className="py-1 text-indigo-600 dark:text-indigo-400 font-medium">{(b.rate * 100).toFixed(0)}%</td>
+                            <td className="py-1 text-right tabular-nums text-gray-600 dark:text-gray-400">{fmt(b.income)}</td>
+                            <td className="py-1 text-right tabular-nums font-medium">{fmt(b.tax)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                <p className="text-xs text-gray-400">Estimates use 2025 federal brackets. State tax uses approximate effective rates. This is not tax advice — consult a tax professional.</p>
+              </div>
+            );
+          })()}
         </div>
       )}
       {showHelp && <HelpPanel title="Spending Analysis" body={"Analyze your spending by category across any date range.\n\nOverview tab: budgeted vs. actual by category with breakdown by account and card.\nTrends tab: year-over-year comparison and 24-month rolling totals.\nFlow tab: Sankey diagram showing income sources flowing into expense categories.\nTax Export tab: download a CSV of deductible transactions for tax filing."} onClose={() => setShowHelp(false)} />}

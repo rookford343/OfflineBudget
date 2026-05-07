@@ -30,6 +30,7 @@ export default function Forecast() {
   const checkingAccounts = accounts.filter((a: any) => a.type === "checking");
   const [accountId, setAccountId] = useState<number | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
+  const [forecastYears, setForecastYears] = useState(1);
   const [expandedQ, setExpandedQ] = useState<number | null>(null);
   const [scenarioId, setScenarioId] = useState<number | null>(null);
   const [chartView, setChartView] = useState<"balance" | "net">("balance");
@@ -45,11 +46,18 @@ export default function Forecast() {
     ? parseFloat(activeAccount.low_balance_threshold)
     : null;
 
-  const { data: quarters = [], isLoading } = useQuery({
+  const { data: singleYearQuarters = [], isLoading: singleLoading } = useQuery({
     queryKey: ["forecast-quarters", activeAccountId, year],
     queryFn: () => forecastApi.quarters(activeAccountId, year),
-    enabled: !!activeAccountId,
+    enabled: !!activeAccountId && forecastYears === 1,
   });
+  const { data: multiYearQuarters = [], isLoading: multiLoading } = useQuery({
+    queryKey: ["forecast-multi-year", activeAccountId, year, forecastYears],
+    queryFn: () => forecastApi.multiYear(activeAccountId, year, forecastYears),
+    enabled: !!activeAccountId && forecastYears > 1,
+  });
+  const quarters = forecastYears === 1 ? singleYearQuarters : multiYearQuarters;
+  const isLoading = forecastYears === 1 ? singleLoading : multiLoading;
 
   const { data: scenarios = [] } = useQuery({
     queryKey: ["scenarios"],
@@ -162,7 +170,7 @@ export default function Forecast() {
 
   // Net view: one bar per quarter
   const netBarData = (quarters as any[]).map((q: any) => ({
-    name: `Q${q.quarter}`,
+    name: forecastYears > 1 ? `Q${q.quarter} ${q.year}` : `Q${q.quarter}`,
     net: parseFloat(q.net),
     income: parseFloat(q.total_income),
     expenses: parseFloat(q.total_expenses),
@@ -215,6 +223,12 @@ export default function Forecast() {
           <select className="input w-auto" value={year} onChange={e => setYear(parseInt(e.target.value))}>
             {[-1, 0, 1, 2].map(d => <option key={d} value={new Date().getFullYear() + d}>{new Date().getFullYear() + d}</option>)}
           </select>
+          <select className="input w-auto" value={forecastYears} onChange={e => setForecastYears(parseInt(e.target.value))}>
+            <option value={1}>1 year</option>
+            <option value={2}>2 years</option>
+            <option value={3}>3 years</option>
+            <option value={5}>5 years</option>
+          </select>
           <select className="input w-auto" value={chartView} onChange={e => setChartView(e.target.value as "balance" | "net")}>
             <option value="balance">Running Balance</option>
             <option value="net">Net Income/Expense</option>
@@ -233,7 +247,9 @@ export default function Forecast() {
       {!isLoading && chartData.length > 0 && (
         <div className="card">
           <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            {chartView === "balance" ? `Balance Over Time — ${year}` : `Quarterly Net Income/Expense — ${year}`}
+            {chartView === "balance"
+              ? `Balance Over Time — ${year}${forecastYears > 1 ? `–${year + forecastYears - 1}` : ""}`
+              : `Quarterly Net Income/Expense — ${year}${forecastYears > 1 ? `–${year + forecastYears - 1}` : ""}`}
           </h3>
           <ResponsiveContainer width="100%" height={280}>
             {chartView === "net" ? (
@@ -461,10 +477,10 @@ export default function Forecast() {
           const hasConflict = delta !== null && Math.abs(delta) > 1;
 
           return (
-          <div key={q.quarter} className="card">
+          <div key={qKey} className="card">
             <button
               className="w-full flex items-center justify-between"
-              onClick={() => setExpandedQ(expandedQ === q.quarter ? null : q.quarter)}
+              onClick={() => setExpandedQ(expandedQ === q.quarter && forecastYears === 1 ? null : (expandedQ === q.quarter ? null : q.quarter))}
             >
               <div className="flex items-center gap-4">
                 <span className="font-bold text-gray-900">Q{q.quarter} {q.year}</span>

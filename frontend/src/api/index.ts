@@ -50,6 +50,8 @@ export const forecastApi = {
     api.get("/forecast/quarters", { params: { account_id: accountId, year } }).then((r) => r.data),
   quartersWithScenario: (accountId: number, year: number, overrides: object[]) =>
     api.post("/forecast/quarters-scenario", { account_id: accountId, year, overrides }).then((r) => r.data),
+  multiYear: (accountId: number, startYear: number, years: number) =>
+    api.get("/forecast/multi-year", { params: { account_id: accountId, start_year: startYear, years } }).then((r) => r.data),
 };
 
 // ── Transactions ──────────────────────────────────────────────────────────────
@@ -100,6 +102,9 @@ export const spendingApi = {
     api.get("/spending/monthly-by-category", { params: { start, end, account_id: accountId, card_id: cardId } }).then((r) => r.data),
   sankey: (year: number, month: number) =>
     api.get(`/spending/sankey/${year}/${month}`).then((r) => r.data),
+  byMerchant: (start: string, end: string, accountId?: number, cardId?: number, limit = 50) =>
+    api.get("/spending/by-merchant", { params: { start, end, account_id: accountId, card_id: cardId, limit } }).then((r) => r.data),
+  taxEstimate: (year: number) => api.get("/spending/tax-estimate", { params: { year } }).then((r) => r.data),
   taxSummaryUrl: (year: number) => `/spending/tax-summary?year=${year}&format=csv`,
 };
 

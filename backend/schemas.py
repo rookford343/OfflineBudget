@@ -24,6 +24,12 @@ class UserOut(BaseModel):
     ss_gross_per_paycheck: Optional[Decimal] = None
     ss_wage_base: Optional[Decimal] = None
     ss_bonus_ytd: Optional[Decimal] = None
+    tax_filing_status: Optional[str] = None
+    tax_state: Optional[str] = None
+    annual_salary: Optional[Decimal] = None
+    other_income: Optional[Decimal] = None
+    federal_withholding_ytd: Optional[Decimal] = None
+    state_withholding_ytd: Optional[Decimal] = None
 
 
 class UserUpdate(BaseModel):
@@ -32,6 +38,12 @@ class UserUpdate(BaseModel):
     ss_gross_per_paycheck: Optional[Decimal] = None
     ss_wage_base: Optional[Decimal] = None
     ss_bonus_ytd: Optional[Decimal] = None
+    tax_filing_status: Optional[str] = None
+    tax_state: Optional[str] = None
+    annual_salary: Optional[Decimal] = None
+    other_income: Optional[Decimal] = None
+    federal_withholding_ytd: Optional[Decimal] = None
+    state_withholding_ytd: Optional[Decimal] = None
 
 
 class UserPasswordChange(BaseModel):
@@ -760,6 +772,14 @@ class TaxSummaryResponse(BaseModel):
     year: int
     rows: list[TaxSummaryRow]
     total_amount: Decimal
+
+
+# ── Merchant spending ─────────────────────────────────────────────────────────
+
+class MerchantSpendingEntry(BaseModel):
+    name: str
+    total: Decimal
+    count: int
 
 
 # ── Reconciliation ────────────────────────────────────────────────────────────

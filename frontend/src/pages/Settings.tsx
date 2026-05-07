@@ -119,6 +119,19 @@ export default function Settings() {
   const [pwSaved, setPwSaved] = useState(false);
   const [profileEmail, setProfileEmail] = useState("");
   const [testEmailStatus, setTestEmailStatus] = useState<"idle" | "sending" | "ok" | "err">("idle");
+  // ── Tax profile state ─────────────────────────────────────────────────────
+  const [taxFilingStatus, setTaxFilingStatus] = useState("single");
+  const [taxState, setTaxState] = useState("");
+  const [taxSalary, setTaxSalary] = useState("");
+  const [taxOtherIncome, setTaxOtherIncome] = useState("");
+  const [taxFedWithheld, setTaxFedWithheld] = useState("");
+  const [taxStateWithheld, setTaxStateWithheld] = useState("");
+  const [taxSaved, setTaxSaved] = useState(false);
+  const taxMut = useMutation({
+    mutationFn: authApi.updateMe,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); setTaxSaved(true); setTimeout(() => setTaxSaved(false), 2000); },
+  });
+
   React.useEffect(() => {
     if (me) {
       setProfileName(me.display_name ?? "");
@@ -126,6 +139,12 @@ export default function Settings() {
       setSsGross(me.ss_gross_per_paycheck ?? "");
       setSsWageBase(me.ss_wage_base ?? "176100");
       setSsBonus(me.ss_bonus_ytd ?? "");
+      setTaxFilingStatus(me.tax_filing_status ?? "single");
+      setTaxState(me.tax_state ?? "");
+      setTaxSalary(me.annual_salary ?? "");
+      setTaxOtherIncome(me.other_income ?? "");
+      setTaxFedWithheld(me.federal_withholding_ytd ?? "");
+      setTaxStateWithheld(me.state_withholding_ytd ?? "");
     }
   }, [me]);
   const updateMeMut = useMutation({
@@ -710,6 +729,60 @@ export default function Settings() {
             </button>
           </div>
         </div>
+        {/* Tax Profile */}
+        <div className="space-y-3 border-t border-gray-100 dark:border-gray-700 pt-4">
+          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Tax Profile</h4>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Used to estimate your tax obligation in the Spending → Tax tab. All values are estimates — consult a tax professional.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+            <div>
+              <label className="label">Filing Status</label>
+              <select className="input" value={taxFilingStatus} onChange={e => setTaxFilingStatus(e.target.value)}>
+                <option value="single">Single</option>
+                <option value="married_jointly">Married Filing Jointly</option>
+                <option value="married_separately">Married Filing Separately</option>
+                <option value="head_of_household">Head of Household</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">State (2-letter code)</label>
+              <input className="input uppercase" placeholder="e.g. TX" maxLength={2} value={taxState} onChange={e => setTaxState(e.target.value.toUpperCase())} />
+            </div>
+            <div>
+              <label className="label">Annual Gross Salary (W-2)</label>
+              <input type="number" step="1" className="input" placeholder="e.g. 85000" value={taxSalary} onChange={e => setTaxSalary(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Other Income (1099, dividends, etc.)</label>
+              <input type="number" step="1" className="input" placeholder="e.g. 5000" value={taxOtherIncome} onChange={e => setTaxOtherIncome(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Federal Tax Withheld YTD</label>
+              <input type="number" step="1" className="input" placeholder="From your pay stubs" value={taxFedWithheld} onChange={e => setTaxFedWithheld(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">State Tax Withheld YTD</label>
+              <input type="number" step="1" className="input" placeholder="From your pay stubs" value={taxStateWithheld} onChange={e => setTaxStateWithheld(e.target.value)} />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              className="btn-primary text-sm"
+              disabled={taxMut.isPending}
+              onClick={() => taxMut.mutate({
+                tax_filing_status: taxFilingStatus,
+                tax_state: taxState || null,
+                annual_salary: taxSalary ? parseFloat(taxSalary) : null,
+                other_income: taxOtherIncome ? parseFloat(taxOtherIncome) : null,
+                federal_withholding_ytd: taxFedWithheld ? parseFloat(taxFedWithheld) : null,
+                state_withholding_ytd: taxStateWithheld ? parseFloat(taxStateWithheld) : null,
+              })}
+            >
+              {taxMut.isPending ? "Saving…" : "Save Tax Profile"}
+            </button>
+            {taxSaved && <span className="text-sm text-green-600">Saved!</span>}
+          </div>
+        </div>
+
         <form onSubmit={submitPassword} className="space-y-3 border-t border-gray-100 dark:border-gray-700 pt-4">
           <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2"><KeyRound size={14} /> Change Password</h4>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl">
@@ -868,6 +941,7 @@ export default function Settings() {
                 <select className="input" value={catForm.type} onChange={e => setCatForm({ ...catForm, type: e.target.value })}>
                   <option value="expense">Expense</option>
                   <option value="income">Income</option>
+                  <option value="savings">Savings (excluded from spending totals)</option>
                 </select>
               </div>
               <div>
