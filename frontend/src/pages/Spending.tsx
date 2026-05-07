@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { spendingApi, accountsApi, cardsApi, analyticsApi } from "../api";
 import { api } from "../api/client";
 import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyLeft } from "d3-sankey";
-import { fmt, firstOfMonth, today } from "../lib/utils";
+import { fmt, firstOfMonth, today, quickRange } from "../lib/utils";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine,
@@ -231,6 +231,11 @@ export default function Spending() {
             {checkingAccounts.map((a: any) => <option key={`account-${a.id}`} value={`account-${a.id}`}>{a.name}</option>)}
             {cards.map((c: any) => <option key={`card-${c.id}`} value={`card-${c.id}`}>{c.name}</option>)}
           </select>
+          <div className="flex gap-1">
+            {([["Mo", "month"], ["3 Mo", "3months"], ["YTD", "ytd"], ["Last Yr", "lastyear"]] as const).map(([label, p]) => (
+              <button key={p} type="button" className="px-2 py-1 text-xs rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-400" onClick={() => { const r = quickRange(p); setStart(r.start); setEnd(r.end); }}>{label}</button>
+            ))}
+          </div>
           <input type="date" className="input w-auto" value={start} onChange={e => setStart(e.target.value)} />
           <span className="self-center text-gray-400 dark:text-[#4a5568]">→</span>
           <input type="date" className="input w-auto" value={end} onChange={e => setEnd(e.target.value)} />

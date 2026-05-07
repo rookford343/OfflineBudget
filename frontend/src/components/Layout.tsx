@@ -26,6 +26,18 @@ const nav = [
   { to: "/settings",     icon: Settings,          label: "Settings"       },
 ];
 
+function loadOrderedNav() {
+  try {
+    const saved = localStorage.getItem("navOrder");
+    if (!saved) return nav;
+    const order = JSON.parse(saved) as string[];
+    const sorted = order.map(to => nav.find(n => n.to === to)!).filter(Boolean);
+    const seen = new Set(order);
+    const remaining = nav.filter(n => !seen.has(n.to));
+    return [...sorted, ...remaining];
+  } catch { return nav; }
+}
+
 export default function Layout() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -37,6 +49,7 @@ export default function Layout() {
     staleTime: 30_000,
   });
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [orderedNav, setOrderedNav] = useState(loadOrderedNav);
 
   // Latch open once on first load if no accounts exist — don't re-derive from live query
   // so the wizard stays visible after step 1 creates the first account.
@@ -51,6 +64,12 @@ export default function Layout() {
     const handler = () => setWizardOpen(true);
     window.addEventListener("open-wizard", handler);
     return () => window.removeEventListener("open-wizard", handler);
+  }, []);
+
+  useEffect(() => {
+    const handler = () => setOrderedNav(loadOrderedNav());
+    window.addEventListener("nav-order-changed", handler);
+    return () => window.removeEventListener("nav-order-changed", handler);
   }, []);
 
   const showWizard = wizardOpen;
@@ -69,7 +88,7 @@ export default function Layout() {
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{me?.display_name ?? user?.display_name}</p>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {nav.map(({ to, icon: Icon, label }) => (
+          {orderedNav.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
@@ -107,7 +126,7 @@ export default function Layout() {
 
       {/* Mobile bottom nav */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around px-2 py-2 z-50">
-        {nav.slice(0, 5).map(({ to, icon: Icon, label }) => (
+        {orderedNav.slice(0, 5).map(({ to, icon: Icon, label }) => (
           <NavLink
             key={to}
             to={to}

@@ -186,3 +186,27 @@ export const checkpointsApi = {
   upsert: (year: number, quarter: number, accountId: number, actual_balance: number) =>
     api.put(`/checkpoints/${year}/${quarter}`, { account_id: accountId, year, quarter, actual_balance }).then((r) => r.data),
 };
+
+// ── Transaction Rules ─────────────────────────────────────────────────────────
+export const rulesApi = {
+  list: () => api.get("/rules").then((r) => r.data),
+  create: (data: object) => api.post("/rules", data).then((r) => r.data),
+  update: (id: number, data: object) => api.patch(`/rules/${id}`, data).then((r) => r.data),
+  remove: (id: number) => api.delete(`/rules/${id}`),
+  test: (data: { pattern: string; pattern_type: string; description: string }) =>
+    api.post("/rules/test", data).then((r) => r.data),
+};
+
+// ── Data Management ───────────────────────────────────────────────────────────
+export const dataApi = {
+  clearTransactions: () => api.delete("/data/transactions"),
+  clearCCTransactions: () => api.delete("/data/cc-transactions"),
+};
+
+// ── Export ────────────────────────────────────────────────────────────────────
+export const exportsApi = {
+  downloadTransactions: (params: object) =>
+    api.get("/export/transactions", { params, responseType: "blob" }).then((r) => r.data),
+  downloadBudgetReport: (year: number, month: number, format = "csv") =>
+    api.get("/export/budget-report", { params: { year, month, format }, responseType: "blob" }).then((r) => r.data),
+};

@@ -10,11 +10,14 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import typer
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
+from pathlib import Path
+from typing import Optional
 from rich.console import Console
 from rich.table import Table
 from rich import box
+from rich.text import Text
 
 from backend.database import SessionLocal, create_tables
 from backend.auth import hash_password
@@ -232,6 +235,120 @@ def list_cards(username: str = typer.Option(..., help="Username")):
         util = float(c.current_balance) / float(c.credit_limit) * 100 if c.credit_limit else 0
         t.add_row(str(c.id), c.name, f"${c.current_balance:,.2f}", f"${c.balance_due:,.2f}", f"${c.credit_limit:,.2f}", f"{util:.1f}%")
     console.print(t)
+
+
+# ── Import ────────────────────────────────────────────────────────────────────
+
+import_app = typer.Typer(help="Import transactions from CSV or OFX/QFX files")
+app.add_typer(import_app, name="import")
+
+
+@import_app.command("csv")
+def import_file(
+    file: Path = typer.Argument(..., help="Path to CSV, OFX, or QFX file"),
+    username: str = typer.Option(..., envvar="BUDGET_USER", help="Username (or set BUDGET_USER env var)"),
+    account_id: Optional[int] = typer.Option(None, "--account-id", help="Checking/savings account ID"),
+    card_id: Optional[int] = typer.Option(None, "--card-id", help="Credit card ID"),
+    auto_confirm: bool = typer.Option(False, "--auto-confirm", help="Skip confirmation prompt (for scripts/cron)"),
+):
+    """Import transactions from a CSV, OFX, or QFX bank file."""
+    if not account_id and not card_id:
+        console.print("[red]Error: provide --account-id or --card-id[/red]")
+        raise typer.Exit(1)
+
+    if not file.exists():
+        console.print(f"[red]File not found: {file}[/red]")
+        raise typer.Exit(1)
+
+    db = get_db()
+    user = _require_user(db, username)
+
+    content = file.read_bytes()
+    ext = file.suffix.lower()
+
+    try:
+        if ext in (".ofx", ".qfx"):
+            from backend.services.ofx_parser import parse_ofx
+            parsed_rows = parse_ofx(content)
+            fmt = "OFX/QFX"
+        else:
+            from backend.services.csv_parser import parse_csv
+            parsed_rows = parse_csv(content)
+            fmt = "CSV"
+    except Exception as e:
+        console.print(f"[red]Failed to parse file: {e}[/red]")
+        raise typer.Exit(1)
+
+    if not parsed_rows:
+        console.print("[yellow]No valid transactions found in file.[/yellow]")
+        raise typer.Exit(0)
+
+    from backend.services.import_service import build_preview, run_import
+    from backend import schemas
+
+    preview_rows = build_preview(db, user, parsed_rows)
+    categorized = sum(1 for r in preview_rows if not r.needs_review)
+
+    t = Table(
+        "Date", "Description", "Amount", "Category", "Review",
+        box=box.ROUNDED,
+        title=f"{file.name} — {len(preview_rows)} transactions ({fmt})",
+    )
+    for r in preview_rows:
+        amt_str = f"${abs(r.amount):,.2f}"
+        amt = Text(f"+{amt_str}" if r.amount >= 0 else f"-{amt_str}")
+        amt.stylize("green" if r.amount >= 0 else "red")
+        review_flag = "[yellow]?[/yellow]" if r.needs_review else "[green]✓[/green]"
+        t.add_row(
+            r.date.strftime("%Y-%m-%d"),
+            r.description[:48] + ("…" if len(r.description) > 48 else ""),
+            amt,
+            r.category_name or "—",
+            review_flag,
+        )
+    console.print(t)
+    console.print(
+        f"[bold]{len(preview_rows)}[/bold] total  |  "
+        f"[green]{categorized}[/green] auto-categorized  |  "
+        f"[yellow]{len(preview_rows) - categorized}[/yellow] need review"
+    )
+
+    if not auto_confirm:
+        typer.confirm(f"\nImport {len(preview_rows)} transactions?", abort=True)
+
+    confirm_rows = [
+        schemas.ImportConfirmRow(
+            date=r.date,
+            description=r.description,
+            amount=r.amount,
+            category_id=r.category_id,
+        )
+        for r in preview_rows
+    ]
+
+    try:
+        result = run_import(db, user, confirm_rows, account_id, card_id)
+    except Exception as e:
+        console.print(f"[red]Import failed: {e}[/red]")
+        raise typer.Exit(1)
+
+    # Write audit log entry
+    log = models.AuditLog(
+        user_id=user.id,
+        username=user.username,
+        method="CLI",
+        path=f"import {file.name}",
+        status_code=200,
+        duration_ms=0,
+        body_summary=f"{file.name} → {result.imported} imported, {result.skipped_duplicates} skipped",
+    )
+    db.add(log)
+    db.commit()
+
+    console.print(
+        f"\n[green]✓ Imported {result.imported} transactions[/green]"
+        + (f"  [dim]({result.skipped_duplicates} duplicates skipped)[/dim]" if result.skipped_duplicates else "")
+    )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -1,11 +1,11 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { accountsApi, categoriesApi, budgetApi, adminApi, authApi } from "../api";
+import { accountsApi, categoriesApi, budgetApi, adminApi, authApi, rulesApi, checkpointsApi, dataApi } from "../api";
 import { fmt } from "../lib/utils";
 import { getTheme, setTheme } from "../store/theme";
 import { clearAuth, isAdmin } from "../store/auth";
 import {
-  Plus, Pencil, Trash2, X, Check, Moon, Sun, ChevronRight, ChevronDown,
+  Plus, Pencil, Trash2, X, Check, Moon, Sun, ChevronRight, ChevronDown, ChevronUp,
   AlertTriangle, Shield, User, Activity, HelpCircle, KeyRound, Link, Mail, RotateCcw, Wand2
 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
@@ -41,6 +41,11 @@ export default function Settings() {
   const [deleteAccId, setDeleteAccId] = useState<number | null>(null);
   const [editBalId, setEditBalId] = useState<number | null>(null);
   const [newBal, setNewBal] = useState("");
+  const { data: editBalCheckpoints = [] } = useQuery<any[]>({
+    queryKey: ["checkpoints", editBalId],
+    queryFn: () => checkpointsApi.list(editBalId!),
+    enabled: editBalId !== null,
+  });
 
   const createAccMut = useMutation({ mutationFn: accountsApi.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["accounts"] }); setShowAccForm(false); } });
   const updateAccMut = useMutation({ mutationFn: ({ id, data }: any) => accountsApi.update(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["accounts"] }); setEditAcc(null); setShowAccForm(false); setEditBalId(null); } });
@@ -157,6 +162,82 @@ export default function Settings() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); setSsSaved(true); setTimeout(() => setSsSaved(false), 2000); },
   });
 
+  // ── Nav order ─────────────────────────────────────────────────────────────
+  const ALL_NAV_ITEMS = [
+    { to: "/dashboard", label: "Dashboard" },
+    { to: "/goals", label: "Goals" },
+    { to: "/net-worth", label: "Net Worth" },
+    { to: "/calendar", label: "Calendar" },
+    { to: "/credit-cards", label: "Credit Cards" },
+    { to: "/forecast", label: "Forecast" },
+    { to: "/spending", label: "Spending" },
+    { to: "/recurring", label: "Recurring" },
+    { to: "/transactions", label: "Transactions" },
+    { to: "/import", label: "Import" },
+    { to: "/budget", label: "Budget" },
+    { to: "/settings", label: "Settings" },
+  ];
+  const defaultNavOrder = ALL_NAV_ITEMS.map(n => n.to);
+  const [navOrder, setNavOrder] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("navOrder");
+      return saved ? JSON.parse(saved) : defaultNavOrder;
+    } catch { return defaultNavOrder; }
+  });
+  const navItems = navOrder.map(to => ALL_NAV_ITEMS.find(n => n.to === to)!).filter(Boolean);
+  function moveNav(index: number, dir: -1 | 1) {
+    const next = [...navOrder];
+    const target = index + dir;
+    if (target < 0 || target >= next.length) return;
+    [next[index], next[target]] = [next[target], next[index]];
+    setNavOrder(next);
+    localStorage.setItem("navOrder", JSON.stringify(next));
+    window.dispatchEvent(new CustomEvent("nav-order-changed"));
+  }
+  function resetNavOrder() {
+    setNavOrder(defaultNavOrder);
+    localStorage.removeItem("navOrder");
+    window.dispatchEvent(new CustomEvent("nav-order-changed"));
+  }
+
+  // ── Transaction Rules ──────────────────────────────────────────────────────
+  const { data: rules = [] } = useQuery<any[]>({ queryKey: ["rules"], queryFn: rulesApi.list });
+  const emptyRule = { name: "", field: "description", pattern_type: "contains", pattern: "", action: "set_category", category_id: "", priority: "0" };
+  const [showRuleForm, setShowRuleForm] = useState(false);
+  const [editRule, setEditRule] = useState<any | null>(null);
+  const [ruleForm, setRuleForm] = useState({ ...emptyRule });
+  const [deleteRuleId, setDeleteRuleId] = useState<number | null>(null);
+  const [ruleTestDesc, setRuleTestDesc] = useState("");
+  const [ruleTestResult, setRuleTestResult] = useState<boolean | null>(null);
+  const createRuleMut = useMutation({ mutationFn: rulesApi.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules"] }); setShowRuleForm(false); } });
+  const updateRuleMut = useMutation({ mutationFn: ({ id, data }: any) => rulesApi.update(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules"] }); setEditRule(null); setShowRuleForm(false); } });
+  const deleteRuleMut = useMutation({ mutationFn: rulesApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules"] }); setDeleteRuleId(null); } });
+  function submitRule(e: React.FormEvent) {
+    e.preventDefault();
+    const data = { ...ruleForm, priority: parseInt(ruleForm.priority) || 0, category_id: ruleForm.category_id ? parseInt(ruleForm.category_id) : null };
+    if (editRule) updateRuleMut.mutate({ id: editRule.id, data });
+    else createRuleMut.mutate(data);
+  }
+  function openEditRule(r: any) {
+    setEditRule(r);
+    setRuleForm({ name: r.name, field: r.field, pattern_type: r.pattern_type, pattern: r.pattern, action: r.action, category_id: r.category_id?.toString() ?? "", priority: r.priority.toString() });
+    setRuleTestDesc(""); setRuleTestResult(null);
+    setShowRuleForm(true);
+  }
+  function handleTestRule() {
+    if (!ruleTestDesc || !ruleForm.pattern) return;
+    rulesApi.test({ pattern: ruleForm.pattern, pattern_type: ruleForm.pattern_type, description: ruleTestDesc })
+      .then((r: any) => setRuleTestResult(r.matched));
+  }
+
+  // ── Accordion ─────────────────────────────────────────────────────────────
+  const [openSections, setOpenSections] = useState<Set<string>>(
+    () => new Set(["preferences", "accounts"])
+  );
+  function toggleSection(key: string) {
+    setOpenSections(s => { const next = new Set(s); next.has(key) ? next.delete(key) : next.add(key); return next; });
+  }
+
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -166,6 +247,24 @@ export default function Settings() {
     onError: (e: any) => setDeleteError(e?.response?.data?.detail ?? "Failed to delete account"),
   });
   function handleDeleteAccount() { setDeleteError(null); deleteAccountMut.mutate({ password: deletePassword }); }
+
+  const [clearConfirm, setClearConfirm] = useState<"transactions" | "cc-transactions" | null>(null);
+  const clearTxnMut = useMutation({
+    mutationFn: dataApi.clearTransactions,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      setClearConfirm(null);
+    },
+  });
+  const clearCCTxnMut = useMutation({
+    mutationFn: dataApi.clearCCTransactions,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["cc-transactions"] });
+      qc.invalidateQueries({ queryKey: ["credit-cards"] });
+      setClearConfirm(null);
+    },
+  });
 
   // ── User management ────────────────────────────────────────────────────────
   const [showUserForm, setShowUserForm] = useState(false);
@@ -191,7 +290,11 @@ export default function Settings() {
 
       {/* ── Preferences ── */}
       <div className="card">
-        <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">Preferences</h3>
+        <button onClick={() => toggleSection("preferences")} className="w-full flex items-center justify-between">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100">Preferences</h3>
+          <ChevronDown size={16} className={`text-gray-400 transition-transform ${openSections.has("preferences") ? "" : "-rotate-90"}`} />
+        </button>
+        {openSections.has("preferences") && <div className="mt-4">
         <div className="flex items-center justify-between py-2">
           <div className="flex items-center gap-3">
             {dark ? <Moon size={16} className="text-indigo-400" /> : <Sun size={16} className="text-amber-500" />}
@@ -219,14 +322,34 @@ export default function Settings() {
             Open
           </button>
         </div>
+        <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Navigation Order</span>
+            <button onClick={resetNavOrder} className="text-xs text-gray-400 hover:text-indigo-500">Reset</button>
+          </div>
+          <div className="space-y-1">
+            {navItems.map((item, i) => (
+              <div key={item.to} className="flex items-center gap-2 py-1 px-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{item.label}</span>
+                <button onClick={() => moveNav(i, -1)} disabled={i === 0} className="btn-ghost p-1 disabled:opacity-30"><ChevronUp size={12} /></button>
+                <button onClick={() => moveNav(i, 1)} disabled={i === navItems.length - 1} className="btn-ghost p-1 disabled:opacity-30"><ChevronDown size={12} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
+        </div>}
       </div>
 
       {/* ── Social Security ── */}
       <div className="card">
-        <div className="flex items-center gap-2 mb-1">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100">Social Security Tax</h3>
-          <button onClick={() => setShowSsHelp(true)} className="text-gray-400 hover:text-indigo-500"><HelpCircle size={15} /></button>
-        </div>
+        <button onClick={() => toggleSection("ss")} className="w-full flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Social Security Tax</h3>
+            <button onClick={e => { e.stopPropagation(); setShowSsHelp(true); }} className="text-gray-400 hover:text-indigo-500"><HelpCircle size={15} /></button>
+          </div>
+          <ChevronDown size={16} className={`text-gray-400 transition-transform ${openSections.has("ss") ? "" : "-rotate-90"}`} />
+        </button>
+        {openSections.has("ss") && <div className="mt-3">
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">Track when you hit the SS wage base so you can plan for the resulting paycheck increase.</p>
         <div className="grid grid-cols-2 gap-4 max-w-md">
           <div>
@@ -252,15 +375,20 @@ export default function Settings() {
           </button>
           {ssSaved && <span className="text-sm text-green-600">Saved!</span>}
         </div>
+        </div>}
       </div>
       {showSsHelp && <HelpPanel title="Social Security Tax" body={"Gross Per Paycheck: your total gross wages per paycheck before any deductions. This is used to estimate how many pay periods until you hit the SS wage base.\n\nSS Wage Base: the annual income limit above which Social Security tax is no longer withheld (default $176,100 for 2025). After reaching this limit, your paycheck increases by ~6.2% of gross.\n\nYTD Bonus Subject to SS: bonuses you've received this year that were subject to Social Security tax. Reduces the remaining wage base so the estimate stays accurate."} onClose={() => setShowSsHelp(false)} />}
 
       {/* ── Accounts ── */}
       <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100">Accounts</h3>
-          <button onClick={openNewAcc} className="btn-primary btn-sm text-xs px-3 py-1.5"><Plus size={14} /> Add Account</button>
+        <div className="flex items-center justify-between">
+          <button onClick={() => toggleSection("accounts")} className="flex items-center gap-2 flex-1 text-left">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Accounts</h3>
+            <ChevronDown size={16} className={`ml-1 text-gray-400 transition-transform ${openSections.has("accounts") ? "" : "-rotate-90"}`} />
+          </button>
+          {openSections.has("accounts") && <button onClick={openNewAcc} className="btn-primary btn-sm text-xs px-3 py-1.5"><Plus size={14} /> Add Account</button>}
         </div>
+        {openSections.has("accounts") && <div className="mt-4">
         <div className="divide-y divide-gray-100 dark:divide-gray-700">
           {accounts.map((a: any) => (
             <div key={a.id} className="py-3 flex items-center justify-between">
@@ -278,13 +406,23 @@ export default function Settings() {
               </div>
               <div className="flex items-center gap-3">
                 {editBalId === a.id ? (
-                  <div className="flex items-center gap-1">
-                    <input type="number" step="0.01" className="input w-28 py-1 text-right" value={newBal} onChange={e => setNewBal(e.target.value)} autoFocus />
-                    <button onClick={() => updateAccMut.mutate({ id: a.id, data: { current_balance: parseFloat(newBal) } })} className="text-green-600"><Check size={14} /></button>
-                    <button onClick={() => setEditBalId(null)} className="text-gray-400"><X size={14} /></button>
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-center gap-1">
+                      <input type="number" step="0.01" className="input w-28 py-1 text-right" value={newBal} onChange={e => setNewBal(e.target.value)} autoFocus />
+                      <button onClick={() => updateAccMut.mutate({ id: a.id, data: { current_balance: parseFloat(newBal) } })} className="text-green-600"><Check size={14} /></button>
+                      <button onClick={() => setEditBalId(null)} className="text-gray-400"><X size={14} /></button>
+                    </div>
+                    {editBalCheckpoints.length > 0 && (() => {
+                      const latest = [...editBalCheckpoints].sort((a: any, b: any) => b.year !== a.year ? b.year - a.year : b.quarter - a.quarter)[0];
+                      return (
+                        <button onClick={() => setNewBal(String(latest.actual_balance))} className="text-xs text-indigo-500 hover:text-indigo-700">
+                          Use Q{latest.quarter} {latest.year} checkpoint: {fmt(latest.actual_balance)}
+                        </button>
+                      );
+                    })()}
                   </div>
                 ) : (
-                  <button onClick={() => { setEditBalId(a.id); setNewBal(a.current_balance); }} className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums hover:text-indigo-600 transition-colors">
+                  <button onClick={() => { setEditBalId(a.id); setNewBal(a.current_balance); }} className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums hover:text-indigo-600 transition-colors" title="Click to correct balance">
                     {fmt(a.current_balance)}
                   </button>
                 )}
@@ -295,17 +433,20 @@ export default function Settings() {
           ))}
           {accounts.length === 0 && <p className="text-sm text-gray-400 py-4 text-center">No accounts yet</p>}
         </div>
+        </div>}
       </div>
 
       {/* ── Categories ── */}
       <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <div>
+        <div className="flex items-center justify-between">
+          <button onClick={() => toggleSection("categories")} className="flex items-center gap-2 flex-1 text-left">
             <h3 className="font-semibold text-gray-900 dark:text-gray-100">Categories</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Click a budget amount to edit it inline</p>
-          </div>
-          <button onClick={() => openNewCat()} className="btn-primary btn-sm text-xs px-3 py-1.5"><Plus size={14} /> Add Category</button>
+            <ChevronDown size={16} className={`ml-1 text-gray-400 transition-transform ${openSections.has("categories") ? "" : "-rotate-90"}`} />
+          </button>
+          {openSections.has("categories") && <button onClick={() => openNewCat()} className="btn-primary btn-sm text-xs px-3 py-1.5"><Plus size={14} /> Add Category</button>}
         </div>
+        {openSections.has("categories") && <div className="mt-4">
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Click a budget amount to edit it inline</p>
         <div className="space-y-1">
           {categories.map((cat: any) => (
             <div key={cat.id}>
@@ -345,18 +486,58 @@ export default function Settings() {
             </div>
           ))}
         </div>
+        </div>}
+      </div>
+
+      {/* ── Transaction Rules ── */}
+      <div className="card">
+        <div className="flex items-center justify-between">
+          <button onClick={() => toggleSection("rules")} className="flex items-center gap-2 flex-1 text-left">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Transaction Rules</h3>
+            <ChevronDown size={16} className={`ml-1 text-gray-400 transition-transform ${openSections.has("rules") ? "" : "-rotate-90"}`} />
+          </button>
+          {openSections.has("rules") && <button onClick={() => { setEditRule(null); setRuleForm({ ...emptyRule }); setRuleTestDesc(""); setRuleTestResult(null); setShowRuleForm(true); }} className="btn-primary btn-sm text-xs px-3 py-1.5"><Plus size={14} /> Add Rule</button>}
+        </div>
+        {openSections.has("rules") && <div className="mt-4">
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">Auto-categorize transactions at import based on description patterns</p>
+        {rules.length === 0 && <p className="text-sm text-gray-400 py-2">No rules yet. Add one to auto-categorize imports.</p>}
+        {rules.length > 0 && (
+          <div className="divide-y divide-gray-100 dark:divide-gray-700">
+            {rules.map((r: any) => (
+              <div key={r.id} className="py-2.5 flex items-center justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{r.name}</span>
+                    {!r.is_active && <span className="text-xs text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">inactive</span>}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                    {r.field} {r.pattern_type} <code className="bg-gray-100 dark:bg-gray-700 px-1 rounded">{r.pattern}</code>
+                    {" → "}{r.action === "set_category" ? (categories.flatMap((c: any) => [c, ...(c.children ?? [])]).find((c: any) => c.id === r.category_id)?.name ?? "category") : "mark transfer"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button onClick={() => openEditRule(r)} className="btn-ghost p-1"><Pencil size={14} /></button>
+                  <button onClick={() => setDeleteRuleId(r.id)} className="btn-ghost p-1 text-red-400"><Trash2 size={14} /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        </div>}
       </div>
 
       {/* ── Users (admin only) ── */}
       {admin && (
         <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between">
+            <button onClick={() => toggleSection("users")} className="flex items-center gap-2 flex-1 text-left">
               <Shield size={16} className="text-indigo-500" />
               <h3 className="font-semibold text-gray-900 dark:text-gray-100">Users</h3>
-            </div>
-            <button onClick={() => setShowUserForm(true)} className="btn-primary btn-sm text-xs px-3 py-1.5"><Plus size={14} /> Add User</button>
+              <ChevronDown size={16} className={`ml-1 text-gray-400 transition-transform ${openSections.has("users") ? "" : "-rotate-90"}`} />
+            </button>
+            {openSections.has("users") && <button onClick={() => setShowUserForm(true)} className="btn-primary btn-sm text-xs px-3 py-1.5"><Plus size={14} /> Add User</button>}
           </div>
+          {openSections.has("users") && <div className="mt-4">
           <div className="divide-y divide-gray-100 dark:divide-gray-700">
             {users.map((u: any) => {
               const linkedTo = u.linked_to_user_id ? users.find((x: any) => x.id === u.linked_to_user_id) : null;
@@ -411,26 +592,29 @@ export default function Settings() {
               );
             })}
           </div>
+          </div>}
         </div>
       )}
 
       {/* ── Audit Log (admin only) ── */}
       {admin && (
         <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
+          <div className="flex items-center justify-between">
+            <button onClick={() => toggleSection("auditlog")} className="flex items-center gap-2 flex-1 text-left">
               <Activity size={16} className="text-indigo-500" />
               <h3 className="font-semibold text-gray-900 dark:text-gray-100">Activity Log</h3>
-            </div>
-            <div className="flex items-center gap-2">
+              <ChevronDown size={16} className={`ml-1 text-gray-400 transition-transform ${openSections.has("auditlog") ? "" : "-rotate-90"}`} />
+            </button>
+            {openSections.has("auditlog") && <div className="flex items-center gap-2">
               <select className="input text-xs w-auto py-1" value={logMethod} onChange={e => { setLogMethod(e.target.value); setLogPage(0); }}>
                 <option value="">All methods</option>
                 <option value="POST">POST</option>
                 <option value="PATCH">PATCH</option>
                 <option value="DELETE">DELETE</option>
               </select>
-            </div>
+            </div>}
           </div>
+          {openSections.has("auditlog") && <div className="mt-4">
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -476,12 +660,17 @@ export default function Settings() {
               </div>
             </div>
           )}
+          </div>}
         </div>
       )}
 
       {/* ── Profile ── */}
-      <div className="card space-y-5">
-        <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><User size={16} className="text-indigo-500" /> Profile</h3>
+      <div className="card">
+        <button onClick={() => toggleSection("profile")} className="w-full flex items-center justify-between">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><User size={16} className="text-indigo-500" /> Profile</h3>
+          <ChevronDown size={16} className={`text-gray-400 transition-transform ${openSections.has("profile") ? "" : "-rotate-90"}`} />
+        </button>
+        {openSections.has("profile") && <div className="mt-4 space-y-5">
         <div className="flex items-end gap-3">
           <div className="flex-1 max-w-xs">
             <label className="label">Display Name</label>
@@ -543,28 +732,80 @@ export default function Settings() {
             {changePasswordMut.isPending ? "Updating…" : "Update Password"}
           </button>
         </form>
+        </div>}
       </div>
 
       {/* ── Danger Zone ── */}
-      <div className="card border-red-100 dark:border-red-900/30 space-y-2">
-        <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">Danger Zone</h3>
-        {!showDeleteConfirm ? (
-          <button onClick={() => setShowDeleteConfirm(true)} className="text-sm text-red-600 hover:underline">
-            Delete my account and all data…
-          </button>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-xs text-red-600">This permanently deletes all your accounts, transactions, and settings. Enter your password to confirm.</p>
-            <div className="flex flex-wrap items-center gap-2 max-w-sm">
-              <input type="password" className="input text-sm flex-1 min-w-0" placeholder="Your password" value={deletePassword} onChange={e => setDeletePassword(e.target.value)} />
-              <button onClick={handleDeleteAccount} disabled={deleteAccountMut.isPending || !deletePassword} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm px-3 py-2 rounded-lg font-medium">
-                {deleteAccountMut.isPending ? "Deleting…" : "Delete"}
+      <div className="card border-red-100 dark:border-red-900/30">
+        <button onClick={() => toggleSection("danger")} className="w-full flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-red-600 dark:text-red-400">Danger Zone</h3>
+          <ChevronDown size={16} className={`text-red-400 transition-transform ${openSections.has("danger") ? "" : "-rotate-90"}`} />
+        </button>
+        {openSections.has("danger") && <div className="mt-3 space-y-4">
+
+          {/* Clear checking transactions */}
+          <div className="border border-red-100 dark:border-red-900/30 rounded-lg p-3 space-y-2">
+            {clearConfirm !== "transactions" ? (
+              <button onClick={() => { setClearConfirm("transactions"); setShowDeleteConfirm(false); }} className="text-sm text-red-600 hover:underline">
+                Clear all checking transactions…
               </button>
-              <button onClick={() => { setShowDeleteConfirm(false); setDeletePassword(""); setDeleteError(null); }} className="btn-secondary text-sm px-3">Cancel</button>
-            </div>
-            {deleteError && <p className="text-xs text-red-600">{deleteError}</p>}
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-red-600">This permanently deletes all checking transactions and resets all account balances to $0. Your accounts, categories, and settings are kept.</p>
+                <div className="flex gap-2">
+                  <button onClick={() => clearTxnMut.mutate()} disabled={clearTxnMut.isPending} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg font-medium">
+                    {clearTxnMut.isPending ? "Clearing…" : "Yes, clear transactions"}
+                  </button>
+                  <button onClick={() => setClearConfirm(null)} className="btn-secondary text-xs px-3">Cancel</button>
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-gray-400">Keeps accounts, categories, recurring items, and rules.</p>
           </div>
-        )}
+
+          {/* Clear CC transactions */}
+          <div className="border border-red-100 dark:border-red-900/30 rounded-lg p-3 space-y-2">
+            {clearConfirm !== "cc-transactions" ? (
+              <button onClick={() => { setClearConfirm("cc-transactions"); setShowDeleteConfirm(false); }} className="text-sm text-red-600 hover:underline">
+                Clear all credit card transactions…
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-red-600">This permanently deletes all credit card transactions and resets all card balances to $0. Your cards, categories, and settings are kept.</p>
+                <div className="flex gap-2">
+                  <button onClick={() => clearCCTxnMut.mutate()} disabled={clearCCTxnMut.isPending} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs px-3 py-1.5 rounded-lg font-medium">
+                    {clearCCTxnMut.isPending ? "Clearing…" : "Yes, clear CC transactions"}
+                  </button>
+                  <button onClick={() => setClearConfirm(null)} className="btn-secondary text-xs px-3">Cancel</button>
+                </div>
+              </div>
+            )}
+            <p className="text-xs text-gray-400">Keeps cards, categories, recurring items, and rules.</p>
+          </div>
+
+          {/* Delete entire account */}
+          <div className="border border-red-100 dark:border-red-900/30 rounded-lg p-3 space-y-2">
+          {!showDeleteConfirm ? (
+            <button onClick={() => { setShowDeleteConfirm(true); setClearConfirm(null); }} className="text-sm text-red-600 hover:underline">
+              Delete my account and all data…
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-xs text-red-600">This permanently deletes all your accounts, transactions, and settings. Enter your password to confirm.</p>
+              <div className="flex flex-wrap items-center gap-2 max-w-sm">
+                <input type="password" className="input text-sm flex-1 min-w-0" placeholder="Your password" value={deletePassword} onChange={e => setDeletePassword(e.target.value)} />
+                <button onClick={handleDeleteAccount} disabled={deleteAccountMut.isPending || !deletePassword} className="bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm px-3 py-2 rounded-lg font-medium">
+                  {deleteAccountMut.isPending ? "Deleting…" : "Delete"}
+                </button>
+                <button onClick={() => { setShowDeleteConfirm(false); setDeletePassword(""); setDeleteError(null); }} className="btn-secondary text-sm px-3">Cancel</button>
+              </div>
+              {deleteError && <p className="text-xs text-red-600">{deleteError}</p>}
+            </div>
+          )}
+          <p className="text-xs text-gray-400">Permanently removes your login, all accounts, and every piece of data.</p>
+          </div>
+
+        </div>}
       </div>
 
       {/* ── Add/Edit Account modal ── */}
@@ -717,6 +958,87 @@ export default function Settings() {
                 </button>
                 <button onClick={() => { setResetPwUserId(null); setResetPwValue(""); setResetPwError(null); }} className="btn-secondary flex-1">Cancel</button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add/Edit Rule modal ── */}
+      {showRuleForm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="card w-full max-w-md">
+            <div className="flex justify-between items-center mb-5">
+              <h3 className="font-bold text-gray-900 dark:text-gray-100">{editRule ? "Edit Rule" : "Add Rule"}</h3>
+              <button onClick={() => setShowRuleForm(false)} className="btn-ghost p-1"><X size={18} /></button>
+            </div>
+            <form onSubmit={submitRule} className="space-y-3">
+              <div><label className="label">Rule Name</label><input className="input" placeholder="e.g. Spotify → Subscriptions" value={ruleForm.name} onChange={e => setRuleForm({ ...ruleForm, name: e.target.value })} required /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Pattern Type</label>
+                  <select className="input" value={ruleForm.pattern_type} onChange={e => { setRuleForm({ ...ruleForm, pattern_type: e.target.value }); setRuleTestResult(null); }}>
+                    <option value="contains">Contains</option>
+                    <option value="startswith">Starts with</option>
+                    <option value="regex">Regex</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Priority (higher runs first)</label>
+                  <input type="number" className="input" value={ruleForm.priority} onChange={e => setRuleForm({ ...ruleForm, priority: e.target.value })} />
+                </div>
+              </div>
+              <div>
+                <label className="label">Pattern</label>
+                <input className="input font-mono" placeholder={ruleForm.pattern_type === "regex" ? "e.g. SPOTIFY|NETFLIX" : "e.g. SPOTIFY"} value={ruleForm.pattern} onChange={e => { setRuleForm({ ...ruleForm, pattern: e.target.value }); setRuleTestResult(null); }} required />
+              </div>
+              <div>
+                <label className="label">Action</label>
+                <select className="input" value={ruleForm.action} onChange={e => setRuleForm({ ...ruleForm, action: e.target.value })}>
+                  <option value="set_category">Set Category</option>
+                  <option value="mark_transfer">Mark as Transfer</option>
+                </select>
+              </div>
+              {ruleForm.action === "set_category" && (
+                <div>
+                  <label className="label">Category</label>
+                  <select className="input" value={ruleForm.category_id} onChange={e => setRuleForm({ ...ruleForm, category_id: e.target.value })} required>
+                    <option value="">Select…</option>
+                    {categories.flatMap((c: any) => [c, ...(c.children ?? [])]).map((c: any) => (
+                      <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
+                <label className="label">Live Test</label>
+                <div className="flex gap-2">
+                  <input className="input flex-1 text-sm" placeholder="Paste a transaction description…" value={ruleTestDesc} onChange={e => { setRuleTestDesc(e.target.value); setRuleTestResult(null); }} />
+                  <button type="button" onClick={handleTestRule} className="btn-secondary text-sm px-3 shrink-0">Test</button>
+                </div>
+                {ruleTestResult !== null && (
+                  <p className={`text-xs mt-1 ${ruleTestResult ? "text-green-600" : "text-red-500"}`}>
+                    {ruleTestResult ? "✓ Pattern matches" : "✗ No match"}
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="submit" className="btn-primary flex-1">{editRule ? "Save" : "Add Rule"}</button>
+                <button type="button" onClick={() => setShowRuleForm(false)} className="btn-secondary flex-1">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Rule confirm ── */}
+      {deleteRuleId && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="card w-full max-w-sm text-center">
+            <h3 className="font-bold text-gray-900 dark:text-gray-100 mb-1">Delete this rule?</h3>
+            <p className="text-sm text-gray-500 mb-5">Future imports won't use this rule. Existing transactions are unaffected.</p>
+            <div className="flex gap-3">
+              <button onClick={() => deleteRuleMut.mutate(deleteRuleId)} className="btn-danger flex-1">Delete</button>
+              <button onClick={() => setDeleteRuleId(null)} className="btn-secondary flex-1">Cancel</button>
             </div>
           </div>
         </div>

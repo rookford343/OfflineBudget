@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, field_validator
-from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency
+from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -512,6 +512,7 @@ class ImportConfirmRow(BaseModel):
     category_id: Optional[int] = None
     notes: Optional[str] = None
     recurring_item_id: Optional[int] = None
+    is_transfer: bool = False
 
 
 class ImportConfirmRequest(BaseModel):
@@ -814,3 +815,50 @@ class QuarterlyCheckpointOut(BaseModel):
     quarter: int
     actual_balance: Decimal
     updated_at: datetime
+
+
+# ── Transaction Rules ─────────────────────────────────────────────────────────
+
+class TransactionRuleCreate(BaseModel):
+    name: str
+    field: RuleField
+    pattern_type: RulePatternType
+    pattern: str
+    action: RuleAction
+    category_id: Optional[int] = None
+    priority: int = 0
+
+
+class TransactionRuleUpdate(BaseModel):
+    name: Optional[str] = None
+    field: Optional[RuleField] = None
+    pattern_type: Optional[RulePatternType] = None
+    pattern: Optional[str] = None
+    action: Optional[RuleAction] = None
+    category_id: Optional[int] = None
+    priority: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class TransactionRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    field: RuleField
+    pattern_type: RulePatternType
+    pattern: str
+    action: RuleAction
+    category_id: Optional[int]
+    priority: int
+    is_active: bool
+    created_at: datetime
+
+
+class RuleTestRequest(BaseModel):
+    pattern: str
+    pattern_type: RulePatternType
+    description: str
+
+
+class RuleTestResponse(BaseModel):
+    matched: bool

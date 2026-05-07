@@ -41,3 +41,23 @@ export function firstOfMonth(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
+
+export type QuickRangePreset = "month" | "3months" | "ytd" | "lastyear";
+
+export function quickRange(preset: QuickRangePreset): { start: string; end: string } {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  if (preset === "month") {
+    return { start: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`, end: iso(now) };
+  }
+  if (preset === "3months") {
+    const s = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+    return { start: iso(s), end: iso(now) };
+  }
+  if (preset === "ytd") {
+    return { start: `${now.getFullYear()}-01-01`, end: iso(now) };
+  }
+  const y = now.getFullYear() - 1;
+  return { start: `${y}-01-01`, end: `${y}-12-31` };
+}
