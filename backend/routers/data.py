@@ -2,8 +2,7 @@
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from backend import models
-from backend.database import get_db
-from backend.routers.auth import get_requester
+from backend.dependencies import get_db, get_requester
 
 router = APIRouter(prefix="/data", tags=["data"])
 
