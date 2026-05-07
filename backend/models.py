@@ -101,6 +101,12 @@ class User(Base):
     other_income: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     federal_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     state_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # Itemized deductions (manually entered from tax documents)
+    itemized_mortgage_interest: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    itemized_donations: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    itemized_salt: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    itemized_property_tax: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    itemized_other: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     accounts: Mapped[list[Account]] = relationship(back_populates="user", cascade="all, delete-orphan")
     categories: Mapped[list[Category]] = relationship(back_populates="user", cascade="all, delete-orphan")

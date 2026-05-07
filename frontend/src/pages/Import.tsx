@@ -12,12 +12,18 @@ function descriptionKey(desc: string): string {
   let key = desc.toLowerCase().trim();
   // Strip POS/payment prefixes (SQ*, TST*, PP*)
   key = key.replace(/^(sq|tst|pp)\*\s*/i, "");
-  // Strip reference codes after *, #, / — including optional space before the code (e.g. "AMAZON * AB12345", "STARBUCKS #12345")
+  // Strip "WEB ID: 1234567890" and "ACH ID: ..." patterns
+  key = key.replace(/\s+(?:web|ach|ppd|ccd)\s+id:?\s*\S*/gi, "");
+  // Strip short-prefix dash reference codes with digits e.g. " ST-D5L4V9H1G4T7", " ACH-1234ABCD"
+  key = key.replace(/\s+[a-z]{1,5}-[a-z0-9]*\d[a-z0-9]*/gi, "");
+  // Strip reference codes after *, #, / — including optional space
   key = key.replace(/[\*#\/]\s*[a-z0-9]*\d[a-z0-9]*/gi, "");
-  // Strip .com suffix
-  key = key.replace(/\.com\b/, "");
+  // Strip common TLD suffixes
+  key = key.replace(/\.(com|cc|net|org|co|io)\b/g, "");
   // Strip trailing store/location numbers (4+ digits, captures trailing city names too)
   key = key.replace(/\s+\d{4,}.*$/, "");
+  // Strip trailing punctuation left by removed tokens
+  key = key.replace(/[\.\,\-\s]+$/, "");
   return key.replace(/\s+/g, " ").trim();
 }
 

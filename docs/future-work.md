@@ -1,112 +1,111 @@
 # Future Work & Roadmap
 
-## Phase 4 — CSV Transaction Import ✓ Shipped
+## Shipped Features (Current Version)
 
-CSV import is complete. Supported features:
+### Core Budgeting
+- ✅ Day-by-day forecast engine with recurring items
+- ✅ Quarterly and multi-year (1/2/3/5 year) forecast views
+- ✅ Budget scenario planning with named scenarios and per-item overrides
+- ✅ Monthly category budgets with rollover support
+- ✅ Savings-type category exclusion from spending totals
 
-### Bank CSV Import (Checking Account) ✓
-- Detects format from header row: Chase, Wells Fargo, BofA, Apple Card, generic
-- Maps columns: date, description, amount
-- Deduplicates against existing transactions (same date + amount + description)
-- Drag-and-drop or click-to-browse upload on the Import page
+### Import & Categorization
+- ✅ CSV import: Chase checking, Chase card, Apple Card, generic
+- ✅ OFX/QFX import (bank-standard format)
+- ✅ Auto-categorization: keyword matching + import history
+- ✅ User-defined transaction rules engine (contains / startswith / regex)
+- ✅ Import deduplication (same date + description + amount)
+- ✅ Import grouping — normalizes descriptions to batch similar charges
+- ✅ Skip auto-categorization toggle for manual review workflows
 
-### Credit Card CSV Import ✓
-- Chase Sapphire and Apple Card formats detected automatically
-- `CreditCardImport` table tracks imports to prevent double-import
+### Spending Analysis
+- ✅ Monthly spending bar chart and stacked category chart
+- ✅ Year-over-year trends (up to 3 years) and 24-month rolling chart
+- ✅ Spending by merchant — sortable ranked table
+- ✅ Sankey income-to-expense flow diagram
+- ✅ Quick date filters (This Month / 3 Months / YTD / Last Year)
 
-### Auto-Categorization ✓
-- Keyword matching rules (merchant → category mapping)
-- History-based matching: past transaction descriptions are used to suggest categories for new imports
-- Manual override for uncategorized rows before confirming import
+### Tax
+- ✅ Full 2025 federal tax estimate with bracket ladder
+- ✅ State income tax (approximate effective rates, all 50 states + DC)
+- ✅ FICA — Social Security + Medicare with additional Medicare threshold
+- ✅ Itemized deductions (mortgage interest, donations, SALT, property tax, other)
+- ✅ Itemized vs. standard deduction comparison (automatic)
+- ✅ Tax-deductible transaction tagging and CSV export
+- ✅ Social Security wage base tracker (consolidated into Tax Profile)
 
----
+### Reconciliation & Net Worth
+- ✅ Transaction reconciliation with recurring item linking
+- ✅ Quarterly balance checkpoints
+- ✅ Net worth tracking with assets, liabilities, and historical snapshots
 
-## Phase 5 — Reconciliation ✓ Shipped
-
-Match imported actual transactions against forecast recurring items:
-
-- Auto-link `transaction.recurring_item_id` on import when day ± 3 and amount within 10%
-- Reconciliation view in Transactions → Reconcile tab: matched, unmatched recurring, and unlinked transactions
-- Variance report: actual vs. expected per recurring item
-
----
-
-## Phase 6 — Enhanced Forecasting ✓ Shipped (partial)
-
-### Money Market Interest Projection ✓
-- Annual interest rate field on accounts (Settings → Accounts → Edit)
-- Forecast engine applies monthly interest credit on last day of each month
-- Interest appears as a projected "Interest Credit" transaction in the forecast
-
-### Budget Scenario Planning ✓
-- Named forecast scenarios with per-recurring-item amount overrides
-- Side-by-side comparison: baseline vs. scenario traces on Forecast page
-
-### Savings Transfer Automation (future)
-- Define a quarterly savings target
-- Forecast engine includes the transfer on day 1 of each quarter
-
-### Multi-Year Forecast (future)
-- Extend forecast beyond current year
-- Annual budget copy
-
----
-
-## Phase 7 — Reporting & Notifications ✓ Shipped
-
-### Annual Tax Summary ✓
-- Per-category `tax_deductible` flag (Settings → Categories → Edit)
-- Export a year's deductible transactions as CSV — Spending → Tax Export tab
-
-### Daily Email Summary ✓
-- Scheduler sends a daily summary at a configurable hour (DAILY_SUMMARY_HOUR env var, default 7am)
-- User sets email address in Settings → Profile → Email Notifications
-- Test email button to verify SMTP config
-- Summary includes: checking balances, upcoming bills (7-day window), MTD expenses, credit cards
-- Requires SMTP server config in `.env` (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS)
-
-### Spending Trend Analysis ✓
-- Month-over-month and year-over-year charts — Spending → Trends tab
+### Other
+- ✅ Credit card tracking with due dates, utilization, and payment recording
+- ✅ Savings goals with progress tracking
+- ✅ Planned expenses
+- ✅ Multi-user support (admin and view-only roles)
+- ✅ Audit log for all write operations
+- ✅ Daily email summary (requires SMTP config)
+- ✅ HTTPS on LAN (self-signed cert via `scripts/setup-ssl.sh`)
+- ✅ Data export (transactions CSV, budget report)
+- ✅ Danger Zone: clear transactions, clear CC transactions, delete account
+- ✅ Navigation order customization (per-browser localStorage)
+- ✅ Account balance correction (click balance in Settings → Accounts)
+- ✅ Docker compose for cloud / portable deploy
 
 ---
 
-## Phase 8 — Cloud / Multi-Device
+## Potential Next Features
 
-### HTTPS on LAN
-- Generate a self-signed cert with `mkcert` — see `SECURITY.md`
-- Update Vite `server.https` config and backend to serve HTTPS
+### High Priority
 
-### Cloud Deployment
-- Replace `sqlite:///./data/budget.db` with PostgreSQL connection string
-- Deploy backend to Railway / Render / Fly.io (single `uvicorn` process)
-- Build frontend: `npm run build` → serve static files from Nginx or Caddy
-- See `docker-compose.yml` for the full container stack
+**Automated Bank Sync (Plaid)**
+Connect directly to 10,000+ financial institutions via Plaid API. New transactions would sync automatically — no more manual CSV exports. Would use cursor-based incremental fetches and run through the same import pipeline (deduplication, categorization, rules). Requires: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` env vars; encrypted token storage (`cryptography` / Fernet).
 
-### Optional: Multi-Household Support
-- Current multi-user model: all users see all shared data
-- Future: `household_id` on all entities; users belong to a household
-- Allows truly separate budgets for different families using the same server
+**CLI Import Command**
+```bash
+python cli/budget.py import csv ./chase_may.csv --account-id 1 --username alice
+python cli/budget.py import csv ./chase_may.csv --account-id 1 --username alice --auto-confirm
+```
+CLI import would show a Rich preview table and require explicit `--auto-confirm` for scripting/cron use. Would call the same `import_service.build_preview()` / `run_import()` functions.
+
+**Split Transactions**
+Divide a single charge into multiple categories (e.g., a Costco run split between Groceries and Household). Backend: `TransactionSplit` table linked to parent transaction with `sum(splits) == abs(amount)` validation. Frontend: expandable rows in the transaction list.
+
+### Medium Priority
+
+**Reconciliation: Per-Row Cleared Status**
+Add a `cleared_at` timestamp column to `Transaction`. Show a checkmark toggle per row in the Reconcile tab so users can mark individual transactions as cleared against their bank statement.
+
+**Budget Rollover Display**
+The `rollover_enabled` and `rollover_balance` fields exist on `Category` but are not surfaced in the Budget UI. Add visible rollover balance indicators showing month-over-month carry-forward amounts.
+
+**CC Payoff Import: Auto-Update Card Balance**
+When a checking CSV import contains a transfer to a credit card (matched by card nickname or last-four), automatically reduce the card's balance. Best-effort fuzzy matching.
+
+**CC Import: Mark as Recurring**
+When reviewing imported CC transactions, add a recurring-item shortcut button per row. Pre-fills a "New Recurring" mini-modal with merchant name, amount, and day-of-month so the item can be added in one click without navigating to Settings.
+
+### Lower Priority
+
+**Import Watch Directory (CLI)**
+```bash
+python cli/budget.py import watch ~/Downloads --account-id 1 --username alice
+```
+Uses `watchdog` to monitor a directory. When a new `.csv`, `.ofx`, or `.qfx` file is detected, automatically triggers the import pipeline.
+
+**Multi-Household Support**
+Current model: all users in an instance share data. Future: `household_id` on all entities, allowing truly separate budgets for different families on the same server.
+
+**Month-Specific Budgets**
+Currently `month=0` applies a budget amount to all months. Allow per-month overrides (e.g., higher grocery budget in November/December).
 
 ---
 
-## Known Limitations (Current Version)
+## Technical Debt
 
-| Area | Limitation | Workaround |
-|------|-----------|------------|
-| CSV import | Built — Chase, Apple Card, generic | — |
-| Reconciliation | Built — Transactions → Reconcile tab | — |
-| Month-specific budgets | month=0 applies to all months | Set per-month via API directly |
-| HTTPS on LAN | Not configured by default | Use mkcert (see SECURITY.md) |
-| Notifications | Daily email summary (requires SMTP config) | Check app manually |
-| Savings interest | Projected when interest_rate set on account | — |
-| Budget.xlsx import | Not built | Re-enter data in the UI |
-
----
-
-## Technical Debt to Address
-
-- Add Alembic migrations (`alembic revision --autogenerate`) once the schema stabilizes — currently `create_tables()` handles first-run
-- Add a proper test suite: `pytest tests/` with fixtures covering forecast engine edge cases
-- Add `pytest-httpx` integration tests for the API routers
-- Implement bundle splitting in Vite config to reduce the 747KB JS bundle
-- Add error boundaries in React so one broken component doesn't crash the whole page
+- Add Alembic migrations (`alembic revision --autogenerate`) once schema stabilizes — currently `upgrade_schema()` handles additive changes with idempotent `ALTER TABLE` statements
+- Add a proper test suite: `pytest tests/` with fixtures for forecast engine edge cases and import pipeline
+- Add `pytest-httpx` integration tests for API routers
+- Implement Vite bundle splitting to reduce the JS bundle size
+- Add React error boundaries so one broken component doesn't crash the whole page
