@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi, checkpointsApi } from "../api";
+import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi, dayCheckpointsApi, transactionsApi, categoriesApi } from "../api";
 import { fmt, today } from "../lib/utils";
 import { Link } from "react-router-dom";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar } from "recharts";
-import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle, CreditCard, Pencil } from "lucide-react";
+import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle, CreditCard, Pencil, ShieldCheck } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import MonthlyAccuracyRow from "../components/MonthlyAccuracyRow";
 
 function isDarkMode(): boolean {
   return document.documentElement.classList.contains("dark");
@@ -39,6 +40,13 @@ export default function Forecast() {
   const [expenseForm, setExpenseForm] = useState({ ...emptyExpense });
   const [editExpenseId, setEditExpenseId] = useState<number | null>(null);
   const [editExpenseForm, setEditExpenseForm] = useState({ ...emptyExpense });
+  const [dayCheckpoint, setDayCheckpoint] = useState<{ date: string; value: string } | null>(null);
+  const [addTxnDate, setAddTxnDate] = useState<string | null>(null);
+  const [addTxnForm, setAddTxnForm] = useState({ description: "", amount: "", category_id: "" });
+  const [anchorValue, setAnchorValue] = useState("");
+  const [anchorDismissed, setAnchorDismissed] = useState(false);
+  const [yearStartValue, setYearStartValue] = useState("");
+  const [yearStartDismissed, setYearStartDismissed] = useState(false);
 
   const activeAccountId = accountId ?? checkingAccounts[0]?.id;
   const activeAccount = checkingAccounts.find((a: any) => a.id === activeAccountId);
@@ -79,26 +87,96 @@ export default function Forecast() {
     queryFn: cardsApi.upcomingDue,
   });
 
-  const { data: checkpoints = [] } = useQuery<any[]>({
-    queryKey: ["checkpoints", activeAccountId],
-    queryFn: () => checkpointsApi.list(activeAccountId!),
+  const { data: dayCheckpoints = [] } = useQuery<any[]>({
+    queryKey: ["day-checkpoints", activeAccountId],
+    queryFn: () => dayCheckpointsApi.list(activeAccountId!),
     enabled: !!activeAccountId,
   });
 
-  const [checkpoint, setCheckpoint] = useState<{ key: string; value: string } | null>(null);
+  const { data: categories = [] } = useQuery<any[]>({
+    queryKey: ["categories"],
+    queryFn: categoriesApi.list,
+  });
 
-  const saveCheckpointMut = useMutation({
-    mutationFn: ({ year, quarter, actual_balance }: { year: number; quarter: number; actual_balance: number }) =>
-      checkpointsApi.upsert(year, quarter, activeAccountId!, actual_balance),
+  const dayCheckpointMap: Record<string, number> = {};
+  (dayCheckpoints as any[]).forEach((c: any) => {
+    dayCheckpointMap[c.date] = parseFloat(c.actual_balance);
+  });
+
+  const allCatOptions = (categories as any[]).flatMap((c: any) => [c, ...(c.children ?? [])]);
+
+  // Balance anchor banner: show when no day checkpoint exists for today and account is new or has never been verified
+  const todayIso = today();
+  const anchorDismissKey = `forecast-anchor-dismissed-${activeAccountId}`;
+  const hasTodayCheckpoint = dayCheckpointMap[todayIso] !== undefined;
+  const accountCreatedAt = activeAccount?.created_at ? new Date(activeAccount.created_at) : null;
+  const accountIsNew = accountCreatedAt != null && (Date.now() - accountCreatedAt.getTime()) < 30 * 24 * 60 * 60 * 1000;
+  const hasAnyCheckpoint = (dayCheckpoints as any[]).length > 0;
+  const persistedDismiss = typeof window !== "undefined" && localStorage.getItem(anchorDismissKey) === "1";
+  const showAnchorBanner = !anchorDismissed && !persistedDismiss && !hasTodayCheckpoint && (accountIsNew || !hasAnyCheckpoint);
+
+  // Year-start balance banner: show when Jan 1 of the selected year is in the past and no checkpoint exists near it
+  const janFirstIso = `${year}-01-01`;
+  const yearStartDismissKey = `forecast-year-start-${year}-${activeAccountId}`;
+  const hasYearStartCheckpoint = Object.keys(dayCheckpointMap).some(
+    d => d >= janFirstIso && d <= `${year}-01-07`
+  );
+  const janFirstIsPast = new Date(year, 0, 1) < new Date(todayIso);
+  const yearStartPersistedDismiss = typeof window !== "undefined" && localStorage.getItem(yearStartDismissKey) === "1";
+  // Q1 open_balance is the reconstructed Jan 1 balance — use as the suggested value
+  const q1OpenBalance = (quarters as any[]).find((q: any) => q.quarter === 1 && q.year === year)?.open_balance;
+  const showYearStartBanner = janFirstIsPast && !hasYearStartCheckpoint && !yearStartDismissed && !yearStartPersistedDismiss && !!activeAccountId;
+
+  const saveDayCheckpointMut = useMutation({
+    mutationFn: ({ date, actual_balance }: { date: string; actual_balance: number }) =>
+      dayCheckpointsApi.upsert(date, activeAccountId!, actual_balance),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["checkpoints"] });
-      setCheckpoint(null);
+      qc.invalidateQueries({ queryKey: ["day-checkpoints"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      setDayCheckpoint(null);
     },
   });
 
-  const checkpointMap: Record<string, number> = {};
-  (checkpoints as any[]).forEach((c: any) => {
-    checkpointMap[`${c.year}-${c.quarter}`] = parseFloat(c.actual_balance);
+  const saveAnchorMut = useMutation({
+    mutationFn: (balance: number) => dayCheckpointsApi.upsert(todayIso, activeAccountId!, balance, "Balance verified"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["day-checkpoints"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      setAnchorValue("");
+    },
+  });
+
+  const saveYearStartMut = useMutation({
+    mutationFn: (balance: number) => dayCheckpointsApi.upsert(janFirstIso, activeAccountId!, balance, "Year opening balance"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["day-checkpoints"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      setYearStartValue("");
+      setYearStartDismissed(true);
+    },
+  });
+
+  const deleteDayCheckpointMut = useMutation({
+    mutationFn: (date: string) => dayCheckpointsApi.remove(date, activeAccountId!),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["day-checkpoints"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+    },
+  });
+
+  const createTxnMut = useMutation({
+    mutationFn: (data: object) => transactionsApi.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      setAddTxnDate(null);
+      setAddTxnForm({ description: "", amount: "", category_id: "" });
+    },
   });
 
   const today_date = new Date();
@@ -216,10 +294,14 @@ export default function Forecast() {
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Forecast <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500">Day-by-day balance projection</p>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <select className="input w-auto" value={activeAccountId ?? ""} onChange={e => setAccountId(parseInt(e.target.value))}>
-            {checkingAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+        <div className="flex gap-2 flex-wrap items-center">
+          {checkingAccounts.length > 1 ? (
+            <select className="input w-auto" value={activeAccountId ?? ""} onChange={e => setAccountId(parseInt(e.target.value))}>
+              {checkingAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          ) : activeAccount ? (
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300 px-1">{activeAccount.name}</span>
+          ) : null}
           <select className="input w-auto" value={year} onChange={e => setYear(parseInt(e.target.value))}>
             {[-1, 0, 1, 2].map(d => <option key={d} value={new Date().getFullYear() + d}>{new Date().getFullYear() + d}</option>)}
           </select>
@@ -233,15 +315,102 @@ export default function Forecast() {
             <option value="balance">Running Balance</option>
             <option value="net">Net Income/Expense</option>
           </select>
-          <select className="input w-auto" value={scenarioId ?? ""} onChange={e => setScenarioId(e.target.value === "" ? null : parseInt(e.target.value))}>
-            <option value="">Baseline only</option>
-            {(scenarios as any[]).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
-          </select>
+          {(scenarios as any[]).length > 0 && (
+            <select className="input w-auto" value={scenarioId ?? ""} onChange={e => setScenarioId(e.target.value === "" ? null : parseInt(e.target.value))}>
+              <option value="">Baseline only</option>
+              {(scenarios as any[]).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          )}
         </div>
       </div>
 
       {checkingAccounts.length === 0 && (
         <div className="card text-center py-8 text-gray-400">Add a checking account to see your forecast.</div>
+      )}
+
+      {showAnchorBanner && activeAccount && (
+        <div className="card border-indigo-200 dark:border-indigo-700 bg-indigo-50/60 dark:bg-indigo-900/20">
+          <div className="flex items-start gap-3">
+            <ShieldCheck size={18} className="text-indigo-500 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-indigo-900 dark:text-indigo-200 text-sm">Confirm your current balance</p>
+              <p className="text-xs text-indigo-700 dark:text-indigo-400 mt-0.5">
+                Your account shows <strong>{fmt(activeAccount.current_balance)}</strong>. Does this match your bank right now?
+                Setting today's balance anchors the forecast so projections start from a verified number.
+              </p>
+              <div className="flex items-center gap-2 mt-3">
+                <input
+                  type="number"
+                  step="0.01"
+                  className="input py-1 w-36 text-sm"
+                  placeholder={String(parseFloat(activeAccount.current_balance).toFixed(2))}
+                  value={anchorValue}
+                  onChange={e => setAnchorValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && anchorValue) saveAnchorMut.mutate(parseFloat(anchorValue));
+                  }}
+                />
+                <button
+                  onClick={() => saveAnchorMut.mutate(parseFloat(anchorValue || activeAccount.current_balance))}
+                  disabled={saveAnchorMut.isPending}
+                  className="btn-primary text-xs px-3 py-1.5"
+                >
+                  {saveAnchorMut.isPending ? "Saving…" : "Confirm Balance"}
+                </button>
+                <button
+                  onClick={() => { localStorage.setItem(anchorDismissKey, "1"); setAnchorDismissed(true); }}
+                  className="text-xs text-indigo-400 hover:text-indigo-600 underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showYearStartBanner && activeAccountId && (
+        <div className="card border-amber-200 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-900/20">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={18} className="text-amber-500 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-amber-900 dark:text-amber-200 text-sm">Set your {year} opening balance</p>
+              <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+                No verified Jan 1 balance found. The graph reconstructs it from imported transactions, but pinning a confirmed
+                value makes the historical portion accurate even if some transactions weren't imported.
+                {q1OpenBalance != null && (
+                  <> Reconstructed estimate: <strong>{fmt(q1OpenBalance)}</strong>.</>
+                )}
+              </p>
+              <div className="flex items-center gap-2 mt-3">
+                <input
+                  type="number"
+                  step="0.01"
+                  className="input py-1 w-36 text-sm"
+                  placeholder={q1OpenBalance != null ? String(parseFloat(q1OpenBalance).toFixed(2)) : "Opening balance"}
+                  value={yearStartValue}
+                  onChange={e => setYearStartValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === "Enter" && yearStartValue) saveYearStartMut.mutate(parseFloat(yearStartValue));
+                  }}
+                />
+                <button
+                  onClick={() => saveYearStartMut.mutate(parseFloat(yearStartValue || (q1OpenBalance != null ? String(parseFloat(q1OpenBalance)) : "0")))}
+                  disabled={saveYearStartMut.isPending || (!yearStartValue && q1OpenBalance == null)}
+                  className="btn-primary text-xs px-3 py-1.5"
+                >
+                  {saveYearStartMut.isPending ? "Saving…" : "Set Jan 1 Balance"}
+                </button>
+                <button
+                  onClick={() => { localStorage.setItem(yearStartDismissKey, "1"); setYearStartDismissed(true); }}
+                  className="text-xs text-amber-500 hover:text-amber-700 underline"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {!isLoading && chartData.length > 0 && (
@@ -471,10 +640,15 @@ export default function Forecast() {
           const qKey = `${q.year}-${q.quarter}`;
           const qEndDate = quarterEndDates[q.quarter];
           const isPastQuarter = qEndDate < today_date;
-          const savedBalance = checkpointMap[qKey];
           const forecastClose = parseFloat(q.close_balance);
+          const savedBalance = q.quarter_end_checkpoint != null ? parseFloat(q.quarter_end_checkpoint) : undefined;
           const delta = savedBalance !== undefined ? savedBalance - forecastClose : null;
           const hasConflict = delta !== null && Math.abs(delta) > 1;
+          // Last day of this quarter as YYYY-MM-DD for day checkpoint
+          const qLastDay = (() => {
+            const d = quarterEndDates[q.quarter];
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          })();
 
           return (
           <div key={qKey} className="card">
@@ -495,34 +669,35 @@ export default function Forecast() {
               </div>
             </button>
 
-            {/* Quarterly checkpoint for past quarters */}
+            {/* Quarter-end balance anchor — uses unified day-checkpoint system */}
             {isPastQuarter && (
               <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 flex flex-wrap items-center gap-3">
                 <span className="text-xs text-gray-500 dark:text-gray-400">Q{q.quarter} actual close:</span>
-                {checkpoint?.key === qKey ? (
+                {dayCheckpoint?.date === qLastDay ? (
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
                       step="0.01"
                       className="input py-1 w-32 text-sm"
-                      value={checkpoint.value}
-                      onChange={e => setCheckpoint({ key: qKey, value: e.target.value })}
+                      value={dayCheckpoint.value}
+                      onChange={e => setDayCheckpoint({ date: qLastDay, value: e.target.value })}
                       autoFocus
                       onKeyDown={e => {
-                        if (e.key === "Enter") saveCheckpointMut.mutate({ year: q.year, quarter: q.quarter, actual_balance: parseFloat(checkpoint.value) });
-                        if (e.key === "Escape") setCheckpoint(null);
+                        if (e.key === "Enter" && dayCheckpoint.value)
+                          saveDayCheckpointMut.mutate({ date: qLastDay, actual_balance: parseFloat(dayCheckpoint.value) });
+                        if (e.key === "Escape") setDayCheckpoint(null);
                       }}
                     />
                     <button
-                      onClick={() => saveCheckpointMut.mutate({ year: q.year, quarter: q.quarter, actual_balance: parseFloat(checkpoint.value) })}
-                      disabled={!checkpoint.value || saveCheckpointMut.isPending}
+                      onClick={() => saveDayCheckpointMut.mutate({ date: qLastDay, actual_balance: parseFloat(dayCheckpoint.value) })}
+                      disabled={!dayCheckpoint.value || saveDayCheckpointMut.isPending}
                       className="btn-primary text-xs px-2 py-1"
                     >Save</button>
-                    <button onClick={() => setCheckpoint(null)} className="btn-secondary text-xs px-2 py-1">Cancel</button>
+                    <button onClick={() => setDayCheckpoint(null)} className="btn-secondary text-xs px-2 py-1">Cancel</button>
                   </div>
                 ) : (
                   <button
-                    onClick={() => setCheckpoint({ key: qKey, value: savedBalance !== undefined ? String(savedBalance) : "" })}
+                    onClick={() => setDayCheckpoint({ date: qLastDay, value: savedBalance !== undefined ? String(savedBalance) : "" })}
                     className="text-xs text-indigo-500 hover:text-indigo-700 underline"
                   >
                     {savedBalance !== undefined ? fmt(savedBalance) : "Enter actual balance"}
@@ -544,6 +719,30 @@ export default function Forecast() {
                   <div className="text-sm"><span className="text-gray-500">Total Income:</span> <strong className="text-green-600">{fmt(q.total_income)}</strong></div>
                   <div className="text-sm"><span className="text-gray-500">Total Expenses:</span> <strong className="text-red-600">{fmt(q.total_expenses)}</strong></div>
                 </div>
+
+                {/* Monthly accuracy panel — past months only */}
+                {(() => {
+                  const startMonth = (q.quarter - 1) * 3 + 1;
+                  const monthsInQ = [startMonth, startMonth + 1, startMonth + 2];
+                  const pastMonths = monthsInQ.filter(m => {
+                    const lastDay = new Date(q.year, m, 0); // last day of month m
+                    return lastDay < today_date;
+                  });
+                  if (pastMonths.length === 0) return null;
+                  return (
+                    <div className="mb-4 rounded-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
+                      <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-100 dark:border-gray-700">
+                        <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Monthly Forecast Accuracy</p>
+                      </div>
+                      <div className="px-3 divide-y divide-gray-100 dark:divide-gray-700">
+                        {pastMonths.map(m => (
+                          <MonthlyAccuracyRow key={m} accountId={activeAccountId} year={q.year} month={m} />
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -551,13 +750,17 @@ export default function Forecast() {
                         <th className="text-left py-2 text-gray-500 font-medium">Date</th>
                         <th className="text-left py-2 text-gray-500 font-medium">Transactions</th>
                         <th className="text-right py-2 text-gray-500 font-medium">Balance</th>
+                        <th className="w-16"></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {q.days.filter((d: any) => d.transactions.length > 0).map((d: any) => (
-                        <tr key={d.date} className="border-b border-gray-50 hover:bg-gray-50">
+                      {q.days.filter((d: any) => d.transactions.length > 0 || dayCheckpointMap[d.date] !== undefined).map((d: any) => {
+                        const hasCp = dayCheckpointMap[d.date] !== undefined;
+                        return (
+                        <tr key={d.date} className={`border-b border-gray-50 dark:border-gray-800 group hover:bg-gray-50 dark:hover:bg-gray-800/40 ${hasCp ? "bg-indigo-50/30 dark:bg-indigo-900/10" : ""}`}>
                           <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">
                             {new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            {hasCp && <span className="ml-1 text-indigo-400" title="Balance checkpoint">⚓</span>}
                           </td>
                           <td className="py-2 pr-4">
                             {d.transactions.map((t: any, i: number) => (
@@ -571,6 +774,37 @@ export default function Forecast() {
                                 {t.is_planned && <span className="px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">planned</span>}
                               </div>
                             ))}
+                            {hasCp && (
+                              <div className="text-xs text-indigo-500 dark:text-indigo-400 mt-1">
+                                Balance snapped to {fmt(dayCheckpointMap[d.date])}
+                              </div>
+                            )}
+                            {/* Day checkpoint inline editor */}
+                            {dayCheckpoint?.date === d.date ? (
+                              <div className="flex items-center gap-1 mt-1">
+                                <input
+                                  type="number" step="0.01"
+                                  className="input py-0.5 w-28 text-xs"
+                                  placeholder="Actual balance"
+                                  value={dayCheckpoint.value}
+                                  autoFocus
+                                  onChange={e => setDayCheckpoint({ date: d.date, value: e.target.value })}
+                                  onKeyDown={e => {
+                                    if (e.key === "Enter" && dayCheckpoint.value)
+                                      saveDayCheckpointMut.mutate({ date: d.date, actual_balance: parseFloat(dayCheckpoint.value) });
+                                    if (e.key === "Escape") setDayCheckpoint(null);
+                                  }}
+                                />
+                                <button onClick={() => saveDayCheckpointMut.mutate({ date: d.date, actual_balance: parseFloat(dayCheckpoint.value) })}
+                                  disabled={!dayCheckpoint.value || saveDayCheckpointMut.isPending}
+                                  className="btn-primary text-xs px-2 py-0.5">Save</button>
+                                {hasCp && (
+                                  <button onClick={() => deleteDayCheckpointMut.mutate(d.date)}
+                                    className="text-xs text-red-500 hover:text-red-700 px-1">Clear</button>
+                                )}
+                                <button onClick={() => setDayCheckpoint(null)} className="btn-secondary text-xs px-2 py-0.5">Cancel</button>
+                              </div>
+                            ) : null}
                           </td>
                           <td className="py-2 text-right font-semibold tabular-nums whitespace-nowrap">
                             {lowBalanceThreshold !== null && parseFloat(d.projected_balance) < lowBalanceThreshold && (
@@ -578,8 +812,27 @@ export default function Forecast() {
                             )}
                             {fmt(d.projected_balance)}
                           </td>
+                          <td className="py-2 pl-2">
+                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                title="Set actual balance for this date"
+                                onClick={() => setDayCheckpoint({ date: d.date, value: hasCp ? String(dayCheckpointMap[d.date]) : "" })}
+                                className="p-1 text-gray-400 hover:text-indigo-500 rounded"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                              <button
+                                title="Add transaction on this date"
+                                onClick={() => { setAddTxnDate(d.date); setAddTxnForm({ description: "", amount: "", category_id: "" }); }}
+                                className="p-1 text-gray-400 hover:text-green-500 rounded"
+                              >
+                                <Plus size={12} />
+                              </button>
+                            </div>
+                          </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -591,6 +844,62 @@ export default function Forecast() {
       </div>
 
       {isLoading && <div className="text-gray-400 text-sm text-center py-8">Building forecast…</div>}
+
+      {/* Quick-add transaction modal */}
+      {addTxnDate && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setAddTxnDate(null)}>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl p-6 w-full max-w-sm space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+                Add Transaction — {new Date(addTxnDate + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </h3>
+              <button onClick={() => setAddTxnDate(null)} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="label">Description</label>
+                <input className="input w-full" placeholder="e.g. Dentist copay" autoFocus
+                  value={addTxnForm.description}
+                  onChange={e => setAddTxnForm(f => ({ ...f, description: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Amount (negative = expense)</label>
+                <input className="input w-full" type="number" step="0.01" placeholder="-150.00"
+                  value={addTxnForm.amount}
+                  onChange={e => setAddTxnForm(f => ({ ...f, amount: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Category (optional)</label>
+                <select className="input w-full" value={addTxnForm.category_id}
+                  onChange={e => setAddTxnForm(f => ({ ...f, category_id: e.target.value }))}>
+                  <option value="">No category</option>
+                  {allCatOptions.map((c: any) => (
+                    <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setAddTxnDate(null)} className="btn-secondary">Cancel</button>
+              <button
+                disabled={!addTxnForm.description || !addTxnForm.amount || createTxnMut.isPending}
+                onClick={() => createTxnMut.mutate({
+                  date: addTxnDate,
+                  description: addTxnForm.description,
+                  amount: parseFloat(addTxnForm.amount),
+                  category_id: addTxnForm.category_id ? parseInt(addTxnForm.category_id) : null,
+                  account_id: activeAccountId,
+                  is_actual: true,
+                })}
+                className="btn-primary"
+              >
+                {createTxnMut.isPending ? "Saving…" : "Add Transaction"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showHelp && <HelpPanel title="Forecast" body={"Day-by-day cash flow projection based on your recurring income and bills.\n\nSelect an account and year to see the balance line. Q1–Q4 summaries show open/close balances and net cash flow.\n\nScenarios let you model 'what if I cut dining by $200/month?' with a second line chart trace.\n\nPlanned Expenses are one-off future costs (vacation, down payment) injected into the forecast balance.\n\nWeekend bills are automatically shifted to the preceding Friday."} onClose={() => setShowHelp(false)} />}
     </div>
   );

@@ -21,7 +21,7 @@ from backend.routers import networth as networth_router_module
 from backend.routers import scenarios as scenarios_router_module
 from backend.routers import planned_expenses as planned_expenses_router_module
 from backend.routers import reconciliation as reconciliation_router_module
-from backend.routers import checkpoints as checkpoints_router_module
+from backend.routers import day_checkpoints as day_checkpoints_router_module
 from backend.routers import rules as rules_router_module
 from backend.routers import exports as exports_router_module
 from backend.routers import data as data_router_module
@@ -107,7 +107,7 @@ app.include_router(networth_router_module.router)
 app.include_router(scenarios_router_module.router)
 app.include_router(planned_expenses_router_module.router)
 app.include_router(reconciliation_router_module.router)
-app.include_router(checkpoints_router_module.router)
+app.include_router(day_checkpoints_router_module.router)
 app.include_router(rules_router_module.router)
 app.include_router(exports_router_module.router)
 app.include_router(data_router_module.router)

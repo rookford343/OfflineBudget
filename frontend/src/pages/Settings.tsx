@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { accountsApi, categoriesApi, budgetApi, adminApi, authApi, rulesApi, checkpointsApi, dataApi } from "../api";
+import { accountsApi, categoriesApi, budgetApi, adminApi, authApi, rulesApi, dataApi } from "../api";
 import { fmt } from "../lib/utils";
 import { getTheme, setTheme } from "../store/theme";
 import { clearAuth, isAdmin } from "../store/auth";
@@ -41,12 +41,6 @@ export default function Settings() {
   const [deleteAccId, setDeleteAccId] = useState<number | null>(null);
   const [editBalId, setEditBalId] = useState<number | null>(null);
   const [newBal, setNewBal] = useState("");
-  const { data: editBalCheckpoints = [] } = useQuery<any[]>({
-    queryKey: ["checkpoints", editBalId],
-    queryFn: () => checkpointsApi.list(editBalId!),
-    enabled: editBalId !== null,
-  });
-
   const createAccMut = useMutation({ mutationFn: accountsApi.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["accounts"] }); setShowAccForm(false); } });
   const updateAccMut = useMutation({ mutationFn: ({ id, data }: any) => accountsApi.update(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["accounts"] }); setEditAcc(null); setShowAccForm(false); setEditBalId(null); } });
   const deleteAccMut = useMutation({ mutationFn: accountsApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["accounts"] }); setDeleteAccId(null); } });
@@ -396,14 +390,6 @@ export default function Settings() {
                       <button onClick={() => updateAccMut.mutate({ id: a.id, data: { current_balance: parseFloat(newBal) } })} className="text-green-600"><Check size={14} /></button>
                       <button onClick={() => setEditBalId(null)} className="text-gray-400"><X size={14} /></button>
                     </div>
-                    {editBalCheckpoints.length > 0 && (() => {
-                      const latest = [...editBalCheckpoints].sort((a: any, b: any) => b.year !== a.year ? b.year - a.year : b.quarter - a.quarter)[0];
-                      return (
-                        <button onClick={() => setNewBal(String(latest.actual_balance))} className="text-xs text-indigo-500 hover:text-indigo-700">
-                          Use Q{latest.quarter} {latest.year} checkpoint: {fmt(latest.actual_balance)}
-                        </button>
-                      );
-                    })()}
                   </div>
                 ) : (
                   <button onClick={() => { setEditBalId(a.id); setNewBal(a.current_balance); }} className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums hover:text-indigo-600 transition-colors" title="Click to correct balance">

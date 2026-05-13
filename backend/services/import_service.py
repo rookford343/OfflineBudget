@@ -1,5 +1,6 @@
 """Shared import logic used by both the HTTP router and CLI."""
 from __future__ import annotations
+import re
 from datetime import datetime
 from decimal import Decimal
 from sqlalchemy import func
@@ -8,29 +9,114 @@ from backend import models, schemas
 from backend.services.csv_parser import ParsedRow
 from backend.services.auto_categorizer import categorize
 
+# ACH/bank noise suffixes to strip before matching
+_ACH_NOISE = re.compile(
+    r"\s+(ppd|ccd|web|tel|ctx)\s+id[:\s]*\S*$"
+    r"|\s+id[:\s]*\d{6,}$"
+    r"|\s+(ach|autopay|online\s+payment|direct\s+dep(osit)?)$",
+    re.IGNORECASE,
+)
+
+_STOP_WORDS = {"the", "ppd", "id", "ind", "crd", "inc", "llc", "co", "a", "an"}
+
+# Synonym collapse: normalize these to a common token before scoring
+_SYNONYMS: dict[str, str] = {
+    "payroll": "paycheck",
+    "salary": "paycheck",
+    "wages": "paycheck",
+    "direct": "paycheck",
+    "dep": "paycheck",
+    "deposit": "paycheck",
+    "autopay": "payment",
+    "auto": "payment",
+    "pay": "payment",
+}
+
+
+def _normalize_for_match(text: str) -> set[str]:
+    """Return a set of normalized tokens for fuzzy name matching."""
+    text = _ACH_NOISE.sub("", text)
+    tokens = re.sub(r"[^a-z0-9\s]", " ", text.lower()).split()
+    result: set[str] = set()
+    for t in tokens:
+        if t in _STOP_WORDS or len(t) < 2:
+            continue
+        result.add(_SYNONYMS.get(t, t))
+    return result
+
+
+def _name_score(txn_desc: str, item_name: str) -> int:
+    """Shared-token count between normalized description and recurring item name."""
+    return len(_normalize_for_match(txn_desc) & _normalize_for_match(item_name))
+
+
+def _fires_near(item: models.RecurringItem, txn_date) -> bool:
+    """True if this recurring item would fire within ±3 days of txn_date."""
+    import calendar
+    from datetime import date as date_type
+    day = item.day_of_month or 28
+    for month_offset in (0, -1, 1):
+        m = txn_date.month + month_offset
+        y = txn_date.year
+        if m < 1:
+            m += 12
+            y -= 1
+        elif m > 12:
+            m -= 12
+            y += 1
+        last_day = calendar.monthrange(y, m)[1]
+        clamped_day = min(day, last_day)
+        try:
+            fire_date = date_type(y, m, clamped_day)
+        except ValueError:
+            continue
+        if abs((txn_date - fire_date).days) <= 3:
+            return True
+    return False
+
 
 def _try_auto_match(txn: models.Transaction, db: Session) -> None:
-    """Link txn to a recurring item if amount and day-of-month are close enough."""
+    """Link txn to a recurring item if amount, day-of-month, and name are close enough.
+
+    Covers income credits, expense debits, and CC payment debits — previously only
+    expenses were considered, which silently dropped paycheck and autopay links.
+    """
     recurring = db.query(models.RecurringItem).filter(
         models.RecurringItem.user_id == txn.user_id,
         models.RecurringItem.account_id == txn.account_id,
         models.RecurringItem.is_active == True,
-        models.RecurringItem.type != models.RecurringType.income,
     ).all()
 
     txn_amount = abs(txn.amount)
     txn_day = txn.date.day
+    is_credit = txn.amount > 0
+
+    best: models.RecurringItem | None = None
+    best_score = -1
 
     for item in recurring:
+        # Direction guard: income items match credits, everything else matches debits
+        if item.type == models.RecurringType.income and not is_credit:
+            continue
+        if item.type != models.RecurringType.income and is_credit:
+            continue
+
         item_day = item.day_of_month or 28
         if abs(txn_day - item_day) > 3:
             continue
         if txn_amount == 0 or item.amount == 0:
             continue
         ratio = txn_amount / item.amount
-        if 0.9 <= ratio <= 1.1:
-            txn.recurring_item_id = item.id
-            return
+        if not (Decimal("0.9") <= ratio <= Decimal("1.1")):
+            continue
+
+        score = _name_score(txn.description, item.name)
+        if score > best_score:
+            best_score = score
+            best = item
+
+    if best is not None:
+        txn.recurring_item_id = best.id
 
 
 def build_preview(
@@ -84,7 +170,6 @@ def build_preview(
         if key not in history_map:
             history_map[key] = cat_id
 
-    # Load user's custom rules, sorted by priority descending
     from backend.services.rules_engine import apply_rules
     cat_by_id = {c.id: c for c in all_cats}
     user_rules = (
@@ -94,9 +179,40 @@ def build_preview(
         .all()
     )
 
+    # Pre-load all active recurring items for this user once
+    all_recurring = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user.id,
+        models.RecurringItem.is_active == True,
+    ).all()
+    expense_recurring = [r for r in all_recurring if r.type == models.RecurringType.expense]
+    income_recurring = [r for r in all_recurring if r.type == models.RecurringType.income]
+    cc_payment_recurring = [r for r in all_recurring if r.type == models.RecurringType.credit_card_payment]
+
+    def _best_suggestion(
+        candidates: list[models.RecurringItem],
+        row: ParsedRow,
+        amount_lo: Decimal = Decimal("0.85"),
+        amount_hi: Decimal = Decimal("1.15"),
+    ) -> tuple[int | None, str | None]:
+        txn_amount = abs(row.amount)
+        best_item: models.RecurringItem | None = None
+        best_score = -1
+        for item in candidates:
+            if item.amount <= 0 or not _fires_near(item, row.date):
+                continue
+            ratio = txn_amount / item.amount
+            if not (amount_lo <= ratio <= amount_hi):
+                continue
+            score = _name_score(row.description, item.name)
+            if score > best_score:
+                best_score = score
+                best_item = item
+        if best_item:
+            return best_item.id, best_item.name
+        return None, None
+
     preview_rows: list[schemas.ImportPreviewRow] = []
     for i, row in enumerate(parsed_rows):
-        # Priority: history → user rules → keyword rules
         matched_cat = categorize(row.description, all_cats, history_map)
         is_transfer = row.is_transfer
 
@@ -108,6 +224,20 @@ def build_preview(
                 elif rule_match.category_id and rule_match.category_id in cat_by_id:
                     matched_cat = cat_by_id[rule_match.category_id]
 
+        suggested_item_id = None
+        suggested_item_name = None
+
+        if row.amount < 0:
+            if is_transfer:
+                # CC autopay and other transfer-flagged debits: check CC payment recurring items
+                suggested_item_id, suggested_item_name = _best_suggestion(cc_payment_recurring, row)
+            else:
+                # Regular expense debit
+                suggested_item_id, suggested_item_name = _best_suggestion(expense_recurring, row)
+        elif row.amount > 0:
+            # Credit (income)
+            suggested_item_id, suggested_item_name = _best_suggestion(income_recurring, row)
+
         preview_rows.append(schemas.ImportPreviewRow(
             row_index=i,
             date=row.date,
@@ -117,6 +247,8 @@ def build_preview(
             category_name=matched_cat.name if matched_cat else None,
             needs_review=matched_cat is None and not is_transfer,
             is_transfer=is_transfer,
+            suggested_recurring_item_id=suggested_item_id,
+            suggested_recurring_item_name=suggested_item_name,
         ))
     return preview_rows
 

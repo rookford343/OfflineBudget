@@ -60,7 +60,7 @@ def update_recurring(
     user: models.User = Depends(get_current_user),
 ):
     item = _get_or_404(db, user.id, item_id)
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(item, field, value)
     db.commit()
     db.refresh(item)

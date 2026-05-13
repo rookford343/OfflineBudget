@@ -203,7 +203,9 @@ class RecurringCreate(BaseModel):
 class RecurringUpdate(BaseModel):
     name: Optional[str] = None
     amount: Optional[Decimal] = None
+    type: Optional[RecurringType] = None
     frequency: Optional[RecurringFrequency] = None
+    account_id: Optional[int] = None
     category_id: Optional[int] = None
     card_id: Optional[int] = None
     day_of_month: Optional[int] = None
@@ -249,6 +251,7 @@ class TransactionUpdate(BaseModel):
     amount: Optional[Decimal] = None
     description: Optional[str] = None
     notes: Optional[str] = None
+    recurring_item_id: Optional[int] = None
 
 
 class TransactionOut(BaseModel):
@@ -295,6 +298,7 @@ class QuarterSummary(BaseModel):
     total_expenses: Decimal
     net: Decimal
     days: list[ForecastEntry]
+    quarter_end_checkpoint: Optional[Decimal] = None
 
 
 # ── Budget ────────────────────────────────────────────────────────────────────
@@ -513,6 +517,8 @@ class ImportPreviewRow(BaseModel):
     category_name: Optional[str]
     needs_review: bool
     is_transfer: bool = False
+    suggested_recurring_item_id: Optional[int] = None
+    suggested_recurring_item_name: Optional[str] = None
 
 
 class ImportPreviewStats(BaseModel):
@@ -546,6 +552,24 @@ class ImportConfirmRequest(BaseModel):
 class ImportConfirmResponse(BaseModel):
     imported: int
     skipped_duplicates: int
+
+
+# ── Forecast Day Checkpoints ──────────────────────────────────────────────────
+
+class ForecastDayCheckpointUpsert(BaseModel):
+    account_id: int
+    actual_balance: Decimal
+    note: Optional[str] = None
+
+
+class ForecastDayCheckpointOut(BaseModel):
+    id: int
+    account_id: int
+    date: date
+    actual_balance: Decimal
+    note: Optional[str]
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ── Admin / Audit Log ─────────────────────────────────────────────────────────
@@ -799,7 +823,8 @@ class ReconcileMatchedItem(BaseModel):
     date: date
     description: str
     actual_amount: Decimal
-    recurring_item_id: int
+    recurring_item_id: Optional[int] = None
+    card_id: Optional[int] = None
     recurring_name: str
     expected_amount: Decimal
     variance: Decimal
@@ -828,23 +853,20 @@ class ReconcileResponse(BaseModel):
     unmatched_transactions: list[ReconcileUnmatchedTransaction]
 
 
-
-
-class QuarterlyCheckpointUpsert(BaseModel):
+class MonthlyForecastSummary(BaseModel):
     account_id: int
     year: int
-    quarter: int
-    actual_balance: Decimal
+    month: int
+    forecasted_open: Decimal
+    forecasted_close: Decimal
+    snapshot_taken_at: Optional[datetime]
+    actual_close: Optional[Decimal]
+    delta: Optional[Decimal]
+    reconcile: ReconcileResponse
 
 
-class QuarterlyCheckpointOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-    id: int
-    account_id: int
-    year: int
-    quarter: int
-    actual_balance: Decimal
-    updated_at: datetime
+
+
 
 
 # ── Transaction Rules ─────────────────────────────────────────────────────────
