@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { transactionsApi, accountsApi, categoriesApi, cardsApi, reconciliationApi, exportsApi, checkpointsApi, recurringApi } from "../api";
+import { transactionsApi, accountsApi, categoriesApi, cardsApi, reconciliationApi, exportsApi, dayCheckpointsApi, recurringApi } from "../api";
 import { fmt, today, firstOfMonth, quickRange } from "../lib/utils";
 import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
@@ -188,10 +188,17 @@ export default function Transactions() {
   });
 
   const markReconciledMut = useMutation({
-    mutationFn: ({ year, quarter, balance }: { year: number; quarter: number; balance: number }) =>
-      checkpointsApi.upsert(year, quarter, activeReconcileAccountId!, balance),
+    mutationFn: ({ year, month, balance }: { year: number; month: number; balance: number }) => {
+      // Use last day of the reconcile month as the day-level anchor
+      const lastDay = new Date(year, month, 0);
+      const dateStr = `${lastDay.getFullYear()}-${String(lastDay.getMonth() + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`;
+      return dayCheckpointsApi.upsert(dateStr, activeReconcileAccountId!, balance, "Reconciled");
+    },
     onSuccess: () => {
       setMarkReconciledBalance("");
+      qc.invalidateQueries({ queryKey: ["day-checkpoints"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
     },
   });
 
@@ -432,8 +439,7 @@ export default function Transactions() {
                 className="btn-primary text-xs px-3 py-2 flex items-center gap-1"
                 disabled={!markReconciledBalance || markReconciledMut.isPending}
                 onClick={() => {
-                  const quarter = Math.ceil(reconcileMonth / 3);
-                  markReconciledMut.mutate({ year: reconcileYear, quarter, balance: parseFloat(markReconciledBalance) });
+                  markReconciledMut.mutate({ year: reconcileYear, month: reconcileMonth, balance: parseFloat(markReconciledBalance) });
                 }}
               >
                 <Check size={13} />

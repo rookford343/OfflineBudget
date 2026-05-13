@@ -28,6 +28,31 @@ def _adjust_for_weekend(d: date) -> date:
     return d
 
 
+def _cc_actual_nearby(
+    card: models.CreditCard,
+    target: date,
+    actuals_by_date: dict[date, list[models.Transaction]],
+    window: int = 7,
+) -> bool:
+    """True if an actual transaction matching this card appears within window days of target.
+
+    Uses the first token of the card name (e.g. 'Chase' from 'Chase Sapphire') as the
+    identifier since bank descriptions rarely include the full product name but always
+    include the issuer. Falls back to last_four if available.
+    """
+    name_lower = (card.name or "").lower().strip()
+    first_token = name_lower.split()[0] if name_lower else ""
+    for offset in range(-window, window + 1):
+        check = target + timedelta(days=offset)
+        for txn in actuals_by_date.get(check, []):
+            desc_lower = txn.description.lower()
+            if first_token and first_token in desc_lower:
+                return True
+            if card.last_four and card.last_four in txn.description:
+                return True
+    return False
+
+
 def _fires_on(item: models.RecurringItem, d: date) -> bool:
     """Return True if this recurring item fires on date d."""
     if item.start_date > d:
@@ -68,13 +93,17 @@ def build_forecast(
     if not account:
         return []
 
-    recurring_items = db.query(models.RecurringItem).options(
-        joinedload(models.RecurringItem.card)
-    ).filter(
-        models.RecurringItem.user_id == user_id,
-        models.RecurringItem.account_id == account_id,
-        models.RecurringItem.is_active == True,
-    ).all()
+    recurring_items = [
+        item for item in db.query(models.RecurringItem).options(
+            joinedload(models.RecurringItem.card)
+        ).filter(
+            models.RecurringItem.user_id == user_id,
+            models.RecurringItem.account_id == account_id,
+            models.RecurringItem.is_active == True,
+        ).all()
+        # CC charges (expense + card_id) hit the card, not the checking account
+        if not (item.type == models.RecurringType.expense and item.card_id is not None)
+    ]
 
     # SS paycheck boost setup
     user = db.query(models.User).filter(models.User.id == user_id).first()
@@ -155,21 +184,54 @@ def build_forecast(
             override_map[ov["recurring_item_id"]] = Decimal(str(ov["amount_delta"]))
 
     today = date.today()
-    # Only load actuals dated today or later — current_balance already reflects all past transactions.
-    # Including past actuals would double-count them against the live balance.
-    actual_txns = db.query(models.Transaction).filter(
+
+    # Load all actuals in the forecast window.
+    # For dates in the past: current_balance already reflects them, so we reconstruct
+    # the starting balance by reversing past actuals — then re-apply them in the walk.
+    # This gives an accurate historical line rather than projecting backward from today's balance.
+    all_actuals = db.query(models.Transaction).filter(
         models.Transaction.user_id == user_id,
         models.Transaction.account_id == account_id,
         models.Transaction.is_actual == True,
-        models.Transaction.date >= today,
+        models.Transaction.date >= start_date,
         models.Transaction.date <= end_date,
     ).all()
 
     actuals_by_date: dict[date, list[models.Transaction]] = {}
-    for t in actual_txns:
+    for t in all_actuals:
         actuals_by_date.setdefault(t.date, []).append(t)
 
-    balance = Decimal(str(account.current_balance))
+    # When start_date is in the past, reverse past actuals to find the opening balance.
+    # current_balance = opening_balance + sum(all actuals from start_date to yesterday),
+    # so opening_balance = current_balance - sum(past actuals).
+    current_balance = Decimal(str(account.current_balance))
+    if start_date < today:
+        past_sum = sum(
+            Decimal(str(t.amount)) for t in all_actuals if t.date < today
+        )
+        balance = current_balance - past_sum
+    else:
+        balance = current_balance
+
+    # Lookup for CC suppression — keyed by the name stored in cc_payments / cc_estimates_by_date
+    card_by_name: dict[str, models.CreditCard] = {(c.name or ""): c for c in all_active_cards}
+
+    day_checkpoint_map: dict[date, Decimal] = {
+        cp.date: cp.actual_balance
+        for cp in db.query(models.ForecastDayCheckpoint).filter(
+            models.ForecastDayCheckpoint.user_id == user_id,
+            models.ForecastDayCheckpoint.account_id == account_id,
+            models.ForecastDayCheckpoint.date >= start_date,
+            models.ForecastDayCheckpoint.date <= end_date,
+        ).all()
+    }
+
+    # Pre-compute which recurring item IDs have linked actuals, and on which dates.
+    # Used to suppress projected entries when the actual arrives on a different day.
+    actual_by_ri: dict[int, list[date]] = {}
+    for t in all_actuals:
+        if t.recurring_item_id:
+            actual_by_ri.setdefault(t.recurring_item_id, []).append(t.date)
 
     entries: list[ForecastEntry] = []
     current = start_date
@@ -179,6 +241,7 @@ def build_forecast(
         actuals_today = actuals_by_date.get(current, [])
         actual_recurring_ids = {t.recurring_item_id for t in actuals_today if t.recurring_item_id}
         actual_manual = [t for t in actuals_today if t.recurring_item_id is None]
+        applied_txn_ids: set[int] = set()
 
         adj_actual_recurring_ids = set(actual_recurring_ids)
         if current.weekday() == 4:
@@ -194,6 +257,7 @@ def build_forecast(
             if natural_fires and item.id in actual_recurring_ids:
                 for actual in actuals_today:
                     if actual.recurring_item_id == item.id:
+                        applied_txn_ids.add(actual.id)
                         balance += Decimal(str(actual.amount))
                         day_transactions.append(ForecastTransaction(
                             name=actual.description,
@@ -220,6 +284,18 @@ def build_forecast(
                 continue
             if item.id in adj_actual_recurring_ids:
                 continue
+
+            # Suppress projected if a linked actual exists for this item but arrived on a
+            # different day: monthly/yearly → any actual this calendar month; biweekly/weekly → ±3 days.
+            if item.id in actual_by_ri:
+                ri_actual_dates = actual_by_ri[item.id]
+                freq = getattr(item, "frequency", None)
+                if freq in (models.RecurringFrequency.monthly, models.RecurringFrequency.yearly):
+                    if any(d.year == current.year and d.month == current.month for d in ri_actual_dates):
+                        continue
+                else:
+                    if any(abs((d - current).days) <= 3 for d in ri_actual_dates):
+                        continue
 
             base_amount = item.amount + override_map.get(item.id, Decimal("0"))
             is_cc = item.type == models.RecurringType.credit_card_payment
@@ -248,6 +324,21 @@ def build_forecast(
                 recurring_item_id=item.id,
             ))
 
+        # Apply linked actuals that arrived on a different day than their natural_fires date.
+        # These have recurring_item_id set but weren't handled in the items loop above.
+        for actual in actuals_today:
+            if actual.recurring_item_id is not None and actual.id not in applied_txn_ids:
+                balance += Decimal(str(actual.amount))
+                day_transactions.append(ForecastTransaction(
+                    name=actual.description,
+                    amount=actual.amount,
+                    type="income" if actual.amount > 0 else "expense",
+                    category_name=actual.category.name if actual.category else None,
+                    is_actual=True,
+                    recurring_item_id=actual.recurring_item_id,
+                    transaction_id=actual.id,
+                ))
+
         # Apply manual actual transactions (not linked to any recurring item)
         for actual in actual_manual:
             balance += Decimal(str(actual.amount))
@@ -273,6 +364,10 @@ def build_forecast(
             ))
 
         for card_name, amount in cc_payments.get(current, []):
+            # Suppress if an actual CC payment for this card was imported near this date
+            card_obj = card_by_name.get(card_name)
+            if card_obj and _cc_actual_nearby(card_obj, current, actuals_by_date):
+                continue
             signed = -amount
             balance += signed
             day_transactions.append(ForecastTransaction(
@@ -285,6 +380,10 @@ def build_forecast(
             ))
 
         for card_name, amount in cc_estimates_by_date.get(current, []):
+            # Suppress if an actual CC payment for this card was imported near this date
+            card_obj = card_by_name.get(card_name)
+            if card_obj and _cc_actual_nearby(card_obj, current, actuals_by_date):
+                continue
             signed = -amount
             balance += signed
             day_transactions.append(ForecastTransaction(
@@ -312,6 +411,11 @@ def build_forecast(
                     type="income",
                     is_actual=False,
                 ))
+
+        # Apply day checkpoint AFTER all transactions so the anchor value is the
+        # final balance for the day (and the starting point for the next day).
+        if current in day_checkpoint_map:
+            balance = day_checkpoint_map[current]
 
         entries.append(ForecastEntry(
             date=current,

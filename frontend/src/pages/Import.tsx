@@ -10,6 +10,11 @@ type SourceTab = "checking" | "card";
 
 function descriptionKey(desc: string): string {
   let key = desc.toLowerCase().trim();
+  // Zelle: normalize "zelle [payment] from/to NAME [ID]" to a stable group key
+  const zelleMatch = key.match(/^zelle(?:\s+payment)?\s+(from|to)\s+([a-z][a-z\s\-]+?)(?:\s+[a-z0-9]{6,})?$/);
+  if (zelleMatch) {
+    return `zelle ${zelleMatch[1]} ${zelleMatch[2].trim()}`;
+  }
   // Strip POS/payment prefixes (SQ*, TST*, PP*)
   key = key.replace(/^(sq|tst|pp)\*\s*/i, "");
   // Strip "WEB ID: 1234567890" and "ACH ID: ..." patterns
@@ -38,6 +43,8 @@ interface PreviewRow {
   included: boolean;
   notes: string;
   recurring_item_id: number | null;
+  suggested_recurring_item_id: number | null;
+  suggested_recurring_item_name: string | null;
 }
 
 const COLOR_SWATCHES = ["#6366f1", "#22c55e", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6"];
@@ -89,7 +96,9 @@ export default function Import() {
         ...r,
         included: !r.is_transfer,
         notes: "",
-        recurring_item_id: null,
+        recurring_item_id: r.suggested_recurring_item_id ?? null,
+        suggested_recurring_item_id: r.suggested_recurring_item_id ?? null,
+        suggested_recurring_item_name: r.suggested_recurring_item_name ?? null,
       })));
       setError(null);
     },
@@ -101,6 +110,9 @@ export default function Import() {
     onSuccess: (data) => {
       setSuccess(data);
       setPreview(null);
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
     },
     onError: (e: any) => setError(e?.response?.data?.detail ?? "Import failed"),
   });
@@ -344,6 +356,16 @@ export default function Import() {
               <button onClick={toggleSelectAll} className="btn-secondary text-xs px-3 py-1.5">
                 {editedRows.every(r => r.included) ? "Deselect All" : "Select All"}
               </button>
+              {needsReviewCount > 0 && (
+                <button
+                  onClick={() => setEditedRows(rows => rows.map(r =>
+                    r.needs_review ? { ...r, needs_review: false, category_id: null, category_name: null } : r
+                  ))}
+                  className="btn-secondary text-xs px-3 py-1.5 text-amber-700 dark:text-amber-400"
+                >
+                  Clear all categories ({needsReviewCount})
+                </button>
+              )}
               <button
                 onClick={confirmImport}
                 disabled={confirmMut.isPending || needsReviewCount > 0}
@@ -561,6 +583,9 @@ export default function Import() {
                       </td>
                       {tab === "checking" && (
                         <td className="py-2 min-w-[160px]">
+                          {row.suggested_recurring_item_name && row.recurring_item_id === row.suggested_recurring_item_id && (
+                            <span className="text-xs text-amber-600 dark:text-amber-400 font-medium block mb-0.5">→ {row.suggested_recurring_item_name}</span>
+                          )}
                           <select
                             className="input py-1 text-xs w-full"
                             value={row.recurring_item_id ?? ""}

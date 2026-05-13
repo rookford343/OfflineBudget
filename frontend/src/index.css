@@ -76,4 +76,5 @@
   .animate-delay-100 { animation-delay: 0.10s; opacity: 0; }
   .animate-delay-200 { animation-delay: 0.20s; opacity: 0; }
   .animate-delay-300 { animation-delay: 0.30s; opacity: 0; }
+  .animate-delay-400 { animation-delay: 0.40s; opacity: 0; }
 }

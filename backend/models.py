@@ -4,7 +4,7 @@ from decimal import Decimal
 from enum import Enum as PyEnum
 from sqlalchemy import (
     Boolean, Date, DateTime, Enum, ForeignKey, Integer,
-    Numeric, String, Text, func,
+    Numeric, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.database import Base
@@ -121,6 +121,7 @@ class User(Base):
     net_worth_snapshots: Mapped[list[NetWorthSnapshot]] = relationship(back_populates="user", cascade="all, delete-orphan")
     forecast_scenarios: Mapped[list[ForecastScenario]] = relationship(back_populates="user", cascade="all, delete-orphan")
     planned_expenses: Mapped[list[PlannedExpense]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    monthly_forecast_snapshots: Mapped[list["MonthlyForecastSnapshot"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 # ── Accounts ─────────────────────────────────────────────────────────────────
@@ -490,18 +491,38 @@ class AuditLog(Base):
     body_summary: Mapped[str | None] = mapped_column(Text)
 
 
-# ── Quarterly Checkpoints ────────────────────────────────────────────────────
+# ── Day Checkpoints ───────────────────────────────────────────────────────────
 
-class QuarterlyCheckpoint(Base):
-    __tablename__ = "quarterly_checkpoints"
+class ForecastDayCheckpoint(Base):
+    __tablename__ = "forecast_day_checkpoints"
+    __table_args__ = (UniqueConstraint("user_id", "account_id", "date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    actual_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user: Mapped["User"] = relationship()
+    account: Mapped["Account"] = relationship()
+
+
+# ── Monthly Forecast Snapshots ────────────────────────────────────────────────
+
+class MonthlyForecastSnapshot(Base):
+    __tablename__ = "monthly_forecast_snapshots"
+    __table_args__ = (UniqueConstraint("user_id", "account_id", "year", "month"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
-    quarter: Mapped[int] = mapped_column(Integer, nullable=False)
-    actual_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    forecasted_open: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    forecasted_close: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    snapshot_taken_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    user: Mapped["User"] = relationship()
+    user: Mapped["User"] = relationship(back_populates="monthly_forecast_snapshots")
     account: Mapped["Account"] = relationship()
