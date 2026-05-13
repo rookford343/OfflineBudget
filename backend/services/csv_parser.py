@@ -1,7 +1,9 @@
 """CSV format detection and row parsing for bank/card imports."""
 from __future__ import annotations
 import csv
+import html
 import io
+import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
@@ -22,6 +24,22 @@ _CC_TRANSFER_PATTERNS = (
 def _is_cc_transfer(description: str) -> bool:
     upper = description.upper()
     return any(p in upper for p in _CC_TRANSFER_PATTERNS)
+
+
+_ZELLE_RE = re.compile(
+    r"^Zelle\s+payment\s+(from|to)\s+([A-Za-z][A-Za-z\s\-]+?)\s+[A-Za-z0-9]{6,}$",
+    re.IGNORECASE,
+)
+
+
+def _clean_description(desc: str) -> str:
+    desc = html.unescape(desc)
+    m = _ZELLE_RE.match(desc.strip())
+    if m:
+        direction = m.group(1).lower()
+        name = m.group(2).strip().title()
+        return f"Zelle {direction} {name}"
+    return desc.strip()
 
 
 @dataclass
@@ -90,13 +108,13 @@ def _parse_row(fmt: ImportFormat, row: dict) -> ParsedRow | None:
         if keys.get("type", "").lower() == "payment":
             return None  # Skip card statement payment rows; they are not transactions
         d_str = keys.get("posting date") or keys.get("transaction date") or ""
-        desc = keys.get("description") or ""
+        desc = _clean_description(keys.get("description") or "")
         amount_str = keys.get("amount") or ""
 
     elif fmt == ImportFormat.apple:
         # Apple Card: Transaction Date, Clearing Date, Description, Merchant, Category, Type, Amount (USD), Purchased By
         d_str = keys.get("transaction date") or ""
-        desc = keys.get("merchant") or keys.get("description") or ""
+        desc = _clean_description(keys.get("merchant") or keys.get("description") or "")
         amount_str = keys.get("amount (usd)") or keys.get("amount") or ""
         # Apple amounts are positive for charges, negate to make them negative debits
         parsed_date = _parse_date(d_str)
@@ -109,8 +127,10 @@ def _parse_row(fmt: ImportFormat, row: dict) -> ParsedRow | None:
         # Generic: try common column names
         d_str = (keys.get("date") or keys.get("transaction date")
                  or keys.get("posting date") or "")
-        desc = (keys.get("description") or keys.get("merchant")
-                or keys.get("payee") or keys.get("name") or "")
+        desc = _clean_description(
+            keys.get("description") or keys.get("merchant")
+            or keys.get("payee") or keys.get("name") or ""
+        )
         amount_str = keys.get("amount") or ""
 
     parsed_date = _parse_date(d_str)

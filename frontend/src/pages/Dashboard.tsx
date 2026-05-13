@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { accountsApi, cardsApi, recurringApi, analyticsApi } from "../api";
 import { fmt, utilColor, utilBg } from "../lib/utils";
 import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import { TrendBadge } from "../components/TrendBadge";
+import { SparkLine } from "../components/SparkLine";
 
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
 
@@ -13,7 +16,6 @@ Key sections:
 • Credit card balances and amounts due
 • Monthly narrative summary — plain-English recap
 • Upcoming bills — items due in the next 30 days`;
-import { useNavigate } from "react-router-dom";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -30,6 +32,10 @@ export default function Dashboard() {
   const { data: summary } = useQuery<any>({
     queryKey: ["monthly-summary", summaryYear, summaryMonth],
     queryFn: () => analyticsApi.monthlySummary(summaryYear, summaryMonth),
+  });
+  const { data: rollingRaw = [] } = useQuery<{ month: string; total: string }[]>({
+    queryKey: ["rolling-monthly-6"],
+    queryFn: () => analyticsApi.rollingMonthly(6),
   });
 
   const checkingAccounts = accounts.filter((a) => a.type === "checking");
@@ -64,6 +70,17 @@ export default function Dashboard() {
     })
     .sort((a, b) => a.next_date.getTime() - b.next_date.getTime())[0];
 
+  // Sparkline + month-over-month % for the Net Position card.
+  const rolling = [...rollingRaw].sort((a, b) => a.month.localeCompare(b.month));
+  const sparkData = rolling.map((r) => parseFloat(r.total));
+  const momPct: number | null = rolling.length >= 2
+    ? (() => {
+        const cur = parseFloat(rolling[rolling.length - 1].total);
+        const prev = parseFloat(rolling[rolling.length - 2].total);
+        return prev === 0 ? null : ((cur - prev) / prev) * 100;
+      })()
+    : null;
+
   return (
     <div className="space-y-6">
       <div>
@@ -73,7 +90,7 @@ export default function Dashboard() {
 
       {/* Available to Spend widget */}
       {ats && (
-        <div className="card">
+        <div className="card bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-100 dark:from-indigo-950/40 dark:to-blue-950/40 dark:border-indigo-900/50">
           <div className="flex items-center gap-2 mb-3">
             <Wallet size={16} className="text-indigo-500" />
             <h3 className="font-semibold text-gray-900 dark:text-white">
@@ -139,7 +156,7 @@ export default function Dashboard() {
 
       {/* Hero stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="stat-card col-span-2 sm:col-span-1">
+        <div className="stat-card stat-card-accent-indigo animate-fade-slide-up animate-delay-100 col-span-2 sm:col-span-1">
           <span className="stat-label">Checking</span>
           <span className={`stat-value ${totalChecking >= 0 ? "text-gray-900" : "text-red-600"}`}>
             {anyBelowThreshold && <AlertTriangle size={18} className="text-amber-500 inline mr-1" />}
@@ -152,24 +169,28 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="stat-card">
+        <div className="stat-card stat-card-accent-amber animate-fade-slide-up animate-delay-200">
           <span className="stat-label">Credit Card Balance</span>
           <span className="stat-value text-amber-600">{fmt(totalCards)}</span>
         </div>
 
-        <div className="stat-card">
+        <div className="stat-card stat-card-accent-red animate-fade-slide-up animate-delay-300">
           <span className="stat-label">Amount Due</span>
           <span className={`stat-value ${totalCardsDue > 0 ? "text-red-600" : "text-gray-900"}`}>
             {fmt(totalCardsDue)}
           </span>
         </div>
 
-        <div className="stat-card">
+        <div className={`stat-card animate-fade-slide-up animate-delay-400 ${totalChecking - totalCardsDue >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
           <span className="stat-label">Net Position</span>
           <span className={`stat-value ${totalChecking - totalCardsDue >= 0 ? "text-green-600" : "text-red-600"}`}>
             {fmt(totalChecking - totalCardsDue)}
           </span>
           <span className="text-xs text-gray-500">checking minus due</span>
+          <div className="flex items-center justify-between mt-1">
+            <TrendBadge pct={momPct} inverse />
+            <SparkLine data={sparkData} color={totalChecking - totalCardsDue >= 0 ? "#22c55e" : "#ef4444"} />
+          </div>
         </div>
       </div>
 

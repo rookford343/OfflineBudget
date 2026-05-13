@@ -46,7 +46,7 @@ export default function Recurring() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.type === "credit_card_payment" && form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: form.frequency === "yearly" ? parseInt(form.month_of_year) : null, end_date: form.end_date || null };
+    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: form.frequency === "yearly" ? parseInt(form.month_of_year) : null, end_date: form.end_date || null };
     if (editItem) updateMut.mutate({ id: editItem.id, data });
     else createMut.mutate(data);
   }
@@ -54,16 +54,18 @@ export default function Recurring() {
   const visibleSuggestions = suggestions.filter((s: any) => !dismissedSuggestions.has(s.description));
 
   const income = items.filter((i: any) => i.type === "income" && i.is_active);
-  const expenses = items.filter((i: any) => i.type === "expense" && i.is_active);
+  const checkingExpenses = items.filter((i: any) => i.type === "expense" && !i.card_id && i.is_active);
+  const ccCharges = items.filter((i: any) => i.type === "expense" && i.card_id && i.is_active);
   const ccPayments = items.filter((i: any) => i.type === "credit_card_payment" && i.is_active);
   const inactive = items.filter((i: any) => !i.is_active);
   const monthlyIncome = income.reduce((s: number, i: any) => s + (i.frequency === "yearly" ? parseFloat(i.amount) / 12 : parseFloat(i.amount)), 0);
-  const monthlyExpenses = [...expenses, ...ccPayments].reduce((s: number, i: any) => s + (i.frequency === "yearly" ? parseFloat(i.amount) / 12 : parseFloat(i.amount)), 0);
+  const monthlyExpenses = [...checkingExpenses, ...ccCharges, ...ccPayments].reduce((s: number, i: any) => s + (i.frequency === "yearly" ? parseFloat(i.amount) / 12 : parseFloat(i.amount)), 0);
 
   function ItemRow({ item }: { item: any }) {
     const isYearly = item.frequency === "yearly";
     const isCcPayment = item.type === "credit_card_payment";
-    const cardName = isCcPayment ? activeCards.find((c: any) => c.id === item.card_id)?.name : null;
+    const isCcCharge = item.type === "expense" && item.card_id;
+    const cardName = (isCcPayment || isCcCharge) ? activeCards.find((c: any) => c.id === item.card_id)?.name : null;
     const dayLabel = isYearly
       ? `${MONTHS[(item.month_of_year ?? 1) - 1]} ${item.day_of_month === 0 ? "last day" : item.day_of_month} each year`
       : `${item.day_of_month === 0 ? "Last day" : `Day ${item.day_of_month}`} each month`;
@@ -192,17 +194,25 @@ export default function Recurring() {
           {income.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No income sources yet</p> : income.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
         </div>
         <div className="card">
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><TrendingDown size={16} className="text-red-500" /> Bills & Expenses ({expenses.length})</h3>
-          {expenses.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No recurring bills yet</p> : expenses.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><TrendingDown size={16} className="text-red-500" /> Checking Expenses ({checkingExpenses.length})</h3>
+          {checkingExpenses.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No checking expenses yet</p> : checkingExpenses.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
         </div>
       </div>
 
-      {ccPayments.length > 0 && (
-        <div className="card">
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><CreditCard size={16} className="text-blue-500" /> Credit Card Payments ({ccPayments.length})</h3>
-          {ccPayments.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
-        </div>
-      )}
+      <div className="grid md:grid-cols-2 gap-6">
+        {(ccCharges.length > 0 || ccPayments.length > 0) && (
+          <div className="card">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><CreditCard size={16} className="text-purple-500" /> Credit Card Charges ({ccCharges.length})</h3>
+            {ccCharges.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No recurring CC charges yet</p> : ccCharges.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
+          </div>
+        )}
+        {ccPayments.length > 0 && (
+          <div className="card">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><CreditCard size={16} className="text-blue-500" /> Credit Card Payments ({ccPayments.length})</h3>
+            {ccPayments.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
+          </div>
+        )}
+      </div>
 
       {inactive.length > 0 && (
         <div className="card opacity-60">
@@ -223,7 +233,7 @@ export default function Recurring() {
               <div>
                 <label className="label">Type</label>
                 <div className="flex rounded-lg bg-gray-100 p-1">
-                  {[["income", "Income"], ["expense", "Expense"], ["credit_card_payment", "CC Payment"]].map(([val, label]) => (
+                  {([["income", "Income"], ["expense", "Expense"], ...(editItem?.type === "credit_card_payment" ? [["credit_card_payment", "CC Payment"]] : [])] as [string, string][]).map(([val, label]) => (
                     <button key={val} type="button" onClick={() => setForm({ ...form, type: val })}
                       className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${form.type === val ? "bg-white shadow-sm text-gray-900" : "text-gray-500"}`}>
                       {label}
@@ -236,6 +246,15 @@ export default function Recurring() {
                   <label className="label">Credit Card</label>
                   <select className="input" value={form.card_id} onChange={e => setForm({ ...form, card_id: e.target.value })} required>
                     <option value="">Select card…</option>
+                    {activeCards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
+              {form.type === "expense" && activeCards.length > 0 && (
+                <div>
+                  <label className="label">Charge to Credit Card <span className="text-gray-400 font-normal">(optional — leave blank for checking)</span></label>
+                  <select className="input" value={form.card_id} onChange={e => setForm({ ...form, card_id: e.target.value })}>
+                    <option value="">Checking / No card</option>
                     {activeCards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 </div>
@@ -262,7 +281,7 @@ export default function Recurring() {
               <div><label className="label">Name</label><input className="input" placeholder="Electric Company" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
               <div><label className="label">Amount</label><input type="number" step="0.01" className="input" placeholder="180.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></div>
               <div>
-                <label className="label">{form.type === "credit_card_payment" ? "Pay From Account" : "Account"}</label>
+                <label className="label">{form.type === "income" ? "Account" : "Pay From Account"}</label>
                 <select className="input" value={form.account_id} onChange={e => setForm({ ...form, account_id: e.target.value })} required>
                   <option value="">Select…</option>
                   {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}

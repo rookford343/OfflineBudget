@@ -52,6 +52,8 @@ export const forecastApi = {
     api.post("/forecast/quarters-scenario", { account_id: accountId, year, overrides }).then((r) => r.data),
   multiYear: (accountId: number, startYear: number, years: number) =>
     api.get("/forecast/multi-year", { params: { account_id: accountId, start_year: startYear, years } }).then((r) => r.data),
+  monthlySummary: (accountId: number, year: number, month: number) =>
+    api.get("/forecast/monthly-summary", { params: { account_id: accountId, year, month } }).then((r) => r.data),
 };
 
 // ── Transactions ──────────────────────────────────────────────────────────────
@@ -184,12 +186,14 @@ export const scenariosApi = {
     api.delete(`/scenarios/${scenarioId}/overrides/${overrideId}`),
 };
 
-// ── Quarterly Checkpoints ─────────────────────────────────────────────────────
-export const checkpointsApi = {
+// ── Day Checkpoints ───────────────────────────────────────────────────────────
+export const dayCheckpointsApi = {
   list: (accountId: number) =>
-    api.get("/checkpoints", { params: { account_id: accountId } }).then((r) => r.data),
-  upsert: (year: number, quarter: number, accountId: number, actual_balance: number) =>
-    api.put(`/checkpoints/${year}/${quarter}`, { account_id: accountId, year, quarter, actual_balance }).then((r) => r.data),
+    api.get("/forecast/day-checkpoints", { params: { account_id: accountId } }).then((r) => r.data),
+  upsert: (date: string, accountId: number, actualBalance: number, note?: string) =>
+    api.put(`/forecast/day-checkpoints/${date}`, { account_id: accountId, actual_balance: actualBalance, note: note ?? null }).then((r) => r.data),
+  remove: (date: string, accountId: number) =>
+    api.delete(`/forecast/day-checkpoints/${date}`, { params: { account_id: accountId } }),
 };
 
 // ── Transaction Rules ─────────────────────────────────────────────────────────

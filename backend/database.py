@@ -92,6 +92,27 @@ def upgrade_schema():
         "ALTER TABLE users ADD COLUMN itemized_salt NUMERIC(14,2)",
         "ALTER TABLE users ADD COLUMN itemized_property_tax NUMERIC(14,2)",
         "ALTER TABLE users ADD COLUMN itemized_other NUMERIC(14,2)",
+        """CREATE TABLE IF NOT EXISTS forecast_day_checkpoints (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            account_id INTEGER NOT NULL REFERENCES accounts(id),
+            date DATE NOT NULL,
+            actual_balance NUMERIC(14,2) NOT NULL,
+            note TEXT,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, account_id, date)
+        )""",
+        """CREATE TABLE IF NOT EXISTS monthly_forecast_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            account_id INTEGER NOT NULL REFERENCES accounts(id),
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            forecasted_open NUMERIC(14,2) NOT NULL,
+            forecasted_close NUMERIC(14,2) NOT NULL,
+            snapshot_taken_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, account_id, year, month)
+        )""",
     ]
     with engine.connect() as conn:
         for s in stmts:
