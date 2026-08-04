@@ -7,6 +7,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle, CreditCard, Pencil, ShieldCheck } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import MonthlyAccuracyRow from "../components/MonthlyAccuracyRow";
+import { RiskBanner } from "../components/RiskBanner";
 
 function isDarkMode(): boolean {
   return document.documentElement.classList.contains("dark");
@@ -90,6 +91,12 @@ export default function Forecast() {
   const { data: dayCheckpoints = [] } = useQuery<any[]>({
     queryKey: ["day-checkpoints", activeAccountId],
     queryFn: () => dayCheckpointsApi.list(activeAccountId!),
+    enabled: !!activeAccountId,
+  });
+
+  const { data: risk } = useQuery({
+    queryKey: ["forecast-risk", activeAccountId],
+    queryFn: () => forecastApi.risk(activeAccountId),
     enabled: !!activeAccountId,
   });
 
@@ -412,6 +419,8 @@ export default function Forecast() {
           </div>
         </div>
       )}
+
+      {activeAccountId && <RiskBanner risk={risk} />}
 
       {!isLoading && chartData.length > 0 && (
         <div className="card">
