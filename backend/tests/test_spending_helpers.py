@@ -45,7 +45,7 @@ def test_merchant_totals_respects_limit(db_session):
     assert len(result) == 2
 
 
-def test_category_totals_for_range_groups_checking_and_card_spend(db_session):
+def test_category_totals_for_range_groups_checking_spend(db_session):
     user, account = _make_user_account(db_session)
     groceries = models.Category(user_id=user.id, name="Groceries", type=models.CategoryType.expense)
     db_session.add(groceries)
@@ -68,6 +68,48 @@ def test_category_totals_for_range_excludes_savings(db_session):
     db_session.add(models.Transaction(
         user_id=user.id, account_id=account.id, date=date(2026, 8, 1),
         amount=Decimal("-200.00"), description="Transfer", category_id=savings_cat.id,
+    ))
+    db_session.commit()
+
+    totals = category_totals_for_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7))
+    assert savings_cat.id not in totals
+
+
+def _make_card(db, user):
+    card = models.CreditCard(
+        user_id=user.id, name="Visa", credit_limit=Decimal("5000.00"),
+        statement_day=15, due_day=1,
+    )
+    db.add(card)
+    db.flush()
+    return card
+
+
+def test_category_totals_for_range_groups_card_spend(db_session):
+    user, account = _make_user_account(db_session)
+    card = _make_card(db_session, user)
+    groceries = models.Category(user_id=user.id, name="Groceries", type=models.CategoryType.expense)
+    db_session.add(groceries)
+    db_session.flush()
+    db_session.add(models.CreditCardTransaction(
+        card_id=card.id, user_id=user.id, category_id=groceries.id,
+        date=date(2026, 8, 3), amount=Decimal("75.00"), merchant="Kroger",
+    ))
+    db_session.commit()
+
+    totals = category_totals_for_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7))
+    assert totals[groceries.id] == Decimal("75.00")
+
+
+def test_category_totals_for_range_excludes_savings_for_card(db_session):
+    user, account = _make_user_account(db_session)
+    card = _make_card(db_session, user)
+    savings_cat = models.Category(user_id=user.id, name="Emergency Fund", type=models.CategoryType.savings)
+    db_session.add(savings_cat)
+    db_session.flush()
+    db_session.add(models.CreditCardTransaction(
+        card_id=card.id, user_id=user.id, category_id=savings_cat.id,
+        date=date(2026, 8, 3), amount=Decimal("150.00"), merchant="Transfer",
     ))
     db_session.commit()
 
