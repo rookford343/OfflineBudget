@@ -823,6 +823,21 @@ class MerchantSpendingEntry(BaseModel):
     count: int
 
 
+class WeeklyDigestCategory(BaseModel):
+    category_id: int
+    category_name: str
+    total: Decimal
+
+
+class WeeklyDigest(BaseModel):
+    week_start: date
+    week_end: date
+    total_spent: Decimal
+    categories: list[WeeklyDigestCategory]
+    top_merchants: list[MerchantSpendingEntry]
+    risk: ForecastRisk
+
+
 # ── Reconciliation ────────────────────────────────────────────────────────────
 
 class ReconcileMatchedItem(BaseModel):
