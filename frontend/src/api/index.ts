@@ -143,6 +143,8 @@ export const analyticsApi = {
   rollingMonthly: (months?: number) => api.get("/spending/rolling-monthly", { params: { months } }).then((r) => r.data),
   monthlySummary: (year: number, month: number) =>
     api.get(`/spending/summary/${year}/${month}`).then((r) => r.data),
+  weeklyDigest: (accountId: number) =>
+    api.get("/spending/weekly-digest", { params: { account_id: accountId } }).then((r) => r.data),
 };
 
 // ── Savings Goals ─────────────────────────────────────────────────────────────
