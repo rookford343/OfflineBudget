@@ -88,6 +88,7 @@ def _digest_html(user: "models.User", digest) -> tuple[str, str]:
 <html><body style='font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#1f2937'>
 <h2 style='color:#4f46e5;margin-bottom:4px'>OfflineBudget Weekly Digest</h2>
 <p style='color:#6b7280;margin-top:0'>{digest.week_start.strftime("%B %-d")} – {digest.week_end.strftime("%B %-d, %Y")}</p>
+<p style='color:#6b7280;margin-top:0'>For {user.display_name}</p>
 
 <p>Total spent this week: <b>{fmt(digest.total_spent)}</b></p>
 
@@ -106,6 +107,7 @@ def _digest_html(user: "models.User", digest) -> tuple[str, str]:
     merchant_text = "\n".join(f"  {m.name}: {fmt(m.total)}" for m in digest.top_merchants[:10]) or "  No merchant activity this week"
 
     text = f"""OfflineBudget Weekly Digest — {digest.week_start.strftime("%B %-d")} to {digest.week_end.strftime("%B %-d, %Y")}
+For {user.display_name}
 
 Total spent this week: {fmt(digest.total_spent)}
 
@@ -130,7 +132,13 @@ def _send_weekly_digest() -> None:
 
     db = SessionLocal()
     try:
-        users = db.query(models.User).filter(models.User.is_active == True).all()
+        users = db.query(models.User).filter(models.User.is_active == True).order_by(models.User.id).all()
+        if len(users) > 1:
+            logger.warning(
+                "Weekly digest: multiple active users found (%d), sending only for %s",
+                len(users), users[0].username,
+            )
+            users = users[:1]
         for user in users:
             account = db.query(models.Account).filter(
                 models.Account.user_id == user.id,
