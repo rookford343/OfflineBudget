@@ -63,3 +63,47 @@ def merchant_totals(
 
     sorted_entries = sorted(totals.items(), key=lambda x: x[1], reverse=True)[:limit]
     return [(name, total, counts[name]) for name, total in sorted_entries]
+
+
+def category_totals_for_range(db: Session, user_id: int, start: date, end: date) -> dict[int, Decimal]:
+    """Sum of expense spending per category_id across checking + credit-card
+    transactions in [start, end]. Savings-type categories are excluded, matching
+    the rest of the app's spending totals.
+    """
+    totals: dict[int, Decimal] = {}
+
+    checking_q = (
+        db.query(models.Transaction)
+        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
+        .filter(
+            models.Transaction.user_id == user_id,
+            models.Transaction.is_actual == True,
+            models.Transaction.date >= start,
+            models.Transaction.date <= end,
+            models.Transaction.amount < 0,
+            models.Transaction.category_id.isnot(None),
+            NOT_SAVINGS,
+        )
+    )
+    for t in checking_q.all():
+        totals[t.category_id] = totals.get(t.category_id, Decimal("0")) + abs(t.amount)
+
+    card_q = (
+        db.query(models.CreditCardTransaction)
+        .outerjoin(models.Category, models.CreditCardTransaction.category_id == models.Category.id)
+        .filter(
+            models.CreditCardTransaction.user_id == user_id,
+            models.CreditCardTransaction.date >= start,
+            models.CreditCardTransaction.date <= end,
+            models.CreditCardTransaction.amount > 0,
+            models.CreditCardTransaction.category_id.isnot(None),
+            or_(
+                models.CreditCardTransaction.category_id.is_(None),
+                models.Category.type != models.CategoryType.savings,
+            ),
+        )
+    )
+    for t in card_q.all():
+        totals[t.category_id] = totals.get(t.category_id, Decimal("0")) + t.amount
+
+    return totals
