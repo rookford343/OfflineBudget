@@ -289,6 +289,13 @@ class ForecastEntry(BaseModel):
     transactions: list[ForecastTransaction]
 
 
+class ForecastRisk(BaseModel):
+    at_risk: bool
+    date: Optional[date]
+    amount: Optional[Decimal]
+    threshold: Decimal
+
+
 class QuarterSummary(BaseModel):
     quarter: int
     year: int
