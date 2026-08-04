@@ -462,6 +462,9 @@ export default function Forecast() {
                 <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
                 <Tooltip content={<CustomTooltip />} />
                 <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
+                {lowBalanceThreshold != null && lowBalanceThreshold > 0 && (
+                  <ReferenceLine y={lowBalanceThreshold} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "Low balance threshold", fontSize: 10, fill: "#f59e0b" }} />
+                )}
                 <Area type="monotone" dataKey="actual" name="Actual" stroke="#6366f1" strokeWidth={2} fill="url(#forecastActualGradient)" dot={false} connectNulls={false} animationDuration={600} />
                 <Area type="monotone" dataKey="projected" name="Projected" stroke="#6366f1" strokeWidth={2} strokeDasharray="5 3" fill="url(#forecastProjectedGradient)" dot={false} connectNulls={false} animationDuration={600} />
                 {hasScenario && (
