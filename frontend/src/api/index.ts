@@ -54,6 +54,8 @@ export const forecastApi = {
     api.get("/forecast/multi-year", { params: { account_id: accountId, start_year: startYear, years } }).then((r) => r.data),
   monthlySummary: (accountId: number, year: number, month: number) =>
     api.get("/forecast/monthly-summary", { params: { account_id: accountId, year, month } }).then((r) => r.data),
+  risk: (accountId: number, days?: number) =>
+    api.get("/forecast/risk", { params: { account_id: accountId, days } }).then((r) => r.data),
 };
 
 // ── Transactions ──────────────────────────────────────────────────────────────
