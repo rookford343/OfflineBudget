@@ -248,7 +248,7 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
     forward-looking negative-balance risk for the given checking account.
     """
     today = date.today()
-    week_start = today - timedelta(days=7)
+    week_start = today - timedelta(days=6)
     week_end = today
 
     cat_totals = category_totals_for_range(db, user.id, week_start, week_end)
