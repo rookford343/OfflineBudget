@@ -7,6 +7,7 @@ import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, Hel
 import HelpPanel from "../components/HelpPanel";
 import { TrendBadge } from "../components/TrendBadge";
 import { SparkLine } from "../components/SparkLine";
+import { RiskBanner } from "../components/RiskBanner";
 
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
 
@@ -26,6 +27,7 @@ export default function Dashboard() {
   const summaryYear = now.getDate() > 3 ? now.getFullYear() : (now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear());
 
   const { data: accounts = [] } = useQuery<any[]>({ queryKey: ["accounts"], queryFn: accountsApi.list });
+  const checkingAccounts = accounts.filter((a) => a.type === "checking");
   const { data: cards = [] } = useQuery<any[]>({ queryKey: ["credit-cards"], queryFn: cardsApi.list });
   const { data: recurring = [] } = useQuery<any[]>({ queryKey: ["recurring"], queryFn: () => recurringApi.list(true) });
   const { data: ats } = useQuery<any>({ queryKey: ["available-to-spend"], queryFn: analyticsApi.availableToSpend });
@@ -37,8 +39,13 @@ export default function Dashboard() {
     queryKey: ["rolling-monthly-6"],
     queryFn: () => analyticsApi.rollingMonthly(6),
   });
+  const primaryChecking = checkingAccounts[0];
+  const { data: weeklyDigest } = useQuery<any>({
+    queryKey: ["weekly-digest", primaryChecking?.id],
+    queryFn: () => analyticsApi.weeklyDigest(primaryChecking.id),
+    enabled: !!primaryChecking,
+  });
 
-  const checkingAccounts = accounts.filter((a) => a.type === "checking");
   const totalChecking = checkingAccounts.reduce((s: number, a: any) => s + parseFloat(a.current_balance), 0);
   const anyBelowThreshold = checkingAccounts.some((a: any) =>
     a.low_balance_threshold != null && parseFloat(a.current_balance) < parseFloat(a.low_balance_threshold)
@@ -120,6 +127,47 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {weeklyDigest && (
+        <div className="card">
+          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">
+            Weekly Digest — {new Date(weeklyDigest.week_start + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+            {" – "}
+            {new Date(weeklyDigest.week_end + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+          </h3>
+          <p className="text-sm text-gray-500 mb-3">Total spent: <span className="font-semibold text-gray-900 dark:text-gray-100">{fmt(parseFloat(weeklyDigest.total_spent))}</span></p>
+
+          {weeklyDigest.categories.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">By Category</p>
+              <div className="space-y-1 text-sm">
+                {weeklyDigest.categories.slice(0, 5).map((c: any) => (
+                  <div key={c.category_id} className="flex justify-between text-gray-600 dark:text-gray-400">
+                    <span>{c.category_name}</span>
+                    <span className="tabular-nums">{fmt(parseFloat(c.total))}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {weeklyDigest.top_merchants.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Top Merchants</p>
+              <div className="space-y-1 text-sm">
+                {weeklyDigest.top_merchants.slice(0, 5).map((m: any) => (
+                  <div key={m.name} className="flex justify-between text-gray-600 dark:text-gray-400">
+                    <span>{m.name}</span>
+                    <span className="tabular-nums">{fmt(parseFloat(m.total))}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
 
       {/* Month in Review */}
       {summary && (
