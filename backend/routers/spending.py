@@ -9,6 +9,7 @@ from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.spending_helpers import NOT_SAVINGS, merchant_totals
+from backend.services.summary_generator import generate_weekly_digest
 
 router = APIRouter(prefix="/spending", tags=["spending"])
 
@@ -584,6 +585,15 @@ def spending_by_merchant(
 ):
     ranked = merchant_totals(db, user.id, start, end, account_id=account_id, card_id=card_id, limit=limit)
     return [schemas.MerchantSpendingEntry(name=name, total=total, count=count) for name, total, count in ranked]
+
+
+@router.get("/weekly-digest", response_model=schemas.WeeklyDigest)
+def get_weekly_digest(
+    account_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    return generate_weekly_digest(db, user, account_id)
 
 
 # ── Tax Summary ───────────────────────────────────────────────────────────────
