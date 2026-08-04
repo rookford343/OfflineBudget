@@ -427,6 +427,22 @@ def build_forecast(
     return entries
 
 
+def find_balance_risk(entries: list[ForecastEntry], threshold: Decimal) -> dict:
+    """Scan forecast entries in order and return the first day the balance drops
+    below threshold. entries must already be sorted by date ascending (build_forecast
+    returns them in that order).
+    """
+    for entry in entries:
+        if entry.projected_balance < threshold:
+            return {
+                "at_risk": True,
+                "date": entry.date,
+                "amount": entry.projected_balance,
+                "threshold": threshold,
+            }
+    return {"at_risk": False, "date": None, "amount": None, "threshold": threshold}
+
+
 def build_quarters(
     db: Session,
     user_id: int,

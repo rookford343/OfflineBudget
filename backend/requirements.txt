@@ -14,6 +14,7 @@ aiosqlite>=0.20.0
 typer>=0.12.0
 rich>=13.0.0
 apscheduler>=3.10.0
+pytest>=8.0.0
 ofxparse>=0.21
 plaid-python>=28.0
 cryptography>=42.0
