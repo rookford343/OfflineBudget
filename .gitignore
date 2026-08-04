@@ -54,3 +54,6 @@ logs/
 # Secret files
 secrets/
 data/transaction_files/*
+
+# Worktrees (isolated SDD workspaces)
+.worktrees/
