@@ -3,18 +3,14 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, cast, String, or_
+from sqlalchemy import func, cast, String
 from sqlalchemy.orm import Session, joinedload
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
+from backend.services.spending_helpers import NOT_SAVINGS, merchant_totals
 
 router = APIRouter(prefix="/spending", tags=["spending"])
-
-_NOT_SAVINGS = or_(
-    models.Transaction.category_id.is_(None),
-    models.Category.type != models.CategoryType.savings,
-)
 
 
 @router.get("/monthly", response_model=list[schemas.MonthlySpendingEntry])
@@ -38,7 +34,7 @@ def spending_monthly(
             models.Transaction.date >= start,
             models.Transaction.date <= end,
             models.Transaction.amount < 0,
-            _NOT_SAVINGS,
+            NOT_SAVINGS,
         )
     )
     if account_id:
@@ -104,7 +100,7 @@ def spending_monthly_by_category(
             models.Transaction.date >= start,
             models.Transaction.date <= end,
             models.Transaction.amount < 0,
-            _NOT_SAVINGS,
+            NOT_SAVINGS,
         )
     )
     if account_id:
@@ -188,7 +184,7 @@ def spending_by_category(
             models.Transaction.is_actual == True,
             models.Transaction.date >= start,
             models.Transaction.date <= end,
-            _NOT_SAVINGS,
+            NOT_SAVINGS,
         )
     )
     if account_id:
@@ -391,7 +387,7 @@ def available_to_spend(
             models.Transaction.date >= first,
             models.Transaction.date <= last,
             models.Transaction.amount < 0,
-            _NOT_SAVINGS,
+            NOT_SAVINGS,
         )
     ).all()
     spent_this_month = sum((abs(t.amount) for t in txns), Decimal("0"))
@@ -423,7 +419,7 @@ def spending_yearly_trends(
                 models.Transaction.date >= date(year, 1, 1),
                 models.Transaction.date <= date(year, 12, 31),
                 models.Transaction.amount < 0,
-                _NOT_SAVINGS,
+                NOT_SAVINGS,
             )
         ).all()
         for t in txns:
@@ -465,7 +461,7 @@ def spending_rolling_monthly(
             models.Transaction.date >= start,
             models.Transaction.date <= today,
             models.Transaction.amount < 0,
-            _NOT_SAVINGS,
+            NOT_SAVINGS,
         )
     ).all()
     for t in txns:
@@ -586,46 +582,8 @@ def spending_by_merchant(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    totals: dict[str, Decimal] = {}
-    counts: dict[str, int] = {}
-
-    checking_q = (
-        db.query(models.Transaction)
-        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
-        .filter(
-            models.Transaction.user_id == user.id,
-            models.Transaction.is_actual == True,
-            models.Transaction.date >= start,
-            models.Transaction.date <= end,
-            models.Transaction.amount < 0,
-            _NOT_SAVINGS,
-        )
-    )
-    if account_id:
-        checking_q = checking_q.filter(models.Transaction.account_id == account_id)
-    for t in checking_q.all():
-        key = t.description or "Unknown"
-        totals[key] = totals.get(key, Decimal("0")) + abs(t.amount)
-        counts[key] = counts.get(key, 0) + 1
-
-    card_q = db.query(models.CreditCardTransaction).filter(
-        models.CreditCardTransaction.user_id == user.id,
-        models.CreditCardTransaction.date >= start,
-        models.CreditCardTransaction.date <= end,
-        models.CreditCardTransaction.amount > 0,
-    )
-    if card_id:
-        card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
-    for t in card_q.all():
-        key = t.merchant or "Unknown"
-        totals[key] = totals.get(key, Decimal("0")) + t.amount
-        counts[key] = counts.get(key, 0) + 1
-
-    sorted_entries = sorted(totals.items(), key=lambda x: x[1], reverse=True)[:limit]
-    return [
-        schemas.MerchantSpendingEntry(name=name, total=total, count=counts[name])
-        for name, total in sorted_entries
-    ]
+    ranked = merchant_totals(db, user.id, start, end, account_id=account_id, card_id=card_id, limit=limit)
+    return [schemas.MerchantSpendingEntry(name=name, total=total, count=count) for name, total, count in ranked]
 
 
 # ── Tax Summary ───────────────────────────────────────────────────────────────
