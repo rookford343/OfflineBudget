@@ -255,7 +255,11 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
     cat_map = {c.id: c.name for c in db.query(models.Category).filter(models.Category.user_id == user.id).all()}
     categories = sorted(
         [
-            WeeklyDigestCategory(category_id=cid, category_name=cat_map.get(cid, "Unknown"), total=total)
+            WeeklyDigestCategory(
+                category_id=cid if cid is not None else 0,
+                category_name=cat_map.get(cid, "Unknown") if cid is not None else "Uncategorized",
+                total=total,
+            )
             for cid, total in cat_totals.items()
         ],
         key=lambda c: c.total,

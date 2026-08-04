@@ -65,12 +65,14 @@ def merchant_totals(
     return [(name, total, counts[name]) for name, total in sorted_entries]
 
 
-def category_totals_for_range(db: Session, user_id: int, start: date, end: date) -> dict[int, Decimal]:
+def category_totals_for_range(db: Session, user_id: int, start: date, end: date) -> dict[int | None, Decimal]:
     """Sum of expense spending per category_id across checking + credit-card
     transactions in [start, end]. Savings-type categories are excluded, matching
-    the rest of the app's spending totals.
+    the rest of the app's spending totals. Transactions with no category_id are
+    grouped under the `None` key so callers can surface an "Uncategorized"
+    bucket instead of silently dropping that spend.
     """
-    totals: dict[int, Decimal] = {}
+    totals: dict[int | None, Decimal] = {}
 
     checking_q = (
         db.query(models.Transaction)
@@ -81,7 +83,6 @@ def category_totals_for_range(db: Session, user_id: int, start: date, end: date)
             models.Transaction.date >= start,
             models.Transaction.date <= end,
             models.Transaction.amount < 0,
-            models.Transaction.category_id.isnot(None),
             NOT_SAVINGS,
         )
     )
@@ -96,7 +97,6 @@ def category_totals_for_range(db: Session, user_id: int, start: date, end: date)
             models.CreditCardTransaction.date >= start,
             models.CreditCardTransaction.date <= end,
             models.CreditCardTransaction.amount > 0,
-            models.CreditCardTransaction.category_id.isnot(None),
             or_(
                 models.CreditCardTransaction.category_id.is_(None),
                 models.Category.type != models.CategoryType.savings,

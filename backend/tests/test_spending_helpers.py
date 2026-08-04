@@ -75,6 +75,23 @@ def test_category_totals_for_range_excludes_savings(db_session):
     assert savings_cat.id not in totals
 
 
+def test_category_totals_for_range_buckets_uncategorized_under_none(db_session):
+    user, account = _make_user_account(db_session)
+    groceries = models.Category(user_id=user.id, name="Groceries", type=models.CategoryType.expense)
+    db_session.add(groceries)
+    db_session.flush()
+    db_session.add_all([
+        models.Transaction(user_id=user.id, account_id=account.id, date=date(2026, 8, 1), amount=Decimal("-60.00"), description="Kroger", category_id=groceries.id),
+        models.Transaction(user_id=user.id, account_id=account.id, date=date(2026, 8, 2), amount=Decimal("-25.00"), description="Uncategorized Charge", category_id=None),
+    ])
+    db_session.commit()
+
+    totals = category_totals_for_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7))
+    assert totals[groceries.id] == Decimal("60.00")
+    assert totals[None] == Decimal("25.00")
+    assert sum(totals.values(), Decimal("0")) == Decimal("85.00")
+
+
 def _make_card(db, user):
     card = models.CreditCard(
         user_id=user.id, name="Visa", credit_limit=Decimal("5000.00"),
@@ -132,3 +149,28 @@ def test_generate_weekly_digest_smoke(db_session):
     assert digest.total_spent == Decimal("42.00")
     assert digest.categories[0].category_name == "Groceries"
     assert digest.risk.at_risk is False
+
+
+def test_generate_weekly_digest_reconciles_uncategorized_spend(db_session):
+    user, account = _make_user_account(db_session)
+    groceries = models.Category(user_id=user.id, name="Groceries", type=models.CategoryType.expense)
+    db_session.add(groceries)
+    db_session.flush()
+    db_session.add_all([
+        models.Transaction(
+            user_id=user.id, account_id=account.id, date=date.today() - timedelta(days=1),
+            amount=Decimal("-42.00"), description="Kroger", category_id=groceries.id,
+        ),
+        models.Transaction(
+            user_id=user.id, account_id=account.id, date=date.today() - timedelta(days=1),
+            amount=Decimal("-500.00"), description="Big Uncategorized Charge", category_id=None,
+        ),
+    ])
+    db_session.commit()
+
+    digest = generate_weekly_digest(db_session, user, account.id)
+    # total_spent must reconcile with the sum of all category buckets, including Uncategorized.
+    assert digest.total_spent == Decimal("542.00")
+    uncategorized = next(c for c in digest.categories if c.category_name == "Uncategorized")
+    assert uncategorized.total == Decimal("500.00")
+    assert uncategorized.category_id == 0
