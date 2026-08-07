@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
@@ -92,14 +92,23 @@ def send_test_email(
 
 
 @router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
-def forgot_password(body: schemas.ForgotPasswordRequest, db: Session = Depends(get_db)):
-    """Always returns 204, whether or not the account/email/SMTP exist —
-    prevents username and email-configuration enumeration."""
+def forgot_password(
+    body: schemas.ForgotPasswordRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Always returns 204, whether or not the account/email/SMTP exist or
+    the rate limit was hit — prevents enumeration and abuse signals alike.
+    The email send is deferred to a background task so a slow/blackholed
+    SMTP host can't hold the request (and a threadpool worker) open."""
+    if not rate_limit_allow(f"forgot:{body.username}", limit=5, window_seconds=3600):
+        return
     user = db.query(models.User).filter(models.User.username == body.username).first()
     if user and user.email and settings.SMTP_HOST:
         raw_token = create_reset_token(db, user)
         link = f"{settings.frontend_url}/reset-password?token={raw_token}"
-        send_email(
+        background_tasks.add_task(
+            send_email,
             user.email,
             "OfflineBudget — Reset Your Password",
             f"<p>Click below to reset your password. This link expires in 15 minutes.</p>"
@@ -123,10 +132,8 @@ def reset_password_with_code(body: schemas.ResetPasswordWithCodeRequest, db: Ses
     if len(body.new_password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     user = db.query(models.User).filter(models.User.username == body.username).first()
-    if not user or not verify_and_consume_recovery_code(db, user, body.code):
+    if not user or not verify_and_consume_recovery_code(db, user, body.code, body.new_password):
         raise HTTPException(status_code=400, detail="Invalid recovery code")
-    user.hashed_password = hash_password(body.new_password)
-    db.commit()
 
 
 @router.post("/me/recovery-code", response_model=schemas.RecoveryCodeOut)

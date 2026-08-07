@@ -19,7 +19,7 @@ def send_email(to: str, subject: str, html_body: str, text_body: str = "") -> No
         if text_body:
             msg.attach(MIMEText(text_body, "plain"))
         msg.attach(MIMEText(html_body, "html"))
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as smtp:
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=10) as smtp:
             smtp.ehlo()
             smtp.starttls()
             if settings.SMTP_USER and settings.SMTP_PASS:

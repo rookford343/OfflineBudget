@@ -14,6 +14,22 @@ _SKIP_PATHS = {"/health", "/docs", "/redoc", "/openapi.json"}
 # Only log mutating methods (skip GET, HEAD, OPTIONS)
 _LOG_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
+# Auth paths whose request bodies can carry a raw credential (password,
+# reset token, recovery code). The audit entry itself (method, path, status,
+# duration, user) is still recorded — only body_summary is withheld, so
+# these secrets can never end up persisted to audit_logs in plaintext, even
+# if the body-capture bug above gets "fixed" later.
+_SKIP_BODY_PATHS = {
+    "/auth/register",
+    "/auth/login",
+    "/auth/me",
+    "/auth/me/password",
+    "/auth/forgot-password",
+    "/auth/reset-password",
+    "/auth/reset-password-with-code",
+    "/auth/me/recovery-code",
+}
+
 
 class AuditMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -42,15 +58,17 @@ class AuditMiddleware(BaseHTTPMiddleware):
                     except (ValueError, TypeError):
                         user_id = None
 
-        # Capture request body summary for mutation methods
+        # Capture request body summary for mutation methods — never for
+        # paths that may carry credentials (see _SKIP_BODY_PATHS above)
         body_summary = None
-        try:
-            body_bytes = await request.body()
-            if body_bytes:
-                text = body_bytes.decode("utf-8", errors="replace")
-                body_summary = text[:200] if len(text) > 200 else text
-        except Exception:
-            pass
+        if request.url.path not in _SKIP_BODY_PATHS:
+            try:
+                body_bytes = await request.body()
+                if body_bytes:
+                    text = body_bytes.decode("utf-8", errors="replace")
+                    body_summary = text[:200] if len(text) > 200 else text
+            except Exception:
+                pass
 
         try:
             db = SessionLocal()
