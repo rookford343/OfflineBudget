@@ -93,6 +93,8 @@ class User(Base):
 
     linked_to_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
     email: Mapped[str | None] = mapped_column(String(256))
+    recovery_code_hash: Mapped[str | None] = mapped_column(String(256))
+    recovery_code_created_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     # Tax profile
     tax_filing_status: Mapped[str | None] = mapped_column(String(32))   # single | married_jointly | married_separately | head_of_household
@@ -473,6 +475,21 @@ class TransactionRule(Base):
 
     user: Mapped[User] = relationship()
     category: Mapped[Category | None] = relationship()
+
+
+# ── Password Reset ───────────────────────────────────────────────────────────
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(256), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    user: Mapped[User] = relationship()
 
 
 # ── Audit Log ─────────────────────────────────────────────────────────────────

@@ -92,6 +92,8 @@ def upgrade_schema():
         "ALTER TABLE users ADD COLUMN itemized_salt NUMERIC(14,2)",
         "ALTER TABLE users ADD COLUMN itemized_property_tax NUMERIC(14,2)",
         "ALTER TABLE users ADD COLUMN itemized_other NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN recovery_code_hash TEXT",
+        "ALTER TABLE users ADD COLUMN recovery_code_created_at DATETIME",
         """CREATE TABLE IF NOT EXISTS forecast_day_checkpoints (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER NOT NULL REFERENCES users(id),
