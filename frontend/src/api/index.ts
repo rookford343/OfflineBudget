@@ -14,6 +14,12 @@ export const authApi = {
     api.patch("/auth/me/password", data),
   deleteAccount: (data: { password: string }) => api.delete("/auth/me", { data }),
   sendTestEmail: () => api.post("/auth/me/send-test-email"),
+  forgotPassword: (username: string) =>
+    api.post("/auth/forgot-password", { username }),
+  resetPassword: (token: string, new_password: string) =>
+    api.post("/auth/reset-password", { token, new_password }),
+  resetPasswordWithCode: (username: string, code: string, new_password: string) =>
+    api.post("/auth/reset-password-with-code", { username, code, new_password }),
 };
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
