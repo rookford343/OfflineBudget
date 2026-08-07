@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { authApi } from "../api";
 import { saveAuth } from "../store/auth";
 import { DollarSign } from "lucide-react";
@@ -94,6 +94,13 @@ export default function Login() {
                 required
               />
             </div>
+            {mode === "login" && (
+              <div className="text-right -mt-2">
+                <Link to="/forgot-password" className="text-xs text-indigo-600 hover:underline">
+                  Forgot password?
+                </Link>
+              </div>
+            )}
             {error && (
               <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
             )}
