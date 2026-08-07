@@ -114,9 +114,18 @@ export default function Settings() {
   const [profileEmail, setProfileEmail] = useState("");
   const [testEmailStatus, setTestEmailStatus] = useState<"idle" | "sending" | "ok" | "err">("idle");
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const [recoveryCodeStatus, setRecoveryCodeStatus] = useState<"idle" | "generating" | "ok" | "err">("idle");
+  const [recoveryCodeCopied, setRecoveryCodeCopied] = useState(false);
+  const [recoveryCodeCopyError, setRecoveryCodeCopyError] = useState(false);
   const generateRecoveryCodeMut = useMutation({
     mutationFn: authApi.generateRecoveryCode,
-    onSuccess: (data) => { setRecoveryCode(data.code); qc.invalidateQueries({ queryKey: ["me"] }); },
+    onMutate: () => setRecoveryCodeStatus("generating"),
+    onSuccess: (data) => {
+      setRecoveryCode(data.code);
+      setRecoveryCodeStatus("ok");
+      qc.invalidateQueries({ queryKey: ["me"] });
+    },
+    onError: () => { setRecoveryCodeStatus("err"); setTimeout(() => setRecoveryCodeStatus("idle"), 3000); },
   });
   // ── Tax profile state ─────────────────────────────────────────────────────
   const [taxFilingStatus, setTaxFilingStatus] = useState("single");
@@ -696,8 +705,11 @@ export default function Settings() {
             onClick={() => generateRecoveryCodeMut.mutate()}
             disabled={generateRecoveryCodeMut.isPending}
           >
-            {generateRecoveryCodeMut.isPending ? "Generating…" : "Generate Recovery Code"}
+            {recoveryCodeStatus === "generating" ? "Generating…" : "Generate Recovery Code"}
           </button>
+          {recoveryCodeStatus === "err" && (
+            <span className="ml-2 text-sm text-red-600">Failed to generate a recovery code. Try again.</span>
+          )}
         </div>
 
         {recoveryCode && (
@@ -714,16 +726,35 @@ export default function Settings() {
               <button
                 type="button"
                 className="btn-primary w-full"
-                onClick={() => {
-                  navigator.clipboard.writeText(recoveryCode);
+                onClick={async () => {
+                  try {
+                    if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
+                    await navigator.clipboard.writeText(recoveryCode);
+                    setRecoveryCodeCopied(true);
+                    setRecoveryCodeCopyError(false);
+                    setTimeout(() => setRecoveryCodeCopied(false), 2000);
+                  } catch {
+                    setRecoveryCodeCopied(false);
+                    setRecoveryCodeCopyError(true);
+                  }
                 }}
               >
-                Copy to Clipboard
+                {recoveryCodeCopied ? "Copied!" : "Copy to Clipboard"}
               </button>
+              {recoveryCodeCopyError && (
+                <p className="text-sm text-red-600 text-center -mt-2">
+                  Couldn't copy automatically — select the code above and copy it manually.
+                </p>
+              )}
               <button
                 type="button"
                 className="text-sm text-gray-500 w-full text-center"
-                onClick={() => setRecoveryCode(null)}
+                onClick={() => {
+                  setRecoveryCode(null);
+                  setRecoveryCodeCopied(false);
+                  setRecoveryCodeCopyError(false);
+                  setRecoveryCodeStatus("idle");
+                }}
               >
                 I've saved it — close
               </button>
