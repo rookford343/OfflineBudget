@@ -152,6 +152,12 @@ def add_transfer_rule(
     if not from_acc or not to_acc:
         console.print("[red]From/to account not found.[/red]")
         raise typer.Exit(1)
+    if increment <= 0:
+        console.print("[red]increment must be greater than 0.[/red]")
+        raise typer.Exit(1)
+    if not (1 <= check_day <= 28):
+        console.print("[red]check_day must be between 1 and 28.[/red]")
+        raise typer.Exit(1)
     if Decimal(str(target_floor)) <= Decimal(str(action_threshold)):
         console.print("[red]target_floor must be greater than action_threshold.[/red]")
         raise typer.Exit(1)
