@@ -541,6 +541,25 @@ def find_balance_risk(entries: list[ForecastEntry], threshold: Decimal) -> dict:
     return {"at_risk": False, "date": None, "amount": None, "threshold": threshold}
 
 
+def find_transfer_signal(entries: list[ForecastEntry]) -> dict:
+    """Scan forecast entries in order and return the first scheduled buffer
+    transfer (a ForecastTransaction with is_transfer=True and a positive
+    amount, i.e. money arriving). entries must already be sorted by date
+    ascending (build_forecast returns them in that order).
+    """
+    for entry in entries:
+        for txn in entry.transactions:
+            if txn.is_transfer and txn.amount > 0:
+                from_name = txn.name.removeprefix("Transfer from ")
+                return {
+                    "triggered": True,
+                    "date": entry.date,
+                    "amount": txn.amount,
+                    "from_name": from_name,
+                }
+    return {"triggered": False, "date": None, "amount": None, "from_name": None}
+
+
 def build_quarters(
     db: Session,
     user_id: int,
