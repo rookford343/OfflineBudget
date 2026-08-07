@@ -20,6 +20,8 @@ export const authApi = {
     api.post("/auth/reset-password", { token, new_password }),
   resetPasswordWithCode: (username: string, code: string, new_password: string) =>
     api.post("/auth/reset-password-with-code", { username, code, new_password }),
+  generateRecoveryCode: (): Promise<{ code: string; created_at: string }> =>
+    api.post("/auth/me/recovery-code").then((r) => r.data),
 };
 
 // ── Accounts ──────────────────────────────────────────────────────────────────
