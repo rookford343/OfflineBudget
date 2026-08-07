@@ -68,10 +68,14 @@ def test_schedule_injects_rounded_up_transfer_when_shortfall_detected(db_session
     user, savings, checking = _make_user_accounts(db_session)
     rule = _make_rule(db_session, user, savings, checking)
     # Checking starts at $500, one big expense on 7/15 drops it to -$2,625.
+    # start_date is July 1st (not Jan 1st) so the bill doesn't fire in the
+    # Jan-June months that the schedule now dry-runs through internally
+    # (it's anchored at Jan 1 of the queried year regardless of the caller's
+    # start_date -- see _compute_transfer_schedule docstring).
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=checking.id, name="Big Bill", amount=Decimal("3125.00"),
         type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
-        day_of_month=15, start_date=date(2026, 1, 1),
+        day_of_month=15, start_date=date(2026, 7, 1),
     ))
     db_session.commit()
 
@@ -89,16 +93,19 @@ def test_schedule_carries_prior_transfer_credit_into_next_month(db_session):
     # so August's raw low is deeper than July's -- this test exists to prove
     # the credit from July's injected transfer is carried forward correctly
     # rather than each month being evaluated against a reset baseline.
+    # start_date is July 1st (not Jan 1st) for the same reason as above -- so
+    # these items don't fire in the Jan-June months the schedule now
+    # dry-runs through internally regardless of the caller's start_date.
     db_session.add_all([
         models.RecurringItem(
             user_id=user.id, account_id=checking.id, name="Big Bill", amount=Decimal("3125.00"),
             type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
-            day_of_month=15, start_date=date(2026, 1, 1),
+            day_of_month=15, start_date=date(2026, 7, 1),
         ),
         models.RecurringItem(
             user_id=user.id, account_id=checking.id, name="Paycheck", amount=Decimal("3000.00"),
             type=models.RecurringType.income, frequency=models.RecurringFrequency.monthly,
-            day_of_month=20, start_date=date(2026, 1, 1),
+            day_of_month=20, start_date=date(2026, 7, 1),
         ),
     ])
     db_session.commit()
@@ -112,3 +119,42 @@ def test_schedule_carries_prior_transfer_credit_into_next_month(db_session):
     # Credited with July's +$3,000 that's $250 -- already clears both the
     # $100 action threshold and the $200 floor, so no second transfer fires.
     assert date(2026, 8, 1) not in schedule
+
+
+def test_schedule_is_independent_of_caller_window_start(db_session):
+    """Regression guard for the window-dependence bug: /forecast/quarters
+    calls _compute_transfer_schedule (indirectly, via build_forecast) with
+    start_date=Jan 1 of the year, while /forecast/risk calls it with
+    start_date=date.today() -- some arbitrary mid-year day. Both must land on
+    the exact same August transfer amount for the same account/rule, because
+    the schedule is supposed to be a property of the account and rule, not of
+    which window the caller happened to request.
+    """
+    user, savings, checking = _make_user_accounts(db_session)
+    rule = _make_rule(db_session, user, savings, checking)
+    # Monthly bill big enough to force an August transfer, no offsetting
+    # income, starting at the beginning of the year like a real recurring
+    # item would.
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=checking.id, name="Big Bill", amount=Decimal("3125.00"),
+        type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
+        day_of_month=15, start_date=date(2026, 1, 1),
+    ))
+    db_session.commit()
+
+    end_date = date(2026, 8, 31)
+
+    # Full-year window, as build_quarters/build_forecast(Jan 1) would request.
+    full_year_schedule = _compute_transfer_schedule(
+        db_session, user.id, rule, date(2026, 1, 1), end_date
+    )
+    # Mid-August window, as /forecast/risk querying from date.today() would
+    # request on any day of August after the 1st.
+    mid_month_schedule = _compute_transfer_schedule(
+        db_session, user.id, rule, date(2026, 8, 15), end_date
+    )
+
+    august = date(2026, 8, 1)
+    assert august in full_year_schedule
+    assert august in mid_month_schedule
+    assert full_year_schedule[august] == mid_month_schedule[august]
