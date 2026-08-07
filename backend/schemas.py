@@ -300,6 +300,7 @@ class ForecastTransaction(BaseModel):
     is_actual: bool
     is_planned: bool = False
     is_cc_payment: bool = False
+    is_transfer: bool = False
     recurring_item_id: Optional[int] = None
     transaction_id: Optional[int] = None
 
@@ -315,6 +316,39 @@ class ForecastRisk(BaseModel):
     date: Optional[date]
     amount: Optional[Decimal]
     threshold: Decimal
+    transfer_triggered: bool = False
+    transfer_date: Optional[date] = None
+    transfer_amount: Optional[Decimal] = None
+    transfer_from: Optional[str] = None
+
+
+class BufferTransferRuleCreate(BaseModel):
+    from_account_id: int
+    to_account_id: int
+    action_threshold: Decimal
+    target_floor: Decimal
+    increment: Decimal = Decimal("1000.00")
+    check_day: int = 1
+
+    @field_validator("target_floor")
+    @classmethod
+    def floor_above_threshold(cls, v, info):
+        threshold = info.data.get("action_threshold")
+        if threshold is not None and v <= threshold:
+            raise ValueError("target_floor must be greater than action_threshold")
+        return v
+
+
+class BufferTransferRuleOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    from_account_id: int
+    to_account_id: int
+    action_threshold: Decimal
+    target_floor: Decimal
+    increment: Decimal
+    check_day: int
+    is_active: bool
 
 
 class QuarterSummary(BaseModel):
