@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_DAYS: int = 7
     ALLOWED_ORIGINS: str = "*"
+    FRONTEND_URL: str | None = None  # base URL for links in emails; falls back to first ALLOWED_ORIGINS entry
     HOST: str = "0.0.0.0"
     PORT: int = 8000
 
@@ -26,6 +27,12 @@ class Settings(BaseSettings):
     @property
     def allowed_origins_list(self) -> list[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]
+
+    @property
+    def frontend_url(self) -> str:
+        if self.FRONTEND_URL:
+            return self.FRONTEND_URL.rstrip("/")
+        return self.allowed_origins_list[0].rstrip("/")
 
     @property
     def digest_recipients_list(self) -> list[str]:
