@@ -465,6 +465,9 @@ export default function Forecast() {
                 {lowBalanceThreshold != null && lowBalanceThreshold > 0 && (
                   <ReferenceLine y={lowBalanceThreshold} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "Low balance threshold", fontSize: 10, fill: "#f59e0b" }} />
                 )}
+                {risk?.action_threshold != null && (
+                  <ReferenceLine y={parseFloat(risk.action_threshold)} stroke="#dc2626" strokeDasharray="4 4" label={{ value: "Action threshold", fontSize: 10, fill: "#dc2626" }} />
+                )}
                 <Area type="monotone" dataKey="actual" name="Actual" stroke="#6366f1" strokeWidth={2} fill="url(#forecastActualGradient)" dot={false} connectNulls={false} animationDuration={600} />
                 <Area type="monotone" dataKey="projected" name="Projected" stroke="#6366f1" strokeWidth={2} strokeDasharray="5 3" fill="url(#forecastProjectedGradient)" dot={false} connectNulls={false} animationDuration={600} />
                 {hasScenario && (
@@ -784,6 +787,7 @@ export default function Forecast() {
                                 {t.is_actual && <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">actual</span>}
                                 {!t.is_actual && !t.is_planned && <span className="badge-blue">projected</span>}
                                 {t.is_planned && <span className="px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">planned</span>}
+                                {t.is_transfer && <span className="px-1.5 py-0.5 rounded text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">transfer</span>}
                               </div>
                             ))}
                             {hasCp && (

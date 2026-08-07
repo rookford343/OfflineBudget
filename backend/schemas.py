@@ -320,6 +320,7 @@ class ForecastRisk(BaseModel):
     transfer_date: Optional[date] = None
     transfer_amount: Optional[Decimal] = None
     transfer_from: Optional[str] = None
+    action_threshold: Optional[Decimal] = None
 
 
 class BufferTransferRuleCreate(BaseModel):

@@ -42,6 +42,11 @@ def get_forecast_risk(
     entries = build_forecast(db, user.id, account_id, start, end)
     risk = find_balance_risk(entries, threshold)
     transfer = find_transfer_signal(entries)
+    active_rule = db.query(models.BufferTransferRule).filter(
+        models.BufferTransferRule.user_id == user.id,
+        models.BufferTransferRule.to_account_id == account_id,
+        models.BufferTransferRule.is_active == True,
+    ).first()
     return schemas.ForecastRisk(
         at_risk=risk["at_risk"],
         date=risk["date"],
@@ -51,6 +56,7 @@ def get_forecast_risk(
         transfer_date=transfer["date"],
         transfer_amount=transfer["amount"],
         transfer_from=transfer["from_name"],
+        action_threshold=active_rule.action_threshold if active_rule else None,
     )
 
 
