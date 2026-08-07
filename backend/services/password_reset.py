@@ -40,3 +40,51 @@ def verify_and_consume_recovery_code(db: Session, user: models.User, code: str) 
     user.recovery_code_created_at = None
     db.commit()
     return True
+
+
+def create_reset_token(db: Session, user: models.User) -> str:
+    """Invalidates any outstanding tokens for this user, issues a new one,
+    and returns the raw token (only its hash is persisted)."""
+    now = datetime.now(timezone.utc)
+    outstanding = (
+        db.query(models.PasswordResetToken)
+        .filter(models.PasswordResetToken.user_id == user.id)
+        .filter(models.PasswordResetToken.used_at.is_(None))
+        .all()
+    )
+    for t in outstanding:
+        t.used_at = now
+
+    raw_token = secrets.token_urlsafe(32)
+    record = models.PasswordResetToken(
+        user_id=user.id,
+        token_hash=hash_password(raw_token),
+        expires_at=now + RESET_TOKEN_TTL,
+    )
+    db.add(record)
+    db.commit()
+    return raw_token
+
+
+def consume_reset_token(db: Session, raw_token: str, new_password: str) -> bool:
+    """Verifies a raw reset token, sets the new password, and marks the
+    token used. Bcrypt hashes aren't lookup-able by value, so this scans
+    unused, unexpired tokens — a small, bounded set in a single-household
+    deployment — and verifies each candidate."""
+    now = datetime.now(timezone.utc)
+    candidates = (
+        db.query(models.PasswordResetToken)
+        .filter(models.PasswordResetToken.used_at.is_(None))
+        .filter(models.PasswordResetToken.expires_at > now)
+        .all()
+    )
+    for candidate in candidates:
+        if verify_password(raw_token, candidate.token_hash):
+            user = db.get(models.User, candidate.user_id)
+            if not user:
+                return False
+            user.hashed_password = hash_password(new_password)
+            candidate.used_at = now
+            db.commit()
+            return True
+    return False
