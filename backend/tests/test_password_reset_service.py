@@ -69,3 +69,53 @@ def test_verify_and_consume_recovery_code_rejects_wrong_code(db_session):
 def test_verify_and_consume_recovery_code_false_when_none_set(db_session):
     user = _make_user(db_session)
     assert verify_and_consume_recovery_code(db_session, user, "anything") is False
+
+
+from backend.services.password_reset import create_reset_token, consume_reset_token
+from backend.auth import verify_password
+
+
+def test_create_reset_token_returns_raw_and_stores_only_hash(db_session):
+    user = _make_user(db_session)
+    raw = create_reset_token(db_session, user)
+    stored = db_session.query(models.PasswordResetToken).filter_by(user_id=user.id).one()
+    assert stored.token_hash != raw
+    assert stored.used_at is None
+
+
+def test_consume_reset_token_sets_new_password_and_marks_used(db_session):
+    user = _make_user(db_session)
+    raw = create_reset_token(db_session, user)
+    assert consume_reset_token(db_session, raw, "new-password-123") is True
+    db_session.refresh(user)
+    assert verify_password("new-password-123", user.hashed_password)
+    stored = db_session.query(models.PasswordResetToken).filter_by(user_id=user.id).one()
+    assert stored.used_at is not None
+
+
+def test_consume_reset_token_rejects_reuse(db_session):
+    user = _make_user(db_session)
+    raw = create_reset_token(db_session, user)
+    assert consume_reset_token(db_session, raw, "first-password") is True
+    assert consume_reset_token(db_session, raw, "second-password") is False
+
+
+def test_consume_reset_token_rejects_expired(db_session):
+    user = _make_user(db_session)
+    raw = create_reset_token(db_session, user)
+    stored = db_session.query(models.PasswordResetToken).filter_by(user_id=user.id).one()
+    stored.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+    db_session.commit()
+    assert consume_reset_token(db_session, raw, "new-password-123") is False
+
+
+def test_consume_reset_token_rejects_unknown_token(db_session):
+    assert consume_reset_token(db_session, "not-a-real-token", "new-password-123") is False
+
+
+def test_create_reset_token_invalidates_prior_outstanding_tokens(db_session):
+    user = _make_user(db_session)
+    first = create_reset_token(db_session, user)
+    create_reset_token(db_session, user)  # second, current token
+    # the first token must no longer work once a new one is issued
+    assert consume_reset_token(db_session, first, "new-password-123") is False
