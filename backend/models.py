@@ -116,6 +116,7 @@ class User(Base):
     transactions: Mapped[list[Transaction]] = relationship(back_populates="user", cascade="all, delete-orphan")
     credit_cards: Mapped[list[CreditCard]] = relationship(back_populates="user", cascade="all, delete-orphan")
     savings_transfers: Mapped[list[SavingsTransfer]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    buffer_transfer_rules: Mapped[list[BufferTransferRule]] = relationship(back_populates="user", cascade="all, delete-orphan")
     budget_allocations: Mapped[list[BudgetAllocation]] = relationship(back_populates="user", cascade="all, delete-orphan")
     savings_goals: Mapped[list[SavingsGoal]] = relationship(back_populates="user", cascade="all, delete-orphan")
     manual_assets: Mapped[list[ManualAsset]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -149,6 +150,8 @@ class Account(Base):
     recurring_items: Mapped[list[RecurringItem]] = relationship(back_populates="account")
     outgoing_transfers: Mapped[list[SavingsTransfer]] = relationship(foreign_keys="SavingsTransfer.from_account_id", back_populates="from_account")
     incoming_transfers: Mapped[list[SavingsTransfer]] = relationship(foreign_keys="SavingsTransfer.to_account_id", back_populates="to_account")
+    outgoing_buffer_rules: Mapped[list[BufferTransferRule]] = relationship(foreign_keys="BufferTransferRule.from_account_id", back_populates="from_account")
+    incoming_buffer_rules: Mapped[list[BufferTransferRule]] = relationship(foreign_keys="BufferTransferRule.to_account_id", back_populates="to_account")
     card_payments: Mapped[list[CreditCardPayment]] = relationship(back_populates="checking_account")
 
 
@@ -208,6 +211,29 @@ class RecurringItem(Base):
     category: Mapped[Category | None] = relationship(back_populates="recurring_items")
     card: Mapped[CreditCard | None] = relationship(foreign_keys=[card_id])
     transactions: Mapped[list[Transaction]] = relationship(back_populates="recurring_item")
+
+
+class BufferTransferRule(Base):
+    """Conditional monthly transfer: if `to_account` would dip below
+    `action_threshold` before the next check_day, transfer `increment`-sized
+    steps from `from_account` until it clears `target_floor`."""
+    __tablename__ = "buffer_transfer_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    from_account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
+    to_account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
+    action_threshold: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    target_floor: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    increment: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    check_day: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user: Mapped[User] = relationship(back_populates="buffer_transfer_rules")
+    from_account: Mapped[Account] = relationship(foreign_keys=[from_account_id], back_populates="outgoing_buffer_rules")
+    to_account: Mapped[Account] = relationship(foreign_keys=[to_account_id], back_populates="incoming_buffer_rules")
 
 
 # ── Transactions ──────────────────────────────────────────────────────────────
