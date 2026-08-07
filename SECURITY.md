@@ -35,8 +35,10 @@ OfflineBudget is designed for **offline / home LAN use**. The threat model is:
 
 ### Password Reset Tokens and Recovery Codes
 - **Reset tokens** — generated when you request a password reset via email; are **bcrypt-hashed at rest** (never stored in plaintext); expire after **15 minutes**; protected by **256-bit random entropy** (generated via `secrets.token_urlsafe`)
-- **Recovery codes** — generated manually from Settings → Profile and stored as **bcrypt-hashed values**; are **single-use** (deleted after one successful reset); no explicit rate limit (protected by being offline/knowledge-based)
+- **Recovery codes** — generated manually from Settings → Profile and stored as **bcrypt-hashed values**; are **single-use** (deleted after one successful reset)
 - **Rate limiting** — reset-password-with-code path is rate-limited at **5 attempts per hour per username**; reset-password path (email-based) has no rate limit since it carries no username, relying instead on token expiry and entropy
+- **`/auth/forgot-password`** is itself rate-limited at **5 attempts per hour per username** to prevent mail-bombing an account's inbox or burning SMTP quota; it always returns 204, even when the limit is hit
+- **Username enumeration** — `/auth/forgot-password` always returns a generic 204 regardless of whether the account exists, so it does not itself reveal whether a username is registered. However, `/auth/register` already returns a distinct `400 "Username already taken"` for existing usernames, so username existence is not actually secret in this app. What `forgot-password`'s constant response *does* hide is narrower: whether that specific account has an email address on file and SMTP configured — i.e. whether requesting a reset will actually result in an email being sent
 
 ---
 
