@@ -699,6 +699,11 @@ export default function Settings() {
             A recovery code lets you reset your password without email. Generating a new one
             replaces any existing code.
           </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            {me?.recovery_code_created_at
+              ? `Recovery code generated on ${new Date(me.recovery_code_created_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+              : "No recovery code set"}
+          </p>
           <button
             type="button"
             className="btn-secondary"
