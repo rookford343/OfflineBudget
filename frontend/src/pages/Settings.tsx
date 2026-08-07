@@ -113,6 +113,11 @@ export default function Settings() {
   const [pwSaved, setPwSaved] = useState(false);
   const [profileEmail, setProfileEmail] = useState("");
   const [testEmailStatus, setTestEmailStatus] = useState<"idle" | "sending" | "ok" | "err">("idle");
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const generateRecoveryCodeMut = useMutation({
+    mutationFn: authApi.generateRecoveryCode,
+    onSuccess: (data) => { setRecoveryCode(data.code); qc.invalidateQueries({ queryKey: ["me"] }); },
+  });
   // ── Tax profile state ─────────────────────────────────────────────────────
   const [taxFilingStatus, setTaxFilingStatus] = useState("single");
   const [taxState, setTaxState] = useState("");
@@ -680,6 +685,51 @@ export default function Settings() {
             </button>
           </div>
         </div>
+        <div className="pt-2 border-t">
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+            A recovery code lets you reset your password without email. Generating a new one
+            replaces any existing code.
+          </p>
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => generateRecoveryCodeMut.mutate()}
+            disabled={generateRecoveryCodeMut.isPending}
+          >
+            {generateRecoveryCodeMut.isPending ? "Generating…" : "Generate Recovery Code"}
+          </button>
+        </div>
+
+        {recoveryCode && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
+            <div className="card max-w-sm w-full space-y-4">
+              <h3 className="font-semibold text-gray-900">Save Your Recovery Code</h3>
+              <p className="text-sm text-gray-500">
+                This won't be shown again. Store it somewhere safe — it's the only way to reset
+                your password without email.
+              </p>
+              <code className="block text-center text-lg font-mono bg-gray-100 rounded-lg py-3 tracking-wider">
+                {recoveryCode}
+              </code>
+              <button
+                type="button"
+                className="btn-primary w-full"
+                onClick={() => {
+                  navigator.clipboard.writeText(recoveryCode);
+                }}
+              >
+                Copy to Clipboard
+              </button>
+              <button
+                type="button"
+                className="text-sm text-gray-500 w-full text-center"
+                onClick={() => setRecoveryCode(null)}
+              >
+                I've saved it — close
+              </button>
+            </div>
+          </div>
+        )}
         {/* Tax Profile */}
         <div className="space-y-3 border-t border-gray-100 dark:border-gray-700 pt-4">
           <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Tax Profile</h4>
