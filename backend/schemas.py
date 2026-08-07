@@ -338,6 +338,20 @@ class BufferTransferRuleCreate(BaseModel):
             raise ValueError("target_floor must be greater than action_threshold")
         return v
 
+    @field_validator("increment")
+    @classmethod
+    def increment_positive(cls, v):
+        if v <= 0:
+            raise ValueError("increment must be greater than 0")
+        return v
+
+    @field_validator("check_day")
+    @classmethod
+    def check_day_in_range(cls, v):
+        if not (1 <= v <= 28):
+            raise ValueError("check_day must be between 1 and 28")
+        return v
+
 
 class BufferTransferRuleOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
