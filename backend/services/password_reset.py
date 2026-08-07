@@ -30,14 +30,21 @@ def issue_recovery_code(db: Session, user: models.User) -> str:
     return code
 
 
-def verify_and_consume_recovery_code(db: Session, user: models.User, code: str) -> bool:
-    """Verifies a recovery code and, on success, clears it (single-use)."""
+def verify_and_consume_recovery_code(
+    db: Session, user: models.User, code: str, new_password: str
+) -> bool:
+    """Verifies a recovery code and, on success, clears it (single-use) and
+    sets the new password — all in one atomic transaction. Mirrors
+    consume_reset_token's shape so a process crash between "code consumed"
+    and "password changed" can't happen; a permanent lockout would defeat
+    the entire purpose of this feature."""
     if not user.recovery_code_hash:
         return False
     if not verify_password(code, user.recovery_code_hash):
         return False
     user.recovery_code_hash = None
     user.recovery_code_created_at = None
+    user.hashed_password = hash_password(new_password)
     db.commit()
     return True
 

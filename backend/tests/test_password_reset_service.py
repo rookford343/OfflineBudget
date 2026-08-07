@@ -38,6 +38,7 @@ from backend.services.password_reset import (
     issue_recovery_code,
     verify_and_consume_recovery_code,
 )
+from backend.auth import verify_password
 
 
 def test_issue_recovery_code_returns_raw_and_stores_hash_only(db_session):
@@ -52,27 +53,32 @@ def test_issue_recovery_code_returns_raw_and_stores_hash_only(db_session):
 def test_verify_and_consume_recovery_code_succeeds_and_rotates(db_session):
     user = _make_user(db_session)
     code = issue_recovery_code(db_session, user)
-    assert verify_and_consume_recovery_code(db_session, user, code) is True
+    assert verify_and_consume_recovery_code(db_session, user, code, "brand-new-pw") is True
     # single-use: the same code fails on a second attempt
     assert user.recovery_code_hash is None
-    assert verify_and_consume_recovery_code(db_session, user, code) is False
+    # atomic: the password change landed in the same operation as the consume
+    assert verify_password("brand-new-pw", user.hashed_password)
+    assert verify_and_consume_recovery_code(db_session, user, code, "another-pw") is False
+    # the second (rejected) attempt did not touch the already-set password
+    assert verify_password("brand-new-pw", user.hashed_password)
 
 
 def test_verify_and_consume_recovery_code_rejects_wrong_code(db_session):
     user = _make_user(db_session)
     issue_recovery_code(db_session, user)
-    assert verify_and_consume_recovery_code(db_session, user, "wrong-code") is False
-    # a wrong attempt does not consume the real code
+    original_hash = user.hashed_password
+    assert verify_and_consume_recovery_code(db_session, user, "wrong-code", "brand-new-pw") is False
+    # a wrong attempt does not consume the real code or change the password
     assert user.recovery_code_hash is not None
+    assert user.hashed_password == original_hash
 
 
 def test_verify_and_consume_recovery_code_false_when_none_set(db_session):
     user = _make_user(db_session)
-    assert verify_and_consume_recovery_code(db_session, user, "anything") is False
+    assert verify_and_consume_recovery_code(db_session, user, "anything", "brand-new-pw") is False
 
 
 from backend.services.password_reset import create_reset_token, consume_reset_token
-from backend.auth import verify_password
 
 
 def test_create_reset_token_returns_raw_and_stores_only_hash(db_session):
