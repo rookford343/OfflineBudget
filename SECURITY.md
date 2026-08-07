@@ -33,6 +33,11 @@ OfflineBudget is designed for **offline / home LAN use**. The threat model is:
 - **Acceptable for home LAN use** where you trust the network
 - For HTTPS, see [Enabling HTTPS on LAN](#enabling-https-on-lan) below
 
+### Password Reset Tokens and Recovery Codes
+- **Reset tokens** — generated when you request a password reset via email; are **bcrypt-hashed at rest** (never stored in plaintext); expire after **15 minutes**; protected by **256-bit random entropy** (generated via `secrets.token_urlsafe`)
+- **Recovery codes** — generated manually from Settings → Profile and stored as **bcrypt-hashed values**; are **single-use** (deleted after one successful reset); no explicit rate limit (protected by being offline/knowledge-based)
+- **Rate limiting** — reset-password-with-code path is rate-limited at **5 attempts per hour per username**; reset-password path (email-based) has no rate limit since it carries no username, relying instead on token expiry and entropy
+
 ---
 
 ## What Is NOT Protected (and Why It's OK for Home Use)

@@ -66,6 +66,22 @@ This starts:
 
 ---
 
+## Forgot Your Password?
+
+1. From the login page, click **Forgot password?**
+2. Enter your username. If you have an email address saved on your account
+   **and** SMTP is configured in `.env`, a reset link is emailed to you
+   (expires in 15 minutes).
+3. No email configured, or don't have access to it? Use a **recovery code**
+   instead — generate one ahead of time from **Settings → Profile →
+   Generate Recovery Code**. Codes are single-use; generate a new one after
+   each reset.
+
+> Set `FRONTEND_URL` in `.env` if the emailed reset link should point
+> somewhere other than the first `ALLOWED_ORIGINS` entry.
+
+---
+
 ## 4. Access from Another Device on Your Home Network
 
 1. Find your machine's local IP address:
