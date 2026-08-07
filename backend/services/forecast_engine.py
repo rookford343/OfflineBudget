@@ -35,25 +35,36 @@ def _compute_transfer_schedule(
     rule: models.BufferTransferRule,
     start_date: date,
     end_date: date,
+    overrides: list[dict] | None = None,
 ) -> dict[date, Decimal]:
     """Dry-run `rule.to_account_id` with no transfers applied, then decide on
     each check_day whether a buffer transfer is needed to keep it above
     `rule.action_threshold` before the next check_day. Each month's decision
     credits transfers already scheduled in earlier months, so a transfer
-    from July isn't re-counted as still needed in August."""
+    from July isn't re-counted as still needed in August.
+
+    Anchored at January 1st of start_date's year (not start_date itself) so
+    the schedule is independent of which window the caller requested --
+    otherwise a query starting mid-month (e.g. /forecast/risk starting at
+    date.today()) would skip that month's check_day entirely, while a
+    full-year query (e.g. /forecast/quarters) would catch it, producing
+    contradictory numbers for the same account on the same day.
+    """
+    anchor = date(start_date.year, 1, 1)
     raw_entries = build_forecast(
-        db, user_id, rule.to_account_id, start_date, end_date,
+        db, user_id, rule.to_account_id, anchor, end_date,
+        overrides=overrides,
         apply_buffer_transfers=False,
     )
     if not raw_entries:
         return {}
 
     check_days: list[date] = []
-    cur = date(start_date.year, start_date.month, 1)
+    cur = anchor
     while cur <= end_date:
         last_day = _last_day_of_month(cur)
         cd = date(cur.year, cur.month, min(rule.check_day, last_day))
-        if start_date <= cd <= end_date:
+        if anchor <= cd <= end_date:
             check_days.append(cd)
         cur = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
 
@@ -290,7 +301,7 @@ def build_forecast(
             ),
         ).all()
         for rule in transfer_rules:
-            schedule = _compute_transfer_schedule(db, user_id, rule, start_date, end_date)
+            schedule = _compute_transfer_schedule(db, user_id, rule, start_date, end_date, overrides=overrides)
             if not schedule:
                 continue
             if rule.to_account_id == account_id:
