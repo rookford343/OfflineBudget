@@ -106,6 +106,26 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    username: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+class ResetPasswordWithCodeRequest(BaseModel):
+    username: str
+    code: str
+    new_password: str
+
+
+class RecoveryCodeOut(BaseModel):
+    code: str
+    created_at: datetime
+
+
 # ── Accounts ──────────────────────────────────────────────────────────────────
 
 class AccountCreate(BaseModel):
