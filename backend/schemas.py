@@ -35,6 +35,7 @@ class UserOut(BaseModel):
     itemized_salt: Optional[Decimal] = None
     itemized_property_tax: Optional[Decimal] = None
     itemized_other: Optional[Decimal] = None
+    recovery_code_created_at: Optional[datetime] = None
 
 
 class UserUpdate(BaseModel):
