@@ -12,6 +12,7 @@ from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_CEILING
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from backend import models
 from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
 
@@ -274,6 +275,29 @@ def build_forecast(
         ).all()
     }
 
+    incoming_transfer_schedules: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
+    outgoing_transfer_schedules: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
+    if apply_buffer_transfers:
+        transfer_rules = db.query(models.BufferTransferRule).options(
+            joinedload(models.BufferTransferRule.from_account),
+            joinedload(models.BufferTransferRule.to_account),
+        ).filter(
+            models.BufferTransferRule.user_id == user_id,
+            models.BufferTransferRule.is_active == True,
+            or_(
+                models.BufferTransferRule.to_account_id == account_id,
+                models.BufferTransferRule.from_account_id == account_id,
+            ),
+        ).all()
+        for rule in transfer_rules:
+            schedule = _compute_transfer_schedule(db, user_id, rule, start_date, end_date)
+            if not schedule:
+                continue
+            if rule.to_account_id == account_id:
+                incoming_transfer_schedules.append((rule, schedule))
+            if rule.from_account_id == account_id:
+                outgoing_transfer_schedules.append((rule, schedule))
+
     # Pre-compute which recurring item IDs have linked actuals, and on which dates.
     # Used to suppress projected entries when the actual arrives on a different day.
     actual_by_ri: dict[int, list[date]] = {}
@@ -458,6 +482,32 @@ def build_forecast(
                     amount=monthly_interest,
                     type="income",
                     is_actual=False,
+                ))
+
+        for rule, schedule in incoming_transfer_schedules:
+            amt = schedule.get(current)
+            if amt:
+                balance += amt
+                day_transactions.append(ForecastTransaction(
+                    name=f"Transfer from {rule.from_account.name}",
+                    amount=amt,
+                    type="income",
+                    category_name=None,
+                    is_actual=False,
+                    is_transfer=True,
+                ))
+
+        for rule, schedule in outgoing_transfer_schedules:
+            amt = schedule.get(current)
+            if amt:
+                balance -= amt
+                day_transactions.append(ForecastTransaction(
+                    name=f"Transfer to {rule.to_account.name}",
+                    amount=-amt,
+                    type="expense",
+                    category_name=None,
+                    is_actual=False,
+                    is_transfer=True,
                 ))
 
         # Apply day checkpoint AFTER all transactions so the anchor value is the
