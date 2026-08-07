@@ -125,6 +125,65 @@ def list_recurring(username: str = typer.Option(..., help="Username")):
     console.print(t)
 
 
+# ── Buffer Transfers ─────────────────────────────────────────────────────────
+
+transfers_app = typer.Typer(help="Manage buffer transfer rules")
+app.add_typer(transfers_app, name="transfers")
+
+@transfers_app.command("add")
+def add_transfer_rule(
+    username: str = typer.Option(..., help="Username"),
+    from_account: str = typer.Option(..., help="Source account name, e.g. Savings"),
+    to_account: str = typer.Option(..., help="Destination account name, e.g. Main Checking"),
+    action_threshold: float = typer.Option(..., help="Balance below this triggers a transfer"),
+    target_floor: float = typer.Option(..., help="Transfer brings the balance up to at least this"),
+    increment: float = typer.Option(1000.0, help="Transfer step size"),
+    check_day: int = typer.Option(1, help="Day of month to evaluate, 1-28"),
+):
+    """Add a buffer transfer rule (e.g. top up Checking from Savings)."""
+    db = get_db()
+    user = _require_user(db, username)
+    from_acc = db.query(models.Account).filter(
+        models.Account.user_id == user.id, models.Account.name == from_account,
+    ).first()
+    to_acc = db.query(models.Account).filter(
+        models.Account.user_id == user.id, models.Account.name == to_account,
+    ).first()
+    if not from_acc or not to_acc:
+        console.print("[red]From/to account not found.[/red]")
+        raise typer.Exit(1)
+    if Decimal(str(target_floor)) <= Decimal(str(action_threshold)):
+        console.print("[red]target_floor must be greater than action_threshold.[/red]")
+        raise typer.Exit(1)
+    rule = models.BufferTransferRule(
+        user_id=user.id, from_account_id=from_acc.id, to_account_id=to_acc.id,
+        action_threshold=Decimal(str(action_threshold)), target_floor=Decimal(str(target_floor)),
+        increment=Decimal(str(increment)), check_day=check_day,
+    )
+    db.add(rule)
+    db.commit()
+    console.print(f"[green]✓ Added buffer transfer rule (id={rule.id}): {from_account} → {to_account}[/green]")
+
+
+@transfers_app.command("list")
+def list_transfer_rules(username: str = typer.Option(..., help="Username")):
+    """List buffer transfer rules."""
+    db = get_db()
+    user = _require_user(db, username)
+    rules = db.query(models.BufferTransferRule).filter(
+        models.BufferTransferRule.user_id == user.id,
+        models.BufferTransferRule.is_active == True,
+    ).all()
+    t = Table("ID", "From", "To", "Action <", "Floor", "Increment", "Check Day", box=box.ROUNDED)
+    for r in rules:
+        t.add_row(
+            str(r.id), r.from_account.name, r.to_account.name,
+            f"${r.action_threshold:,.2f}", f"${r.target_floor:,.2f}",
+            f"${r.increment:,.2f}", str(r.check_day),
+        )
+    console.print(t)
+
+
 # ── Forecast ──────────────────────────────────────────────────────────────────
 
 forecast_app = typer.Typer(help="View forecasts")
