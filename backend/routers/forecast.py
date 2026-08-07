@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
-from backend.services.forecast_engine import build_forecast, build_quarters, find_balance_risk
+from backend.services.forecast_engine import build_forecast, build_quarters, find_balance_risk, find_transfer_signal
 from backend.services.reconciliation_helper import compute_reconciliation
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
@@ -40,7 +40,18 @@ def get_forecast_risk(
     start = date.today()
     end = start + timedelta(days=days)
     entries = build_forecast(db, user.id, account_id, start, end)
-    return find_balance_risk(entries, threshold)
+    risk = find_balance_risk(entries, threshold)
+    transfer = find_transfer_signal(entries)
+    return schemas.ForecastRisk(
+        at_risk=risk["at_risk"],
+        date=risk["date"],
+        amount=risk["amount"],
+        threshold=risk["threshold"],
+        transfer_triggered=transfer["triggered"],
+        transfer_date=transfer["date"],
+        transfer_amount=transfer["amount"],
+        transfer_from=transfer["from_name"],
+    )
 
 
 def _attach_quarter_checkpoints(
