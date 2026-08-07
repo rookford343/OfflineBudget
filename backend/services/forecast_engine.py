@@ -10,7 +10,7 @@ For each day in the requested range:
 from __future__ import annotations
 from calendar import monthrange
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from sqlalchemy.orm import Session, joinedload
 from backend import models
 from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
@@ -26,6 +26,53 @@ def _adjust_for_weekend(d: date) -> date:
     if d.weekday() == 6:  # Sunday
         return d - timedelta(days=2)
     return d
+
+
+def _compute_transfer_schedule(
+    db: Session,
+    user_id: int,
+    rule: models.BufferTransferRule,
+    start_date: date,
+    end_date: date,
+) -> dict[date, Decimal]:
+    """Dry-run `rule.to_account_id` with no transfers applied, then decide on
+    each check_day whether a buffer transfer is needed to keep it above
+    `rule.action_threshold` before the next check_day. Each month's decision
+    credits transfers already scheduled in earlier months, so a transfer
+    from July isn't re-counted as still needed in August."""
+    raw_entries = build_forecast(
+        db, user_id, rule.to_account_id, start_date, end_date,
+        apply_buffer_transfers=False,
+    )
+    if not raw_entries:
+        return {}
+
+    check_days: list[date] = []
+    cur = date(start_date.year, start_date.month, 1)
+    while cur <= end_date:
+        last_day = _last_day_of_month(cur)
+        cd = date(cur.year, cur.month, min(rule.check_day, last_day))
+        if start_date <= cd <= end_date:
+            check_days.append(cd)
+        cur = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
+
+    schedule: dict[date, Decimal] = {}
+    injected_so_far = Decimal("0")
+    for i, cd in enumerate(check_days):
+        window_end = check_days[i + 1] - timedelta(days=1) if i + 1 < len(check_days) else end_date
+        window = [e for e in raw_entries if cd <= e.date <= window_end]
+        if not window:
+            continue
+        lowest_raw = min(e.projected_balance for e in window)
+        lowest_adjusted = lowest_raw + injected_so_far
+        if lowest_adjusted < rule.action_threshold:
+            shortfall = rule.target_floor - lowest_adjusted
+            steps = int((shortfall / rule.increment).to_integral_value(rounding=ROUND_CEILING))
+            amount = rule.increment * steps
+            schedule[cd] = amount
+            injected_so_far += amount
+
+    return schedule
 
 
 def _cc_actual_nearby(
@@ -85,6 +132,7 @@ def build_forecast(
     end_date: date,
     *,
     overrides: list[dict] | None = None,
+    apply_buffer_transfers: bool = True,
 ) -> list[ForecastEntry]:
     account: models.Account = db.query(models.Account).filter(
         models.Account.id == account_id,
