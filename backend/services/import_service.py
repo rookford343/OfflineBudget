@@ -260,6 +260,8 @@ def run_import(
     rows: list[schemas.ImportConfirmRow],
     account_id: int | None,
     card_id: int | None,
+    source: models.TransactionSource = models.TransactionSource.csv_import,
+    card_source: models.CardTransactionSource = models.CardTransactionSource.csv_import,
 ) -> schemas.ImportConfirmResponse:
     """Insert transactions, update balances, and skip duplicates."""
     imported = 0
@@ -289,7 +291,7 @@ def run_import(
                 notes=row.notes,
                 recurring_item_id=row.recurring_item_id,
                 is_actual=True,
-                source=models.TransactionSource.csv_import,
+                source=source,
                 imported_at=now,
             )
             if not row.recurring_item_id:
@@ -331,7 +333,7 @@ def run_import(
                 date=row.date,
                 amount=abs(row.amount),
                 merchant=row.description,
-                source=models.CardTransactionSource.csv_import,
+                source=card_source,
             )
             db.add(ct)
 

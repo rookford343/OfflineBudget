@@ -4,13 +4,12 @@ categorization, and rules apply identically regardless of source."""
 from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.crypto import decrypt
 from backend.services.csv_parser import ParsedRow
 from backend.services.import_service import build_preview, run_import
-from backend.services.simplefin_client import fetch_transactions, SimpleFinError
+from backend.services.simplefin_client import fetch_transactions
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +21,27 @@ _OVERLAP_DAYS = 3  # re-fetch a few days of overlap each sync so late-posting
 
 def sync_connection(db: Session, connection: models.BankConnection) -> None:
     """Sync every linked account for one BankConnection. Isolates failures per
-    account so one broken link doesn't block the others."""
+    account so one broken link doesn't block the others, and isolates the
+    decrypt step so a corrupted/key-mismatched token can't propagate out to
+    the caller (sync_all iterates other connections in the same job)."""
     user = db.get(models.User, connection.user_id)
     if not user:
         return
 
-    access_url = decrypt(connection.access_url_encrypted)
+    try:
+        access_url = decrypt(connection.access_url_encrypted)
+    except Exception as exc:  # noqa: BLE001 -- any decrypt failure isolates this connection only
+        logger.error(
+            "Bank sync failed to decrypt access token for connection %s: %s",
+            connection.id, exc,
+        )
+        db.rollback()
+        connection.last_error = str(exc)
+        connection.status = models.BankConnectionStatus.error
+        connection.last_synced_at = datetime.utcnow()
+        db.commit()
+        return
+
     links = db.query(models.BankConnectionAccountLink).filter(
         models.BankConnectionAccountLink.connection_id == connection.id,
     ).all()
@@ -38,11 +52,14 @@ def sync_connection(db: Session, connection: models.BankConnection) -> None:
         try:
             _sync_link(db, user, access_url, link)
             any_success = True
-        except SimpleFinError as exc:
+        except Exception as exc:  # noqa: BLE001 -- one link's failure (SimpleFinError or
+            # anything unexpected out of build_preview/run_import) must never
+            # stop the other links on this connection from syncing.
             logger.error(
                 "Bank sync failed for connection %s account %s: %s",
                 connection.id, link.simplefin_account_id, exc,
             )
+            db.rollback()
             connection.last_error = str(exc)
 
     # Any link succeeding brings the connection back to active (last_error is
@@ -79,29 +96,13 @@ def _sync_link(db: Session, user: models.User, access_url: str, link: models.Ban
             )
             for r in preview_rows
         ]
-        # import_service.run_import always tags new rows with the csv_import
-        # source. Capture the high-water mark before the call and retag only
-        # the rows this call actually inserted, so bank-sync-origin
-        # transactions are distinguishable without touching the shared
-        # import pipeline (dedup, categorization, rules stay identical for
-        # every source).
-        max_txn_id_before = db.query(func.max(models.Transaction.id)).scalar() or 0
-        max_card_txn_id_before = db.query(func.max(models.CreditCardTransaction.id)).scalar() or 0
         run_import(
             db, user, confirm_rows,
             account_id=link.local_account_id,
             card_id=link.local_credit_card_id,
+            source=models.TransactionSource.bank_sync,
+            card_source=models.CardTransactionSource.bank_sync,
         )
-        if link.local_account_id:
-            db.query(models.Transaction).filter(
-                models.Transaction.account_id == link.local_account_id,
-                models.Transaction.id > max_txn_id_before,
-            ).update({"source": models.TransactionSource.bank_sync})
-        elif link.local_credit_card_id:
-            db.query(models.CreditCardTransaction).filter(
-                models.CreditCardTransaction.card_id == link.local_credit_card_id,
-                models.CreditCardTransaction.id > max_card_txn_id_before,
-            ).update({"source": models.CardTransactionSource.bank_sync})
 
     if link.local_account_id:
         account = db.get(models.Account, link.local_account_id)
@@ -117,9 +118,22 @@ def _sync_link(db: Session, user: models.User, access_url: str, link: models.Ban
 
 
 def sync_all(db: Session) -> None:
-    """Entry point for the daily scheduled job -- syncs every active connection."""
+    """Entry point for the daily scheduled job -- syncs every active connection.
+    Isolates each connection so one connection's unexpected failure (including
+    a decrypt error or anything sync_connection itself doesn't catch) can
+    never abort the rest of the job."""
     connections = db.query(models.BankConnection).filter(
         models.BankConnection.status == models.BankConnectionStatus.active,
     ).all()
     for connection in connections:
-        sync_connection(db, connection)
+        try:
+            sync_connection(db, connection)
+        except Exception as exc:  # noqa: BLE001 -- defense in depth: sync_connection
+            # already isolates decrypt and per-link failures internally, but
+            # nothing raised while processing one connection may prevent
+            # sync_all from attempting every other connection.
+            logger.error(
+                "Bank sync job failed entirely for connection %s: %s",
+                connection.id, exc,
+            )
+            db.rollback()
