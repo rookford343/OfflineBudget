@@ -115,6 +115,7 @@ def upgrade_schema():
             snapshot_taken_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(user_id, account_id, year, month)
         )""",
+        "ALTER TABLE credit_cards ADD COLUMN pending_charges NUMERIC(14,2) DEFAULT 0",
     ]
     with engine.connect() as conn:
         for s in stmts:
