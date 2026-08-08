@@ -32,6 +32,15 @@ export const accountsApi = {
   remove: (id: number) => api.delete(`/accounts/${id}`),
 };
 
+// ── Bank Sync (SimpleFIN) ────────────────────────────────────────────────────
+export const bankSyncApi = {
+  connect: (setup_token: string) => api.post("/bank-sync/connect", { setup_token }).then((r) => r.data),
+  link: (connectionId: number, data: object) => api.post(`/bank-sync/${connectionId}/link`, data).then((r) => r.data),
+  status: () => api.get("/bank-sync/status").then((r) => r.data),
+  syncNow: () => api.post("/bank-sync/sync-now").then((r) => r.data),
+  disconnect: (connectionId: number) => api.delete(`/bank-sync/${connectionId}`),
+};
+
 // ── Categories ────────────────────────────────────────────────────────────────
 export const categoriesApi = {
   list: () => api.get("/categories").then((r) => r.data),
