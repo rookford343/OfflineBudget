@@ -4,8 +4,8 @@ from decimal import Decimal
 from collections import defaultdict
 from sqlalchemy.orm import Session
 from backend import models
-from backend.schemas import MonthlySummary, WeeklyDigest, WeeklyDigestCategory, ForecastRisk, MerchantSpendingEntry
-from backend.services.spending_helpers import category_totals_for_range, merchant_totals
+from backend.schemas import MonthlySummary, WeeklyDigest, ForecastRisk
+from backend.services.spending_helpers import category_totals_for_range
 from backend.services.forecast_engine import build_forecast, find_balance_risk
 from backend.services.budget_snapshot import compute_budget_snapshot
 
@@ -252,24 +252,12 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
     week_start = today - timedelta(days=6)
     week_end = today
 
+    # total_spent is this function's own computation (the trailing-7-day sum),
+    # kept independent of compute_budget_snapshot. categories/top_merchants,
+    # however, are the identical trailing-7-day breakdown compute_budget_snapshot
+    # already computes -- reused below instead of recomputed.
     cat_totals = category_totals_for_range(db, user.id, week_start, week_end)
-    cat_map = {c.id: c.name for c in db.query(models.Category).filter(models.Category.user_id == user.id).all()}
-    categories = sorted(
-        [
-            WeeklyDigestCategory(
-                category_id=cid if cid is not None else 0,
-                category_name=cat_map.get(cid, "Unknown") if cid is not None else "Uncategorized",
-                total=total,
-            )
-            for cid, total in cat_totals.items()
-        ],
-        key=lambda c: c.total,
-        reverse=True,
-    )
     total_spent = sum(cat_totals.values(), Decimal("0"))
-
-    merchants = merchant_totals(db, user.id, week_start, week_end, limit=10)
-    top_merchants = [MerchantSpendingEntry(name=n, total=t, count=c) for n, t, c in merchants]
 
     account = db.query(models.Account).filter(
         models.Account.id == account_id, models.Account.user_id == user.id,
@@ -285,8 +273,8 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
         week_start=week_start,
         week_end=week_end,
         total_spent=total_spent,
-        categories=categories,
-        top_merchants=top_merchants,
+        categories=snapshot.categories,
+        top_merchants=snapshot.top_merchants,
         risk=risk,
         snapshot=snapshot,
     )
