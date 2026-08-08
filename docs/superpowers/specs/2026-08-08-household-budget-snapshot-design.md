@@ -73,14 +73,24 @@ ChargedSoFar    = Σ(RecurringItem.amount) for active RecurringItems with
                   already posted this month -- Dan's "Credit Card Bills"
                   list on the Budget tab)
 
-LeftToSpend     = Leftover - CardBalances + ChargedSoFar
+CCBudgetTotal   = Σ(RecurringItem.amount) for ALL active RecurringItems
+                  with card_id set, regardless of day_of_month (the full
+                  monthly total of Dan's "Credit Card Bills" list)
 
-NotSaving       = QuarterMinimum - CardBalances + ChargedSoFar
+LeftToSpend     = Leftover - CardBalances + ChargedSoFar
+                  (CCBudgetTotal cancels out algebraically here -- the
+                  spreadsheet's actual cell adds the full CC budget back
+                  then subtracts the not-yet-due remainder, which nets to
+                  just +ChargedSoFar)
+
+NotSaving       = QuarterMinimum - CardBalances - CCBudgetTotal + ChargedSoFar
                   (QuarterMinimum = the current quarter's lowest projected
                   checking balance -- confirmed intentional with Dan, even
                   though it reads oddly out of context: it represents how
                   much of the quarter's safety cushion current card debt +
-                  upcoming card bills would eat into)
+                  upcoming card bills would eat into. Unlike LeftToSpend,
+                  CCBudgetTotal does NOT cancel out here -- verified by hand
+                  against the live spreadsheet cell, this term is required)
 
 DaysRemaining   = (last day of as_of's month) - as_of.day + 1
 
