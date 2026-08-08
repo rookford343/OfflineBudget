@@ -254,6 +254,9 @@ class Transaction(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     is_actual: Mapped[bool] = mapped_column(Boolean, default=True)
     source: Mapped[TransactionSource] = mapped_column(Enum(TransactionSource), default=TransactionSource.manual)
+    # Upstream provider's own transaction id (SimpleFIN). NULL for manual entry
+    # and CSV/OFX imports, which have no stable external identifier.
+    external_id: Mapped[str | None] = mapped_column(String(128))
     imported_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -320,6 +323,9 @@ class CreditCardTransaction(Base):
     merchant: Mapped[str] = mapped_column(String(256), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     source: Mapped[CardTransactionSource] = mapped_column(Enum(CardTransactionSource), default=CardTransactionSource.manual)
+    # Upstream provider's own transaction id (SimpleFIN). NULL for manual entry
+    # and CSV/OFX imports, which have no stable external identifier.
+    external_id: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     card: Mapped[CreditCard] = relationship(back_populates="card_transactions")

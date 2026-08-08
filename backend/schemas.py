@@ -621,6 +621,9 @@ class ImportConfirmRow(BaseModel):
     notes: Optional[str] = None
     recurring_item_id: Optional[int] = None
     is_transfer: bool = False
+    # Provider transaction id when the row came from a bank sync; None for
+    # CSV/OFX and manual rows.
+    external_id: Optional[str] = None
 
 
 class ImportConfirmRequest(BaseModel):

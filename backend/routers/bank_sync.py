@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
-from backend.services.crypto import encrypt, EncryptionNotConfigured
+from backend.services.crypto import assert_encryption_configured, decrypt, encrypt, EncryptionNotConfigured
 from backend.services.simplefin_client import claim_setup_token, fetch_accounts, SimpleFinError
 from backend.services.bank_sync_service import sync_connection
 
@@ -38,15 +38,20 @@ def connect(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    # Check the encryption key FIRST: a SimpleFIN setup token can only be
+    # claimed once, so failing after claim_setup_token would burn the user's
+    # token and force them back to the bank for a new one.
+    try:
+        assert_encryption_configured()
+    except EncryptionNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
     try:
         access_url = claim_setup_token(body.setup_token)
     except SimpleFinError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    try:
-        encrypted = encrypt(access_url)
-    except EncryptionNotConfigured as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+    encrypted = encrypt(access_url)
 
     connection = models.BankConnection(user_id=user.id, access_url_encrypted=encrypted)
     db.add(connection)
@@ -98,6 +103,37 @@ def link_account(
     return link
 
 
+@router.get("/{connection_id}/accounts", response_model=list[schemas.BankConnectionAccountOut])
+def list_connection_accounts(
+    connection_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Re-discover the SimpleFIN accounts on an existing connection.
+
+    /connect returns this list exactly once, and the setup token is consumed by
+    then -- so without this endpoint, losing that response (refresh, navigating
+    away, closing the mapping UI early) means the user can never map the
+    remaining accounts without disconnecting and buying a new token.
+    """
+    connection = _get_owned_connection(db, user, connection_id)
+    try:
+        access_url = decrypt(connection.access_url_encrypted)
+    except EncryptionNotConfigured as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        accounts = fetch_accounts(access_url)
+    except SimpleFinError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return [
+        schemas.BankConnectionAccountOut(
+            simplefin_account_id=a.id, name=a.name, org_name=a.org_name,
+            balance=a.balance, currency=a.currency,
+        )
+        for a in accounts
+    ]
+
+
 @router.get("/status", response_model=list[schemas.BankConnectionStatusOut])
 def status_list(
     db: Session = Depends(get_db),
@@ -111,9 +147,12 @@ def sync_now(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    # Errored connections are deliberately included -- sync_connection is the
+    # only path that can restore `active`, so skipping them here would make a
+    # transient failure permanent and leave "Sync Now" reporting 0 forever.
     connections = db.query(models.BankConnection).filter(
         models.BankConnection.user_id == user.id,
-        models.BankConnection.status == models.BankConnectionStatus.active,
+        models.BankConnection.status != models.BankConnectionStatus.disconnected,
     ).all()
     errors = []
     for connection in connections:

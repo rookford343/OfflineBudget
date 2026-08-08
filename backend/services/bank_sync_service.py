@@ -82,17 +82,24 @@ def _sync_link(db: Session, user: models.User, access_url: str, link: models.Ban
     txns, balance = fetch_transactions(access_url, link.simplefin_account_id, since)
 
     parsed_rows = [
-        ParsedRow(date=t.posted.date(), description=t.description, amount=t.amount)
+        ParsedRow(
+            date=t.posted.date(), description=t.description, amount=t.amount,
+            external_id=t.id,
+        )
         for t in txns
     ]
 
     if parsed_rows:
         preview_rows = build_preview(db, user, parsed_rows)
+        # build_preview stamps each preview row with the index of the ParsedRow
+        # it came from, so we recover SimpleFIN's transaction id by index rather
+        # than widening the preview/confirm contract for every CSV caller.
         confirm_rows = [
             schemas.ImportConfirmRow(
                 date=r.date, description=r.description, amount=r.amount,
                 category_id=r.category_id, is_transfer=r.is_transfer,
                 recurring_item_id=r.suggested_recurring_item_id,
+                external_id=parsed_rows[r.row_index].external_id,
             )
             for r in preview_rows
         ]
@@ -111,19 +118,26 @@ def _sync_link(db: Session, user: models.User, access_url: str, link: models.Ban
     elif link.local_credit_card_id:
         card = db.get(models.CreditCard, link.local_credit_card_id)
         if card:
-            card.current_balance = balance
+            # SimpleFIN reports a card's liability as a NEGATIVE balance, but
+            # CreditCard.current_balance is a positive amount owed everywhere
+            # else in this codebase (import_service subtracts signed amounts,
+            # utilization_pct divides by credit_limit). Flip the sign.
+            card.current_balance = -balance
 
     link.last_synced_at = datetime.utcnow()
     db.commit()
 
 
 def sync_all(db: Session) -> None:
-    """Entry point for the daily scheduled job -- syncs every active connection.
-    Isolates each connection so one connection's unexpected failure (including
-    a decrypt error or anything sync_connection itself doesn't catch) can
-    never abort the rest of the job."""
+    """Entry point for the daily scheduled job -- syncs every connection the
+    user hasn't explicitly disconnected. Errored connections are deliberately
+    INCLUDED: sync_connection is the only code path that can flip status back
+    to `active`, so excluding `error` would make a single transient failure
+    (timeout, bank unreachable) permanent. Isolates each connection so one
+    connection's unexpected failure (including a decrypt error or anything
+    sync_connection itself doesn't catch) can never abort the rest of the job."""
     connections = db.query(models.BankConnection).filter(
-        models.BankConnection.status == models.BankConnectionStatus.active,
+        models.BankConnection.status != models.BankConnectionStatus.disconnected,
     ).all()
     for connection in connections:
         try:

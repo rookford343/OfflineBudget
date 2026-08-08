@@ -20,6 +20,13 @@ def _fernet() -> Fernet:
         raise EncryptionNotConfigured(f"BANK_TOKEN_ENCRYPTION_KEY is not a valid Fernet key: {exc}") from exc
 
 
+def assert_encryption_configured() -> None:
+    """Raise EncryptionNotConfigured if the key is missing or invalid, without
+    needing a plaintext in hand. Lets callers fail BEFORE spending a one-time
+    resource (e.g. a SimpleFIN setup token, which can only be claimed once)."""
+    _fernet()
+
+
 def encrypt(plaintext: str) -> str:
     return _fernet().encrypt(plaintext.encode()).decode()
 
