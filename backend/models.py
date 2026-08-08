@@ -32,11 +32,13 @@ class TransactionSource(str, PyEnum):
     manual = "manual"
     csv_import = "csv_import"
     forecast_generated = "forecast_generated"
+    bank_sync = "bank_sync"
 
 
 class CardTransactionSource(str, PyEnum):
     manual = "manual"
     csv_import = "csv_import"
+    bank_sync = "bank_sync"
 
 
 class ImportFormat(str, PyEnum):
@@ -570,3 +572,44 @@ class MonthlyForecastSnapshot(Base):
 
     user: Mapped["User"] = relationship(back_populates="monthly_forecast_snapshots")
     account: Mapped["Account"] = relationship()
+
+
+# ── Bank Sync (SimpleFIN) ───────────────────────────────────────────────────
+
+class BankConnectionStatus(str, PyEnum):
+    active = "active"
+    error = "error"
+    disconnected = "disconnected"
+
+
+class BankConnection(Base):
+    __tablename__ = "bank_connections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    access_url_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[BankConnectionStatus] = mapped_column(Enum(BankConnectionStatus), default=BankConnectionStatus.active, nullable=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    user: Mapped["User"] = relationship()
+    links: Mapped[list["BankConnectionAccountLink"]] = relationship(back_populates="connection", cascade="all, delete-orphan")
+
+
+class BankConnectionAccountLink(Base):
+    __tablename__ = "bank_connection_account_links"
+    __table_args__ = (UniqueConstraint("connection_id", "simplefin_account_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("bank_connections.id"), nullable=False)
+    simplefin_account_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    simplefin_account_name: Mapped[str] = mapped_column(String(256), nullable=False)
+    local_account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
+    local_credit_card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    connection: Mapped["BankConnection"] = relationship(back_populates="links")
+    local_account: Mapped["Account | None"] = relationship()
+    local_credit_card: Mapped["CreditCard | None"] = relationship()
