@@ -10,6 +10,7 @@ from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.spending_helpers import NOT_SAVINGS, merchant_totals
 from backend.services.summary_generator import generate_weekly_digest
+from backend.services.budget_snapshot import compute_budget_snapshot
 
 router = APIRouter(prefix="/spending", tags=["spending"])
 
@@ -399,6 +400,15 @@ def available_to_spend(
         spent_this_month=spent_this_month,
         available=monthly_income - committed_expenses - spent_this_month,
     )
+
+
+@router.get("/budget-snapshot", response_model=schemas.BudgetSnapshot)
+def budget_snapshot(
+    account_id: int = Query(...),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    return compute_budget_snapshot(db, user, account_id)
 
 
 @router.get("/yearly-trends", response_model=list[schemas.YearlyTrendEntry])
