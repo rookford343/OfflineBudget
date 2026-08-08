@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, field_validator
-from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction
+from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -632,6 +632,57 @@ class ImportConfirmRequest(BaseModel):
 class ImportConfirmResponse(BaseModel):
     imported: int
     skipped_duplicates: int
+
+
+# ── Bank Sync (SimpleFIN) ────────────────────────────────────────────────────
+
+class BankConnectionAccountOut(BaseModel):
+    """One SimpleFIN account discovered on the connection, for the mapping UI."""
+    simplefin_account_id: str
+    name: str
+    org_name: str
+    balance: Decimal
+    currency: str
+
+
+class BankConnectionConnectRequest(BaseModel):
+    setup_token: str
+
+
+class BankConnectionConnectResponse(BaseModel):
+    connection_id: int
+    accounts: list[BankConnectionAccountOut]
+
+
+class BankConnectionLinkRequest(BaseModel):
+    simplefin_account_id: str
+    simplefin_account_name: str
+    local_account_id: Optional[int] = None
+    local_credit_card_id: Optional[int] = None
+
+
+class BankConnectionLinkOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    simplefin_account_id: str
+    simplefin_account_name: str
+    local_account_id: Optional[int]
+    local_credit_card_id: Optional[int]
+    last_synced_at: Optional[datetime]
+
+
+class BankConnectionStatusOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    status: BankConnectionStatus
+    last_synced_at: Optional[datetime]
+    last_error: Optional[str]
+    links: list[BankConnectionLinkOut]
+
+
+class BankSyncNowResponse(BaseModel):
+    synced_connections: int
+    errors: list[str]
 
 
 # ── Forecast Day Checkpoints ──────────────────────────────────────────────────
