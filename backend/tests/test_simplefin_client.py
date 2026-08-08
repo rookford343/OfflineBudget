@@ -88,3 +88,93 @@ def test_fetch_accounts_raises_simplefinerror_on_http_error():
     with patch("backend.services.simplefin_client.httpx.get", side_effect=httpx.HTTPError("boom")):
         with pytest.raises(SimpleFinError):
             fetch_accounts("https://access.url")
+
+
+def test_fetch_accounts_raises_on_missing_balance():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {
+        "accounts": [
+            {"id": "acc-1", "name": "Checking", "org": {"name": "Chase"}, "currency": "USD"},
+        ]
+    }
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        with pytest.raises(SimpleFinError):
+            fetch_accounts("https://access.url")
+
+
+def test_fetch_accounts_raises_on_non_numeric_balance():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {
+        "accounts": [
+            {"id": "acc-1", "name": "Checking", "org": {"name": "Chase"}, "balance": "not-a-number", "currency": "USD"},
+        ]
+    }
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        with pytest.raises(SimpleFinError):
+            fetch_accounts("https://access.url")
+
+
+def test_fetch_transactions_raises_on_missing_posted():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {
+        "accounts": [{
+            "id": "acc-1", "balance": "980.44",
+            "transactions": [
+                {"id": "t1", "amount": "-52.90", "description": "MEIJER #123"},
+            ],
+        }]
+    }
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        with pytest.raises(SimpleFinError):
+            fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+
+
+def test_fetch_transactions_raises_on_invalid_timestamp():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {
+        "accounts": [{
+            "id": "acc-1", "balance": "980.44",
+            "transactions": [
+                {"id": "t1", "posted": "not-a-timestamp", "amount": "-52.90", "description": "MEIJER #123"},
+            ],
+        }]
+    }
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        with pytest.raises(SimpleFinError):
+            fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+
+
+def test_fetch_transactions_raises_on_non_numeric_amount():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {
+        "accounts": [{
+            "id": "acc-1", "balance": "980.44",
+            "transactions": [
+                {"id": "t1", "posted": 1723276800, "amount": "not-a-number", "description": "MEIJER #123"},
+            ],
+        }]
+    }
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        with pytest.raises(SimpleFinError):
+            fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+
+
+def test_fetch_transactions_raises_on_missing_account_balance():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {
+        "accounts": [{
+            "id": "acc-1",
+            "transactions": [
+                {"id": "t1", "posted": 1723276800, "amount": "-52.90", "description": "MEIJER #123"},
+            ],
+        }]
+    }
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        with pytest.raises(SimpleFinError):
+            fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
