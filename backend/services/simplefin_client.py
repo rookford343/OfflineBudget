@@ -8,7 +8,7 @@ import base64
 import binascii
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 import httpx
 
 
@@ -60,16 +60,19 @@ def fetch_accounts(access_url: str, timeout: float = 15.0) -> list[SimpleFinAcco
     """Fetch account metadata + balances only (no transactions) -- used for the
     initial link-mapping step in Settings."""
     data = _get(access_url, params={"balances-only": "1"}, timeout=timeout)
-    return [
-        SimpleFinAccount(
-            id=a["id"],
-            name=a.get("name", "Unknown"),
-            org_name=(a.get("org") or {}).get("name", ""),
-            balance=Decimal(str(a["balance"])),
-            currency=a.get("currency", "USD"),
-        )
-        for a in data.get("accounts", [])
-    ]
+    accounts = []
+    for a in data.get("accounts", []):
+        try:
+            accounts.append(SimpleFinAccount(
+                id=a["id"],
+                name=a.get("name", "Unknown"),
+                org_name=(a.get("org") or {}).get("name", ""),
+                balance=Decimal(str(a["balance"])),
+                currency=a.get("currency", "USD"),
+            ))
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+            raise SimpleFinError(f"SimpleFIN returned a malformed account record: {exc}") from exc
+    return accounts
 
 
 def fetch_transactions(
@@ -84,16 +87,22 @@ def fetch_transactions(
     if not accounts:
         raise SimpleFinError(f"SimpleFIN returned no data for account {account_id}")
     account = accounts[0]
-    balance = Decimal(str(account["balance"]))
-    txns = [
-        SimpleFinTransaction(
-            id=t["id"],
-            posted=datetime.fromtimestamp(t["posted"]),
-            amount=Decimal(str(t["amount"])),
-            description=t.get("description") or t.get("payee") or "Unknown",
-        )
-        for t in account.get("transactions", [])
-    ]
+    try:
+        balance = Decimal(str(account["balance"]))
+    except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
+        raise SimpleFinError(f"SimpleFIN returned a malformed account record: {exc}") from exc
+
+    txns = []
+    for t in account.get("transactions", []):
+        try:
+            txns.append(SimpleFinTransaction(
+                id=t["id"],
+                posted=datetime.fromtimestamp(t["posted"]),
+                amount=Decimal(str(t["amount"])),
+                description=t.get("description") or t.get("payee") or "Unknown",
+            ))
+        except (KeyError, TypeError, ValueError, InvalidOperation, OSError) as exc:
+            raise SimpleFinError(f"SimpleFIN returned a malformed transaction record: {exc}") from exc
     return txns, balance
 
 
