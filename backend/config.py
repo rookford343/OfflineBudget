@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     WEEKLY_DIGEST_DAY: str = "fri"    # APScheduler cron day_of_week value
     WEEKLY_DIGEST_HOUR: int = 7       # 24-hour local time
     DIGEST_RECIPIENTS: str = ""       # comma-separated email addresses
+    BANK_TOKEN_ENCRYPTION_KEY: str | None = None  # Fernet key for encrypting SimpleFIN access URLs at rest
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
