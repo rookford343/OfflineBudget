@@ -254,6 +254,58 @@ def build_preview(
     return preview_rows
 
 
+def _find_duplicate_transaction(
+    db: Session, user_id: int, account_id: int, row: schemas.ImportConfirmRow,
+) -> models.Transaction | None:
+    """Duplicate lookup for a checking-account import row.
+
+    Rows that carry the provider's own transaction id (bank sync) match on that
+    id, because the legacy (date, amount, description) heuristic silently
+    collapses two genuinely distinct same-day charges -- two identical $4.50
+    coffees -- into one. When the id doesn't match anything, we still fall back
+    to the heuristic but restricted to rows that predate this column
+    (external_id IS NULL), so upgrading an existing database doesn't re-import
+    already-synced history. Rows without an external_id (CSV, OFX, manual) use
+    the original heuristic unchanged.
+    """
+    base = db.query(models.Transaction).filter(
+        models.Transaction.user_id == user_id,
+        models.Transaction.account_id == account_id,
+    )
+    heuristic = (
+        models.Transaction.date == row.date,
+        models.Transaction.amount == row.amount,
+        models.Transaction.description == row.description,
+    )
+    if row.external_id:
+        by_id = base.filter(models.Transaction.external_id == row.external_id).first()
+        if by_id:
+            return by_id
+        return base.filter(models.Transaction.external_id.is_(None), *heuristic).first()
+    return base.filter(*heuristic).first()
+
+
+def _find_duplicate_card_transaction(
+    db: Session, user_id: int, card_id: int, row: schemas.ImportConfirmRow,
+) -> models.CreditCardTransaction | None:
+    """Card-side twin of _find_duplicate_transaction -- same rationale."""
+    base = db.query(models.CreditCardTransaction).filter(
+        models.CreditCardTransaction.user_id == user_id,
+        models.CreditCardTransaction.card_id == card_id,
+    )
+    heuristic = (
+        models.CreditCardTransaction.date == row.date,
+        models.CreditCardTransaction.amount == abs(row.amount),
+        models.CreditCardTransaction.merchant == row.description,
+    )
+    if row.external_id:
+        by_id = base.filter(models.CreditCardTransaction.external_id == row.external_id).first()
+        if by_id:
+            return by_id
+        return base.filter(models.CreditCardTransaction.external_id.is_(None), *heuristic).first()
+    return base.filter(*heuristic).first()
+
+
 def run_import(
     db: Session,
     user: models.User,
@@ -270,13 +322,7 @@ def run_import(
 
     for row in rows:
         if account_id:
-            dup = db.query(models.Transaction).filter(
-                models.Transaction.user_id == user.id,
-                models.Transaction.account_id == account_id,
-                models.Transaction.date == row.date,
-                models.Transaction.amount == row.amount,
-                models.Transaction.description == row.description,
-            ).first()
+            dup = _find_duplicate_transaction(db, user.id, account_id, row)
             if dup:
                 skipped += 1
                 continue
@@ -292,6 +338,7 @@ def run_import(
                 recurring_item_id=row.recurring_item_id,
                 is_actual=True,
                 source=source,
+                external_id=row.external_id,
                 imported_at=now,
             )
             if not row.recurring_item_id:
@@ -315,13 +362,7 @@ def run_import(
             imported += 1
 
         elif card_id:
-            dup = db.query(models.CreditCardTransaction).filter(
-                models.CreditCardTransaction.user_id == user.id,
-                models.CreditCardTransaction.card_id == card_id,
-                models.CreditCardTransaction.date == row.date,
-                models.CreditCardTransaction.amount == abs(row.amount),
-                models.CreditCardTransaction.merchant == row.description,
-            ).first()
+            dup = _find_duplicate_card_transaction(db, user.id, card_id, row)
             if dup:
                 skipped += 1
                 continue
@@ -334,6 +375,7 @@ def run_import(
                 amount=abs(row.amount),
                 merchant=row.description,
                 source=card_source,
+                external_id=row.external_id,
             )
             db.add(ct)
 
