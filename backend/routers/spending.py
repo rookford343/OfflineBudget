@@ -2,7 +2,7 @@ import calendar
 from datetime import date
 from decimal import Decimal
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, cast, String
 from sqlalchemy.orm import Session, joinedload
 from backend import models
@@ -408,6 +408,12 @@ def budget_snapshot(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    account = db.query(models.Account).filter(
+        models.Account.id == account_id,
+        models.Account.user_id == user.id,
+    ).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
     return compute_budget_snapshot(db, user, account_id)
 
 
