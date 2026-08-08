@@ -1,0 +1,90 @@
+import base64
+from datetime import datetime
+from decimal import Decimal
+from unittest.mock import patch, MagicMock
+import httpx
+import pytest
+from backend.services.simplefin_client import (
+    claim_setup_token, fetch_accounts, fetch_transactions, SimpleFinError,
+)
+
+
+def test_claim_setup_token_returns_access_url():
+    claim_url = "https://bridge.simplefin.org/simplefin/claim/abc123"
+    setup_token = base64.b64encode(claim_url.encode()).decode()
+    mock_resp = MagicMock()
+    mock_resp.text = "https://user:pass@bridge.simplefin.org/simplefin"
+    mock_resp.raise_for_status = lambda: None
+
+    with patch("backend.services.simplefin_client.httpx.post", return_value=mock_resp) as mock_post:
+        access_url = claim_setup_token(setup_token)
+
+    assert access_url == "https://user:pass@bridge.simplefin.org/simplefin"
+    mock_post.assert_called_once_with(claim_url, timeout=15.0)
+
+
+def test_claim_setup_token_rejects_invalid_base64():
+    with pytest.raises(SimpleFinError):
+        claim_setup_token("!!!not-valid-base64!!!")
+
+
+def test_claim_setup_token_raises_on_http_error():
+    setup_token = base64.b64encode(b"https://bridge.simplefin.org/claim/x").decode()
+    with patch("backend.services.simplefin_client.httpx.post", side_effect=httpx.HTTPError("boom")):
+        with pytest.raises(SimpleFinError):
+            claim_setup_token(setup_token)
+
+
+def test_fetch_accounts_parses_balances():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {
+        "accounts": [
+            {"id": "acc-1", "name": "Checking", "org": {"name": "Chase"}, "balance": "1234.56", "currency": "USD"},
+            {"id": "acc-2", "name": "Sapphire", "org": {"name": "Chase"}, "balance": "-500.00", "currency": "USD"},
+        ]
+    }
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        accounts = fetch_accounts("https://user:pass@bridge.simplefin.org/simplefin")
+
+    assert len(accounts) == 2
+    assert accounts[0].id == "acc-1"
+    assert accounts[0].balance == Decimal("1234.56")
+    assert accounts[1].org_name == "Chase"
+
+
+def test_fetch_transactions_returns_txns_and_balance():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {
+        "accounts": [{
+            "id": "acc-1", "balance": "980.44",
+            "transactions": [
+                {"id": "t1", "posted": 1723276800, "amount": "-52.90", "description": "MEIJER #123"},
+                {"id": "t2", "posted": 1723190400, "amount": "2500.00", "payee": "ACME CORP PAYROLL"},
+            ],
+        }]
+    }
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        txns, balance = fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+
+    assert balance == Decimal("980.44")
+    assert len(txns) == 2
+    assert txns[0].amount == Decimal("-52.90")
+    assert txns[0].description == "MEIJER #123"
+    assert txns[1].description == "ACME CORP PAYROLL"  # falls back to payee when description missing
+
+
+def test_fetch_transactions_raises_when_account_missing():
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {"accounts": []}
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        with pytest.raises(SimpleFinError):
+            fetch_transactions("https://access.url", "acc-missing", datetime(2026, 8, 1))
+
+
+def test_fetch_accounts_raises_simplefinerror_on_http_error():
+    with patch("backend.services.simplefin_client.httpx.get", side_effect=httpx.HTTPError("boom")):
+        with pytest.raises(SimpleFinError):
+            fetch_accounts("https://access.url")
