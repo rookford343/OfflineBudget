@@ -16,6 +16,22 @@ def _get_owned_connection(db: Session, user: models.User, connection_id: int) ->
     return connection
 
 
+def _assert_account_owned(db: Session, user_id: int, account_id: int) -> None:
+    if not db.query(models.Account).filter(
+        models.Account.id == account_id,
+        models.Account.user_id == user_id,
+    ).first():
+        raise HTTPException(status_code=404, detail="Account not found")
+
+
+def _assert_credit_card_owned(db: Session, user_id: int, card_id: int) -> None:
+    if not db.query(models.CreditCard).filter(
+        models.CreditCard.id == card_id,
+        models.CreditCard.user_id == user_id,
+    ).first():
+        raise HTTPException(status_code=404, detail="Credit card not found")
+
+
 @router.post("/connect", response_model=schemas.BankConnectionConnectResponse, status_code=status.HTTP_201_CREATED)
 def connect(
     body: schemas.BankConnectionConnectRequest,
@@ -64,6 +80,10 @@ def link_account(
     connection = _get_owned_connection(db, user, connection_id)
     if not body.local_account_id and not body.local_credit_card_id:
         raise HTTPException(status_code=400, detail="Provide either local_account_id or local_credit_card_id")
+    if body.local_account_id:
+        _assert_account_owned(db, user.id, body.local_account_id)
+    if body.local_credit_card_id:
+        _assert_credit_card_owned(db, user.id, body.local_credit_card_id)
 
     link = models.BankConnectionAccountLink(
         connection_id=connection.id,
