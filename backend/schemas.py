@@ -911,6 +911,29 @@ class WeeklyDigest(BaseModel):
     risk: ForecastRisk
 
 
+class CardSnapshot(BaseModel):
+    id: int
+    name: str
+    current_balance: Decimal
+    pending_charges: Decimal
+    credit_limit: Decimal
+    utilization_pct: float
+    due_day: int
+
+
+class BudgetSnapshot(BaseModel):
+    as_of: date
+    leftover: Decimal
+    left_to_spend: Decimal
+    left_to_spend_weekly: Decimal
+    not_saving: Decimal
+    not_saving_weekly: Decimal
+    days_remaining_in_month: int
+    cards: list[CardSnapshot]
+    categories: list[WeeklyDigestCategory]
+    top_merchants: list[MerchantSpendingEntry]
+
+
 # ── Reconciliation ────────────────────────────────────────────────────────────
 
 class ReconcileMatchedItem(BaseModel):
