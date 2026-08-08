@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from backend import models
 from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
+from backend.services.card_matching import card_matches_description
 
 
 def _last_day_of_month(d: date) -> int:
@@ -95,19 +96,14 @@ def _cc_actual_nearby(
 ) -> bool:
     """True if an actual transaction matching this card appears within window days of target.
 
-    Uses the first token of the card name (e.g. 'Chase' from 'Chase Sapphire') as the
-    identifier since bank descriptions rarely include the full product name but always
-    include the issuer. Falls back to last_four if available.
+    Matching uses card_matching.card_matches_description (first-token-of-name
+    heuristic, since bank descriptions rarely include the full product name but
+    always include the issuer, plus a last_four fallback).
     """
-    name_lower = (card.name or "").lower().strip()
-    first_token = name_lower.split()[0] if name_lower else ""
     for offset in range(-window, window + 1):
         check = target + timedelta(days=offset)
         for txn in actuals_by_date.get(check, []):
-            desc_lower = txn.description.lower()
-            if first_token and first_token in desc_lower:
-                return True
-            if card.last_four and card.last_four in txn.description:
+            if card_matches_description(card, txn.description):
                 return True
     return False
 

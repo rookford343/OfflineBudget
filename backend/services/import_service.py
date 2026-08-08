@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.csv_parser import ParsedRow
 from backend.services.auto_categorizer import categorize
+from backend.services.card_matching import card_matches_description
 
 # ACH/bank noise suffixes to strip before matching
 _ACH_NOISE = re.compile(
@@ -301,11 +302,8 @@ def run_import(
 
             # CC payoff detection: reduce matched card's balance
             if row.is_transfer:
-                desc_lower = row.description.lower()
                 for card in db.query(models.CreditCard).filter_by(user_id=user.id).all():
-                    name_lower = (card.name or "").lower()
-                    if (name_lower and name_lower in desc_lower) or \
-                       (card.last_four and card.last_four in row.description):
+                    if card_matches_description(card, row.description):
                         card.current_balance = max(
                             Decimal("0"),
                             Decimal(str(card.current_balance)) - abs(Decimal(str(row.amount)))
