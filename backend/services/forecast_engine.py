@@ -214,7 +214,7 @@ def build_forecast(
             and card.balance_due and card.balance_due > 0
         ):
             cc_payments.setdefault(card.next_payment_date, []).append(
-                (card.name, Decimal(str(card.balance_due)))
+                (card.name, Decimal(str(card.balance_due)) + Decimal(str(card.pending_charges or 0)))
             )
         if card.monthly_spend_estimate and card.monthly_spend_estimate > 0:
             estimate = Decimal(str(card.monthly_spend_estimate))
