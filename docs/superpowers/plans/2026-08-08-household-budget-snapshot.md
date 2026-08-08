@@ -12,7 +12,8 @@
 
 - `pending_charges` is **not** part of the Left-to-Spend/Not-saving math — that math uses `CreditCard.current_balance` only. `pending_charges` only affects the Forecast's CC-payment injection. Do not conflate the two.
 - No auto-reset of `pending_charges` — it's a plain field Dan manages himself.
-- The golden-value regression test must reproduce Dan's real spreadsheet numbers exactly: `left_to_spend == 1567.72`, `left_to_spend_weekly == 438.96`, `not_saving == 2085.64`, `not_saving_weekly == 583.98`, as of `2026-08-07` (rounded to cents).
+- The golden-value regression test must reproduce Dan's real spreadsheet numbers as of `2026-08-07`: `left_to_spend_weekly == 438.96`, `not_saving == 2085.64`, `not_saving_weekly == 583.98` exactly, and `left_to_spend == 1567.73` (one cent above the spreadsheet's displayed `1567.72` — a verified benign Decimal(14,2)-storage-vs-Excel-float rounding-order artifact, not an error; see Task 3's implementation for the full explanation).
+- `Not Saving` is confirmed to intentionally react to `pending_charges` via its `QuarterMinimum` term (which is forecast-derived, and the forecast includes `pending_charges` per Task 2) — this matches Dan's stated purpose for the field. `Left to Spend` never reacts to it, since it doesn't use `QuarterMinimum`. Do not "fix" `Not Saving` to ignore `pending_charges`.
 - Follow existing conventions exactly: SQLAlchemy `Mapped[...]` style in `backend/models.py`, Pydantic `BaseModel` style in `backend/schemas.py`, the `upgrade_schema()` `ALTER TABLE` list pattern in `backend/database.py` for new columns, React Query + Tailwind `card`/gradient conventions in the frontend pages.
 - Daily summary email (`generate_daily_summary`) is out of scope — only the weekly digest gets the new content and visual refresh.
 

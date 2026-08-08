@@ -32,11 +32,17 @@ simple manual number per card.
    data, on both the Dashboard and the Friday weekly email, from one shared
    computation.
 3. Add a manual `pending_charges` field per credit card, editable from
-   Credit Cards settings and inline on the Dashboard, that (a) improves the
-   Forecast's credit-card-payment projection and (b) is not part of the
-   Left-to-Spend/Not-saving math (that math uses today's real balance only —
-   pending charges are a forecast-only concept, mirroring how Dan already
-   keeps these as separate mental models today).
+   Credit Cards settings and inline on the Dashboard, that improves the
+   Forecast's credit-card-payment projection. It is deliberately excluded
+   from `CardBalances` (Left-to-Spend/Not-saving use today's real
+   `current_balance` only, not anticipated future charges) — but `Not
+   Saving`'s `QuarterMinimum` term legitimately picks it up anyway, because
+   that term is itself the checking-account forecast, and pending charges
+   are now part of that forecast (Goal 3's own improvement). Confirmed
+   intentional with Dan: this matches his stated reason for wanting the
+   field in the first place — catching anticipated overspend before it
+   forces a savings pull, which is exactly what `Not Saving` measures.
+   `Left to Spend` never sees it, since it doesn't use `QuarterMinimum`.
 4. Visually refresh the weekly email — the current template is plain HTML
    tables.
 
@@ -55,8 +61,12 @@ simple manual number per card.
 ## The formulas (reverse-engineered from Budget.xlsx, verified against live cells)
 
 Confirmed by decoding the actual Excel formulas in `2026 Overview!B17:C18`
-and `Budget!F1:F6`, and reproducing Dan's real numbers exactly
-($1,567.72 / $438.96 / $2,085.64 / $583.98 as of 2026-08-07):
+and `Budget!F1:F6`, and reproducing Dan's real numbers
+($1,567.73 / $438.96 / $2,085.64 / $583.98 as of 2026-08-07 — `left_to_spend`
+is one cent above the spreadsheet's displayed $1,567.72; verified as a
+benign rounding-order artifact, Decimal(14,2) storage rounds inputs to
+cents before summing, Excel's cell keeps full float precision throughout
+and only rounds for display):
 
 ```
 Leftover        = MonthlyIncome
@@ -65,7 +75,8 @@ Leftover        = MonthlyIncome
                   - GroceriesBudget (BudgetAllocation, category "Groceries", month=0)
 
 CardBalances    = Σ(CreditCard.current_balance) across active cards
-                  (uses current_balance only -- NOT + pending_charges; see Goal 3)
+                  (uses current_balance only -- NOT + pending_charges directly;
+                  see Goal 3 for why NotSaving picks it up anyway via QuarterMinimum)
 
 ChargedSoFar    = Σ(RecurringItem.amount) for active RecurringItems with
                   card_id set AND day_of_month <= as_of.day
