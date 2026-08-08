@@ -133,6 +133,15 @@ def compute_budget_snapshot(
     # spreadsheet cell adds it back then subtracts the not-yet-due
     # remainder), but NOT in Not Saving -- verified by hand against the
     # live spreadsheet cell. Do not "simplify" these to look symmetric.
+    #
+    # Not Saving also intentionally picks up pending_charges transitively:
+    # quarter_min comes from the real forecast (build_quarters ->
+    # forecast_engine.py's CC-payment injection), which folds in each
+    # card's pending_charges. Left to Spend never touches the forecast, so
+    # it never reacts to pending_charges -- that asymmetry is intentional
+    # (it's exactly what lets Not Saving catch anticipated overspend before
+    # it forces a savings pull). Pinned down in
+    # backend/tests/test_budget_snapshot.py::test_not_saving_reacts_to_pending_charges_but_left_to_spend_does_not.
     left_to_spend = leftover - card_balances + charged_so_far
     quarter_min = _quarter_minimum(db, user.id, account_id, as_of)
     not_saving = quarter_min - card_balances - cc_budget_total + charged_so_far

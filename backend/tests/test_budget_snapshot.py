@@ -136,3 +136,43 @@ def test_no_active_cards_gives_zero_card_balance(db_session):
     # With zero income/bills/budgets seeded, leftover is 0, so left_to_spend
     # reduces to just +ChargedSoFar(0) -CardBalances(0) = 0.
     assert snapshot.left_to_spend == Decimal("0.00")
+
+
+def test_not_saving_reacts_to_pending_charges_but_left_to_spend_does_not(db_session):
+    """Not Saving pulls QuarterMinimum from the real forecast, which includes
+    pending_charges (see forecast_engine.py's CC-payment injection) -- so
+    entering a pending charge should move Not Saving but never Left to Spend
+    (which doesn't touch the forecast at all). This is intentional: it
+    matches the user's stated reason for wanting pending_charges in the
+    first place. Do not "fix" this to isolate Not Saving from it."""
+    user = models.User(username="pendtest", hashed_password="x", display_name="PendTest")
+    db_session.add(user)
+    db_session.flush()
+    checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("2000.00"))
+    card = models.CreditCard(
+        user_id=user.id, name="Test Card", credit_limit=Decimal("10000.00"),
+        statement_day=28, due_day=25, balance_due=Decimal("1000.00"),
+        next_payment_date=date(2026, 8, 25),
+    )
+    db_session.add_all([checking, card])
+    db_session.flush()
+    # A modest recurring expense so there's a real (non-mocked) forecast to
+    # walk -- this test deliberately does NOT mock build_quarters, unlike
+    # the golden-value test, because the whole point is to exercise the
+    # real forecast path where pending_charges actually lives.
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=checking.id, name="Rent", amount=Decimal("500.00"),
+        type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
+        day_of_month=1, start_date=date(2026, 1, 1),
+    ))
+    db_session.commit()
+
+    baseline = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    card.pending_charges = Decimal("500.00")
+    db_session.commit()
+
+    with_pending = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    assert with_pending.left_to_spend == baseline.left_to_spend, "Left to Spend must never react to pending_charges"
+    assert with_pending.not_saving == baseline.not_saving - Decimal("500.00"), "Not Saving must react by exactly the pending amount (it dropped, since it's a payment)"
