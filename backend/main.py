@@ -92,7 +92,9 @@ def _digest_html(user: "models.User", digest) -> tuple[str, str]:
     card_rows = "".join(
         f"<tr><td style='padding:6px 12px 6px 0'>{c.name}</td>"
         f"<td style='padding:6px 0;text-align:right;font-weight:600'>{fmt(c.current_balance)}</td>"
-        f"<td style='padding:6px 0 6px 12px;text-align:right;color:#9ca3af;font-size:12px'>{c.utilization_pct}% of {fmt(c.credit_limit)}</td></tr>"
+        f"<td style='padding:6px 0 6px 12px;text-align:right;color:#9ca3af;font-size:12px'>{c.utilization_pct}% of {fmt(c.credit_limit)}"
+        + (f" · pending {fmt(c.pending_charges)}" if c.pending_charges and c.pending_charges > 0 else "")
+        + "</td></tr>"
         for c in snap.cards
     ) or "<tr><td style='color:#888'>No active cards</td></tr>"
     cards_html = section("Credit Cards", f"<table style='width:100%'>{card_rows}</table>")
@@ -140,7 +142,12 @@ def _digest_html(user: "models.User", digest) -> tuple[str, str]:
 
     cat_text = "\n".join(f"  {c.category_name}: {fmt(c.total)}" for c in digest.categories) or "  No categorized spending this week"
     merchant_text = "\n".join(f"  {m.name}: {fmt(m.total)}" for m in digest.top_merchants[:10]) or "  No merchant activity this week"
-    card_text = "\n".join(f"  {c.name}: {fmt(c.current_balance)} ({c.utilization_pct}% of {fmt(c.credit_limit)})" for c in snap.cards) or "  No active cards"
+    card_text = "\n".join(
+        f"  {c.name}: {fmt(c.current_balance)} ({c.utilization_pct}% of {fmt(c.credit_limit)}"
+        + (f", pending {fmt(c.pending_charges)}" if c.pending_charges and c.pending_charges > 0 else "")
+        + ")"
+        for c in snap.cards
+    ) or "  No active cards"
 
     text = f"""OfflineBudget Weekly Digest — {digest.week_start.strftime("%B %-d")} to {digest.week_end.strftime("%B %-d, %Y")}
 For {user.display_name}
