@@ -186,51 +186,53 @@ export default function Dashboard() {
           </h3>
           <p className="text-sm text-gray-500 mb-3">Total spent: <span className="font-semibold text-gray-900 dark:text-gray-100">{fmt(parseFloat(weeklyDigest.total_spent))}</span></p>
 
-          {weeklyDigest.categories.length > 0 && (
-            <div className="mb-4 max-w-md">
-              <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">By Category</p>
-              <div className="space-y-1 text-sm">
-                {weeklyDigest.categories.slice(0, 5).map((c: any) => {
-                  const budget = budgetByCategory.get(c.category_id);
-                  const budgeted = budget ? parseFloat(budget.budgeted) : 0;
-                  const actual = budget ? parseFloat(budget.actual_total) : 0;
-                  const pct = budgeted > 0 ? Math.min(100, (actual / budgeted) * 100) : 0;
-                  const overBudget = budgeted > 0 && actual > budgeted;
-                  return (
-                    <div key={c.category_id} className="relative rounded overflow-hidden">
-                      {budgeted > 0 && (
-                        <div
-                          className={`absolute inset-y-0 left-0 rounded ${overBudget ? "bg-red-100 dark:bg-red-900/30" : "bg-indigo-100 dark:bg-indigo-900/30"}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      )}
-                      <div className="relative flex justify-between gap-4 px-1.5 py-0.5 text-gray-600 dark:text-gray-400">
-                        <span className="flex items-center gap-1 min-w-0 truncate">
-                          {overBudget && <AlertTriangle size={11} className="text-red-500 shrink-0" />}
-                          {c.category_name}
-                        </span>
-                        <span className="tabular-nums shrink-0">{fmt(parseFloat(c.total))}</span>
+          <div className="grid md:grid-cols-2 gap-6">
+            {weeklyDigest.categories.length > 0 && (
+              <div>
+                <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">By Category</p>
+                <div className="space-y-1.5 text-sm">
+                  {weeklyDigest.categories.slice(0, 5).map((c: any) => {
+                    const budget = budgetByCategory.get(c.category_id);
+                    const budgeted = budget ? parseFloat(budget.budgeted) : 0;
+                    const actual = budget ? parseFloat(budget.actual_total) : 0;
+                    const pct = budgeted > 0 ? Math.min(100, (actual / budgeted) * 100) : 0;
+                    const overBudget = budgeted > 0 && actual > budgeted;
+                    return (
+                      <div key={c.category_id} className={`relative rounded overflow-hidden ${budgeted > 0 ? `border-l-2 ${overBudget ? "border-red-500" : "border-indigo-400"}` : ""}`}>
+                        {budgeted > 0 && (
+                          <div
+                            className={`absolute inset-y-0 left-0 ${overBudget ? "bg-red-200/70 dark:bg-red-900/40" : "bg-indigo-200/70 dark:bg-indigo-800/40"}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        )}
+                        <div className="relative flex justify-between gap-4 px-1.5 py-1 text-gray-600 dark:text-gray-400">
+                          <span className="flex items-center gap-1 min-w-0 truncate">
+                            {overBudget && <AlertTriangle size={11} className="text-red-500 shrink-0" />}
+                            {c.category_name}
+                          </span>
+                          <span className="tabular-nums shrink-0">{fmt(parseFloat(c.total))}</span>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {weeklyDigest.top_merchants.length > 0 && (
-            <div className="max-w-md">
-              <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">Top Merchants</p>
-              <div className="space-y-1 text-sm">
-                {weeklyDigest.top_merchants.slice(0, 5).map((m: any) => (
-                  <div key={m.name} className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
-                    <span className="truncate">{m.name}</span>
-                    <span className="tabular-nums shrink-0">{fmt(parseFloat(m.total))}</span>
-                  </div>
-                ))}
+            {weeklyDigest.top_merchants.length > 0 && (
+              <div>
+                <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">Top Merchants</p>
+                <div className="space-y-1.5 text-sm">
+                  {weeklyDigest.top_merchants.slice(0, 5).map((m: any) => (
+                    <div key={m.name} className="flex justify-between gap-4 px-1.5 py-1 text-gray-600 dark:text-gray-400">
+                      <span className="truncate">{m.name}</span>
+                      <span className="tabular-nums shrink-0">{fmt(parseFloat(m.total))}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
 
