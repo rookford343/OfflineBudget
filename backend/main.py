@@ -25,6 +25,7 @@ from backend.routers import day_checkpoints as day_checkpoints_router_module
 from backend.routers import rules as rules_router_module
 from backend.routers import exports as exports_router_module
 from backend.routers import data as data_router_module
+from backend.routers import bank_sync as bank_sync_router_module
 
 logger = logging.getLogger(__name__)
 
@@ -209,9 +210,22 @@ def _send_weekly_digest() -> None:
         db.close()
 
 
+def _run_bank_sync() -> None:
+    from backend.database import SessionLocal
+    from backend.services.bank_sync_service import sync_all
+    db = SessionLocal()
+    try:
+        sync_all(db)
+    except Exception as exc:
+        logger.error("Bank sync job failed: %s", exc)
+    finally:
+        db.close()
+
+
 _scheduler = BackgroundScheduler()
 _scheduler.add_job(_send_daily_summaries, "cron", hour=settings.DAILY_SUMMARY_HOUR)
 _scheduler.add_job(_send_weekly_digest, "cron", day_of_week=settings.WEEKLY_DIGEST_DAY, hour=settings.WEEKLY_DIGEST_HOUR)
+_scheduler.add_job(_run_bank_sync, "cron", hour=5)
 
 
 @asynccontextmanager
@@ -263,6 +277,7 @@ app.include_router(day_checkpoints_router_module.router)
 app.include_router(rules_router_module.router)
 app.include_router(exports_router_module.router)
 app.include_router(data_router_module.router)
+app.include_router(bank_sync_router_module.router)
 
 
 @app.get("/health", tags=["health"])
