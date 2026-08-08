@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { accountsApi, categoriesApi, budgetApi, adminApi, authApi, rulesApi, dataApi } from "../api";
+import { accountsApi, categoriesApi, budgetApi, adminApi, authApi, rulesApi, dataApi, bankSyncApi } from "../api";
 import { fmt } from "../lib/utils";
 import { getTheme, setTheme } from "../store/theme";
 import { clearAuth, isAdmin } from "../store/auth";
@@ -23,6 +23,42 @@ export default function Settings() {
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
+  const { data: bankConnections = [] } = useQuery<any[]>({ queryKey: ["bank-connections"], queryFn: bankSyncApi.status });
+  const [setupToken, setSetupToken] = useState("");
+  const [pendingConnect, setPendingConnect] = useState<{ connection_id: number; accounts: any[] } | null>(null);
+  const [linkTargets, setLinkTargets] = useState<Record<string, string>>({});
+
+  const connectMut = useMutation({
+    mutationFn: (token: string) => bankSyncApi.connect(token),
+    onSuccess: (data) => { setPendingConnect(data); setSetupToken(""); },
+  });
+  const linkMut = useMutation({
+    mutationFn: ({ connectionId, data }: any) => bankSyncApi.link(connectionId, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["bank-connections"] }); },
+  });
+  const syncNowMut = useMutation({
+    mutationFn: bankSyncApi.syncNow,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["bank-connections"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); },
+  });
+  const disconnectMut = useMutation({
+    mutationFn: bankSyncApi.disconnect,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["bank-connections"] }),
+  });
+
+  function submitLink(simplefinAccountId: string, simplefinAccountName: string, connectionId: number) {
+    const target = linkTargets[simplefinAccountId];
+    if (!target) return;
+    const [kind, id] = target.split(":");
+    linkMut.mutate({
+      connectionId,
+      data: {
+        simplefin_account_id: simplefinAccountId,
+        simplefin_account_name: simplefinAccountName,
+        local_account_id: kind === "account" ? parseInt(id) : undefined,
+        local_credit_card_id: kind === "card" ? parseInt(id) : undefined,
+      },
+    });
+  }
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["categories"], queryFn: categoriesApi.list });
   const { data: budgets = [] } = useQuery<any[]>({ queryKey: ["budget", currentYear], queryFn: () => budgetApi.list(currentYear) });
   const { data: users = [] } = useQuery<any[]>({ queryKey: ["admin-users"], queryFn: adminApi.listUsers, enabled: admin });
@@ -417,6 +453,97 @@ export default function Settings() {
           ))}
           {accounts.length === 0 && <p className="text-sm text-gray-400 py-4 text-center">No accounts yet</p>}
         </div>
+        </div>}
+      </div>
+
+      {/* ── Bank Connections ── */}
+      <div className="card">
+        <div className="flex items-center justify-between">
+          <button onClick={() => toggleSection("bank-sync")} className="flex items-center gap-2 flex-1 text-left">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><Link size={16} className="text-indigo-500" /> Bank Connections</h3>
+            <ChevronDown size={16} className={`ml-1 text-gray-400 transition-transform ${openSections.has("bank-sync") ? "" : "-rotate-90"}`} />
+          </button>
+          {openSections.has("bank-sync") && bankConnections.length > 0 && (
+            <button onClick={() => syncNowMut.mutate()} disabled={syncNowMut.isPending} className="btn-primary btn-sm text-xs px-3 py-1.5">
+              {syncNowMut.isPending ? "Syncing…" : "Sync Now"}
+            </button>
+          )}
+        </div>
+        {openSections.has("bank-sync") && <div className="mt-4 space-y-4">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Connects to your bank via SimpleFIN Bridge (~$15/yr, read-only) to pull transactions automatically. Syncs daily at 5am.
+          </p>
+
+          {bankConnections.map((conn: any) => (
+            <div key={conn.id} className="border border-gray-100 dark:border-gray-700 rounded-lg p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    Connection #{conn.id} — {conn.status}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {conn.last_synced_at ? `Last synced ${new Date(conn.last_synced_at).toLocaleString()}` : "Never synced"}
+                  </p>
+                  {conn.last_error && <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1"><AlertTriangle size={12} /> {conn.last_error}</p>}
+                </div>
+                <button onClick={() => disconnectMut.mutate(conn.id)} className="btn-ghost p-1.5 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+              </div>
+              {conn.links.length > 0 && (
+                <div className="mt-2 divide-y divide-gray-100 dark:divide-gray-700">
+                  {conn.links.map((l: any) => (
+                    <div key={l.id} className="py-1.5 text-xs text-gray-600 dark:text-gray-300">
+                      {l.simplefin_account_name} → {l.local_account_id ? "linked account" : l.local_credit_card_id ? "linked card" : "unlinked"}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+
+          {pendingConnect && (
+            <div className="border border-indigo-200 dark:border-indigo-800 rounded-lg p-3 space-y-2">
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Map discovered accounts</p>
+              {pendingConnect.accounts.map((a: any) => (
+                <div key={a.simplefin_account_id} className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-gray-600 dark:text-gray-300">{a.org_name} — {a.name} ({fmt(a.balance)})</span>
+                  <select
+                    className="input py-1 text-xs w-40"
+                    value={linkTargets[a.simplefin_account_id] || ""}
+                    onChange={(e) => setLinkTargets({ ...linkTargets, [a.simplefin_account_id]: e.target.value })}
+                  >
+                    <option value="">Select account…</option>
+                    {accounts.map((acc: any) => <option key={`account:${acc.id}`} value={`account:${acc.id}`}>{acc.name}</option>)}
+                  </select>
+                  <button
+                    onClick={() => submitLink(a.simplefin_account_id, a.name, pendingConnect.connection_id)}
+                    disabled={!linkTargets[a.simplefin_account_id]}
+                    className="btn-primary btn-sm text-xs px-2 py-1"
+                  >
+                    Link
+                  </button>
+                </div>
+              ))}
+              <button onClick={() => setPendingConnect(null)} className="text-xs text-gray-400 hover:text-gray-600">Done</button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              className="input flex-1 text-xs"
+              placeholder="Paste SimpleFIN setup token"
+              value={setupToken}
+              onChange={(e) => setSetupToken(e.target.value)}
+            />
+            <button
+              onClick={() => connectMut.mutate(setupToken)}
+              disabled={!setupToken || connectMut.isPending}
+              className="btn-primary btn-sm text-xs px-3 py-1.5"
+            >
+              {connectMut.isPending ? "Connecting…" : "Connect"}
+            </button>
+          </div>
+          {connectMut.isError && <p className="text-xs text-red-600 dark:text-red-400">{(connectMut.error as any)?.response?.data?.detail || "Failed to connect"}</p>}
         </div>}
       </div>
 
