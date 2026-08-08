@@ -461,12 +461,24 @@ export default function Forecast() {
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
                 <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
                 <Tooltip content={<CustomTooltip />} />
-                <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
+                <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.5} />
                 {lowBalanceThreshold != null && lowBalanceThreshold > 0 && (
-                  <ReferenceLine y={lowBalanceThreshold} stroke="#f59e0b" strokeDasharray="4 4" label={{ value: "Low balance threshold", fontSize: 10, fill: "#f59e0b" }} />
+                  <ReferenceLine
+                    y={lowBalanceThreshold}
+                    stroke={isDarkMode() ? "#fbbf24" : "#b45309"}
+                    strokeWidth={2}
+                    strokeDasharray="6 3"
+                    label={{ value: "Low balance threshold", position: "insideBottomRight", fontSize: 11, fontWeight: 600, fill: isDarkMode() ? "#fbbf24" : "#b45309" }}
+                  />
                 )}
                 {risk?.action_threshold != null && (
-                  <ReferenceLine y={parseFloat(risk.action_threshold)} stroke="#dc2626" strokeDasharray="4 4" label={{ value: "Action threshold", fontSize: 10, fill: "#dc2626" }} />
+                  <ReferenceLine
+                    y={parseFloat(risk.action_threshold)}
+                    stroke={isDarkMode() ? "#f87171" : "#b91c1c"}
+                    strokeWidth={2}
+                    strokeDasharray="6 3"
+                    label={{ value: "Action threshold", position: "insideTopRight", fontSize: 11, fontWeight: 600, fill: isDarkMode() ? "#f87171" : "#b91c1c" }}
+                  />
                 )}
                 <Area type="monotone" dataKey="actual" name="Actual" stroke="#6366f1" strokeWidth={2} fill="url(#forecastActualGradient)" dot={false} connectNulls={false} animationDuration={600} />
                 <Area type="monotone" dataKey="projected" name="Projected" stroke="#6366f1" strokeWidth={2} strokeDasharray="5 3" fill="url(#forecastProjectedGradient)" dot={false} connectNulls={false} animationDuration={600} />
