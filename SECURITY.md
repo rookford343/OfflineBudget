@@ -40,6 +40,14 @@ OfflineBudget is designed for **offline / home LAN use**. The threat model is:
 - **`/auth/forgot-password`** is itself rate-limited at **5 attempts per hour per username** to prevent mail-bombing an account's inbox or burning SMTP quota; it always returns 204, even when the limit is hit
 - **Username enumeration** — `/auth/forgot-password` always returns a generic 204 regardless of whether the account exists, so it does not itself reveal whether a username is registered. However, `/auth/register` already returns a distinct `400 "Username already taken"` for existing usernames, so username existence is not actually secret in this app. What `forgot-password`'s constant response *does* hide is narrower: whether that specific account has an email address on file and SMTP configured — i.e. whether requesting a reset will actually result in an email being sent
 
+### Bank Connection Tokens (SimpleFIN)
+
+- If bank sync is enabled, the SimpleFIN access URL (which grants read-only access to your linked bank accounts) is **encrypted at rest** with Fernet (AES-128-CBC + HMAC), using `BANK_TOKEN_ENCRYPTION_KEY` — a dedicated secret, separate from `JWT_SECRET`, generated the same way
+- The key lives only in `.env` (gitignored) — never committed, never logged
+- Without `BANK_TOKEN_ENCRYPTION_KEY` set, the `/bank-sync/connect` endpoint refuses to store a token at all rather than falling back to plaintext
+- The sync job runs daily (5am local) and makes outbound HTTPS calls to SimpleFIN's bridge — this is the one deliberate exception to OfflineBudget's "no outbound connections" default, and only applies if you opt in by pasting a SimpleFIN setup token
+- Disconnecting (Settings → Bank Connections → trash icon) deletes the stored token and its account links immediately; it does not touch transactions already imported
+
 ---
 
 ## What Is NOT Protected (and Why It's OK for Home Use)
