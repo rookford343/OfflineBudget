@@ -36,6 +36,10 @@ export const accountsApi = {
 export const bankSyncApi = {
   connect: (setup_token: string) => api.post("/bank-sync/connect", { setup_token }).then((r) => r.data),
   link: (connectionId: number, data: object) => api.post(`/bank-sync/${connectionId}/link`, data).then((r) => r.data),
+  // Re-fetch the accounts discovered on an existing connection. `connect`
+  // returns them exactly once and the setup token is spent by then, so this is
+  // the only way back to the mapping UI without buying a new token.
+  accounts: (connectionId: number) => api.get(`/bank-sync/${connectionId}/accounts`).then((r) => r.data),
   status: () => api.get("/bank-sync/status").then((r) => r.data),
   syncNow: () => api.post("/bank-sync/sync-now").then((r) => r.data),
   disconnect: (connectionId: number) => api.delete(`/bank-sync/${connectionId}`),
