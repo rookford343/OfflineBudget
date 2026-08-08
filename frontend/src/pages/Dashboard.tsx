@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { accountsApi, cardsApi, recurringApi, analyticsApi } from "../api";
 import { fmt, utilColor, utilBg } from "../lib/utils";
@@ -21,6 +21,13 @@ Key sections:
 export default function Dashboard() {
   const navigate = useNavigate();
   const [showHelp, setShowHelp] = useState(false);
+  const [editingPending, setEditingPending] = useState<number | null>(null);
+  const [pendingValue, setPendingValue] = useState("");
+  const qc = useQueryClient();
+  const updatePendingMut = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: object }) => cardsApi.update(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); setEditingPending(null); },
+  });
   const now = new Date();
   // Show previous month's summary once we're past the 3rd of the current month; otherwise current month
   const summaryMonth = now.getDate() > 3 ? now.getMonth() + 1 : (now.getMonth() === 0 ? 12 : now.getMonth());
@@ -43,6 +50,11 @@ export default function Dashboard() {
   const { data: weeklyDigest } = useQuery<any>({
     queryKey: ["weekly-digest", primaryChecking?.id],
     queryFn: () => analyticsApi.weeklyDigest(primaryChecking.id),
+    enabled: !!primaryChecking,
+  });
+  const { data: snapshot } = useQuery<any>({
+    queryKey: ["budget-snapshot", primaryChecking?.id],
+    queryFn: () => analyticsApi.budgetSnapshot(primaryChecking.id),
     enabled: !!primaryChecking,
   });
 
@@ -123,6 +135,28 @@ export default function Dashboard() {
               <span className={`tabular-nums text-lg font-bold ${parseFloat(ats.available) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
                 {fmt(parseFloat(ats.available))}
               </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Household Snapshot -- Left to Spend / Not Saving */}
+      {snapshot && (
+        <div className="card bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-100 dark:from-emerald-950/40 dark:to-teal-950/40 dark:border-emerald-900/50">
+          <div className="flex items-center gap-2 mb-3">
+            <Wallet size={16} className="text-emerald-600" />
+            <h3 className="font-semibold text-gray-900 dark:text-white">Household Snapshot</h3>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Left to Spend (this week)</p>
+              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmt(parseFloat(snapshot.left_to_spend_weekly))}</p>
+              <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.left_to_spend))} this month</p>
+            </div>
+            <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Not Saving (this week)</p>
+              <p className="text-xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmt(parseFloat(snapshot.not_saving_weekly))}</p>
+              <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.not_saving))} this month</p>
             </div>
           </div>
         </div>
@@ -267,6 +301,28 @@ export default function Dashboard() {
                           style={{ width: `${Math.min(100, c.utilization_pct)}%` }}
                         />
                       </div>
+                    </div>
+                    <div className="mt-1 text-xs text-gray-500">
+                      {editingPending === c.id ? (
+                        <span className="inline-flex items-center gap-1">
+                          Pending:
+                          <input
+                            type="number" step="0.01" autoFocus
+                            className="input !w-20 !py-0.5 !text-xs"
+                            value={pendingValue}
+                            onChange={(e) => setPendingValue(e.target.value)}
+                            onBlur={() => updatePendingMut.mutate({ id: c.id, data: { pending_charges: parseFloat(pendingValue) || 0 } })}
+                            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                          />
+                        </span>
+                      ) : (
+                        <button
+                          className="hover:underline"
+                          onClick={() => { setEditingPending(c.id); setPendingValue(c.pending_charges || "0"); }}
+                        >
+                          Pending: {fmt(c.pending_charges || 0)} ✎
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="text-right shrink-0 ml-4">

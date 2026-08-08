@@ -153,6 +153,8 @@ export const analyticsApi = {
     api.get(`/spending/summary/${year}/${month}`).then((r) => r.data),
   weeklyDigest: (accountId: number) =>
     api.get("/spending/weekly-digest", { params: { account_id: accountId } }).then((r) => r.data),
+  budgetSnapshot: (accountId: number) =>
+    api.get("/spending/budget-snapshot", { params: { account_id: accountId } }).then((r) => r.data),
 };
 
 // ── Savings Goals ─────────────────────────────────────────────────────────────
