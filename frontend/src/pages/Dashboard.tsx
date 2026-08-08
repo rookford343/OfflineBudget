@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { accountsApi, cardsApi, recurringApi, analyticsApi } from "../api";
+import { accountsApi, cardsApi, recurringApi, analyticsApi, budgetApi } from "../api";
 import { fmt, utilColor, utilBg } from "../lib/utils";
 import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
@@ -64,6 +64,11 @@ export default function Dashboard() {
     queryFn: () => analyticsApi.budgetSnapshot(primaryChecking.id),
     enabled: !!primaryChecking,
   });
+  const { data: budgetOverview = [] } = useQuery<any[]>({
+    queryKey: ["budget-overview", now.getFullYear(), now.getMonth() + 1],
+    queryFn: () => budgetApi.overview(now.getFullYear(), now.getMonth() + 1),
+  });
+  const budgetByCategory = new Map(budgetOverview.map((r: any) => [r.category_id, r]));
 
   const totalChecking = checkingAccounts.reduce((s: number, a: any) => s + parseFloat(a.current_balance), 0);
   const anyBelowThreshold = checkingAccounts.some((a: any) =>
@@ -114,58 +119,61 @@ export default function Dashboard() {
         <p className="text-sm text-gray-500">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
       </div>
 
-      {/* Available to Spend widget */}
-      {ats && (
-        <div className="card bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-100 dark:from-indigo-950/40 dark:to-blue-950/40 dark:border-indigo-900/50">
-          <div className="flex items-center gap-2 mb-3">
-            <Wallet size={16} className="text-indigo-500" />
-            <h3 className="font-semibold text-gray-900 dark:text-white">
-              Available to Spend —{" "}
-              {new Date().toLocaleDateString("en-US", { month: "long" })}
-            </h3>
-          </div>
-          <div className="space-y-1 text-sm">
-            <div className="flex justify-between text-gray-600 dark:text-gray-400">
-              <span>Monthly Income</span>
-              <span className="tabular-nums text-green-600 dark:text-green-400 font-medium">{fmt(parseFloat(ats.monthly_income))}</span>
+      {/* Available to Spend + Household Snapshot, side by side */}
+      {(ats || snapshot) && (
+        <div className="grid md:grid-cols-2 gap-6">
+          {ats && (
+            <div className="card bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-100 dark:from-indigo-950/40 dark:to-blue-950/40 dark:border-indigo-900/50">
+              <div className="flex items-center gap-2 mb-3">
+                <Wallet size={16} className="text-indigo-500" />
+                <h3 className="font-semibold text-gray-900 dark:text-white">
+                  Available to Spend —{" "}
+                  {new Date().toLocaleDateString("en-US", { month: "long" })}
+                </h3>
+              </div>
+              <div className="space-y-1 text-sm max-w-xs">
+                <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
+                  <span>Monthly Income</span>
+                  <span className="tabular-nums text-green-600 dark:text-green-400 font-medium">{fmt(parseFloat(ats.monthly_income))}</span>
+                </div>
+                <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
+                  <span>Committed Bills</span>
+                  <span className="tabular-nums text-red-500 dark:text-red-400 font-medium">−{fmt(parseFloat(ats.committed_expenses))}</span>
+                </div>
+                <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
+                  <span>Spent So Far</span>
+                  <span className="tabular-nums text-amber-600 dark:text-amber-400 font-medium">−{fmt(parseFloat(ats.spent_this_month))}</span>
+                </div>
+                <div className="border-t border-gray-200 dark:border-gray-700 mt-2 pt-2 flex justify-between gap-4">
+                  <span className="font-semibold text-gray-900 dark:text-white">Available</span>
+                  <span className={`tabular-nums text-lg font-bold ${parseFloat(ats.available) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                    {fmt(parseFloat(ats.available))}
+                  </span>
+                </div>
+              </div>
             </div>
-            <div className="flex justify-between text-gray-600 dark:text-gray-400">
-              <span>Committed Bills</span>
-              <span className="tabular-nums text-red-500 dark:text-red-400 font-medium">−{fmt(parseFloat(ats.committed_expenses))}</span>
-            </div>
-            <div className="flex justify-between text-gray-600 dark:text-gray-400">
-              <span>Spent So Far</span>
-              <span className="tabular-nums text-amber-600 dark:text-amber-400 font-medium">−{fmt(parseFloat(ats.spent_this_month))}</span>
-            </div>
-            <div className="border-t border-gray-200 dark:border-gray-700 mt-2 pt-2 flex justify-between">
-              <span className="font-semibold text-gray-900 dark:text-white">Available</span>
-              <span className={`tabular-nums text-lg font-bold ${parseFloat(ats.available) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                {fmt(parseFloat(ats.available))}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* Household Snapshot -- Left to Spend / Not Saving */}
-      {snapshot && (
-        <div className="card bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-100 dark:from-emerald-950/40 dark:to-teal-950/40 dark:border-emerald-900/50">
-          <div className="flex items-center gap-2 mb-3">
-            <Wallet size={16} className="text-emerald-600" />
-            <h3 className="font-semibold text-gray-900 dark:text-white">Household Snapshot</h3>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Left to Spend (this week)</p>
-              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmt(parseFloat(snapshot.left_to_spend_weekly))}</p>
-              <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.left_to_spend))} this month</p>
+          {snapshot && (
+            <div className="card bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-100 dark:from-emerald-950/40 dark:to-teal-950/40 dark:border-emerald-900/50">
+              <div className="flex items-center gap-2 mb-3">
+                <Wallet size={16} className="text-emerald-600" />
+                <h3 className="font-semibold text-gray-900 dark:text-white">Household Snapshot</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Left to Spend (this week)</p>
+                  <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmt(parseFloat(snapshot.left_to_spend_weekly))}</p>
+                  <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.left_to_spend))} this month</p>
+                </div>
+                <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Not Saving (this week)</p>
+                  <p className="text-xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmt(parseFloat(snapshot.not_saving_weekly))}</p>
+                  <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.not_saving))} this month</p>
+                </div>
+              </div>
             </div>
-            <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
-              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Not Saving (this week)</p>
-              <p className="text-xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmt(parseFloat(snapshot.not_saving_weekly))}</p>
-              <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.not_saving))} this month</p>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -179,27 +187,45 @@ export default function Dashboard() {
           <p className="text-sm text-gray-500 mb-3">Total spent: <span className="font-semibold text-gray-900 dark:text-gray-100">{fmt(parseFloat(weeklyDigest.total_spent))}</span></p>
 
           {weeklyDigest.categories.length > 0 && (
-            <div className="mb-3">
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">By Category</p>
+            <div className="mb-4 max-w-md">
+              <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">By Category</p>
               <div className="space-y-1 text-sm">
-                {weeklyDigest.categories.slice(0, 5).map((c: any) => (
-                  <div key={c.category_id} className="flex justify-between text-gray-600 dark:text-gray-400">
-                    <span>{c.category_name}</span>
-                    <span className="tabular-nums">{fmt(parseFloat(c.total))}</span>
-                  </div>
-                ))}
+                {weeklyDigest.categories.slice(0, 5).map((c: any) => {
+                  const budget = budgetByCategory.get(c.category_id);
+                  const budgeted = budget ? parseFloat(budget.budgeted) : 0;
+                  const actual = budget ? parseFloat(budget.actual_total) : 0;
+                  const pct = budgeted > 0 ? Math.min(100, (actual / budgeted) * 100) : 0;
+                  const overBudget = budgeted > 0 && actual > budgeted;
+                  return (
+                    <div key={c.category_id} className="relative rounded overflow-hidden">
+                      {budgeted > 0 && (
+                        <div
+                          className={`absolute inset-y-0 left-0 rounded ${overBudget ? "bg-red-100 dark:bg-red-900/30" : "bg-indigo-100 dark:bg-indigo-900/30"}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      )}
+                      <div className="relative flex justify-between gap-4 px-1.5 py-0.5 text-gray-600 dark:text-gray-400">
+                        <span className="flex items-center gap-1 min-w-0 truncate">
+                          {overBudget && <AlertTriangle size={11} className="text-red-500 shrink-0" />}
+                          {c.category_name}
+                        </span>
+                        <span className="tabular-nums shrink-0">{fmt(parseFloat(c.total))}</span>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
 
           {weeklyDigest.top_merchants.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Top Merchants</p>
+            <div className="max-w-md">
+              <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">Top Merchants</p>
               <div className="space-y-1 text-sm">
                 {weeklyDigest.top_merchants.slice(0, 5).map((m: any) => (
-                  <div key={m.name} className="flex justify-between text-gray-600 dark:text-gray-400">
-                    <span>{m.name}</span>
-                    <span className="tabular-nums">{fmt(parseFloat(m.total))}</span>
+                  <div key={m.name} className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
+                    <span className="truncate">{m.name}</span>
+                    <span className="tabular-nums shrink-0">{fmt(parseFloat(m.total))}</span>
                   </div>
                 ))}
               </div>
@@ -379,14 +405,14 @@ export default function Dashboard() {
       {accounts.length > 0 && (
         <div className="card">
           <h3 className="font-semibold text-gray-900 mb-4">All Accounts</h3>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-gray-100 max-w-md">
             {accounts.map((a: any) => (
-              <div key={a.id} className="flex items-center justify-between py-3">
-                <div>
-                  <p className="text-sm font-medium text-gray-900">{a.name}</p>
+              <div key={a.id} className="flex items-center justify-between gap-4 py-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-gray-900 truncate">{a.name}</p>
                   <p className="text-xs text-gray-500 capitalize">{a.type.replace("_", " ")}</p>
                 </div>
-                <span className={`text-sm font-bold tabular-nums ${parseFloat(a.current_balance) >= 0 ? "text-gray-900" : "text-red-600"}`}>
+                <span className={`text-sm font-bold tabular-nums shrink-0 ${parseFloat(a.current_balance) >= 0 ? "text-gray-900" : "text-red-600"}`}>
                   {a.low_balance_threshold != null && parseFloat(a.current_balance) < parseFloat(a.low_balance_threshold) && (
                     <AlertTriangle size={14} className="text-amber-500 inline mr-1" />
                   )}
