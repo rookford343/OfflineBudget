@@ -116,6 +116,8 @@ def upgrade_schema():
             UNIQUE(user_id, account_id, year, month)
         )""",
         "ALTER TABLE credit_cards ADD COLUMN pending_charges NUMERIC(14,2) DEFAULT 0",
+        "ALTER TABLE transactions ADD COLUMN external_id VARCHAR(128)",
+        "ALTER TABLE credit_card_transactions ADD COLUMN external_id VARCHAR(128)",
     ]
     with engine.connect() as conn:
         for s in stmts:

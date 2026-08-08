@@ -48,6 +48,10 @@ class ParsedRow:
     description: str
     amount: Decimal  # positive = credit/income, negative = debit/charge
     is_transfer: bool = False
+    # Upstream provider's transaction id, when the source has one (SimpleFIN).
+    # CSV/OFX parsing never sets this, so those paths keep the legacy
+    # date/amount/description dedup heuristic unchanged.
+    external_id: str | None = None
 
 
 def detect_format(headers: list[str]) -> ImportFormat:
