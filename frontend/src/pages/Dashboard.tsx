@@ -26,7 +26,10 @@ export default function Dashboard() {
   const qc = useQueryClient();
   const updatePendingMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: object }) => cardsApi.update(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); setEditingPending(null); },
+    onSuccess: (_data, variables) => {
+      qc.invalidateQueries({ queryKey: ["credit-cards"] });
+      setEditingPending((current) => (current === variables.id ? null : current));
+    },
   });
   const now = new Date();
   // Show previous month's summary once we're past the 3rd of the current month; otherwise current month
