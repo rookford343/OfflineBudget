@@ -13,7 +13,7 @@ Built with **FastAPI + SQLite** on the backend, **React + TypeScript** on the fr
 | [Forecast](#forecasting) | Day-by-day balance projection; quarterly and multi-year views; scenario planning |
 | [Spending Analysis](#spending-analysis) | Monthly trends, year-over-year, merchant ranking, income flow diagram |
 | [Tax Estimator](#tax-estimator) | Full 2025 federal + state estimate; itemized vs. standard deduction; bracket ladder |
-| [Transaction Import](#transaction-import) | CSV and OFX/QFX upload; auto-categorization; custom rules engine |
+| [Transaction Import](#transaction-import) | CSV and OFX/QFX upload; auto-categorization; custom rules engine; optional automated bank sync via SimpleFIN |
 | [Credit Cards](#credit-cards) | Balance tracking, due-date reminders, payment recording, per-card spending |
 | [Budget Tracking](#budget-tracking) | Monthly category budgets with rollover; actual vs. budgeted variance |
 | [Reconciliation](#reconciliation) | Link transactions to recurring items; quarterly balance checkpoints |
