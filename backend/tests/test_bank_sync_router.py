@@ -100,6 +100,55 @@ def test_link_requires_local_target(client, db_session):
     assert resp.status_code == 400
 
 
+def test_link_rejects_other_users_local_account(client, db_session):
+    test_client, user = client
+    other = models.User(username="mallory", hashed_password="x", display_name="Mallory")
+    db_session.add(other)
+    db_session.commit()
+    db_session.refresh(other)
+    other_account = models.Account(user_id=other.id, name="Mallory Checking", type=models.AccountType.checking)
+    db_session.add(other_account)
+    db_session.commit()
+    db_session.refresh(other_account)
+    connection = models.BankConnection(user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url"))
+    db_session.add(connection)
+    db_session.commit()
+    db_session.refresh(connection)
+
+    resp = test_client.post(f"/bank-sync/{connection.id}/link", json={
+        "simplefin_account_id": "acc-1", "simplefin_account_name": "Checking",
+        "local_account_id": other_account.id,
+    })
+
+    assert resp.status_code == 404
+
+
+def test_link_rejects_other_users_local_credit_card(client, db_session):
+    test_client, user = client
+    other = models.User(username="mallory", hashed_password="x", display_name="Mallory")
+    db_session.add(other)
+    db_session.commit()
+    db_session.refresh(other)
+    other_card = models.CreditCard(
+        user_id=other.id, name="Mallory Card", credit_limit=Decimal("1000"),
+        statement_day=1, due_day=15,
+    )
+    db_session.add(other_card)
+    db_session.commit()
+    db_session.refresh(other_card)
+    connection = models.BankConnection(user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url"))
+    db_session.add(connection)
+    db_session.commit()
+    db_session.refresh(connection)
+
+    resp = test_client.post(f"/bank-sync/{connection.id}/link", json={
+        "simplefin_account_id": "acc-1", "simplefin_account_name": "Checking",
+        "local_credit_card_id": other_card.id,
+    })
+
+    assert resp.status_code == 404
+
+
 def test_status_lists_connections_with_links(client, db_session):
     test_client, user = client
     connection = models.BankConnection(user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url"), last_error="boom")
