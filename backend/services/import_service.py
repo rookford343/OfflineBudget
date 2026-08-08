@@ -339,7 +339,9 @@ def run_import(
 
             card = db.get(models.CreditCard, card_id)
             if card and card.user_id == user.id:
-                card.current_balance += abs(row.amount)
+                # Sales are negative (increase what's owed), returns/credits are
+                # positive (decrease it) -- subtracting the signed amount handles both.
+                card.current_balance -= row.amount
 
             imported += 1
 
