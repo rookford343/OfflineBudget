@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { accountsApi, categoriesApi, budgetApi, adminApi, authApi, rulesApi, dataApi, bankSyncApi } from "../api";
+import { accountsApi, categoriesApi, budgetApi, adminApi, authApi, rulesApi, dataApi, bankSyncApi, cardsApi } from "../api";
 import { fmt } from "../lib/utils";
 import { getTheme, setTheme } from "../store/theme";
 import { clearAuth, isAdmin } from "../store/auth";
@@ -23,6 +23,9 @@ export default function Settings() {
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
+  // Credit cards are linkable sync targets too -- the mapping dropdown below
+  // offers them alongside checking accounts.
+  const { data: cards = [] } = useQuery<any[]>({ queryKey: ["credit-cards"], queryFn: cardsApi.list });
   const { data: bankConnections = [] } = useQuery<any[]>({ queryKey: ["bank-connections"], queryFn: bankSyncApi.status });
   const [setupToken, setSetupToken] = useState("");
   const [pendingConnect, setPendingConnect] = useState<{ connection_id: number; accounts: any[] } | null>(null);
@@ -36,9 +39,23 @@ export default function Settings() {
     mutationFn: ({ connectionId, data }: any) => bankSyncApi.link(connectionId, data),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["bank-connections"] }); },
   });
+  // Re-opens the mapping UI for a connection whose /connect response is long
+  // gone -- without this, an unmapped account needs a whole new setup token.
+  const loadAccountsMut = useMutation({
+    mutationFn: (connectionId: number) => bankSyncApi.accounts(connectionId),
+    onSuccess: (accts: any[], connectionId: number) =>
+      setPendingConnect({ connection_id: connectionId, accounts: accts }),
+  });
   const syncNowMut = useMutation({
     mutationFn: bankSyncApi.syncNow,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["bank-connections"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bank-connections"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      // A sync updates linked card balances too, so refresh both keys the
+      // codebase uses for credit cards.
+      qc.invalidateQueries({ queryKey: ["credit-cards"] });
+      qc.invalidateQueries({ queryKey: ["cards"] });
+    },
   });
   const disconnectMut = useMutation({
     mutationFn: bankSyncApi.disconnect,
@@ -486,7 +503,16 @@ export default function Settings() {
                   </p>
                   {conn.last_error && <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1"><AlertTriangle size={12} /> {conn.last_error}</p>}
                 </div>
-                <button onClick={() => disconnectMut.mutate(conn.id)} className="btn-ghost p-1.5 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => loadAccountsMut.mutate(conn.id)}
+                    disabled={loadAccountsMut.isPending}
+                    className="btn-ghost text-xs px-2 py-1 text-indigo-500 hover:bg-indigo-50"
+                  >
+                    {loadAccountsMut.isPending && loadAccountsMut.variables === conn.id ? "Loading…" : "Map more accounts"}
+                  </button>
+                  <button onClick={() => disconnectMut.mutate(conn.id)} className="btn-ghost p-1.5 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                </div>
               </div>
               {conn.links.length > 0 && (
                 <div className="mt-2 divide-y divide-gray-100 dark:divide-gray-700">
@@ -511,8 +537,13 @@ export default function Settings() {
                     value={linkTargets[a.simplefin_account_id] || ""}
                     onChange={(e) => setLinkTargets({ ...linkTargets, [a.simplefin_account_id]: e.target.value })}
                   >
-                    <option value="">Select account…</option>
-                    {accounts.map((acc: any) => <option key={`account:${acc.id}`} value={`account:${acc.id}`}>{acc.name}</option>)}
+                    <option value="">Select account or card…</option>
+                    <optgroup label="Accounts">
+                      {accounts.map((acc: any) => <option key={`account:${acc.id}`} value={`account:${acc.id}`}>{acc.name}</option>)}
+                    </optgroup>
+                    <optgroup label="Credit Cards">
+                      {cards.map((c: any) => <option key={`card:${c.id}`} value={`card:${c.id}`}>{c.name}</option>)}
+                    </optgroup>
                   </select>
                   <button
                     onClick={() => submitLink(a.simplefin_account_id, a.name, pendingConnect.connection_id)}
