@@ -149,6 +149,7 @@ def test_generate_weekly_digest_smoke(db_session):
     assert digest.total_spent == Decimal("42.00")
     assert digest.categories[0].category_name == "Groceries"
     assert digest.risk.at_risk is False
+    assert digest.snapshot.as_of == date.today()
 
 
 def test_generate_weekly_digest_reconciles_uncategorized_spend(db_session):

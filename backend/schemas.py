@@ -902,15 +902,6 @@ class WeeklyDigestCategory(BaseModel):
     total: Decimal
 
 
-class WeeklyDigest(BaseModel):
-    week_start: date
-    week_end: date
-    total_spent: Decimal
-    categories: list[WeeklyDigestCategory]
-    top_merchants: list[MerchantSpendingEntry]
-    risk: ForecastRisk
-
-
 class CardSnapshot(BaseModel):
     id: int
     name: str
@@ -932,6 +923,16 @@ class BudgetSnapshot(BaseModel):
     cards: list[CardSnapshot]
     categories: list[WeeklyDigestCategory]
     top_merchants: list[MerchantSpendingEntry]
+
+
+class WeeklyDigest(BaseModel):
+    week_start: date
+    week_end: date
+    total_spent: Decimal
+    categories: list[WeeklyDigestCategory]
+    top_merchants: list[MerchantSpendingEntry]
+    risk: ForecastRisk
+    snapshot: BudgetSnapshot
 
 
 # ── Reconciliation ────────────────────────────────────────────────────────────

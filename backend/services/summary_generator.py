@@ -7,6 +7,7 @@ from backend import models
 from backend.schemas import MonthlySummary, WeeklyDigest, WeeklyDigestCategory, ForecastRisk, MerchantSpendingEntry
 from backend.services.spending_helpers import category_totals_for_range, merchant_totals
 from backend.services.forecast_engine import build_forecast, find_balance_risk
+from backend.services.budget_snapshot import compute_budget_snapshot
 
 
 # ── Daily email summary ───────────────────────────────────────────────────────
@@ -278,6 +279,8 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
     risk_dict = find_balance_risk(forecast_entries, threshold)
     risk = ForecastRisk(**risk_dict)
 
+    snapshot = compute_budget_snapshot(db, user, account_id, as_of=today)
+
     return WeeklyDigest(
         week_start=week_start,
         week_end=week_end,
@@ -285,4 +288,5 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
         categories=categories,
         top_merchants=top_merchants,
         risk=risk,
+        snapshot=snapshot,
     )
