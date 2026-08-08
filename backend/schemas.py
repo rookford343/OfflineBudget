@@ -443,6 +443,7 @@ class CreditCardCreate(BaseModel):
     balance_due: Decimal = Decimal("0")
     next_payment_date: Optional[date] = None
     monthly_spend_estimate: Optional[Decimal] = None
+    pending_charges: Decimal = Decimal("0")
     notes: Optional[str] = None
 
 
@@ -456,6 +457,7 @@ class CreditCardUpdate(BaseModel):
     balance_due: Optional[Decimal] = None
     next_payment_date: Optional[date] = None
     monthly_spend_estimate: Optional[Decimal] = None
+    pending_charges: Optional[Decimal] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
 
@@ -472,6 +474,7 @@ class CreditCardOut(BaseModel):
     balance_due: Decimal
     next_payment_date: Optional[date]
     monthly_spend_estimate: Optional[Decimal]
+    pending_charges: Decimal
     is_active: bool
     notes: Optional[str]
     utilization_pct: float = 0.0
