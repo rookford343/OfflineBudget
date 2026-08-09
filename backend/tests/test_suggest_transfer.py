@@ -27,10 +27,17 @@ def _make_accounts(db, user, num_savings=1):
     return checking, savings_accounts
 
 
+# A fixed offset from "today" rather than a hardcoded calendar date: keeps
+# every test's risk window comfortably inside suggest_transfer's
+# past-date clamp (see test_suggested_date_is_never_in_the_past) no matter
+# when the suite actually runs.
+R0 = date.today() + timedelta(days=60)
+
+
 def _risk(at_risk=True, d=None, amount="-500.00", threshold="0"):
     return {
         "at_risk": at_risk,
-        "date": d or date(2026, 9, 15),
+        "date": d or R0,
         "amount": Decimal(amount) if at_risk else None,
         "threshold": Decimal(threshold),
     }
@@ -75,7 +82,7 @@ def test_suggestion_rounds_up_to_default_increment(db_session):
     assert result["amount"] == Decimal("1000.00")
     assert result["from_account_id"] == savings[0].id
     assert result["already_planned"] is False
-    assert result["date"] == date(2026, 9, 15) - timedelta(days=3)
+    assert result["date"] == R0 - timedelta(days=3)
 
 
 def test_suggestion_rounds_up_to_custom_increment(db_session):
@@ -148,13 +155,13 @@ def test_suggestion_is_sized_to_the_deepest_dip_not_the_first(db_session):
     db_session.commit()
 
     entries = _entries(
-        (date(2026, 9, 1), "5000.00"),
-        (date(2026, 9, 15), "-200.00"),   # shallow dip -- first breach
-        (date(2026, 9, 20), "3000.00"),
-        (date(2026, 10, 5), "-8400.00"),  # the real hole
+        (R0 - timedelta(days=14), "5000.00"),
+        (R0, "-200.00"),                      # shallow dip -- first breach
+        (R0 + timedelta(days=5), "3000.00"),
+        (R0 + timedelta(days=20), "-8400.00"),  # the real hole
     )
     risk = find_balance_risk(entries, Decimal("0"))
-    assert risk["date"] == date(2026, 9, 15)
+    assert risk["date"] == R0
     assert risk["amount"] == Decimal("-200.00")
 
     result = suggest_transfer(db_session, user, checking.id, risk, entries)
@@ -172,15 +179,15 @@ def test_inadequate_existing_plan_still_produces_a_topup(db_session):
     db_session.flush()
     db_session.add(models.PlannedTransfer(
         user_id=user.id, from_account_id=savings[0].id, to_account_id=checking.id,
-        amount=Decimal("1000.00"), target_date=date(2026, 9, 13),
+        amount=Decimal("1000.00"), target_date=R0 - timedelta(days=2),
         status=models.PlannedTransferStatus.pending,
     ))
     db_session.commit()
 
     # Entries are already net of that $1000 injection and still $2500 short.
     entries = _entries(
-        (date(2026, 9, 13), "1000.00"),
-        (date(2026, 9, 15), "-2500.00"),
+        (R0 - timedelta(days=2), "1000.00"),
+        (R0, "-2500.00"),
     )
     risk = find_balance_risk(entries, Decimal("0"))
 
@@ -188,7 +195,7 @@ def test_inadequate_existing_plan_still_produces_a_topup(db_session):
 
     assert result["already_planned"] is True  # informational only
     assert result["amount"] == Decimal("3000.00")
-    assert result["date"] == date(2026, 9, 12)
+    assert result["date"] == R0 - timedelta(days=3)
     assert result["from_account_id"] == savings[0].id
 
 
@@ -243,12 +250,12 @@ def test_verified_transfer_does_not_suppress_a_new_suggestion(db_session):
     db_session.flush()
     db_session.add(models.PlannedTransfer(
         user_id=user.id, from_account_id=savings[0].id, to_account_id=checking.id,
-        amount=Decimal("1000.00"), target_date=date(2026, 9, 13),
+        amount=Decimal("1000.00"), target_date=R0 - timedelta(days=2),
         status=models.PlannedTransferStatus.verified,
     ))
     db_session.commit()
 
-    risk = _risk(d=date(2026, 9, 15))
+    risk = _risk(d=R0)
     result = suggest_transfer(db_session, user, checking.id, risk, _flat_entries(risk))
 
     assert result["already_planned"] is False

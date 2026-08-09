@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowRightLeft } from "lucide-react";
 import { fmt } from "../lib/utils";
 
@@ -43,6 +43,16 @@ export function RiskBanner({
   // Accepting has to resolve that before it creates a source-less transfer.
   const [pickedFromId, setPickedFromId] = useState("");
 
+  // sourceAccounts changes whenever the forecasted account (or the account
+  // list) changes. A stale pick from a previous account must not survive
+  // that switch — otherwise the select can visually show one account while
+  // resolvedFromId still points at an account no longer in the list (or,
+  // worse, at the very account now being forecasted).
+  const sourceIdKey = sourceAccounts.map((a) => a.id).join(",");
+  useEffect(() => {
+    setPickedFromId("");
+  }, [sourceIdKey]);
+
   if (!risk) return null;
 
   const showAlert = risk.at_risk && risk.date && risk.amount != null;
@@ -53,7 +63,11 @@ export function RiskBanner({
 
   const suggestedFromId = risk.suggested_transfer_from_account_id ?? null;
   const needsSourcePick = suggestedFromId === null;
-  const resolvedFromId = suggestedFromId ?? (pickedFromId ? parseInt(pickedFromId) : null);
+  const validPickedId =
+    pickedFromId && sourceAccounts.some((a) => String(a.id) === pickedFromId)
+      ? parseInt(pickedFromId)
+      : null;
+  const resolvedFromId = suggestedFromId ?? validPickedId;
 
   if (!showAlert && !showTransfer && !showSuggestion) return null;
 

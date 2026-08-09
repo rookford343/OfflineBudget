@@ -57,3 +57,4 @@ data/transaction_files/*
 
 # Worktrees (isolated SDD workspaces)
 .worktrees/
+.claude/*

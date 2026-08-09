@@ -23,6 +23,11 @@ def _assert_account_owned(db: Session, user_id: int, account_id: int) -> None:
         raise HTTPException(status_code=404, detail="Account not found")
 
 
+def _assert_distinct(from_account_id: int | None, to_account_id: int) -> None:
+    if from_account_id is not None and from_account_id == to_account_id:
+        raise HTTPException(status_code=422, detail="from_account_id and to_account_id must differ")
+
+
 @router.get("", response_model=list[schemas.PlannedTransferOut])
 def list_planned_transfers(
     db: Session = Depends(get_db),
@@ -45,6 +50,7 @@ def create_planned_transfer(
     _assert_account_owned(db, user.id, body.to_account_id)
     if body.from_account_id:
         _assert_account_owned(db, user.id, body.from_account_id)
+    _assert_distinct(body.from_account_id, body.to_account_id)
     transfer = models.PlannedTransfer(
         user_id=user.id,
         from_account_id=body.from_account_id,
@@ -73,6 +79,9 @@ def update_planned_transfer(
         _assert_account_owned(db, user.id, data["to_account_id"])
     if "from_account_id" in data and data["from_account_id"] is not None:
         _assert_account_owned(db, user.id, data["from_account_id"])
+    effective_from = data["from_account_id"] if "from_account_id" in data else transfer.from_account_id
+    effective_to = data["to_account_id"] if "to_account_id" in data else transfer.to_account_id
+    _assert_distinct(effective_from, effective_to)
     for field, value in data.items():
         setattr(transfer, field, value)
     db.commit()
