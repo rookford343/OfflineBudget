@@ -2,8 +2,17 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { transactionsApi, accountsApi, categoriesApi, cardsApi, reconciliationApi, exportsApi, dayCheckpointsApi, recurringApi } from "../api";
 import { fmt, today, firstOfMonth, quickRange } from "../lib/utils";
-import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check } from "lucide-react";
+import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check, Upload, Landmark } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+
+// Small inline indicator for where a transaction came from -- manual entry is
+// the unmarked default (most common, shouldn't add visual noise); CSV/OFX
+// import and bank sync each get a distinct icon + tooltip.
+function SourceBadge({ source }: { source: string }) {
+  if (source === "csv_import") return <span title="Imported from CSV/OFX" className="shrink-0"><Upload size={12} className="text-blue-400" /></span>;
+  if (source === "bank_sync") return <span title="Synced from your bank" className="shrink-0"><Landmark size={12} className="text-indigo-400" /></span>;
+  return null;
+}
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -335,7 +344,7 @@ export default function Transactions() {
                         {new Date(t.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       </td>
                       <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
-                        <div className="truncate">{t.description}</div>
+                        <div className="truncate flex items-center gap-1.5"><SourceBadge source={t.source} />{t.description}</div>
                         {editingNotesId === t.id ? (
                           <input
                             autoFocus
@@ -394,7 +403,9 @@ export default function Transactions() {
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                         {new Date(t.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       </td>
-                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs truncate">{t.merchant}</td>
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
+                        <div className="truncate flex items-center gap-1.5"><SourceBadge source={t.source} />{t.merchant}</div>
+                      </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
                         <CategoryCell txnId={t.id} catId={t.category_id} onSave={catId => handleCardCatChange(t.id, catId)} editingCatId={editingCatId} setEditingCatId={setEditingCatId} allCats={allCats} catMap={catMap} />
                       </td>
