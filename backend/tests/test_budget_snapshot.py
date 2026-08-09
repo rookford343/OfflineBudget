@@ -18,6 +18,10 @@ def _seed_spreadsheet_scenario(db):
     card = models.CreditCard(
         user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("29000.00"),
         statement_day=28, due_day=25, current_balance=Decimal("1856.45"),
+        # Before bank sync existed, Dan kept balance_due in step with
+        # current_balance by hand -- this golden scenario predates the split
+        # documented in compute_budget_snapshot, so the two match here.
+        balance_due=Decimal("1856.45"),
     )
     db.add_all([checking, card])
     db.flush()
@@ -139,12 +143,20 @@ def test_no_active_cards_gives_zero_card_balance(db_session):
 
 
 def test_not_saving_reacts_to_pending_charges_but_left_to_spend_does_not(db_session):
-    """Not Saving pulls QuarterMinimum from the real forecast, which includes
-    pending_charges (see forecast_engine.py's CC-payment injection) -- so
-    entering a pending charge should move Not Saving but never Left to Spend
-    (which doesn't touch the forecast at all). This is intentional: it
-    matches the user's stated reason for wanting pending_charges in the
-    first place. Do not "fix" this to isolate Not Saving from it."""
+    """Not Saving includes pending_charges via its explicit balance_due_total
+    term (balance_due + pending_charges per card) -- so entering a pending
+    charge should move Not Saving but never Left to Spend (which uses
+    current_balance, not balance_due/pending_charges, and never touches the
+    forecast). This is intentional: it matches the user's stated reason for
+    wanting pending_charges in the first place. Do not "fix" this to isolate
+    Not Saving from it.
+
+    Previously this flowed transitively through quarter_min (the forecast's
+    own CC-payment injection folded pending_charges in) -- that path also
+    double-counted the payoff itself (see
+    test_not_saving_does_not_double_count_the_cc_payoff) and was replaced
+    2026-08-08 with this explicit term. The user-visible reactivity is the
+    same; the mechanism is no longer entangled with the forecast."""
     user = models.User(username="pendtest", hashed_password="x", display_name="PendTest")
     db_session.add(user)
     db_session.flush()
@@ -176,3 +188,43 @@ def test_not_saving_reacts_to_pending_charges_but_left_to_spend_does_not(db_sess
 
     assert with_pending.left_to_spend == baseline.left_to_spend, "Left to Spend must never react to pending_charges"
     assert with_pending.not_saving == baseline.not_saving - Decimal("500.00"), "Not Saving must react by exactly the pending amount (it dropped, since it's a payment)"
+
+
+def test_not_saving_does_not_double_count_the_cc_payoff(db_session):
+    """Reproduces a live bug (2026-08-08): the quarter's minimum projected
+    day landed exactly on the credit card's due date, which the forecast
+    engine already models as a full payoff withdrawal from checking. Since
+    not_saving separately subtracts the card balance as its own term,
+    quarter_min must be computed WITHOUT that payoff already baked in, or
+    the same payoff gets subtracted twice.
+
+    Unlike test_left_to_spend_and_not_saving_match_spreadsheet_exactly (which
+    mocks build_quarters entirely, bypassing this interaction), this test
+    exercises the real forecast engine so the double-count is actually
+    reachable."""
+    user = models.User(username="dan2", hashed_password="x", display_name="Dan")
+    db_session.add(user)
+    db_session.flush()
+
+    checking = models.Account(
+        user_id=user.id, name="Checking", type=models.AccountType.checking,
+        current_balance=Decimal("5000.00"),
+    )
+    card = models.CreditCard(
+        user_id=user.id, name="Visa", credit_limit=Decimal("10000.00"),
+        statement_day=25, due_day=25, current_balance=Decimal("3000.00"),
+        balance_due=Decimal("3000.00"),
+        next_payment_date=date(2026, 8, 25),
+    )
+    db_session.add_all([checking, card])
+    db_session.commit()
+
+    snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 8))
+
+    # The forecast's own minimum day (the payoff date) drops to ~$2,000
+    # (5000 - 3000 payoff). If not_saving's quarter_min already reflects
+    # that payoff, subtracting card_balances (3000) again would land
+    # around 2000 - 3000 = -1000. Without the double-count, quarter_min
+    # should stay near the un-paid-off balance (~5000), so not_saving
+    # lands near 5000 - 3000 = 2000, not deeply negative.
+    assert snapshot.not_saving > Decimal("0")
