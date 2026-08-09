@@ -82,7 +82,7 @@ def test_suggestion_rounds_up_to_default_increment(db_session):
     assert result["amount"] == Decimal("1000.00")
     assert result["from_account_id"] == savings[0].id
     assert result["already_planned"] is False
-    assert result["date"] == R0 - timedelta(days=3)
+    assert result["date"] == R0.replace(day=1)
 
 
 def test_suggestion_rounds_up_to_custom_increment(db_session):
@@ -135,16 +135,31 @@ def test_suggestion_never_suggests_transferring_from_the_account_itself(db_sessi
 
 
 def test_suggested_date_is_never_in_the_past(db_session):
-    """A risk within 3 days would otherwise back-date the suggestion."""
+    """A risk landing in the current calendar month defaults to the 1st of
+    that month, which has already passed -- must clamp forward to today
+    rather than suggest a transfer date that's already gone."""
     user = _make_user(db_session)
     checking, _ = _make_accounts(db_session, user, num_savings=1)
     db_session.commit()
 
-    tomorrow = date.today() + timedelta(days=1)
-    risk = _risk(d=tomorrow)
+    risk = _risk(d=date.today())
     result = suggest_transfer(db_session, user, checking.id, risk, _flat_entries(risk))
 
     assert result["date"] == date.today()
+
+
+def test_suggested_date_defaults_to_the_first_of_the_risk_month(db_session):
+    """The default pull date is the 1st of the month the shortfall lands
+    in -- Dan wants the money in before that month's spending starts, not
+    a few days before the specific dip."""
+    user = _make_user(db_session)
+    checking, _ = _make_accounts(db_session, user, num_savings=1)
+    db_session.commit()
+
+    risk = _risk(d=R0)
+    result = suggest_transfer(db_session, user, checking.id, risk, _flat_entries(risk))
+
+    assert result["date"] == R0.replace(day=1)
 
 
 def test_suggestion_is_sized_to_the_deepest_dip_not_the_first(db_session):
@@ -195,7 +210,7 @@ def test_inadequate_existing_plan_still_produces_a_topup(db_session):
 
     assert result["already_planned"] is True  # informational only
     assert result["amount"] == Decimal("3000.00")
-    assert result["date"] == R0 - timedelta(days=3)
+    assert result["date"] == R0.replace(day=1)
     assert result["from_account_id"] == savings[0].id
 
 

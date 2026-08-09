@@ -43,6 +43,13 @@ export function RiskBanner({
   // Accepting has to resolve that before it creates a source-less transfer.
   const [pickedFromId, setPickedFromId] = useState("");
 
+  // The suggested amount/date are editable before accepting -- Dan may know
+  // better than the forecast (round to a cleaner number, pull it in earlier
+  // for an unrelated reason, etc). Defaults track the backend's suggestion
+  // until the user overrides one.
+  const [amountOverride, setAmountOverride] = useState("");
+  const [dateOverride, setDateOverride] = useState("");
+
   // sourceAccounts changes whenever the forecasted account (or the account
   // list) changes. A stale pick from a previous account must not survive
   // that switch — otherwise the select can visually show one account while
@@ -52,6 +59,14 @@ export function RiskBanner({
   useEffect(() => {
     setPickedFromId("");
   }, [sourceIdKey]);
+
+  // A new suggestion (different amount or date from the backend) replaces
+  // whatever the user was editing -- otherwise an edit made against a prior
+  // shortfall would silently carry over onto an unrelated new one.
+  useEffect(() => {
+    setAmountOverride("");
+    setDateOverride("");
+  }, [risk?.suggested_transfer_amount, risk?.suggested_transfer_date]);
 
   if (!risk) return null;
 
@@ -68,6 +83,10 @@ export function RiskBanner({
       ? parseInt(pickedFromId)
       : null;
   const resolvedFromId = suggestedFromId ?? validPickedId;
+
+  const effectiveAmount = amountOverride || risk.suggested_transfer_amount || "";
+  const effectiveDate = dateOverride || risk.suggested_transfer_date || "";
+  const effectiveAmountValid = parseFloat(effectiveAmount) > 0;
 
   if (!showAlert && !showTransfer && !showSuggestion) return null;
 
@@ -103,6 +122,28 @@ export function RiskBanner({
                   ? "You already have a transfer planned near this date, but it doesn't cover the whole dip."
                   : "You'll need to make this transfer yourself in your bank — accepting just plans it here."}
               </p>
+              <div className="flex items-center gap-3 mt-2 text-xs text-blue-800 dark:text-blue-300">
+                <label className="flex items-center gap-1.5">
+                  Amount
+                  <input
+                    type="number"
+                    step="1"
+                    min="0"
+                    className="input w-24 text-xs py-1"
+                    value={effectiveAmount}
+                    onChange={(e) => setAmountOverride(e.target.value)}
+                  />
+                </label>
+                <label className="flex items-center gap-1.5">
+                  Date
+                  <input
+                    type="date"
+                    className="input w-auto text-xs py-1"
+                    value={effectiveDate}
+                    onChange={(e) => setDateOverride(e.target.value)}
+                  />
+                </label>
+              </div>
               {needsSourcePick && (
                 <label className="flex items-center gap-2 mt-2 text-xs text-blue-800 dark:text-blue-300">
                   Move from
@@ -119,8 +160,13 @@ export function RiskBanner({
                 </label>
               )}
               <button
-                onClick={() => resolvedFromId !== null && onAcceptSuggestion(risk.suggested_transfer_amount!, risk.suggested_transfer_date!, resolvedFromId)}
-                disabled={resolvedFromId === null}
+                onClick={() =>
+                  resolvedFromId !== null &&
+                  effectiveAmountValid &&
+                  effectiveDate &&
+                  onAcceptSuggestion(effectiveAmount, effectiveDate, resolvedFromId)
+                }
+                disabled={resolvedFromId === null || !effectiveAmountValid || !effectiveDate}
                 className="btn-primary btn-sm text-xs px-3 py-1.5 mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Accept

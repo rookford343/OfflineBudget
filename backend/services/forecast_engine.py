@@ -665,8 +665,10 @@ def suggest_transfer(
 
     return {
         "amount": amount,
-        # Three days of lead time, but never a date already in the past.
-        "date": max(risk_date - timedelta(days=3), date.today()),
+        # Default to the 1st of the risk month -- Dan pulls the transfer in
+        # at the start of the month the shortfall lands in, not a few days
+        # before the dip itself. Never a date already in the past though.
+        "date": max(risk_date.replace(day=1), date.today()),
         "from_account_id": from_account_id,
         "already_planned": already_planned,
     }
