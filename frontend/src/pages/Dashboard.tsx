@@ -8,6 +8,7 @@ import HelpPanel from "../components/HelpPanel";
 import { TrendBadge } from "../components/TrendBadge";
 import { SparkLine } from "../components/SparkLine";
 import { RiskBanner } from "../components/RiskBanner";
+import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
 
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
 
@@ -236,6 +237,7 @@ export default function Dashboard() {
         </div>
       )}
 
+      <PlannedTransferReminder />
       {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
 
       {/* Month in Review */}

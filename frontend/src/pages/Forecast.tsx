@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi, dayCheckpointsApi, transactionsApi, categoriesApi } from "../api";
+import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi, dayCheckpointsApi, transactionsApi, categoriesApi, plannedTransfersApi } from "../api";
 import { fmt, today } from "../lib/utils";
 import { Link } from "react-router-dom";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar } from "recharts";
@@ -8,6 +8,7 @@ import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, Hel
 import HelpPanel from "../components/HelpPanel";
 import MonthlyAccuracyRow from "../components/MonthlyAccuracyRow";
 import { RiskBanner } from "../components/RiskBanner";
+import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
 
 function isDarkMode(): boolean {
   return document.documentElement.classList.contains("dark");
@@ -183,6 +184,15 @@ export default function Forecast() {
       qc.invalidateQueries({ queryKey: ["accounts"] });
       setAddTxnDate(null);
       setAddTxnForm({ description: "", amount: "", category_id: "" });
+    },
+  });
+
+  const acceptSuggestionMut = useMutation({
+    mutationFn: (data: { to_account_id: number; from_account_id: number | null; amount: string; target_date: string }) =>
+      plannedTransfersApi.create(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["planned-transfers"] });
+      qc.invalidateQueries({ queryKey: ["forecast-risk"] });
     },
   });
 
@@ -420,7 +430,15 @@ export default function Forecast() {
         </div>
       )}
 
-      {activeAccountId && <RiskBanner risk={risk} />}
+      {activeAccountId && (
+        <RiskBanner
+          risk={risk}
+          onAcceptSuggestion={(amount, targetDate, fromAccountId) =>
+            acceptSuggestionMut.mutate({ to_account_id: activeAccountId, from_account_id: fromAccountId, amount, target_date: targetDate })
+          }
+        />
+      )}
+      <PlannedTransferReminder />
 
       {!isLoading && chartData.length > 0 && (
         <div className="card">
