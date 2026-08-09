@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
-from backend.services.forecast_engine import build_forecast, build_quarters, find_balance_risk, find_transfer_signal
+from backend.services.forecast_engine import build_forecast, build_quarters, find_balance_risk, find_transfer_signal, suggest_transfer
 from backend.services.reconciliation_helper import compute_reconciliation
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
@@ -42,6 +42,7 @@ def get_forecast_risk(
     entries = build_forecast(db, user.id, account_id, start, end)
     risk = find_balance_risk(entries, threshold)
     transfer = find_transfer_signal(entries)
+    suggestion = suggest_transfer(db, user, account_id, risk)
     active_rule = db.query(models.BufferTransferRule).filter(
         models.BufferTransferRule.user_id == user.id,
         models.BufferTransferRule.to_account_id == account_id,
@@ -57,6 +58,10 @@ def get_forecast_risk(
         transfer_amount=transfer["amount"],
         transfer_from=transfer["from_name"],
         action_threshold=active_rule.action_threshold if active_rule else None,
+        suggested_transfer_amount=suggestion["amount"],
+        suggested_transfer_date=suggestion["date"],
+        suggested_transfer_from_account_id=suggestion["from_account_id"],
+        suggested_transfer_already_planned=suggestion["already_planned"],
     )
 
 
