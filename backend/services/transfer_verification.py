@@ -17,11 +17,35 @@ def verify_scheduled_transfers(db: Session, user_id: int) -> int:
     """Scans this user's `scheduled` PlannedTransfers for a matching real
     transaction on the destination account, within a 5-day window of
     target_date and 5% of the planned amount. On match, flips status to
-    `verified` and records the link. Returns the count verified."""
+    `verified` and records the link. Returns the count verified.
+
+    Two guards keep amount+date fuzziness from producing false positives,
+    which are the expensive kind of error here: a transfer marked done that
+    Dan never actually made looks safe on the forecast while the real money
+    isn't there.
+
+    1. One transaction, one transfer. A transaction already claimed by
+       another PlannedTransfer.verified_transaction_id can never match a
+       second one -- otherwise two transfers near the same date both flip to
+       verified off a single real deposit. The claimed set is seeded from the
+       database (so it survives across runs) and extended as this run
+       assigns matches.
+    2. Recurring items are never manual transfers. A transaction already
+       linked to a RecurringItem is a recognized paycheck/bill, so it's
+       excluded outright -- that rules out the most common real-world
+       collision, a paycheck landing inside the tolerance window.
+    """
     scheduled = db.query(models.PlannedTransfer).filter(
         models.PlannedTransfer.user_id == user_id,
         models.PlannedTransfer.status == models.PlannedTransferStatus.scheduled,
     ).all()
+
+    claimed_txn_ids: set[int] = {
+        row[0] for row in db.query(models.PlannedTransfer.verified_transaction_id).filter(
+            models.PlannedTransfer.user_id == user_id,
+            models.PlannedTransfer.verified_transaction_id.isnot(None),
+        ).all()
+    }
 
     verified_count = 0
     for transfer in scheduled:
@@ -30,18 +54,24 @@ def verify_scheduled_transfers(db: Session, user_id: int) -> int:
         low = transfer.amount * (1 - _AMOUNT_TOLERANCE_PCT)
         high = transfer.amount * (1 + _AMOUNT_TOLERANCE_PCT)
 
-        match = db.query(models.Transaction).filter(
+        query = db.query(models.Transaction).filter(
             models.Transaction.user_id == user_id,
             models.Transaction.account_id == transfer.to_account_id,
             models.Transaction.date >= window_start,
             models.Transaction.date <= window_end,
             models.Transaction.amount >= low,
             models.Transaction.amount <= high,
-        ).first()
+            models.Transaction.recurring_item_id.is_(None),
+        )
+        if claimed_txn_ids:
+            query = query.filter(models.Transaction.id.notin_(claimed_txn_ids))
+
+        match = query.order_by(models.Transaction.date, models.Transaction.id).first()
 
         if match:
             transfer.status = models.PlannedTransferStatus.verified
             transfer.verified_transaction_id = match.id
+            claimed_txn_ids.add(match.id)
             verified_count += 1
 
     if verified_count:
