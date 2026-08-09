@@ -233,6 +233,7 @@ class RecurringUpdate(BaseModel):
     month_of_year: Optional[int] = None
     end_date: Optional[date] = None
     is_active: Optional[bool] = None
+    include_in_forecast: Optional[bool] = None
     notes: Optional[str] = None
 
 
@@ -251,6 +252,7 @@ class RecurringOut(BaseModel):
     start_date: date
     end_date: Optional[date]
     is_active: bool
+    include_in_forecast: bool = True
     notes: Optional[str]
 
 
