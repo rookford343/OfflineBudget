@@ -550,6 +550,7 @@ def build_forecast(
                     category_name=None,
                     is_actual=False,
                     is_transfer=True,
+                    is_planned_transfer=True,
                 ))
             if pt.from_account_id == account_id:
                 balance -= pt.amount
@@ -560,6 +561,7 @@ def build_forecast(
                     category_name=None,
                     is_actual=False,
                     is_transfer=True,
+                    is_planned_transfer=True,
                 ))
 
         # Apply day checkpoint AFTER all transactions so the anchor value is the
@@ -647,7 +649,7 @@ def find_transfer_signal(entries: list[ForecastEntry]) -> dict:
     """
     for entry in entries:
         for txn in entry.transactions:
-            if txn.is_transfer and txn.amount > 0:
+            if txn.is_transfer and txn.amount > 0 and not txn.is_planned_transfer:
                 from_name = txn.name.removeprefix("Transfer from ")
                 return {
                     "triggered": True,

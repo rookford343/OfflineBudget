@@ -305,6 +305,7 @@ class ForecastTransaction(BaseModel):
     is_planned: bool = False
     is_cc_payment: bool = False
     is_transfer: bool = False
+    is_planned_transfer: bool = False
     recurring_item_id: Optional[int] = None
     transaction_id: Optional[int] = None
 
