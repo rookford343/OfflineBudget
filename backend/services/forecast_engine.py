@@ -556,6 +556,52 @@ def find_balance_risk(entries: list[ForecastEntry], threshold: Decimal) -> dict:
     return {"at_risk": False, "date": None, "amount": None, "threshold": threshold}
 
 
+def suggest_transfer(db: Session, user: models.User, account_id: int, risk: dict) -> dict:
+    """Given a risk dict from find_balance_risk (at_risk=True), compute a
+    suggested one-time transfer that would clear it, rounded UP to the
+    user's transfer_increment (default $1000). Returns
+    already_planned=True (no new suggestion) if an active (pending or
+    scheduled) PlannedTransfer already targets this account within a few
+    days of the risk date -- a verified one does NOT suppress a new
+    suggestion, since its real transaction is already resolved history,
+    not an open plan covering a new risk.
+    """
+    empty = {"amount": None, "date": None, "from_account_id": None, "already_planned": False}
+    if not risk.get("at_risk"):
+        return empty
+
+    risk_date = risk["date"]
+    window_start = risk_date - timedelta(days=5)
+    window_end = risk_date + timedelta(days=5)
+    existing = db.query(models.PlannedTransfer).filter(
+        models.PlannedTransfer.user_id == user.id,
+        models.PlannedTransfer.to_account_id == account_id,
+        models.PlannedTransfer.status.in_([models.PlannedTransferStatus.pending, models.PlannedTransferStatus.scheduled]),
+        models.PlannedTransfer.target_date >= window_start,
+        models.PlannedTransfer.target_date <= window_end,
+    ).first()
+    if existing:
+        return {**empty, "already_planned": True}
+
+    shortfall = risk["threshold"] - risk["amount"]
+    increment = user.transfer_increment or Decimal("1000.00")
+    amount = (shortfall / increment).to_integral_value(rounding=ROUND_CEILING) * increment
+
+    savings_accounts = db.query(models.Account).filter(
+        models.Account.user_id == user.id,
+        models.Account.type == models.AccountType.savings,
+        models.Account.is_active == True,
+    ).all()
+    from_account_id = savings_accounts[0].id if len(savings_accounts) == 1 else None
+
+    return {
+        "amount": amount,
+        "date": risk_date - timedelta(days=3),
+        "from_account_id": from_account_id,
+        "already_planned": False,
+    }
+
+
 def find_transfer_signal(entries: list[ForecastEntry]) -> dict:
     """Scan forecast entries in order and return the first scheduled buffer
     transfer (a ForecastTransaction with is_transfer=True and a positive
