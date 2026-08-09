@@ -595,34 +595,62 @@ def find_balance_risk(entries: list[ForecastEntry], threshold: Decimal) -> dict:
     return {"at_risk": False, "date": None, "amount": None, "threshold": threshold}
 
 
-def suggest_transfer(db: Session, user: models.User, account_id: int, risk: dict) -> dict:
-    """Given a risk dict from find_balance_risk (at_risk=True), compute a
-    suggested one-time transfer that would clear it, rounded UP to the
-    user's transfer_increment (default $1000). Returns
-    already_planned=True (no new suggestion) if an active (pending or
-    scheduled) PlannedTransfer already targets this account within a few
-    days of the risk date -- a verified one does NOT suppress a new
-    suggestion, since its real transaction is already resolved history,
-    not an open plan covering a new risk.
+def suggest_transfer(
+    db: Session,
+    user: models.User,
+    account_id: int,
+    risk: dict,
+    entries: list[ForecastEntry],
+) -> dict:
+    """Given a risk dict from find_balance_risk (at_risk=True) and the same
+    `entries` list that risk was computed from, compute a suggested one-time
+    transfer that would clear the WHOLE window, rounded UP to the user's
+    transfer_increment (default $1000).
+
+    Sized off the window minimum, not the first breach. find_balance_risk
+    reports the FIRST day the balance dips below threshold, which is not
+    necessarily the lowest point. A shallow dip (a small bill) followed by a
+    deep one (a down payment) used to produce a suggestion sized to the
+    shallow dip, leaving the real hole uncovered.
+
+    already_planned is informational only, never suppression. build_forecast
+    already injects every pending/scheduled PlannedTransfer into the day-by-day
+    walk, so `entries` -- and therefore this shortfall -- is already net of
+    whatever Dan has accepted. If at_risk is still True after that injection,
+    the existing plans are demonstrably not enough and the correct answer is a
+    top-up sized to what's still missing.
+
+    The old behavior suppressed on the *existence* of a nearby active plan
+    rather than its *adequacy*: accepting a too-small suggestion permanently
+    dead-ended the banner, which stayed red with no way to get a corrected
+    suggestion short of hand-editing the transfer's amount. Callers can still
+    use already_planned to word this as "top up the transfer you already have"
+    versus "no plan here yet".
     """
     empty = {"amount": None, "date": None, "from_account_id": None, "already_planned": False}
     if not risk.get("at_risk"):
         return empty
 
     risk_date = risk["date"]
+
     window_start = risk_date - timedelta(days=5)
     window_end = risk_date + timedelta(days=5)
-    existing = db.query(models.PlannedTransfer).filter(
+    already_planned = db.query(models.PlannedTransfer).filter(
         models.PlannedTransfer.user_id == user.id,
         models.PlannedTransfer.to_account_id == account_id,
         models.PlannedTransfer.status.in_([models.PlannedTransferStatus.pending, models.PlannedTransferStatus.scheduled]),
         models.PlannedTransfer.target_date >= window_start,
         models.PlannedTransfer.target_date <= window_end,
-    ).first()
-    if existing:
-        return {**empty, "already_planned": True}
+    ).first() is not None
 
-    shortfall = risk["threshold"] - risk["amount"]
+    window_min = min(
+        (e.projected_balance for e in entries),
+        default=risk["amount"],
+    )
+    shortfall = risk["threshold"] - window_min
+    if shortfall <= 0:
+        return {**empty, "already_planned": already_planned}
+
     increment = user.transfer_increment or Decimal("1000.00")
     amount = (shortfall / increment).to_integral_value(rounding=ROUND_CEILING) * increment
 
@@ -630,14 +658,17 @@ def suggest_transfer(db: Session, user: models.User, account_id: int, risk: dict
         models.Account.user_id == user.id,
         models.Account.type == models.AccountType.savings,
         models.Account.is_active == True,
+        # Never suggest moving money from an account to itself.
+        models.Account.id != account_id,
     ).all()
     from_account_id = savings_accounts[0].id if len(savings_accounts) == 1 else None
 
     return {
         "amount": amount,
-        "date": risk_date - timedelta(days=3),
+        # Three days of lead time, but never a date already in the past.
+        "date": max(risk_date - timedelta(days=3), date.today()),
         "from_account_id": from_account_id,
-        "already_planned": False,
+        "already_planned": already_planned,
     }
 
 
