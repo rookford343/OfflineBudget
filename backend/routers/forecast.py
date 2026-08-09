@@ -42,7 +42,7 @@ def get_forecast_risk(
     entries = build_forecast(db, user.id, account_id, start, end)
     risk = find_balance_risk(entries, threshold)
     transfer = find_transfer_signal(entries)
-    suggestion = suggest_transfer(db, user, account_id, risk)
+    suggestion = suggest_transfer(db, user, account_id, risk, entries)
     active_rule = db.query(models.BufferTransferRule).filter(
         models.BufferTransferRule.user_id == user.id,
         models.BufferTransferRule.to_account_id == account_id,
