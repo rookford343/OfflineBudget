@@ -254,6 +254,21 @@ def build_preview(
     return preview_rows
 
 
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def _normalize_desc(desc: str) -> str:
+    """Collapse internal whitespace before comparing descriptions across
+    import sources. A bank's CSV export commonly pads ACH descriptions to a
+    fixed column width ("PAYROLL     PPD ID: 123"); SimpleFIN returns the
+    same real transaction already whitespace-normalized ("PAYROLL PPD ID:
+    123"). Both describe the identical event, but a plain equality check
+    never matches them -- confirmed live 2026-08-08: 17 checking transactions
+    ($33k) were silently double-imported on a first sync because of exactly
+    this mismatch."""
+    return _WHITESPACE_RE.sub(" ", desc.strip())
+
+
 def _find_duplicate_transaction(
     db: Session, user_id: int, account_id: int, row: schemas.ImportConfirmRow,
 ) -> models.Transaction | None:
@@ -266,23 +281,28 @@ def _find_duplicate_transaction(
     to the heuristic but restricted to rows that predate this column
     (external_id IS NULL), so upgrading an existing database doesn't re-import
     already-synced history. Rows without an external_id (CSV, OFX, manual) use
-    the original heuristic unchanged.
+    the original heuristic unchanged. Description comparison is whitespace-
+    normalized in Python (not at the DB level) -- see _normalize_desc.
     """
     base = db.query(models.Transaction).filter(
         models.Transaction.user_id == user_id,
         models.Transaction.account_id == account_id,
-    )
-    heuristic = (
         models.Transaction.date == row.date,
         models.Transaction.amount == row.amount,
-        models.Transaction.description == row.description,
     )
+    normalized = _normalize_desc(row.description)
     if row.external_id:
-        by_id = base.filter(models.Transaction.external_id == row.external_id).first()
+        by_id = db.query(models.Transaction).filter(
+            models.Transaction.user_id == user_id,
+            models.Transaction.account_id == account_id,
+            models.Transaction.external_id == row.external_id,
+        ).first()
         if by_id:
             return by_id
-        return base.filter(models.Transaction.external_id.is_(None), *heuristic).first()
-    return base.filter(*heuristic).first()
+        candidates = base.filter(models.Transaction.external_id.is_(None)).all()
+    else:
+        candidates = base.all()
+    return next((c for c in candidates if _normalize_desc(c.description) == normalized), None)
 
 
 def _find_duplicate_card_transaction(
@@ -292,18 +312,22 @@ def _find_duplicate_card_transaction(
     base = db.query(models.CreditCardTransaction).filter(
         models.CreditCardTransaction.user_id == user_id,
         models.CreditCardTransaction.card_id == card_id,
-    )
-    heuristic = (
         models.CreditCardTransaction.date == row.date,
         models.CreditCardTransaction.amount == abs(row.amount),
-        models.CreditCardTransaction.merchant == row.description,
     )
+    normalized = _normalize_desc(row.description)
     if row.external_id:
-        by_id = base.filter(models.CreditCardTransaction.external_id == row.external_id).first()
+        by_id = db.query(models.CreditCardTransaction).filter(
+            models.CreditCardTransaction.user_id == user_id,
+            models.CreditCardTransaction.card_id == card_id,
+            models.CreditCardTransaction.external_id == row.external_id,
+        ).first()
         if by_id:
             return by_id
-        return base.filter(models.CreditCardTransaction.external_id.is_(None), *heuristic).first()
-    return base.filter(*heuristic).first()
+        candidates = base.filter(models.CreditCardTransaction.external_id.is_(None)).all()
+    else:
+        candidates = base.all()
+    return next((c for c in candidates if _normalize_desc(c.merchant) == normalized), None)
 
 
 def run_import(
