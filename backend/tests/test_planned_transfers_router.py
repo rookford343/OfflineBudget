@@ -60,6 +60,27 @@ def test_create_rejects_account_owned_by_another_user(db_session, client):
     assert resp.status_code == 404
 
 
+def test_create_rejects_from_account_same_as_to_account(client):
+    test_client, user, checking, savings = client
+
+    resp = test_client.post("/planned-transfers", json={
+        "from_account_id": checking.id, "to_account_id": checking.id,
+        "amount": "1000.00", "target_date": "2026-09-12",
+    })
+    assert resp.status_code == 422
+
+
+def test_update_rejects_from_account_same_as_to_account(client):
+    test_client, user, checking, savings = client
+    created = test_client.post("/planned-transfers", json={
+        "from_account_id": savings.id, "to_account_id": checking.id,
+        "amount": "1000.00", "target_date": "2026-09-12",
+    }).json()
+
+    resp = test_client.patch(f"/planned-transfers/{created['id']}", json={"from_account_id": checking.id})
+    assert resp.status_code == 422
+
+
 def test_update_planned_transfer(client):
     test_client, user, checking, savings = client
     created = test_client.post("/planned-transfers", json={
