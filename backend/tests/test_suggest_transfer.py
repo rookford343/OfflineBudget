@@ -1,7 +1,8 @@
 from datetime import date, timedelta
 from decimal import Decimal
 from backend import models
-from backend.services.forecast_engine import suggest_transfer
+from backend.schemas import ForecastEntry
+from backend.services.forecast_engine import build_forecast, find_balance_risk, suggest_transfer
 
 
 def _make_user(db, transfer_increment=None):
@@ -35,12 +36,29 @@ def _risk(at_risk=True, d=None, amount="-500.00", threshold="0"):
     }
 
 
+def _entries(*balances_by_date):
+    """Build a minimal ForecastEntry list from (date, balance) pairs."""
+    return [
+        ForecastEntry(date=d, projected_balance=Decimal(str(b)), transactions=[])
+        for d, b in balances_by_date
+    ]
+
+
+def _flat_entries(risk_dict):
+    """Entries whose only low point is exactly the risk's first-breach amount.
+
+    Keeps the classic single-dip tests honest: window minimum == risk amount,
+    so the suggestion size is unchanged by the window-minimum fix.
+    """
+    return _entries((risk_dict["date"], risk_dict["amount"]))
+
+
 def test_no_suggestion_when_not_at_risk(db_session):
     user = _make_user(db_session)
     checking, _ = _make_accounts(db_session, user)
     db_session.commit()
 
-    result = suggest_transfer(db_session, user, checking.id, _risk(at_risk=False))
+    result = suggest_transfer(db_session, user, checking.id, _risk(at_risk=False), [])
 
     assert result == {"amount": None, "date": None, "from_account_id": None, "already_planned": False}
 
@@ -50,8 +68,9 @@ def test_suggestion_rounds_up_to_default_increment(db_session):
     checking, savings = _make_accounts(db_session, user, num_savings=1)
     db_session.commit()
 
-    # shortfall = threshold(0) - amount(-500) = 500 -> rounds up to 1000 (default increment)
-    result = suggest_transfer(db_session, user, checking.id, _risk(amount="-500.00", threshold="0"))
+    # shortfall = threshold(0) - window_min(-500) = 500 -> rounds up to 1000 (default increment)
+    risk = _risk(amount="-500.00", threshold="0")
+    result = suggest_transfer(db_session, user, checking.id, risk, _flat_entries(risk))
 
     assert result["amount"] == Decimal("1000.00")
     assert result["from_account_id"] == savings[0].id
@@ -65,7 +84,8 @@ def test_suggestion_rounds_up_to_custom_increment(db_session):
     db_session.commit()
 
     # shortfall = 500 -> exactly one 500 increment, no rounding needed
-    result = suggest_transfer(db_session, user, checking.id, _risk(amount="-500.00", threshold="0"))
+    risk = _risk(amount="-500.00", threshold="0")
+    result = suggest_transfer(db_session, user, checking.id, risk, _flat_entries(risk))
 
     assert result["amount"] == Decimal("500.00")
 
@@ -75,7 +95,8 @@ def test_suggestion_leaves_from_account_unset_when_ambiguous(db_session):
     checking, savings = _make_accounts(db_session, user, num_savings=2)
     db_session.commit()
 
-    result = suggest_transfer(db_session, user, checking.id, _risk())
+    risk = _risk()
+    result = suggest_transfer(db_session, user, checking.id, risk, _flat_entries(risk))
 
     assert result["from_account_id"] is None
 
@@ -85,12 +106,67 @@ def test_suggestion_leaves_from_account_unset_when_no_savings(db_session):
     checking, _ = _make_accounts(db_session, user, num_savings=0)
     db_session.commit()
 
-    result = suggest_transfer(db_session, user, checking.id, _risk())
+    risk = _risk()
+    result = suggest_transfer(db_session, user, checking.id, risk, _flat_entries(risk))
 
     assert result["from_account_id"] is None
 
 
-def test_already_planned_suppresses_a_new_suggestion(db_session):
+def test_suggestion_never_suggests_transferring_from_the_account_itself(db_session):
+    """Viewing a savings account's own forecast must not suggest moving money
+    from that account into itself."""
+    user = _make_user(db_session)
+    savings = models.Account(user_id=user.id, name="Savings", type=models.AccountType.savings)
+    db_session.add(savings)
+    db_session.commit()
+
+    risk = _risk()
+    result = suggest_transfer(db_session, user, savings.id, risk, _flat_entries(risk))
+
+    assert result["amount"] == Decimal("1000.00")
+    assert result["from_account_id"] is None
+
+
+def test_suggested_date_is_never_in_the_past(db_session):
+    """A risk within 3 days would otherwise back-date the suggestion."""
+    user = _make_user(db_session)
+    checking, _ = _make_accounts(db_session, user, num_savings=1)
+    db_session.commit()
+
+    tomorrow = date.today() + timedelta(days=1)
+    risk = _risk(d=tomorrow)
+    result = suggest_transfer(db_session, user, checking.id, risk, _flat_entries(risk))
+
+    assert result["date"] == date.today()
+
+
+def test_suggestion_is_sized_to_the_deepest_dip_not_the_first(db_session):
+    """Regression: a shallow dip followed by a deeper one used to size the
+    suggestion off the shallow one, leaving the real hole uncovered."""
+    user = _make_user(db_session)
+    checking, savings = _make_accounts(db_session, user, num_savings=1)
+    db_session.commit()
+
+    entries = _entries(
+        (date(2026, 9, 1), "5000.00"),
+        (date(2026, 9, 15), "-200.00"),   # shallow dip -- first breach
+        (date(2026, 9, 20), "3000.00"),
+        (date(2026, 10, 5), "-8400.00"),  # the real hole
+    )
+    risk = find_balance_risk(entries, Decimal("0"))
+    assert risk["date"] == date(2026, 9, 15)
+    assert risk["amount"] == Decimal("-200.00")
+
+    result = suggest_transfer(db_session, user, checking.id, risk, entries)
+
+    # Sized to 8400, not 200: 8400 -> next 1000 increment = 9000
+    assert result["amount"] == Decimal("9000.00")
+
+
+def test_inadequate_existing_plan_still_produces_a_topup(db_session):
+    """An active plan that doesn't cover the hole must not suppress the
+    suggestion -- build_forecast already netted it out of the entries, so
+    what remains is a genuine top-up, not a duplicate."""
     user = _make_user(db_session)
     checking, savings = _make_accounts(db_session, user, num_savings=1)
     db_session.flush()
@@ -101,16 +177,67 @@ def test_already_planned_suppresses_a_new_suggestion(db_session):
     ))
     db_session.commit()
 
-    result = suggest_transfer(db_session, user, checking.id, _risk(d=date(2026, 9, 15)))
+    # Entries are already net of that $1000 injection and still $2500 short.
+    entries = _entries(
+        (date(2026, 9, 13), "1000.00"),
+        (date(2026, 9, 15), "-2500.00"),
+    )
+    risk = find_balance_risk(entries, Decimal("0"))
 
-    assert result["already_planned"] is True
+    result = suggest_transfer(db_session, user, checking.id, risk, entries)
+
+    assert result["already_planned"] is True  # informational only
+    assert result["amount"] == Decimal("3000.00")
+    assert result["date"] == date(2026, 9, 12)
+    assert result["from_account_id"] == savings[0].id
+
+
+def test_adequate_existing_plan_never_reaches_the_suggestion_branch(db_session):
+    """End-to-end: once an adequate pending transfer is injected by
+    build_forecast, the account is no longer at risk at all, so no bogus
+    suggestion is produced. Suppression by adequacy, not by existence."""
+    user = _make_user(db_session)
+    checking = models.Account(
+        user_id=user.id, name="Checking", type=models.AccountType.checking,
+        current_balance=Decimal("500.00"),
+    )
+    savings = models.Account(
+        user_id=user.id, name="Savings", type=models.AccountType.savings,
+        current_balance=Decimal("50000.00"),
+    )
+    db_session.add_all([checking, savings])
+    db_session.flush()
+
+    start = date.today()
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=checking.id, name="Big Bill",
+        amount=Decimal("2000.00"), type=models.RecurringType.expense,
+        day_of_month=(start + timedelta(days=10)).day,
+        frequency=models.RecurringFrequency.monthly,
+        start_date=start, is_active=True, include_in_forecast=True,
+    ))
+    db_session.add(models.PlannedTransfer(
+        user_id=user.id, from_account_id=savings.id, to_account_id=checking.id,
+        amount=Decimal("5000.00"), target_date=start + timedelta(days=5),
+        status=models.PlannedTransferStatus.pending,
+    ))
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, checking.id, start, start + timedelta(days=20))
+    risk = find_balance_risk(entries, Decimal("0"))
+    assert risk["at_risk"] is False
+
+    result = suggest_transfer(db_session, user, checking.id, risk, entries)
+
     assert result["amount"] is None
+    assert result["date"] is None
+    assert result["from_account_id"] is None
 
 
 def test_verified_transfer_does_not_suppress_a_new_suggestion(db_session):
     """A verified transfer means the real transaction already happened and
     is reflected in actuals -- a NEW risk near the same date needs its own
-    new suggestion, not silent suppression by old, already-resolved history."""
+    new suggestion, and already_planned must stay False for it."""
     user = _make_user(db_session)
     checking, savings = _make_accounts(db_session, user, num_savings=1)
     db_session.flush()
@@ -121,6 +248,8 @@ def test_verified_transfer_does_not_suppress_a_new_suggestion(db_session):
     ))
     db_session.commit()
 
-    result = suggest_transfer(db_session, user, checking.id, _risk(d=date(2026, 9, 15)))
+    risk = _risk(d=date(2026, 9, 15))
+    result = suggest_transfer(db_session, user, checking.id, risk, _flat_entries(risk))
 
     assert result["already_planned"] is False
+    assert result["amount"] == Decimal("1000.00")
