@@ -119,6 +119,21 @@ def upgrade_schema():
         "ALTER TABLE transactions ADD COLUMN external_id VARCHAR(128)",
         "ALTER TABLE credit_card_transactions ADD COLUMN external_id VARCHAR(128)",
         "ALTER TABLE recurring_items ADD COLUMN include_in_forecast BOOLEAN DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN transfer_increment NUMERIC(14,2) DEFAULT 1000.00",
+        """CREATE TABLE IF NOT EXISTS planned_transfers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            from_account_id INTEGER REFERENCES accounts(id),
+            to_account_id INTEGER NOT NULL REFERENCES accounts(id),
+            amount NUMERIC(14,2) NOT NULL,
+            target_date DATE NOT NULL,
+            status VARCHAR(10) NOT NULL DEFAULT 'pending',
+            suggested BOOLEAN DEFAULT 0,
+            notes TEXT,
+            verified_transaction_id INTEGER REFERENCES transactions(id),
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )""",
     ]
     with engine.connect() as conn:
         for s in stmts:
