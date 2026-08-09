@@ -118,6 +118,7 @@ def upgrade_schema():
         "ALTER TABLE credit_cards ADD COLUMN pending_charges NUMERIC(14,2) DEFAULT 0",
         "ALTER TABLE transactions ADD COLUMN external_id VARCHAR(128)",
         "ALTER TABLE credit_card_transactions ADD COLUMN external_id VARCHAR(128)",
+        "ALTER TABLE recurring_items ADD COLUMN include_in_forecast BOOLEAN DEFAULT 1",
     ]
     with engine.connect() as conn:
         for s in stmts:

@@ -204,6 +204,14 @@ class RecurringItem(Base):
     start_date: Mapped[date] = mapped_column(Date, nullable=False)
     end_date: Mapped[date | None] = mapped_column(Date)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Counts toward monthly budget totals (_monthly_income/_monthly_expenses)
+    # either way. When False, excluded from the day-by-day cash forecast
+    # (build_forecast/build_quarters) -- for income that's real but already
+    # spoken for the moment it lands (e.g. an annual bonus modeled as 1/12th
+    # per month for budget planning), not sitting in checking waiting to be
+    # spent. Defaults True so every existing item keeps forecasting exactly
+    # as before.
+    include_in_forecast: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

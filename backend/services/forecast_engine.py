@@ -141,7 +141,6 @@ def build_forecast(
     *,
     overrides: list[dict] | None = None,
     apply_buffer_transfers: bool = True,
-    apply_cc_payments: bool = True,
 ) -> list[ForecastEntry]:
     account: models.Account = db.query(models.Account).filter(
         models.Account.id == account_id,
@@ -157,6 +156,7 @@ def build_forecast(
             models.RecurringItem.user_id == user_id,
             models.RecurringItem.account_id == account_id,
             models.RecurringItem.is_active == True,
+            models.RecurringItem.include_in_forecast == True,
         ).all()
         # CC charges (expense + card_id) hit the card, not the checking account
         if not (item.type == models.RecurringType.expense and item.card_id is not None)
@@ -205,7 +205,7 @@ def build_forecast(
     all_active_cards = db.query(models.CreditCard).filter(
         models.CreditCard.user_id == user_id,
         models.CreditCard.is_active == True,
-    ).all() if apply_cc_payments else []
+    ).all()
     for card in all_active_cards:
         if card.id in recurring_cc_card_ids:
             continue  # recurring CC payment item already handles this card
@@ -214,8 +214,15 @@ def build_forecast(
             and start_date <= card.next_payment_date <= end_date
             and card.balance_due and card.balance_due > 0
         ):
+            # balance_due only, NOT + pending_charges -- Dan's real
+            # spreadsheet forecast pays off only the last-statement total on
+            # the due date ("2026 Forecast" row 24: "=L23-9273.76-180.16",
+            # no pending-charges term), and separately counts pending_charges
+            # exactly once via budget_snapshot.py's new_spending_total.
+            # Adding it here too double-counted it: once in this payoff
+            # projection, once again downstream. Confirmed live 2026-08-09.
             cc_payments.setdefault(card.next_payment_date, []).append(
-                (card.name, Decimal(str(card.balance_due)) + Decimal(str(card.pending_charges or 0)))
+                (card.name, Decimal(str(card.balance_due)))
             )
         if card.monthly_spend_estimate and card.monthly_spend_estimate > 0:
             estimate = Decimal(str(card.monthly_spend_estimate))
@@ -574,12 +581,11 @@ def build_quarters(
     account_id: int,
     year: int,
     overrides: list[dict] | None = None,
-    apply_cc_payments: bool = True,
 ) -> list[QuarterSummary]:
     # Build the full year in one pass so Q2+ open balances chain from Q1 close.
     full_start = date(year, 1, 1)
     full_end = date(year, 12, 31)
-    all_days = build_forecast(db, user_id, account_id, full_start, full_end, overrides=overrides, apply_cc_payments=apply_cc_payments)
+    all_days = build_forecast(db, user_id, account_id, full_start, full_end, overrides=overrides)
     if not all_days:
         return []
 

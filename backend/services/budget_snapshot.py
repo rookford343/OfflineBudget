@@ -89,22 +89,24 @@ def _charged_so_far(db: Session, user_id: int, as_of: date) -> Decimal:
 
 
 def _quarter_minimum(db: Session, user_id: int, account_id: int, as_of: date) -> Decimal:
-    """The lowest projected checking balance this quarter, EXCLUDING the
-    forecast's own credit-card-payoff injection (apply_cc_payments=False).
+    """The lowest projected checking balance this quarter, INCLUDING the
+    forecast's own credit-card-payoff injection.
 
-    not_saving (below) already subtracts the card balance itself as its own
-    term, so a quarter_min that already reflects a projected payoff would
-    double-count that same payoff -- once inside the forecast that produced
-    this minimum, once again via the explicit subtraction. Confirmed live
-    2026-08-08: this collapsed a real not_saving of +$2,085.64-ish down to
-    -$8,232.93, because the quarter's minimum day landed exactly on the
-    card's due date, already post-payoff. The Forecast page's own chart and
-    risk callout are unaffected -- they call build_quarters/build_forecast
-    directly with the apply_cc_payments default (True), so they still show
-    the real dip.
+    Matches Dan's real spreadsheet methodology exactly (Budget.xlsx "2026
+    Forecast" sheet hand-models the same payoff event inline, e.g. row 24:
+    "=L23-9273.76-180.16" on the card's due date) -- his quarter-minimum
+    already reflects paying off each card's last-statement balance. Not
+    Saving (below) does NOT subtract that same balance again; it subtracts
+    only the NEW spending accumulated since that statement closed (see
+    balance_due_total's docstring). An earlier version of this function
+    excluded the payoff from quarter_min entirely on the theory that
+    subtracting the full card balance downstream double-counted it -- that
+    was wrong: it was double-counting because the downstream term was using
+    the full balance, not because quarter_min included the payoff. Fixed
+    2026-08-09 after reading the real spreadsheet directly.
     """
     quarter_num = (as_of.month - 1) // 3 + 1
-    quarters = build_quarters(db, user_id, account_id, as_of.year, apply_cc_payments=False)
+    quarters = build_quarters(db, user_id, account_id, as_of.year)
     quarter = next((q for q in quarters if q.quarter == quarter_num), None)
     if not quarter or not quarter.days:
         return Decimal("0")
@@ -140,17 +142,22 @@ def compute_budget_snapshot(
         models.CreditCard.is_active == True,
     ).all()
     card_balances = sum((c.current_balance for c in active_cards), Decimal("0"))
-    # What will actually be paid off next cycle -- the closed-statement total
-    # plus anything charged since, NOT the live running current_balance.
-    # Before bank sync, current_balance was itself only as fresh as Dan's last
-    # manual update, so it and balance_due rarely diverged enough to matter.
-    # Now that sync keeps current_balance accurate to the minute (including
-    # charges from after the statement closed, not yet due), the two have
-    # genuinely split -- confirmed live 2026-08-08: current_balance $10,528.54
-    # vs the real amount due $9,273.76. Not Saving asks "if I paid off what's
-    # actually due, how short am I" (Dan's own definition), so it uses
-    # balance_due + pending_charges, not current_balance.
-    balance_due_total = sum((c.balance_due + c.pending_charges for c in active_cards), Decimal("0"))
+    # NEW spending accumulated since each card's last statement closed --
+    # NOT the full running balance, and NOT just balance_due. quarter_min
+    # (below) already reflects paying off each card's last-statement total
+    # (balance_due) via the forecast's own payoff projection, so subtracting
+    # the full current_balance again here would double-count that same
+    # statement amount; subtracting only balance_due would miss the new,
+    # not-yet-statemented spending entirely. current_balance - balance_due
+    # + pending_charges is exactly that gap. Read directly from Dan's real
+    # spreadsheet 2026-08-09 ("2026 Overview"!B12: "=-9273.76+10524.22+605.99"
+    # -- literally -balance_due + current_balance + pending_charges for
+    # Chase Sapphire). Before bank sync this was usually ~0 (current_balance
+    # tracked balance_due closely by hand); live sync now keeps
+    # current_balance accurate to the minute, so the gap is real and
+    # material -- confirmed live: Chase Sapphire alone carried a $1,860.77
+    # gap on 2026-08-09.
+    new_spending_total = sum((c.current_balance - c.balance_due + c.pending_charges for c in active_cards), Decimal("0"))
     charged_so_far = _charged_so_far(db, user.id, as_of)
     cc_budget_total = _cc_budget_total(db, user.id)
 
@@ -159,16 +166,8 @@ def compute_budget_snapshot(
     # remainder), but NOT in Not Saving -- verified by hand against the
     # live spreadsheet cell. Do not "simplify" these to look symmetric.
     left_to_spend = leftover - card_balances + charged_so_far
-    # quarter_min is computed WITHOUT the forecast's own credit-card-payoff
-    # projection (apply_cc_payments=False in _quarter_minimum) -- Not Saving
-    # subtracts the card payoff itself via balance_due_total below, so a
-    # quarter_min that already reflected a projected payoff would double-
-    # count it. Confirmed live 2026-08-08: this collapsed a real Not Saving
-    # of roughly +$2,000 down to -$8,232.93, because the quarter's minimum
-    # day landed exactly on the card's due date. See
-    # backend/tests/test_budget_snapshot.py::test_not_saving_does_not_double_count_the_cc_payoff.
     quarter_min = _quarter_minimum(db, user.id, account_id, as_of)
-    not_saving = quarter_min - balance_due_total - cc_budget_total + charged_so_far
+    not_saving = quarter_min - new_spending_total - cc_budget_total + charged_so_far
 
     left_to_spend_weekly, days_remaining = _weekly_allowance(left_to_spend, as_of)
     not_saving_weekly, _ = _weekly_allowance(not_saving, as_of)
