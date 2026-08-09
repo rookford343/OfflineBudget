@@ -71,6 +71,91 @@ def test_update_planned_transfer(client):
     assert resp.json()["amount"] == "1500.00"
 
 
+def test_patch_cannot_change_status(client):
+    """The general PATCH must not be a back door around mark-scheduled.
+
+    Allowing an arbitrary transition (notably verified -> pending) would
+    silently re-enable forecast injection for a transfer whose real
+    transaction is already sitting in actuals, double-counting it.
+    """
+    test_client, user, checking, savings = client
+    created = test_client.post("/planned-transfers", json={
+        "to_account_id": checking.id, "amount": "1000.00", "target_date": "2026-09-12",
+    }).json()
+    test_client.post(f"/planned-transfers/{created['id']}/mark-scheduled")
+
+    resp = test_client.patch(f"/planned-transfers/{created['id']}", json={"status": "pending"})
+
+    assert resp.status_code in (200, 422)
+    after = test_client.get("/planned-transfers").json()[0]
+    assert after["status"] == "scheduled"
+
+
+def test_patch_ignoring_status_still_applies_other_fields(client):
+    test_client, user, checking, savings = client
+    created = test_client.post("/planned-transfers", json={
+        "to_account_id": checking.id, "amount": "1000.00", "target_date": "2026-09-12",
+    }).json()
+    test_client.post(f"/planned-transfers/{created['id']}/mark-scheduled")
+
+    resp = test_client.patch(
+        f"/planned-transfers/{created['id']}",
+        json={"status": "pending", "amount": "1750.00"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["amount"] == "1750.00"
+    assert resp.json()["status"] == "scheduled"
+
+
+def test_create_accepts_and_persists_the_suggested_flag(client):
+    test_client, user, checking, savings = client
+
+    resp = test_client.post("/planned-transfers", json={
+        "to_account_id": checking.id, "amount": "1000.00",
+        "target_date": "2026-09-12", "suggested": True,
+    })
+
+    assert resp.status_code == 201
+    assert resp.json()["suggested"] is True
+    assert test_client.get("/planned-transfers").json()[0]["suggested"] is True
+
+
+def test_create_defaults_suggested_to_false(client):
+    test_client, user, checking, savings = client
+
+    resp = test_client.post("/planned-transfers", json={
+        "to_account_id": checking.id, "amount": "1000.00", "target_date": "2026-09-12",
+    })
+
+    assert resp.status_code == 201
+    assert resp.json()["suggested"] is False
+
+
+@pytest.mark.parametrize("amount", ["0", "-500.00"])
+def test_create_rejects_non_positive_amount(client, amount):
+    """A non-positive amount inverts the forecast injection on both accounts."""
+    test_client, user, checking, savings = client
+
+    resp = test_client.post("/planned-transfers", json={
+        "to_account_id": checking.id, "amount": amount, "target_date": "2026-09-12",
+    })
+
+    assert resp.status_code == 422
+
+
+@pytest.mark.parametrize("amount", ["0", "-500.00"])
+def test_update_rejects_non_positive_amount(client, amount):
+    test_client, user, checking, savings = client
+    created = test_client.post("/planned-transfers", json={
+        "to_account_id": checking.id, "amount": "1000.00", "target_date": "2026-09-12",
+    }).json()
+
+    resp = test_client.patch(f"/planned-transfers/{created['id']}", json={"amount": amount})
+
+    assert resp.status_code == 422
+
+
 def test_mark_scheduled_transitions_pending_to_scheduled(client):
     test_client, user, checking, savings = client
     created = test_client.post("/planned-transfers", json={
