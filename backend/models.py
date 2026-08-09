@@ -92,6 +92,7 @@ class User(Base):
     ss_gross_per_paycheck: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     ss_wage_base: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     ss_bonus_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    transfer_increment: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("1000.00"))
 
     linked_to_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
     email: Mapped[str | None] = mapped_column(String(256))
@@ -627,3 +628,36 @@ class BankConnectionAccountLink(Base):
     connection: Mapped["BankConnection"] = relationship(back_populates="links")
     local_account: Mapped["Account | None"] = relationship()
     local_credit_card: Mapped["CreditCard | None"] = relationship()
+
+
+# ── Planned Transfers ────────────────────────────────────────────────────────
+
+class PlannedTransferStatus(str, PyEnum):
+    pending = "pending"
+    scheduled = "scheduled"
+    verified = "verified"
+
+
+class PlannedTransfer(Base):
+    """A one-time, Dan-confirmed transfer plan -- NOT automatic like
+    BufferTransferRule. The app never moves money; this tracks a plan Dan
+    executes himself in his real bank, and never assumes it happened."""
+    __tablename__ = "planned_transfers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    from_account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
+    to_account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    target_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[PlannedTransferStatus] = mapped_column(Enum(PlannedTransferStatus), default=PlannedTransferStatus.pending, nullable=False)
+    suggested: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    verified_transaction_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("transactions.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user: Mapped["User"] = relationship()
+    from_account: Mapped["Account | None"] = relationship(foreign_keys=[from_account_id])
+    to_account: Mapped["Account"] = relationship(foreign_keys=[to_account_id])
+    verified_transaction: Mapped["Transaction | None"] = relationship()
