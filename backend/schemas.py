@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, field_validator
-from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus
+from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus, PlannedTransferStatus
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -35,6 +35,7 @@ class UserOut(BaseModel):
     itemized_salt: Optional[Decimal] = None
     itemized_property_tax: Optional[Decimal] = None
     itemized_other: Optional[Decimal] = None
+    transfer_increment: Optional[Decimal] = None
     recovery_code_created_at: Optional[datetime] = None
 
 
@@ -55,6 +56,7 @@ class UserUpdate(BaseModel):
     itemized_salt: Optional[Decimal] = None
     itemized_property_tax: Optional[Decimal] = None
     itemized_other: Optional[Decimal] = None
+    transfer_increment: Optional[Decimal] = None
 
 
 class UserPasswordChange(BaseModel):
@@ -323,6 +325,10 @@ class ForecastRisk(BaseModel):
     transfer_amount: Optional[Decimal] = None
     transfer_from: Optional[str] = None
     action_threshold: Optional[Decimal] = None
+    suggested_transfer_amount: Optional[Decimal] = None
+    suggested_transfer_date: Optional[date] = None
+    suggested_transfer_from_account_id: Optional[int] = None
+    suggested_transfer_already_planned: bool = False
 
 
 class BufferTransferRuleCreate(BaseModel):
@@ -907,6 +913,39 @@ class PlannedExpenseOut(BaseModel):
     notes: Optional[str]
     category_id: Optional[int]
     account_id: Optional[int]
+    created_at: datetime
+
+
+# ── Planned Transfers ────────────────────────────────────────────────────────
+
+class PlannedTransferCreate(BaseModel):
+    from_account_id: Optional[int] = None
+    to_account_id: int
+    amount: Decimal
+    target_date: date
+    notes: Optional[str] = None
+
+
+class PlannedTransferUpdate(BaseModel):
+    from_account_id: Optional[int] = None
+    to_account_id: Optional[int] = None
+    amount: Optional[Decimal] = None
+    target_date: Optional[date] = None
+    status: Optional[PlannedTransferStatus] = None
+    notes: Optional[str] = None
+
+
+class PlannedTransferOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    from_account_id: Optional[int]
+    to_account_id: int
+    amount: Decimal
+    target_date: date
+    status: PlannedTransferStatus
+    suggested: bool
+    notes: Optional[str]
+    verified_transaction_id: Optional[int]
     created_at: datetime
 
 
