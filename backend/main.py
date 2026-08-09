@@ -224,6 +224,7 @@ def _run_bank_sync() -> None:
                 verify_scheduled_transfers(db, user.id)
             except Exception as exc:
                 logger.error("Transfer verification failed for %s: %s", user.username, exc)
+                db.rollback()
     except Exception as exc:
         logger.error("Bank sync job failed: %s", exc)
     finally:
