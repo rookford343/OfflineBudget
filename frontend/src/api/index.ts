@@ -201,6 +201,15 @@ export const plannedExpensesApi = {
   remove: (id: number) => api.delete(`/planned-expenses/${id}`),
 };
 
+// ── Planned Transfers ────────────────────────────────────────────────────────
+export const plannedTransfersApi = {
+  list: () => api.get("/planned-transfers").then((r) => r.data),
+  create: (data: object) => api.post("/planned-transfers", data).then((r) => r.data),
+  update: (id: number, data: object) => api.patch(`/planned-transfers/${id}`, data).then((r) => r.data),
+  markScheduled: (id: number) => api.post(`/planned-transfers/${id}/mark-scheduled`).then((r) => r.data),
+  remove: (id: number) => api.delete(`/planned-transfers/${id}`),
+};
+
 // ── Scenarios ─────────────────────────────────────────────────────────────────
 export const scenariosApi = {
   list: () => api.get("/scenarios").then((r) => r.data),
