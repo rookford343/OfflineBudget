@@ -213,10 +213,17 @@ def _send_weekly_digest() -> None:
 
 def _run_bank_sync() -> None:
     from backend.database import SessionLocal
+    from backend import models
     from backend.services.bank_sync_service import sync_all
+    from backend.services.transfer_verification import verify_scheduled_transfers
     db = SessionLocal()
     try:
         sync_all(db)
+        for user in db.query(models.User).filter(models.User.is_active == True).all():
+            try:
+                verify_scheduled_transfers(db, user.id)
+            except Exception as exc:
+                logger.error("Transfer verification failed for %s: %s", user.username, exc)
     except Exception as exc:
         logger.error("Bank sync job failed: %s", exc)
     finally:
