@@ -141,6 +141,7 @@ def build_forecast(
     *,
     overrides: list[dict] | None = None,
     apply_buffer_transfers: bool = True,
+    apply_cc_payments: bool = True,
 ) -> list[ForecastEntry]:
     account: models.Account = db.query(models.Account).filter(
         models.Account.id == account_id,
@@ -204,7 +205,7 @@ def build_forecast(
     all_active_cards = db.query(models.CreditCard).filter(
         models.CreditCard.user_id == user_id,
         models.CreditCard.is_active == True,
-    ).all()
+    ).all() if apply_cc_payments else []
     for card in all_active_cards:
         if card.id in recurring_cc_card_ids:
             continue  # recurring CC payment item already handles this card
@@ -573,11 +574,12 @@ def build_quarters(
     account_id: int,
     year: int,
     overrides: list[dict] | None = None,
+    apply_cc_payments: bool = True,
 ) -> list[QuarterSummary]:
     # Build the full year in one pass so Q2+ open balances chain from Q1 close.
     full_start = date(year, 1, 1)
     full_end = date(year, 12, 31)
-    all_days = build_forecast(db, user_id, account_id, full_start, full_end, overrides=overrides)
+    all_days = build_forecast(db, user_id, account_id, full_start, full_end, overrides=overrides, apply_cc_payments=apply_cc_payments)
     if not all_days:
         return []
 
