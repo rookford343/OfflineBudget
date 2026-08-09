@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from backend import models
-from backend.services.forecast_engine import build_forecast
+from backend.services.forecast_engine import build_forecast, find_transfer_signal
 
 
 def _make_user_and_accounts(db):
@@ -65,3 +65,21 @@ def test_verified_transfer_does_not_inject(db_session):
     entries = build_forecast(db_session, user.id, checking.id, date(2026, 9, 1), date(2026, 9, 30))
     sep15 = next(e for e in entries if e.date == date(2026, 9, 15))
     assert not any(t.is_transfer for t in sep15.transactions)
+
+
+def test_pending_transfer_does_not_trigger_buffer_transfer_signal(db_session):
+    """PlannedTransfer is explicitly NOT automatic (per its own model
+    docstring) -- find_transfer_signal must stay exclusively about
+    BufferTransferRule-driven automatic transfers, so a pending
+    PlannedTransfer alone (no BufferTransferRule) must not trigger it."""
+    user, checking, savings = _make_user_and_accounts(db_session)
+    db_session.add(models.PlannedTransfer(
+        user_id=user.id, from_account_id=savings.id, to_account_id=checking.id,
+        amount=Decimal("5000.00"), target_date=date(2026, 9, 15),
+        status=models.PlannedTransferStatus.pending,
+    ))
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, checking.id, date(2026, 9, 1), date(2026, 9, 30))
+    signal = find_transfer_signal(entries)
+    assert signal["triggered"] is False
