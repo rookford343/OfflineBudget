@@ -924,16 +924,38 @@ class PlannedTransferCreate(BaseModel):
     to_account_id: int
     amount: Decimal
     target_date: date
+    suggested: bool = False
     notes: Optional[str] = None
+
+    @field_validator("amount")
+    @classmethod
+    def amount_positive(cls, v: Decimal) -> Decimal:
+        if v <= 0:
+            raise ValueError("amount must be greater than 0")
+        return v
 
 
 class PlannedTransferUpdate(BaseModel):
+    """`status` is deliberately absent.
+
+    The only sanctioned status transitions are the dedicated
+    /mark-scheduled endpoint and the auto-verifier. Letting a plain PATCH
+    set an arbitrary status (notably verified -> pending) would silently
+    re-enable forecast injection for a transfer whose real transaction is
+    already in actuals, double-counting it.
+    """
     from_account_id: Optional[int] = None
     to_account_id: Optional[int] = None
     amount: Optional[Decimal] = None
     target_date: Optional[date] = None
-    status: Optional[PlannedTransferStatus] = None
     notes: Optional[str] = None
+
+    @field_validator("amount")
+    @classmethod
+    def amount_positive(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is not None and v <= 0:
+            raise ValueError("amount must be greater than 0")
+        return v
 
 
 class PlannedTransferOut(BaseModel):

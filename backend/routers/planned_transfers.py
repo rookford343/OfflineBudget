@@ -51,6 +51,7 @@ def create_planned_transfer(
         to_account_id=body.to_account_id,
         amount=body.amount,
         target_date=body.target_date,
+        suggested=body.suggested,
         notes=body.notes,
     )
     db.add(transfer)
