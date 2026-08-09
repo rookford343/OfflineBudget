@@ -193,6 +193,7 @@ export default function Settings() {
   const [taxPropertyTax, setTaxPropertyTax] = useState("");
   const [taxOther, setTaxOther] = useState("");
   const [taxSaved, setTaxSaved] = useState(false);
+  const [transferIncrement, setTransferIncrement] = useState("");
   const taxMut = useMutation({
     mutationFn: authApi.updateMe,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); setTaxSaved(true); setTimeout(() => setTaxSaved(false), 2000); },
@@ -216,6 +217,7 @@ export default function Settings() {
       setTaxSalt(me.itemized_salt ?? "");
       setTaxPropertyTax(me.itemized_property_tax ?? "");
       setTaxOther(me.itemized_other ?? "");
+      setTransferIncrement(me.transfer_increment ?? "1000");
     }
   }, [me]);
   const updateMeMut = useMutation({
@@ -419,6 +421,30 @@ export default function Settings() {
                 <button onClick={() => moveNav(i, 1)} disabled={i === navItems.length - 1} className="btn-ghost p-1 disabled:opacity-30"><ChevronDown size={12} /></button>
               </div>
             ))}
+          </div>
+        </div>
+        <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Suggested Transfer Increment</span>
+              <p className="text-xs text-gray-400">Suggested transfers round up to this amount (e.g. $1,000 steps)</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                step="1"
+                className="input w-28 text-sm text-right"
+                value={transferIncrement}
+                onChange={(e) => setTransferIncrement(e.target.value)}
+              />
+              <button
+                onClick={() => taxMut.mutate({ transfer_increment: transferIncrement ? parseFloat(transferIncrement) : null })}
+                disabled={taxMut.isPending}
+                className="btn-secondary text-xs px-3 py-1.5"
+              >
+                {taxMut.isPending ? "Saving…" : "Save"}
+              </button>
+            </div>
           </div>
         </div>
         </div>}
