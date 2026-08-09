@@ -12,11 +12,15 @@ export function PlannedTransferReminder() {
   const qc = useQueryClient();
   const { data: transfers = [] } = useQuery<any[]>({ queryKey: ["planned-transfers"], queryFn: plannedTransfersApi.list });
   const { data: accounts = [] } = useQuery<any[]>({ queryKey: ["accounts"], queryFn: accountsApi.list });
-  const accountName = (id: number | null) => accounts.find((a: any) => a.id === id)?.name ?? "Savings";
+  // Never fall back to a real account's name for an unset id -- a null
+  // from_account_id means "not chosen yet", and rendering it as "Savings"
+  // showed a specific account that was never actually selected.
+  const accountName = (id: number | null) => accounts.find((a: any) => a.id === id)?.name ?? "(no source account set)";
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editAmount, setEditAmount] = useState("");
   const [editDate, setEditDate] = useState("");
+  const [editFromId, setEditFromId] = useState("");
 
   const markScheduledMut = useMutation({
     mutationFn: plannedTransfersApi.markScheduled,
@@ -27,6 +31,10 @@ export function PlannedTransferReminder() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["planned-transfers"] });
       qc.invalidateQueries({ queryKey: ["forecast-risk"] });
+      // Editing amount or date changes the forecast injection, so the chart
+      // is stale until these refetch too.
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
       setEditingId(null);
     },
   });
@@ -35,6 +43,8 @@ export function PlannedTransferReminder() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["planned-transfers"] });
       qc.invalidateQueries({ queryKey: ["forecast-risk"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
     },
   });
 
@@ -42,9 +52,12 @@ export function PlannedTransferReminder() {
     setEditingId(t.id);
     setEditAmount(t.amount);
     setEditDate(t.target_date);
+    setEditFromId(t.from_account_id != null ? String(t.from_account_id) : "");
   }
   function saveEdit(id: number) {
-    updateMut.mutate({ id, data: { amount: parseFloat(editAmount), target_date: editDate } });
+    const data: Record<string, unknown> = { amount: parseFloat(editAmount), target_date: editDate };
+    if (editFromId) data.from_account_id = parseInt(editFromId);
+    updateMut.mutate({ id, data });
   }
 
   const active = transfers.filter((t: any) => t.status === "pending" || t.status === "scheduled");
@@ -58,6 +71,12 @@ export function PlannedTransferReminder() {
             <div className="flex items-center gap-2 flex-1">
               <input type="number" step="1" className="input w-28 text-sm" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} autoFocus />
               <input type="date" className="input text-sm" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
+              <select className="input w-auto text-sm" value={editFromId} onChange={(e) => setEditFromId(e.target.value)}>
+                <option value="">No source account</option>
+                {accounts.filter((a: any) => a.id !== t.to_account_id).map((a: any) => (
+                  <option key={a.id} value={a.id}>From {a.name}</option>
+                ))}
+              </select>
               <button onClick={() => saveEdit(t.id)} disabled={updateMut.isPending} className="text-green-600"><Check size={16} /></button>
               <button onClick={() => setEditingId(null)} className="text-gray-400"><X size={16} /></button>
             </div>

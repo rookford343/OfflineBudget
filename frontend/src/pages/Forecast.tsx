@@ -188,11 +188,15 @@ export default function Forecast() {
   });
 
   const acceptSuggestionMut = useMutation({
-    mutationFn: (data: { to_account_id: number; from_account_id: number | null; amount: string; target_date: string }) =>
+    mutationFn: (data: { to_account_id: number; from_account_id: number; amount: string; target_date: string; suggested: boolean }) =>
       plannedTransfersApi.create(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["planned-transfers"] });
       qc.invalidateQueries({ queryKey: ["forecast-risk"] });
+      // The accepted transfer is injected into the day-by-day walk, so the
+      // chart itself is stale until these refetch.
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
     },
   });
 
@@ -433,8 +437,9 @@ export default function Forecast() {
       {activeAccountId && (
         <RiskBanner
           risk={risk}
+          sourceAccounts={accounts.filter((a: any) => a.id !== activeAccountId).map((a: any) => ({ id: a.id, name: a.name }))}
           onAcceptSuggestion={(amount, targetDate, fromAccountId) =>
-            acceptSuggestionMut.mutate({ to_account_id: activeAccountId, from_account_id: fromAccountId, amount, target_date: targetDate })
+            acceptSuggestionMut.mutate({ to_account_id: activeAccountId, from_account_id: fromAccountId, amount, target_date: targetDate, suggested: true })
           }
         />
       )}
