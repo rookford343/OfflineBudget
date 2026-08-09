@@ -313,6 +313,19 @@ def build_forecast(
             if rule.from_account_id == account_id:
                 outgoing_transfer_schedules.append((rule, schedule))
 
+    planned_transfers = db.query(models.PlannedTransfer).options(
+        joinedload(models.PlannedTransfer.from_account),
+        joinedload(models.PlannedTransfer.to_account),
+    ).filter(
+        models.PlannedTransfer.user_id == user_id,
+        models.PlannedTransfer.status.in_([models.PlannedTransferStatus.pending, models.PlannedTransferStatus.scheduled]),
+    ).filter(
+        or_(
+            models.PlannedTransfer.to_account_id == account_id,
+            models.PlannedTransfer.from_account_id == account_id,
+        )
+    ).all()
+
     # Pre-compute which recurring item IDs have linked actuals, and on which dates.
     # Used to suppress projected entries when the actual arrives on a different day.
     actual_by_ri: dict[int, list[date]] = {}
@@ -519,6 +532,30 @@ def build_forecast(
                 day_transactions.append(ForecastTransaction(
                     name=f"Transfer to {rule.to_account.name}",
                     amount=-amt,
+                    type="expense",
+                    category_name=None,
+                    is_actual=False,
+                    is_transfer=True,
+                ))
+
+        for pt in planned_transfers:
+            if pt.target_date != current:
+                continue
+            if pt.to_account_id == account_id:
+                balance += pt.amount
+                day_transactions.append(ForecastTransaction(
+                    name=f"Planned Transfer from {pt.from_account.name if pt.from_account else 'Savings'}",
+                    amount=pt.amount,
+                    type="income",
+                    category_name=None,
+                    is_actual=False,
+                    is_transfer=True,
+                ))
+            if pt.from_account_id == account_id:
+                balance -= pt.amount
+                day_transactions.append(ForecastTransaction(
+                    name=f"Planned Transfer to {pt.to_account.name}",
+                    amount=-pt.amount,
                     type="expense",
                     category_name=None,
                     is_actual=False,
