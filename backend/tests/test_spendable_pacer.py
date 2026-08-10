@@ -488,7 +488,13 @@ def test_trailing_partial_week_never_exceeds_the_remaining_pool(db_session):
     remaining_pool = Decimal("200.00")  # no prior-week spend, so pool == leftover
     assert result.spendable_this_week == Decimal("200.00")  # exactly the pool, NOT 700.00
     assert result.spendable_this_week <= remaining_pool
-    assert result.days_left_in_week == 7  # Nov 29 (Sun) through Dec 5 (Sat)
+
+    # The week runs Nov 29 (Sun) - Dec 5 (Sat), but only Nov 29-30 fall in
+    # November, and spendable_this_week only covers those 2 days. The daily
+    # pace must divide by the same 2, not by the raw 7 -- dividing $200 across
+    # 7 days reported $28.57/day when the real answer is $100/day.
+    assert result.days_left_in_week == 2
+    assert result.spendable_today == Decimal("100.00")  # 200 / 2, NOT 200 / 7 = 28.57
 
 
 def test_trailing_partial_week_with_a_negative_pool_is_not_inflated(db_session):
