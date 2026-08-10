@@ -273,7 +273,12 @@ def compute_weekly_spendable(db: Session, user_id: int, leftover: Decimal, as_of
     spend_this_week = discretionary_spend_in_range(db, user_id, effective_week_start, as_of)
     spendable_this_week = (this_week_target - spend_this_week).quantize(Decimal("0.01"))
 
-    days_left_in_week = (week_end - as_of).days + 1
+    # Capped at month end for the same reason this_week_days is: spendable_this_week
+    # only covers the week's days that fall INSIDE this month, so the daily pace must
+    # divide by that same count. Dividing the trailing week's 2 real days of budget
+    # across a raw 7-day week understated the daily figure by up to 3.5x -- exactly
+    # backwards for a number whose whole job is answering "what can I spend today?".
+    days_left_in_week = (week_end_capped - as_of).days + 1
     spendable_today = (spendable_this_week / Decimal(days_left_in_week)).quantize(Decimal("0.01"))
 
     return WeeklySpendable(
