@@ -32,18 +32,36 @@ logger = logging.getLogger(__name__)
 
 
 _WEEKDAY_ABBREVIATIONS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+_WEEKDAY_FULL_NAMES = [
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+]
 
 
 def _is_digest_day(today: date, digest_day: str) -> bool:
     """True when `today` is the weekday the Weekly Digest sends on
     (settings.WEEKLY_DIGEST_DAY, APScheduler cron day_of_week format, e.g.
     'fri') -- the Daily Summary is skipped that day since the digest
-    already covers the same ground (account/card balances, spending)."""
-    return _WEEKDAY_ABBREVIATIONS[today.weekday()] == digest_day.strip().lower()
+    already covers the same ground (account/card balances, spending).
+
+    Recognizes the three-letter abbreviation ('fri') and the full weekday
+    name ('friday'), both case- and whitespace-insensitive. APScheduler's
+    day_of_week field also accepts integers, comma lists ('mon,fri') and
+    ranges ('mon-fri'); this helper deliberately does NOT parse those and
+    simply returns False for them. That fails open -- the Daily Summary
+    keeps sending and the user loses nothing, which is the correct failure
+    direction; the alternative (guessing wrong and skipping) silently drops
+    mail.
+    """
+    day = digest_day.strip().lower()
+    return _WEEKDAY_ABBREVIATIONS[today.weekday()] == day or _WEEKDAY_FULL_NAMES[today.weekday()] == day
 
 
 def _send_daily_summaries() -> None:
-    if _is_digest_day(date.today(), settings.WEEKLY_DIGEST_DAY):
+    # Only skip when the digest is actually going to send. A blank
+    # DIGEST_RECIPIENTS is the documented way (.env.example) to turn the
+    # Weekly Digest off; skipping on weekday alone would silently drop one
+    # Daily Summary every week and send nothing in its place.
+    if settings.digest_recipients_list and _is_digest_day(date.today(), settings.WEEKLY_DIGEST_DAY):
         logger.info("Skipping daily summary -- weekly digest covers today.")
         return
     from backend.database import SessionLocal
@@ -177,7 +195,7 @@ For {user.display_name}
 Total spent this week: {fmt(digest.total_spent)}
 
 HOUSEHOLD SNAPSHOT
-  Spendable this week: {fmt(snap.left_to_spend_weekly)} (${abs(float(snap.spendable_today)):,.2f}/day, {"on pace" if snap.on_pace else "over pace"})
+  Spendable this week: {fmt(snap.left_to_spend_weekly)} (${abs(float(snap.spendable_today)):,.2f}/day for the next {snap.days_left_in_week} day{"" if snap.days_left_in_week == 1 else "s"}, {"on pace" if snap.on_pace else "over pace"})
   Not Saving this week: {fmt(snap.not_saving_weekly)} (monthly: {fmt(snap.not_saving)})
 {risk_text}
 CREDIT CARDS
