@@ -1,5 +1,5 @@
 import calendar
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from collections import defaultdict
 from sqlalchemy.orm import Session
@@ -9,8 +9,30 @@ from backend.services.spending_helpers import category_totals_for_range
 from backend.services.forecast_engine import build_forecast, find_balance_risk
 from backend.services.budget_snapshot import compute_budget_snapshot
 
+_STALE_SYNC_HOURS = 24
+
 
 # ── Daily email summary ───────────────────────────────────────────────────────
+
+def _stale_bank_connections(db: Session, user_id: int, now: datetime | None = None) -> list[models.BankConnection]:
+    """Connections either actively erroring, or that haven't completed a
+    sync in the last 24 hours -- data the Daily Summary is built from could
+    be out of date without any other signal to the user. A deliberately
+    `disconnected` connection is excluded: that's a user action, not a
+    failure, and shouldn't nag daily forever after."""
+    now = now or datetime.utcnow()
+    threshold = now - timedelta(hours=_STALE_SYNC_HOURS)
+    connections = db.query(models.BankConnection).filter(
+        models.BankConnection.user_id == user_id,
+        models.BankConnection.status != models.BankConnectionStatus.disconnected,
+    ).all()
+    return [
+        c for c in connections
+        if c.status == models.BankConnectionStatus.error
+        or c.last_synced_at is None
+        or c.last_synced_at < threshold
+    ]
+
 
 def _fires_soon(item: models.RecurringItem, today: date, days_ahead: int = 7) -> bool:
     for offset in range(days_ahead + 1):
@@ -63,8 +85,34 @@ def generate_daily_summary(db: Session, user: models.User) -> tuple[str, str]:
         models.CreditCard.is_active == True,
     ).all()
 
+    stale_connections = _stale_bank_connections(db, user.id)
+
     def fmt(v: Decimal) -> str:
         return f"${v:,.2f}"
+
+    def _connection_label(c: models.BankConnection) -> str:
+        names = [link.simplefin_account_name for link in c.links if link.simplefin_account_name]
+        return ", ".join(names) if names else f"Bank connection #{c.id}"
+
+    stale_rows = "".join(
+        f"<tr><td style='padding:4px 12px 4px 0'>{_connection_label(c)}</td>"
+        f"<td style='padding:4px 0;color:#991b1b'>"
+        + (
+            f"failing: {c.last_error}" if c.status == models.BankConnectionStatus.error and c.last_error
+            else "sync failing" if c.status == models.BankConnectionStatus.error
+            else "no sync in 24+ hours" if c.last_synced_at is None
+            else f"last synced {c.last_synced_at.strftime('%b %-d, %-I:%M %p')} UTC"
+        )
+        + "</td></tr>"
+        for c in stale_connections
+    )
+    stale_html = (
+        f"<div style='background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;margin-bottom:16px'>"
+        f"<p style='margin:0 0 6px;color:#991b1b;font-weight:600;font-size:13px'>⚠ Stale bank data</p>"
+        f"<table style='width:100%;font-size:13px'>{stale_rows}</table>"
+        f"<p style='margin:6px 0 0;color:#991b1b;font-size:12px'>Balances and transactions below may not reflect today's activity.</p>"
+        f"</div>"
+    ) if stale_connections else ""
 
     acct_rows = "".join(
         f"<tr><td style='padding:4px 12px 4px 0'>{a.name}</td>"
@@ -90,6 +138,7 @@ def generate_daily_summary(db: Session, user: models.User) -> tuple[str, str]:
 <h2 style='color:#4f46e5;margin-bottom:4px'>OfflineBudget Daily Summary</h2>
 <p style='color:#6b7280;margin-top:0'>{today.strftime("%A, %B %-d, %Y")}</p>
 
+{stale_html}
 <h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Checking Accounts</h3>
 <table style='width:100%'>{acct_rows}</table>
 
@@ -109,8 +158,20 @@ def generate_daily_summary(db: Session, user: models.User) -> tuple[str, str]:
     upcoming_text = "\n".join(f"  {r.name}: {fmt(r.amount)}" for r in upcoming) or "  None in the next 7 days"
     card_text = "\n".join(f"  {c.name}: {fmt(c.current_balance)} (due day {c.due_day})" for c in cards) or "  No credit cards"
 
-    text = f"""OfflineBudget Daily Summary — {today.strftime("%B %-d, %Y")}
+    def _stale_reason(c: models.BankConnection) -> str:
+        if c.status == models.BankConnectionStatus.error:
+            return f"failing: {c.last_error}" if c.last_error else "sync failing"
+        if c.last_synced_at is None:
+            return "no sync in 24+ hours"
+        return f"last synced {c.last_synced_at.strftime('%b %-d, %-I:%M %p')} UTC"
 
+    stale_text = (
+        "\nSTALE BANK DATA -- balances/transactions below may not reflect today's activity\n"
+        + "\n".join(f"  {_connection_label(c)}: {_stale_reason(c)}" for c in stale_connections) + "\n"
+    ) if stale_connections else ""
+
+    text = f"""OfflineBudget Daily Summary — {today.strftime("%B %-d, %Y")}
+{stale_text}
 CHECKING ACCOUNTS
 {acct_text}
 
