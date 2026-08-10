@@ -189,3 +189,103 @@ def test_recurring_card_charge_firing_across_a_month_boundary(db_session):
 
     # 100.00 total in range, 15.99 subscription deducted (fires Sep 2, inside range).
     assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 30), date(2026, 9, 5)) == Decimal("84.01")
+
+
+from backend.services.spendable_pacer import compute_weekly_spendable
+
+
+def test_this_week_target_splits_the_pool_evenly_with_no_spend_yet(db_session):
+    user, checking = _make_user_and_checking(db_session)
+    db_session.commit()
+
+    # Feb 1 2026 is a Sunday, Feb has 28 days -> exactly 4 whole weeks.
+    result = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 2, 1))
+
+    assert result.spendable_this_week == Decimal("625.00")  # 2500 / 4
+    assert result.days_left_in_week == 7
+    assert result.spendable_today == Decimal("89.29")  # 625 / 7, quantized
+    assert result.on_pace is True
+
+
+def test_overspending_shrinks_a_later_weeks_target(db_session):
+    """Rollover: $700 spent in week 1 (target was $625, so $75 over) eats
+    into every remaining week, not just week 1."""
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 2, 3),
+        amount=Decimal("-700.00"), description="Big week", is_actual=True,
+    ))
+    db_session.commit()
+
+    # Feb 8 2026 is the Sunday starting week 2. 3 whole weeks remain (21/7).
+    result = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 2, 8))
+
+    # remaining_pool = 2500 - 700 = 1800; 1800 / 3 weeks = 600 (vs the
+    # original 625/week even pace -- the $75 overspend split across 3
+    # remaining weeks is exactly the $25/week shortfall: 625 - 25 = 600).
+    assert result.spendable_this_week == Decimal("600.00")
+    assert result.on_pace is True
+
+
+def test_prior_week_and_this_weeks_spend_are_not_double_counted(db_session):
+    """Regression: the pool must be depleted by spend from BEFORE this
+    week only. Depleting it by full month-to-date (which always includes
+    this week's own spend) and then ALSO subtracting this week's spend
+    from the per-week target double-counts every dollar spent so far this
+    week."""
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.Transaction(  # week 1 spend
+        user_id=user.id, account_id=checking.id, date=date(2026, 2, 3),
+        amount=Decimal("-700.00"), description="Week 1", is_actual=True,
+    ))
+    db_session.add(models.Transaction(  # week 2 spend, on the day being evaluated
+        user_id=user.id, account_id=checking.id, date=date(2026, 2, 8),
+        amount=Decimal("-50.00"), description="Week 2 so far", is_actual=True,
+    ))
+    db_session.commit()
+
+    result = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 2, 8))
+
+    # this_week_target = (2500 - 700) / 3 weeks = 600 (week 1's spend only,
+    # matching test_overspending_shrinks_a_later_weeks_target above);
+    # spendable_this_week = 600 - 50 (week 2's own spend, subtracted once) = 550.
+    # A double-counting bug would instead deplete the pool by 750 (700+50)
+    # before dividing AND subtract the 50 again, landing on 533.33.
+    assert result.spendable_this_week == Decimal("550.00")
+
+
+def test_this_weeks_spend_reduces_spendable_this_week(db_session):
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 2, 1),
+        amount=Decimal("-900.00"), description="Overspend", is_actual=True,
+    ))
+    db_session.commit()
+
+    result = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 2, 1))
+
+    # this_week_target = 2500/4 = 625; spend_this_week (Feb1-Feb1) = 900.
+    assert result.spendable_this_week == Decimal("-275.00")
+    assert result.on_pace is False
+
+
+def test_this_weeks_spend_is_clipped_to_the_current_month(db_session):
+    """A calendar week can start in the previous month -- Aug 1 2026 is a
+    Saturday, so its Sun-Sat week runs Jul 26 - Aug 1. Spend from before
+    the month started must not count against THIS week's target, even
+    though it falls inside the raw Sun-Sat window."""
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 7, 31),
+        amount=Decimal("-5000.00"), description="July spending", is_actual=True,
+    ))
+    db_session.commit()
+
+    result = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 8, 1))
+
+    # this_week_target = leftover / weeks_remaining_in_month(Aug 1) = 2500 / (31/7).
+    # spend_this_week must be 0 -- July's $5000 sits outside the clipped
+    # [Aug 1, Aug 1] window -- so spendable_this_week is the full target,
+    # completely unaffected by July's spend.
+    expected_target = (Decimal("2500.00") / (Decimal("31") / Decimal("7"))).quantize(Decimal("0.01"))
+    assert result.spendable_this_week == expected_target
