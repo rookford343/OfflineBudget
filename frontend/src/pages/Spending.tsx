@@ -620,7 +620,7 @@ export default function Spending() {
 
           {taxEstimate?.error && (
             <div className="card bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 text-sm">
-              {taxEstimate.error} <a href="/settings" className="underline ml-1">Go to Settings</a>
+              {taxEstimate.error} <a href="/settings/tax" className="underline ml-1">Go to Settings</a>
             </div>
           )}
 
