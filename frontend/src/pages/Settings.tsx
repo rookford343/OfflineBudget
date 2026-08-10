@@ -1,12 +1,14 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { SlidersHorizontal, User } from "lucide-react";
+import { SlidersHorizontal, User, Link } from "lucide-react";
 import { cx } from "../lib/utils";
 import ProfileTab from "./settings/ProfileTab";
 import PreferencesTab from "./settings/PreferencesTab";
+import AccountsTab from "./settings/AccountsTab";
 
 const TABS = [
   { to: "profile", label: "Profile & Security", icon: User },
   { to: "preferences", label: "Preferences", icon: SlidersHorizontal },
+  { to: "accounts", label: "Accounts & Bank Sync", icon: Link },
 ];
 
 export default function Settings() {
@@ -41,6 +43,7 @@ export default function Settings() {
             <Route index element={<Navigate to="profile" replace />} />
             <Route path="profile" element={<ProfileTab />} />
             <Route path="preferences" element={<PreferencesTab />} />
+            <Route path="accounts" element={<AccountsTab />} />
           </Routes>
         </div>
       </div>
