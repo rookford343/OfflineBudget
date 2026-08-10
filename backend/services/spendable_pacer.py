@@ -18,7 +18,37 @@ from decimal import Decimal
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from backend import models
+from backend.services.card_matching import card_matches_description
 from backend.services.spending_helpers import NOT_SAVINGS
+
+
+# Categories whose BUDGETED amount budget_snapshot.py already removes from the
+# monthly pool up front, via _budget_allocation_total(..., "Savings"/"Groceries").
+# Subtracting their ACTUAL spend here too would deduct the same money twice --
+# once as a budget line, again as a transaction. Matched by exact, case-sensitive
+# name because that is precisely what budget_snapshot.py hardcodes. The
+# CategoryType.savings check in NOT_SAVINGS does NOT cover these: real users
+# routinely type their "Savings"/"Groceries" categories as `expense`.
+_EXCLUDED_CATEGORY_NAMES = ("Groceries", "Savings")
+
+_TRANSFER_DESCRIPTION_MARKERS = ("online transfer", "transfer to", "transfer from")
+
+
+def _looks_like_internal_transfer(description: str) -> bool:
+    """True when a bank description looks like money moved between the user's
+    own accounts (checking -> savings, checking -> checking) rather than spent.
+
+    HEURISTIC, not a fact: `Transaction` has no persisted `is_transfer` column
+    (it exists only transiently on CSV-import row schemas and is discarded once
+    categorization decisions are made), so the description text is the only
+    signal available at this layer. False positives (a merchant literally named
+    "Transfer To ...") and false negatives (a bank wording we don't list) are
+    both possible. That is the same accuracy tolerance the codebase already
+    accepts from `card_matching.card_matches_description`, which is used for
+    exactly this class of "is this row really spending?" question.
+    """
+    desc = (description or "").lower()
+    return any(marker in desc for marker in _TRANSFER_DESCRIPTION_MARKERS)
 
 
 def week_bounds(as_of: date) -> tuple[date, date]:
@@ -99,10 +129,40 @@ def discretionary_spend_checking(db: Session, user_id: int, start: date, end: da
             models.Transaction.amount < 0,
             models.Transaction.recurring_item_id.is_(None),
             NOT_SAVINGS,
+            or_(
+                models.Transaction.category_id.is_(None),
+                models.Category.name.notin_(_EXCLUDED_CATEGORY_NAMES),
+            ),
         )
         .all()
     )
-    return sum((abs(t.amount) for t in rows if t.id not in verified_txn_ids), Decimal("0"))
+
+    # The remaining two exclusions can't be expressed as SQL predicates -- both
+    # need the description matched against Python-side data (the user's card
+    # list / a marker tuple), so filter the fetched rows instead.
+    #
+    # Credit-card autopay debits ("CHASE CREDIT CRD AUTOPAY") and internal
+    # transfers ("Online Transfer to CHK ...0054") land in checking as plain
+    # uncategorized negatives with no recurring_item_id, so neither existing
+    # exclusion catches them -- yet neither is discretionary spend. A card
+    # payment is settling charges this pacer ALREADY counted on the card side
+    # (discretionary_spend_card), so counting the payment too double-counts the
+    # same dollars; a transfer never leaves the household at all.
+    active_cards = db.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user_id,
+        models.CreditCard.is_active == True,
+    ).all()
+
+    def is_spend(t: models.Transaction) -> bool:
+        if t.id in verified_txn_ids:
+            return False
+        if any(card_matches_description(card, t.description) for card in active_cards):
+            return False
+        if _looks_like_internal_transfer(t.description):
+            return False
+        return True
+
+    return sum((abs(t.amount) for t in rows if is_spend(t)), Decimal("0"))
 
 
 def discretionary_spend_card(db: Session, user_id: int, start: date, end: date) -> Decimal:
@@ -117,6 +177,10 @@ def discretionary_spend_card(db: Session, user_id: int, start: date, end: date) 
             or_(
                 models.CreditCardTransaction.category_id.is_(None),
                 models.Category.type != models.CategoryType.savings,
+            ),
+            or_(
+                models.CreditCardTransaction.category_id.is_(None),
+                models.Category.name.notin_(_EXCLUDED_CATEGORY_NAMES),
             ),
         )
         .all()
@@ -176,7 +240,25 @@ def compute_weekly_spendable(db: Session, user_id: int, leftover: Decimal, as_of
     remaining_pool = leftover - spend_prior_to_this_week
 
     weeks_left = weeks_remaining_in_month(effective_week_start)
-    this_week_target = remaining_pool / weeks_left
+
+    # This week claims a share of the pool proportional to how many days it
+    # actually has, NOT a flat 1/weeks_left. A month that doesn't start on a
+    # Sunday opens with a stub week (Aug 1 2026 is a Saturday -> a one-day
+    # "week"); giving that stub a whole week's allocation spikes day one to
+    # ~7x the real daily rate and cliffs the next morning. Dividing the share
+    # by weeks_left keeps the stub's per-DAY rate identical to every other
+    # week's -- it just stops the stub from claiming a full week's dollars.
+    # A whole 7-day week has this_week_share == 1, so nothing changes there.
+    this_week_days = (week_end - effective_week_start).days + 1
+    this_week_share = Decimal(this_week_days) / Decimal(7)
+    # Clamp: in the month's trailing partial week weeks_left < 1, so the ratio
+    # above exceeds 1 and would hand out MORE than the entire remaining pool
+    # (measured up to 4.5x on real data). One week can never be worth more
+    # than everything left in the month. Note this also makes the trailing
+    # week -- whose [effective_week_start, week_end] window spills past
+    # month-end -- resolve to exactly remaining_pool, which is the correct
+    # "last stretch gets what's left" behavior.
+    this_week_target = min(remaining_pool * (this_week_share / weeks_left), remaining_pool)
 
     spend_this_week = discretionary_spend_in_range(db, user_id, effective_week_start, as_of)
     spendable_this_week = (this_week_target - spend_this_week).quantize(Decimal("0.01"))
