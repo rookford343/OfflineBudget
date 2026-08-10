@@ -1,5 +1,5 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { SlidersHorizontal, User, Link, Tags, Receipt, Users as UsersIcon } from "lucide-react";
+import { User, SlidersHorizontal, Link, Tags, Receipt, Users as UsersIcon, AlertTriangle } from "lucide-react";
 import { cx } from "../lib/utils";
 import ProfileTab from "./settings/ProfileTab";
 import PreferencesTab from "./settings/PreferencesTab";
@@ -7,6 +7,7 @@ import AccountsTab from "./settings/AccountsTab";
 import CategoriesTab from "./settings/CategoriesTab";
 import TaxTab from "./settings/TaxTab";
 import HouseholdTab from "./settings/HouseholdTab";
+import DangerZoneTab from "./settings/DangerZoneTab";
 
 const TABS = [
   { to: "profile", label: "Profile & Security", icon: User },
@@ -15,6 +16,7 @@ const TABS = [
   { to: "categories", label: "Categories & Rules", icon: Tags },
   { to: "tax", label: "Tax", icon: Receipt },
   { to: "household", label: "Household", icon: UsersIcon },
+  { to: "danger", label: "Danger Zone", icon: AlertTriangle, danger: true },
 ];
 
 export default function Settings() {
@@ -33,9 +35,11 @@ export default function Settings() {
               className={({ isActive }) =>
                 cx(
                   "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap",
-                  isActive
-                    ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400"
-                    : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                  t.danger
+                    ? (isActive ? "bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400" : "text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20")
+                    : (isActive
+                        ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400"
+                        : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50")
                 )
               }
             >
@@ -53,6 +57,7 @@ export default function Settings() {
             <Route path="categories" element={<CategoriesTab />} />
             <Route path="tax" element={<TaxTab />} />
             <Route path="household" element={<HouseholdTab />} />
+            <Route path="danger" element={<DangerZoneTab />} />
           </Routes>
         </div>
       </div>
