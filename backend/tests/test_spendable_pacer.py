@@ -116,6 +116,64 @@ def test_excludes_a_verified_planned_transfer_transaction(db_session):
     assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
 
 
+def test_checking_refund_nets_against_the_matching_debit(db_session):
+    """Regression: a checking refund (positive amount) used to be dropped
+    entirely by the amount < 0 filter instead of netting against the debit
+    it reverses."""
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add_all([
+        models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 8, 3), amount=Decimal("-50.00"), description="Home Depot", is_actual=True),
+        models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 8, 5), amount=Decimal("50.00"), description="Home Depot", is_actual=True),
+    ])
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+
+
+def test_checking_refund_never_nets_against_unrelated_income(db_session):
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add_all([
+        models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 8, 3), amount=Decimal("-50.00"), description="Home Depot", is_actual=True),
+        models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 8, 4), amount=Decimal("1000.00"), description="Zelle from Elaine Ford", is_actual=True),
+    ])
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("50.00")
+
+
+def test_card_refund_nets_against_the_matching_charge(db_session):
+    """Regression (real-world pattern: Ozwell $25 charge + $25 refund used
+    to show as $25 of spend with the refund silently dropped, or worse, as
+    $50 if the refund happened to be miscategorized as another charge)."""
+    user, checking = _make_user_and_checking(db_session)
+    card = models.CreditCard(user_id=user.id, name="Visa", credit_limit=Decimal("5000.00"), statement_day=28, due_day=15)
+    db_session.add(card)
+    db_session.flush()
+    db_session.add_all([
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 3), amount=Decimal("25.00"), merchant="OZWELL, LLC"),
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 4), amount=Decimal("-25.00"), merchant="OZWELL, LLC"),
+    ])
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+
+
+def test_card_net_refund_period_reduces_discretionary_spend_below_zero(db_session):
+    """A week where refunds exceed charges should show as NEGATIVE
+    discretionary spend (real extra spendable money), not floor at zero."""
+    user, checking = _make_user_and_checking(db_session)
+    card = models.CreditCard(user_id=user.id, name="Visa", credit_limit=Decimal("5000.00"), statement_day=28, due_day=15)
+    db_session.add(card)
+    db_session.flush()
+    db_session.add_all([
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 3), amount=Decimal("30.00"), merchant="Store"),
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 4), amount=Decimal("-100.00"), merchant="Store"),
+    ])
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("-70.00")
+
+
 def test_excludes_a_credit_card_autopay_debit(db_session):
     """Regression (real data, July 2026): a $11,312.54 checking debit reading
     'CHASE CREDIT CRD AUTOPAY' is a credit-card PAYMENT, not spending -- the
