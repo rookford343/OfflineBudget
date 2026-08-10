@@ -233,6 +233,7 @@ class RecurringUpdate(BaseModel):
     card_id: Optional[int] = None
     day_of_month: Optional[int] = None
     month_of_year: Optional[int] = None
+    start_date: Optional[date] = None
     end_date: Optional[date] = None
     is_active: Optional[bool] = None
     include_in_forecast: Optional[bool] = None
