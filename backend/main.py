@@ -31,7 +31,21 @@ from backend.routers import planned_transfers as planned_transfers_router_module
 logger = logging.getLogger(__name__)
 
 
+_WEEKDAY_ABBREVIATIONS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+
+
+def _is_digest_day(today: date, digest_day: str) -> bool:
+    """True when `today` is the weekday the Weekly Digest sends on
+    (settings.WEEKLY_DIGEST_DAY, APScheduler cron day_of_week format, e.g.
+    'fri') -- the Daily Summary is skipped that day since the digest
+    already covers the same ground (account/card balances, spending)."""
+    return _WEEKDAY_ABBREVIATIONS[today.weekday()] == digest_day.strip().lower()
+
+
 def _send_daily_summaries() -> None:
+    if _is_digest_day(date.today(), settings.WEEKLY_DIGEST_DAY):
+        logger.info("Skipping daily summary -- weekly digest covers today.")
+        return
     from backend.database import SessionLocal
     from backend import models
     from backend.services.email_service import send_email
