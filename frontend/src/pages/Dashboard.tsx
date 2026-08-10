@@ -438,7 +438,7 @@ export default function Dashboard() {
           <h3 className="font-semibold text-gray-700 mb-1">Welcome to OfflineBudget!</h3>
           <p className="text-sm text-gray-500 mb-4">Start by adding your checking account and recurring income/bills.</p>
           <div className="flex gap-3 justify-center">
-            <button onClick={() => navigate("/settings")} className="btn-primary">Add Account</button>
+            <button onClick={() => navigate("/settings/accounts")} className="btn-primary">Add Account</button>
             <button onClick={() => navigate("/recurring")} className="btn-secondary">Add Recurring Items</button>
           </div>
         </div>
