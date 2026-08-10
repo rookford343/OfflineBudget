@@ -162,10 +162,43 @@ def discretionary_spend_checking(db: Session, user_id: int, start: date, end: da
             return False
         return True
 
-    return sum((abs(t.amount) for t in rows if is_spend(t)), Decimal("0"))
+    debit_rows = [t for t in rows if is_spend(t)]
+    total = sum((abs(t.amount) for t in debit_rows), Decimal("0"))
+
+    # A refund nets against the charge it reverses rather than being dropped.
+    # Only a positive-amount row whose description matches an already-counted
+    # debit qualifies -- an unrelated deposit (paycheck, Zelle, a transfer in)
+    # has its own description and never accidentally nets against spend it
+    # has nothing to do with. Same rule spending_helpers.py's merchant/category
+    # totals use, for the same reason.
+    debit_descriptions = {t.description for t in debit_rows if t.description}
+    if debit_descriptions:
+        refund_rows = (
+            db.query(models.Transaction)
+            .filter(
+                models.Transaction.user_id == user_id,
+                models.Transaction.is_actual == True,
+                models.Transaction.date >= start,
+                models.Transaction.date <= end,
+                models.Transaction.amount > 0,
+                models.Transaction.description.in_(debit_descriptions),
+            )
+            .all()
+        )
+        total -= sum((t.amount for t in refund_rows), Decimal("0"))
+
+    return total
 
 
 def discretionary_spend_card(db: Session, user_id: int, start: date, end: date) -> Decimal:
+    """Card charges minus refunds/credits, minus card-linked recurring
+    subscriptions already counted in `leftover`.
+
+    Refunds net unconditionally here (no `amount > 0` filter) -- unlike the
+    checking side, CreditCardTransaction only ever holds charges and their
+    refunds, never unrelated income, so a negative amount is always a credit
+    against that same card's discretionary spend.
+    """
     rows = (
         db.query(models.CreditCardTransaction)
         .outerjoin(models.Category, models.CreditCardTransaction.category_id == models.Category.id)
@@ -173,7 +206,6 @@ def discretionary_spend_card(db: Session, user_id: int, start: date, end: date) 
             models.CreditCardTransaction.user_id == user_id,
             models.CreditCardTransaction.date >= start,
             models.CreditCardTransaction.date <= end,
-            models.CreditCardTransaction.amount > 0,
             or_(
                 models.CreditCardTransaction.category_id.is_(None),
                 models.Category.type != models.CategoryType.savings,
@@ -186,6 +218,13 @@ def discretionary_spend_card(db: Session, user_id: int, start: date, end: date) 
         .all()
     )
     total = sum((t.amount for t in rows), Decimal("0"))
+    if total < 0:
+        # Already a net refund period -- a subscription's assumed firing
+        # (which may not have even posted as a real row yet, see
+        # _recurring_card_charges_in_range's docstring) must not erase real
+        # refunded money. Only subtract the recurring estimate from a
+        # non-negative total, which is what the floor below protects.
+        return total
     recurring = _recurring_card_charges_in_range(db, user_id, start, end)
     return max(total - recurring, Decimal("0"))
 
