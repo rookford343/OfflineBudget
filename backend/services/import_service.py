@@ -308,12 +308,16 @@ def _find_duplicate_transaction(
 def _find_duplicate_card_transaction(
     db: Session, user_id: int, card_id: int, row: schemas.ImportConfirmRow,
 ) -> models.CreditCardTransaction | None:
-    """Card-side twin of _find_duplicate_transaction -- same rationale."""
+    """Card-side twin of _find_duplicate_transaction -- same rationale.
+
+    Compares against -row.amount, not abs(row.amount) -- see run_import's
+    CreditCardTransaction creation for why the sign flips on the way in.
+    """
     base = db.query(models.CreditCardTransaction).filter(
         models.CreditCardTransaction.user_id == user_id,
         models.CreditCardTransaction.card_id == card_id,
         models.CreditCardTransaction.date == row.date,
-        models.CreditCardTransaction.amount == abs(row.amount),
+        models.CreditCardTransaction.amount == -row.amount,
     )
     normalized = _normalize_desc(row.description)
     if row.external_id:
@@ -396,7 +400,16 @@ def run_import(
                 user_id=user.id,
                 category_id=row.category_id,
                 date=row.date,
-                amount=abs(row.amount),
+                # row.amount follows SimpleFIN/ParsedRow convention (negative
+                # = a sale/charge, positive = a return/credit -- same as
+                # checking). CreditCardTransaction.amount is the opposite
+                # (positive = charge, negative = refund/credit), so this is
+                # a sign flip, not abs(). abs() silently discarded every
+                # refund's sign, storing it as an indistinguishable extra
+                # charge -- confirmed against real Chase data (a $25 refund
+                # showed as a $25 charge, inflating that week's spend by
+                # $25 with nothing to net it against).
+                amount=-row.amount,
                 merchant=row.description,
                 source=card_source,
                 external_id=row.external_id,
