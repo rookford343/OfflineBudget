@@ -44,8 +44,17 @@ export default function Layout() {
 
   const showWizard = wizardOpen;
   const pinnedSet = new Set(pinned);
-  const pinnedItems = pinned.map(to => PINNABLE_ITEMS.find(i => i.to === to)).filter((i): i is typeof PINNABLE_ITEMS[number] => !!i);
-  const mobileItems = [DASHBOARD_ITEM, ...pinnedItems].slice(0, 5);
+  // Render pinned items in PINNABLE_ITEMS' fixed order, not the order the user
+  // happened to tick the checkboxes in. Filtering PINNABLE_ITEMS by membership
+  // preserves that order for free and can't yield a miss to filter out.
+  const pinnedItems = PINNABLE_ITEMS.filter(item => pinnedSet.has(item.to));
+  // The sidebar is `hidden md:flex`, so below md this bottom bar is the ONLY
+  // navigation. With no pins it must still offer real destinations, and
+  // Settings must always survive the cap since it's the only route to the pin
+  // picker. Slicing the middle to 3 (rather than the whole array to 5) reserves
+  // the last slot for Settings no matter how many items are pinned.
+  const middleItems = pinnedItems.length > 0 ? pinnedItems : PINNABLE_ITEMS.slice(0, 3);
+  const mobileItems = [DASHBOARD_ITEM, ...middleItems.slice(0, 3), SETTINGS_ITEM];
 
   function logout() {
     clearAuth();
