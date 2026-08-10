@@ -61,7 +61,13 @@ const LEGACY_ORDER_STORAGE_KEY = "navOrder";
 export function loadPinnedNav(): string[] {
   try {
     const saved = localStorage.getItem(PINNED_STORAGE_KEY);
-    if (saved) return JSON.parse(saved);
+    if (saved) {
+      // JSON.parse succeeding doesn't make the result an array -- a stored
+      // `"5"` or `{"a":1}` parses fine but blows up later in Layout's
+      // `new Set(pinned)` / `.map`, outside any try/catch.
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed)) return parsed;
+    }
   } catch { /* fall through to migration/default */ }
 
   try {
