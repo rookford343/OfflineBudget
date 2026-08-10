@@ -7,6 +7,15 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 
+def parse_recipients(value: str | None) -> list[str]:
+    """Comma-separated email addresses -> a clean list. A User.email field
+    holds one or more addresses this way -- "dan@x.com" for a single
+    recipient, "dan@x.com, wife@x.com" to reach more than one person."""
+    if not value:
+        return []
+    return [e.strip() for e in value.split(",") if e.strip()]
+
+
 def send_email(to: str, subject: str, html_body: str, text_body: str = "") -> None:
     """Send email via SMTP with STARTTLS. No-ops silently when SMTP_HOST is not configured."""
     if not settings.SMTP_HOST:
