@@ -165,6 +165,9 @@ export default function Dashboard() {
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Left to Spend (this week)</p>
                   <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmt(parseFloat(snapshot.left_to_spend_weekly))}</p>
+                  <p className={`text-xs mt-1 ${snapshot.on_pace ? "text-emerald-500 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
+                    {fmt(parseFloat(snapshot.spendable_today))}/day · {snapshot.on_pace ? "on pace" : "over pace"}
+                  </p>
                   <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.left_to_spend))} this month</p>
                 </div>
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
