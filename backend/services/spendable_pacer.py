@@ -241,24 +241,34 @@ def compute_weekly_spendable(db: Session, user_id: int, leftover: Decimal, as_of
 
     weeks_left = weeks_remaining_in_month(effective_week_start)
 
-    # This week claims a share of the pool proportional to how many days it
-    # actually has, NOT a flat 1/weeks_left. A month that doesn't start on a
-    # Sunday opens with a stub week (Aug 1 2026 is a Saturday -> a one-day
-    # "week"); giving that stub a whole week's allocation spikes day one to
-    # ~7x the real daily rate and cliffs the next morning. Dividing the share
-    # by weeks_left keeps the stub's per-DAY rate identical to every other
-    # week's -- it just stops the stub from claiming a full week's dollars.
-    # A whole 7-day week has this_week_share == 1, so nothing changes there.
-    this_week_days = (week_end - effective_week_start).days + 1
+    # This week claims a share of the pool proportional to how many of its days
+    # actually fall INSIDE this month, NOT a flat 1/weeks_left. Both ends of the
+    # week must be clipped to the month for that count to be meaningful:
+    # effective_week_start already clips the front (a month can open mid-week),
+    # and week_end_capped clips the back (a month can end mid-week). Clipping
+    # only the front is what used to make this_week_share exceed weeks_left --
+    # which IS correctly capped at month end -- pushing the ratio above 1 in the
+    # trailing week.
+    #
+    # With both ends clipped, this_week_days <= weeks_left * 7 always, so the
+    # ratio lands in (0, 1] and |this_week_target| <= |remaining_pool| falls out
+    # structurally -- for BOTH signs, with no clamp. That is the whole point:
+    # a min() clamp only bounds a positive pool. On a negative pool min() picks
+    # the MORE negative branch, inflating the deficit (-$24,645.69 shown against
+    # a true -$21,245.04 on real July 2026 data) and charging a mid-month
+    # deficit in full to every remaining week instead of amortizing it.
+    #
+    # One proportional formula now covers every week position -- leading stub
+    # (Aug 1 2026 is a Saturday -> a one-day "week", which would otherwise get a
+    # full week's dollars and spike day one ~7x), full mid-month week, and
+    # trailing partial week -- with no special-casing. A whole 7-day week inside
+    # the month has this_week_share == 1, leaving the common case untouched.
+    last_day = calendar.monthrange(as_of.year, as_of.month)[1]
+    month_end = date(as_of.year, as_of.month, last_day)
+    week_end_capped = min(week_end, month_end)
+    this_week_days = (week_end_capped - effective_week_start).days + 1
     this_week_share = Decimal(this_week_days) / Decimal(7)
-    # Clamp: in the month's trailing partial week weeks_left < 1, so the ratio
-    # above exceeds 1 and would hand out MORE than the entire remaining pool
-    # (measured up to 4.5x on real data). One week can never be worth more
-    # than everything left in the month. Note this also makes the trailing
-    # week -- whose [effective_week_start, week_end] window spills past
-    # month-end -- resolve to exactly remaining_pool, which is the correct
-    # "last stretch gets what's left" behavior.
-    this_week_target = min(remaining_pool * (this_week_share / weeks_left), remaining_pool)
+    this_week_target = remaining_pool * (this_week_share / weeks_left)
 
     spend_this_week = discretionary_spend_in_range(db, user_id, effective_week_start, as_of)
     spendable_this_week = (this_week_target - spend_this_week).quantize(Decimal("0.01"))

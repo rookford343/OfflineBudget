@@ -491,6 +491,57 @@ def test_trailing_partial_week_never_exceeds_the_remaining_pool(db_session):
     assert result.days_left_in_week == 7  # Nov 29 (Sun) through Dec 5 (Sat)
 
 
+def test_trailing_partial_week_with_a_negative_pool_is_not_inflated(db_session):
+    """Regression: the old `min(target, remaining_pool)` clamp was sign-naive.
+    For a NEGATIVE pool min() picks the MORE negative branch, so instead of
+    bounding the deficit it inflated it -- on real July 31 2026 data it showed
+    -$24,645.69 against a true -$21,245.04.
+
+    Nov 29 2026 (Sunday) opens the month's final 2-day stretch (Nov 30 is a
+    Monday), so weeks_left = 2/7 and this week's clipped days = 2 -> ratio 1.
+    Pool = 300 - 1000 = -700, so the target is exactly the pool: -700.00.
+    The old clamp gave -700 / (2/7) = -2450.00, a 3.5x overstated deficit.
+    """
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.Transaction(  # prior-week spend that overdraws the pool
+        user_id=user.id, account_id=checking.id, date=date(2026, 11, 10),
+        amount=Decimal("-1000.00"), description="Big earlier week", is_actual=True,
+    ))
+    db_session.commit()
+
+    result = compute_weekly_spendable(db_session, user.id, Decimal("300.00"), date(2026, 11, 29))
+
+    remaining_pool = Decimal("-700.00")  # 300 leftover - 1000 spent before this week
+    assert result.spendable_this_week == Decimal("-700.00")  # exactly the pool, NOT -2450.00
+    assert result.spendable_this_week >= remaining_pool  # deficit bounded, not amplified
+    assert result.on_pace is False
+
+
+def test_mid_month_negative_pool_is_amortized_across_remaining_weeks(db_session):
+    """Regression: a mid-month deficit must be spread proportionally over the
+    weeks left, not charged in full to every one of them. The old clamp had
+    exactly that effect for negative pools, with zero test coverage.
+
+    Aug 9 2026 is a Sunday. weeks_left = 23/7 (Aug 9..Aug 31), this week is a
+    full 7 days, so the ratio is 7/23 and the target is -500 * 7/23 = -152.17.
+    Under the old clamp this was min(-152.17, -500) = -500.00 -- the entire
+    month's deficit charged to this single week.
+    """
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 8, 5),
+        amount=Decimal("-1000.00"), description="Prior week overspend", is_actual=True,
+    ))
+    db_session.commit()
+
+    result = compute_weekly_spendable(db_session, user.id, Decimal("500.00"), date(2026, 8, 9))
+
+    # remaining_pool = 500 - 1000 = -500
+    assert result.spendable_this_week == Decimal("-152.17")
+    assert result.spendable_this_week > Decimal("-500.00")  # amortized, not full-charged
+    assert result.on_pace is False
+
+
 def test_leading_stub_week_is_not_given_a_full_weeks_allocation(db_session):
     """Regression (Important 4): Aug 2026 starts on a Saturday, so its first
     "week" is the single day Aug 1. Treating that stub as a full week spiked
