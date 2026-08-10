@@ -177,7 +177,7 @@ For {user.display_name}
 Total spent this week: {fmt(digest.total_spent)}
 
 HOUSEHOLD SNAPSHOT
-  Spendable this week: {fmt(snap.left_to_spend_weekly)} ({fmt(snap.spendable_today)}/day, {"on pace" if snap.on_pace else "over pace"})
+  Spendable this week: {fmt(snap.left_to_spend_weekly)} (${abs(float(snap.spendable_today)):,.2f}/day, {"on pace" if snap.on_pace else "over pace"})
   Not Saving this week: {fmt(snap.not_saving_weekly)} (monthly: {fmt(snap.not_saving)})
 {risk_text}
 CREDIT CARDS
