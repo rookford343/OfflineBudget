@@ -135,6 +135,66 @@ def test_category_totals_for_range_excludes_savings_for_card(db_session):
     assert savings_cat.id not in totals
 
 
+def test_merchant_totals_nets_a_card_refund_against_the_charge(db_session):
+    """Regression: a card refund (negative amount) used to be dropped by an
+    `amount > 0` filter instead of netting against the original charge,
+    inflating the merchant's total by the full refunded amount."""
+    user, account = _make_user_account(db_session)
+    card = _make_card(db_session, user)
+    db_session.add_all([
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 3), amount=Decimal("25.00"), merchant="Ozwell, Llc"),
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 4), amount=Decimal("-25.00"), merchant="Ozwell, Llc"),
+    ])
+    db_session.commit()
+
+    result = merchant_totals(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7))
+    assert result == [("Ozwell, Llc", Decimal("0.00"), 1)]  # refund doesn't count as a second purchase
+
+
+def test_category_totals_for_range_nets_a_card_refund(db_session):
+    user, account = _make_user_account(db_session)
+    card = _make_card(db_session, user)
+    dining = models.Category(user_id=user.id, name="Dining", type=models.CategoryType.expense)
+    db_session.add(dining)
+    db_session.flush()
+    db_session.add_all([
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, category_id=dining.id, date=date(2026, 8, 3), amount=Decimal("60.00"), merchant="Restaurant"),
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, category_id=dining.id, date=date(2026, 8, 4), amount=Decimal("-60.00"), merchant="Restaurant"),
+    ])
+    db_session.commit()
+
+    totals = category_totals_for_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7))
+    assert totals[dining.id] == Decimal("0.00")
+
+
+def test_merchant_totals_nets_a_checking_refund_matching_a_debit_description(db_session):
+    user, account = _make_user_account(db_session)
+    db_session.add_all([
+        models.Transaction(user_id=user.id, account_id=account.id, date=date(2026, 8, 3), amount=Decimal("-50.00"), description="Home Depot"),
+        models.Transaction(user_id=user.id, account_id=account.id, date=date(2026, 8, 5), amount=Decimal("50.00"), description="Home Depot"),
+    ])
+    db_session.commit()
+
+    result = merchant_totals(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7))
+    assert result == [("Home Depot", Decimal("0.00"), 1)]
+
+
+def test_merchant_totals_does_not_net_unrelated_income_against_a_different_merchant(db_session):
+    """A same-window positive checking transaction with a description that
+    doesn't match any debit -- a Zelle, a transfer from savings, a paycheck
+    -- must never net against unrelated spend just because both landed in
+    the same week."""
+    user, account = _make_user_account(db_session)
+    db_session.add_all([
+        models.Transaction(user_id=user.id, account_id=account.id, date=date(2026, 8, 3), amount=Decimal("-50.00"), description="Home Depot"),
+        models.Transaction(user_id=user.id, account_id=account.id, date=date(2026, 8, 4), amount=Decimal("1000.00"), description="Zelle from Elaine Ford"),
+    ])
+    db_session.commit()
+
+    result = merchant_totals(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7))
+    assert result == [("Home Depot", Decimal("50.00"), 1)]  # Zelle never appears
+
+
 def test_generate_weekly_digest_smoke(db_session):
     user, account = _make_user_account(db_session)
     groceries = models.Category(user_id=user.id, name="Groceries", type=models.CategoryType.expense)
