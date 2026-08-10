@@ -80,3 +80,70 @@ def test_daily_summary_still_sends_on_digest_day_when_the_digest_is_disabled(mon
 
 def test_daily_summary_sends_on_a_non_digest_day(monkeypatch):
     assert _daily_summary_ran(monkeypatch, recipients="dan@example.com", today=date(2026, 8, 13)) is True
+
+
+# ── Multi-recipient daily summary ────────────────────────────────────────────
+
+from backend.services.email_service import parse_recipients
+
+
+def test_parse_recipients_splits_a_comma_separated_field():
+    assert parse_recipients("dan@example.com, wife@example.com") == ["dan@example.com", "wife@example.com"]
+
+
+def test_parse_recipients_handles_a_single_address():
+    assert parse_recipients("dan@example.com") == ["dan@example.com"]
+
+
+def test_parse_recipients_drops_blank_entries_and_extra_whitespace():
+    assert parse_recipients(" dan@example.com ,, wife@example.com,") == ["dan@example.com", "wife@example.com"]
+
+
+def test_parse_recipients_returns_empty_list_for_none_or_blank():
+    assert parse_recipients(None) == []
+    assert parse_recipients("") == []
+
+
+def test_daily_summary_emails_every_recipient_in_a_multi_address_field(monkeypatch):
+    """Regression: user.email holding "dan@x.com, wife@x.com" used to be
+    passed whole to send_email as a single malformed address -- now each
+    parsed recipient gets its own send_email call."""
+    import backend.models as models
+    from decimal import Decimal
+
+    monkeypatch.setattr(main_module.settings, "DIGEST_RECIPIENTS", "", raising=False)
+
+    class _FakeDate(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 8, 13)  # a non-digest-day Thursday
+
+    monkeypatch.setattr(main_module, "date", _FakeDate)
+
+    user = models.User(id=1, username="dan", hashed_password="x", display_name="Dan", email="dan@example.com, wife@example.com", is_active=True)
+    account = models.Account(id=1, user_id=1, name="Checking", type=models.AccountType.checking, current_balance=Decimal("100.00"))
+
+    class _FakeQuery:
+        def __init__(self, model):
+            self.model = model
+        def filter(self, *a, **kw):
+            return self
+        def count(self):
+            return 1
+        def all(self):
+            return [user] if self.model is models.User else []
+
+    class _FakeSession:
+        def query(self, model):
+            return _FakeQuery(model)
+        def close(self):
+            pass
+
+    monkeypatch.setattr("backend.database.SessionLocal", lambda: _FakeSession())
+    monkeypatch.setattr("backend.services.summary_generator.generate_daily_summary", lambda db, u: ("<html>", "text"))
+    sent_to = []
+    monkeypatch.setattr("backend.services.email_service.send_email", lambda to, *a, **kw: sent_to.append(to))
+
+    main_module._send_daily_summaries()
+
+    assert sent_to == ["dan@example.com", "wife@example.com"]

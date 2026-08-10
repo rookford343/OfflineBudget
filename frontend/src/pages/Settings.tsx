@@ -855,11 +855,11 @@ export default function Settings() {
         </div>
         <div className="space-y-2">
           <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2"><Mail size={14} /> Email Notifications</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Used for daily summary emails. Requires SMTP to be configured on the server.</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">Used for daily summary emails. Requires SMTP to be configured on the server. Enter multiple addresses separated by commas to send to more than one person.</p>
           <div className="flex items-end gap-3">
             <div className="flex-1 max-w-xs">
-              <label className="label">Email Address</label>
-              <input type="email" className="input" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} placeholder="you@example.com" />
+              <label className="label">Email Address(es)</label>
+              <input type="email" multiple className="input" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} placeholder="you@example.com, spouse@example.com" />
             </div>
             <button
               onClick={() => updateMeMut.mutate({ email: profileEmail || null })}
