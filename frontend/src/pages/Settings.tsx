@@ -1,11 +1,12 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { SlidersHorizontal, User, Link, Tags, Receipt } from "lucide-react";
+import { SlidersHorizontal, User, Link, Tags, Receipt, Users as UsersIcon } from "lucide-react";
 import { cx } from "../lib/utils";
 import ProfileTab from "./settings/ProfileTab";
 import PreferencesTab from "./settings/PreferencesTab";
 import AccountsTab from "./settings/AccountsTab";
 import CategoriesTab from "./settings/CategoriesTab";
 import TaxTab from "./settings/TaxTab";
+import HouseholdTab from "./settings/HouseholdTab";
 
 const TABS = [
   { to: "profile", label: "Profile & Security", icon: User },
@@ -13,6 +14,7 @@ const TABS = [
   { to: "accounts", label: "Accounts & Bank Sync", icon: Link },
   { to: "categories", label: "Categories & Rules", icon: Tags },
   { to: "tax", label: "Tax", icon: Receipt },
+  { to: "household", label: "Household", icon: UsersIcon },
 ];
 
 export default function Settings() {
@@ -50,6 +52,7 @@ export default function Settings() {
             <Route path="accounts" element={<AccountsTab />} />
             <Route path="categories" element={<CategoriesTab />} />
             <Route path="tax" element={<TaxTab />} />
+            <Route path="household" element={<HouseholdTab />} />
           </Routes>
         </div>
       </div>
