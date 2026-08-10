@@ -289,3 +289,23 @@ def test_this_weeks_spend_is_clipped_to_the_current_month(db_session):
     # completely unaffected by July's spend.
     expected_target = (Decimal("2500.00") / (Decimal("31") / Decimal("7"))).quantize(Decimal("0.01"))
     assert result.spendable_this_week == expected_target
+
+
+def test_spendable_this_week_is_stable_across_the_same_week(db_session):
+    """Regression: this_week_target must not drift day-to-day within the
+    same calendar week just because as_of advances -- only actual spend
+    (or a new week starting) should change it."""
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 2, 3),
+        amount=Decimal("-700.00"), description="Week 1", is_actual=True,
+    ))
+    db_session.commit()
+
+    sunday_result = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 2, 8))
+    wednesday_result = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 2, 11))
+    saturday_result = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 2, 14))
+
+    assert sunday_result.spendable_this_week == Decimal("600.00")
+    assert wednesday_result.spendable_this_week == Decimal("600.00")
+    assert saturday_result.spendable_this_week == Decimal("600.00")

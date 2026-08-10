@@ -175,7 +175,7 @@ def compute_weekly_spendable(db: Session, user_id: int, leftover: Decimal, as_of
         spend_prior_to_this_week = Decimal("0")  # this week IS the first week of the month
     remaining_pool = leftover - spend_prior_to_this_week
 
-    weeks_left = weeks_remaining_in_month(as_of)
+    weeks_left = weeks_remaining_in_month(effective_week_start)
     this_week_target = remaining_pool / weeks_left
 
     spend_this_week = discretionary_spend_in_range(db, user_id, effective_week_start, as_of)
