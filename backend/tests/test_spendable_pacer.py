@@ -116,6 +116,176 @@ def test_excludes_a_verified_planned_transfer_transaction(db_session):
     assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
 
 
+def test_excludes_a_credit_card_autopay_debit(db_session):
+    """Regression (real data, July 2026): a $11,312.54 checking debit reading
+    'CHASE CREDIT CRD AUTOPAY' is a credit-card PAYMENT, not spending -- the
+    charges it settles were already counted on the card side. It carries no
+    category and no recurring_item_id, so neither pre-existing exclusion
+    caught it, and it alone drove Spendable this week to -$40,004.84."""
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.CreditCard(
+        user_id=user.id, name="Chase Sapphire", last_four="1312",
+        credit_limit=Decimal("20000.00"), statement_day=28, due_day=15,
+    ))
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
+        amount=Decimal("-11312.54"), is_actual=True,
+        description="CHASE CREDIT CRD AUTOPAY                    PPD ID: 4760039224",
+    ))
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+
+
+def test_excludes_a_card_autopay_matched_by_the_cards_name_token(db_session):
+    """The second real pattern: 'APPLECARD GSBANK PAYMENT' matches the
+    'Apple Card' row on its first name token, with no last_four to fall back
+    on (that card's last_four is blank in real data)."""
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.CreditCard(
+        user_id=user.id, name="Apple Card", last_four="",
+        credit_limit=Decimal("5000.00"), statement_day=28, due_day=15,
+    ))
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
+        amount=Decimal("-210.15"), is_actual=True,
+        description="APPLECARD GSBANK PAYMENT    16069006        WEB ID: 9999999999",
+    ))
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+
+
+def test_an_inactive_cards_autopay_is_still_only_matched_against_active_cards(db_session):
+    """Guard on the exclusion's scope: only ACTIVE cards are consulted, so a
+    retired card's name can't quietly suppress real spending forever."""
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.CreditCard(
+        user_id=user.id, name="Zephyr Rewards", credit_limit=Decimal("1000.00"),
+        statement_day=28, due_day=15, is_active=False,
+    ))
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
+        amount=Decimal("-60.00"), description="ZEPHYR COFFEE ROASTERS", is_actual=True,
+    ))
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("60.00")
+
+
+def test_excludes_an_internal_online_transfer(db_session):
+    """Regression (real data, July 2026): 'Online Transfer to CHK ...0054'
+    moves $1,000 between the household's own accounts. Nothing was spent, but
+    with no category and no recurring link it counted as discretionary spend."""
+    user, checking = _make_user_and_checking(db_session)
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
+        amount=Decimal("-1000.00"), is_actual=True,
+        description="Online Transfer to CHK ...0054 transaction#: 30221323328 07/31",
+    ))
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+
+
+def test_transfer_heuristic_matches_the_documented_wordings(db_session):
+    user, checking = _make_user_and_checking(db_session)
+    for i, desc in enumerate([
+        "Online Transfer to SAV ...8452 transaction#: 24419258103",
+        "TRANSFER TO SAVINGS ACCOUNT",
+        "Transfer from Checking ...0054",
+    ]):
+        db_session.add(models.Transaction(
+            user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
+            amount=Decimal("-100.00"), description=desc, is_actual=True,
+        ))
+    db_session.add(models.Transaction(  # control: a real purchase still counts
+        user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
+        amount=Decimal("-25.00"), description="Bookstore", is_actual=True,
+    ))
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("25.00")
+
+
+def test_excludes_a_groceries_category_checking_transaction(db_session):
+    """Regression: budget_snapshot.py removes the Groceries BUDGET from the
+    monthly pool up front, so counting actual grocery spend here deducts the
+    same money twice. Note type=expense -- the real 'Groceries' category is
+    NOT CategoryType.savings, so the pre-existing NOT_SAVINGS filter missed it."""
+    user, checking = _make_user_and_checking(db_session)
+    groceries = models.Category(user_id=user.id, name="Groceries", type=models.CategoryType.expense)
+    db_session.add(groceries)
+    db_session.flush()
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
+        amount=Decimal("-150.00"), description="Kroger", is_actual=True,
+        category_id=groceries.id,
+    ))
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+
+
+def test_excludes_an_expense_typed_savings_category_transaction(db_session):
+    """The real 'Savings' category is typed `expense`, not `savings` -- zero
+    CategoryType.savings categories exist in the production data -- so it must
+    be excluded by NAME, matching what budget_snapshot.py hardcodes."""
+    user, checking = _make_user_and_checking(db_session)
+    savings = models.Category(user_id=user.id, name="Savings", type=models.CategoryType.expense)
+    db_session.add(savings)
+    db_session.flush()
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
+        amount=Decimal("-500.00"), description="Move to savings", is_actual=True,
+        category_id=savings.id,
+    ))
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+
+
+def test_a_similarly_named_category_is_not_excluded(db_session):
+    """Exclusion is exact and case-sensitive, matching budget_snapshot.py's
+    hardcoded "Savings"/"Groceries" -- 'Grocery Delivery' is ordinary spend."""
+    user, checking = _make_user_and_checking(db_session)
+    cat = models.Category(user_id=user.id, name="Grocery Delivery", type=models.CategoryType.expense)
+    db_session.add(cat)
+    db_session.flush()
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
+        amount=Decimal("-40.00"), description="Instacart", is_actual=True,
+        category_id=cat.id,
+    ))
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("40.00")
+
+
+def test_excludes_a_groceries_category_card_transaction(db_session):
+    """The costly half of the double-subtraction: real card grocery spend was
+    $1,626.13 in July 2026 alone, none of it excluded."""
+    user, checking = _make_user_and_checking(db_session)
+    card = models.CreditCard(
+        user_id=user.id, name="Visa", credit_limit=Decimal("5000.00"),
+        statement_day=28, due_day=15,
+    )
+    groceries = models.Category(user_id=user.id, name="Groceries", type=models.CategoryType.expense)
+    db_session.add_all([card, groceries])
+    db_session.flush()
+    db_session.add(models.CreditCardTransaction(
+        card_id=card.id, user_id=user.id, date=date(2026, 8, 3),
+        amount=Decimal("1626.13"), merchant="Kroger", category_id=groceries.id,
+    ))
+    db_session.add(models.CreditCardTransaction(  # control: uncategorized charge still counts
+        card_id=card.id, user_id=user.id, date=date(2026, 8, 3),
+        amount=Decimal("42.00"), merchant="Hardware Store",
+    ))
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("42.00")
+
+
 def test_counts_a_plain_card_charge(db_session):
     user, checking = _make_user_and_checking(db_session)
     card = models.CreditCard(
@@ -283,12 +453,72 @@ def test_this_weeks_spend_is_clipped_to_the_current_month(db_session):
 
     result = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 8, 1))
 
-    # this_week_target = leftover / weeks_remaining_in_month(Aug 1) = 2500 / (31/7).
     # spend_this_week must be 0 -- July's $5000 sits outside the clipped
     # [Aug 1, Aug 1] window -- so spendable_this_week is the full target,
-    # completely unaffected by July's spend.
-    expected_target = (Decimal("2500.00") / (Decimal("31") / Decimal("7"))).quantize(Decimal("0.01"))
+    # completely unaffected by July's spend. That is what this test asserts.
+    #
+    # The target itself is prorated by this stub week's one-day length:
+    #   this_week_share = 1/7, weeks_left = 31/7
+    #   target = 2500 * ((1/7) / (31/7)) = 2500 / 31 = 80.65
+    # This expected literal was previously 564.52 (= 2500 / (31/7)), which
+    # handed this single-day stub week a FULL week's dollars -- the exact
+    # day-one spike Important 4 fixes. The change here is a mechanical
+    # consequence of the prorated formula, not a change to what this test
+    # is checking (July spend staying out of August's window).
+    expected_target = (Decimal("2500.00") / Decimal("31")).quantize(Decimal("0.01"))
+    assert expected_target == Decimal("80.65")
     assert result.spendable_this_week == expected_target
+
+
+def test_trailing_partial_week_never_exceeds_the_remaining_pool(db_session):
+    """Regression (Critical 3): in the month's trailing partial week
+    weeks_left < 1, so `remaining_pool / weeks_left` INFLATES the target
+    above the entire remaining pool. Nov 30 2026 is a Monday, so the final
+    stretch is Nov 29-30: weeks_left = 2/7, and the unclamped formula would
+    hand out 200 / (2/7) = $700 -- 3.5x the $200 actually left for the month.
+
+    This replaces the clamp assertion carried by the deleted
+    test_weekly_allowance_uses_full_amount_in_final_week_of_month.
+    """
+    user, checking = _make_user_and_checking(db_session)
+    db_session.commit()
+
+    result = compute_weekly_spendable(db_session, user.id, Decimal("200.00"), date(2026, 11, 29))
+
+    remaining_pool = Decimal("200.00")  # no prior-week spend, so pool == leftover
+    assert result.spendable_this_week == Decimal("200.00")  # exactly the pool, NOT 700.00
+    assert result.spendable_this_week <= remaining_pool
+    assert result.days_left_in_week == 7  # Nov 29 (Sun) through Dec 5 (Sat)
+
+
+def test_leading_stub_week_is_not_given_a_full_weeks_allocation(db_session):
+    """Regression (Important 4): Aug 2026 starts on a Saturday, so its first
+    "week" is the single day Aug 1. Treating that stub as a full week spiked
+    spendable_today to $564.52 on day one and cliffed to ~$83/day the next
+    morning -- a 6.8x day-one spike. Prorated, the stub's per-DAY rate lines
+    up with the following full week's instead.
+    """
+    user, checking = _make_user_and_checking(db_session)
+    db_session.commit()
+
+    stub = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 8, 1))
+    next_week = compute_weekly_spendable(db_session, user.id, Decimal("2500.00"), date(2026, 8, 2))
+
+    # Stub week: 1 day, share = 1/7, weeks_left = 31/7 -> 2500/31 = 80.65,
+    # spread over its 1 remaining day.
+    assert stub.days_left_in_week == 1
+    assert stub.spendable_this_week == Decimal("80.65")
+    assert stub.spendable_today == Decimal("80.65")
+
+    # Following full week: 7 days, share = 1, weeks_left = 30/7 -> 583.33
+    # over 7 days = 83.33/day.
+    assert next_week.days_left_in_week == 7
+    assert next_week.spendable_this_week == Decimal("583.33")
+    assert next_week.spendable_today == Decimal("83.33")
+
+    # The point of the fix: day one is NOT inflated relative to the next
+    # week's daily rate. (Pre-fix it was 564.52 vs 83.33 -- 6.8x.)
+    assert stub.spendable_today <= next_week.spendable_today
 
 
 def test_spendable_this_week_is_stable_across_the_same_week(db_session):
