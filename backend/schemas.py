@@ -1035,6 +1035,9 @@ class BudgetSnapshot(BaseModel):
     leftover: Decimal
     left_to_spend: Decimal
     left_to_spend_weekly: Decimal
+    spendable_today: Decimal
+    days_left_in_week: int
+    on_pace: bool
     not_saving: Decimal
     not_saving_weekly: Decimal
     days_remaining_in_month: int
