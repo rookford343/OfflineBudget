@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry
 from backend.services.forecast_engine import build_quarters
+from backend.services.spendable_pacer import compute_weekly_spendable
 from backend.services.spending_helpers import category_totals_for_range, merchant_totals
 
 
@@ -169,8 +170,8 @@ def compute_budget_snapshot(
     quarter_min = _quarter_minimum(db, user.id, account_id, as_of)
     not_saving = quarter_min - new_spending_total - cc_budget_total + charged_so_far
 
-    left_to_spend_weekly, days_remaining = _weekly_allowance(left_to_spend, as_of)
-    not_saving_weekly, _ = _weekly_allowance(not_saving, as_of)
+    not_saving_weekly, days_remaining = _weekly_allowance(not_saving, as_of)
+    weekly_spendable = compute_weekly_spendable(db, user.id, leftover, as_of)
 
     cards = [
         CardSnapshot(
@@ -204,7 +205,10 @@ def compute_budget_snapshot(
         as_of=as_of,
         leftover=leftover,
         left_to_spend=left_to_spend,
-        left_to_spend_weekly=left_to_spend_weekly,
+        left_to_spend_weekly=weekly_spendable.spendable_this_week,
+        spendable_today=weekly_spendable.spendable_today,
+        days_left_in_week=weekly_spendable.days_left_in_week,
+        on_pace=weekly_spendable.on_pace,
         not_saving=not_saving,
         not_saving_weekly=not_saving_weekly,
         days_remaining_in_month=days_remaining,

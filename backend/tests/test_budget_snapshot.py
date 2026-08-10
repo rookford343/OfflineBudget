@@ -111,20 +111,12 @@ def test_left_to_spend_and_not_saving_match_spreadsheet_exactly(db_session):
     # already-rounded inputs lands one cent higher. Verified by hand -- do not
     # "fix" this back to 1567.72.
     assert snapshot.left_to_spend == Decimal("1567.73")
-    assert snapshot.left_to_spend_weekly == Decimal("438.96")
+    # left_to_spend_weekly is no longer derived from left_to_spend -- it's
+    # the transaction-driven weekly pacer now (see test_spendable_pacer.py).
+    # Not asserted here; this test only covers the spreadsheet-verified
+    # left_to_spend/not_saving formulas, which are unchanged.
     assert snapshot.not_saving == Decimal("2085.64")
     assert snapshot.not_saving_weekly == Decimal("583.98")
-
-
-def test_weekly_allowance_uses_full_amount_in_final_week_of_month(db_session):
-    user, checking, card = _seed_spreadsheet_scenario(db_session)
-
-    with patch("backend.services.budget_snapshot.build_quarters", return_value=_fake_quarter_min("5120.66")):
-        snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 28))
-
-    # 4 days remain (28,29,30,31) <= 7, so the weekly figure equals the full
-    # left-to-spend amount rather than being divided further.
-    assert snapshot.left_to_spend_weekly == snapshot.left_to_spend
 
 
 def test_no_active_cards_gives_zero_card_balance(db_session):
