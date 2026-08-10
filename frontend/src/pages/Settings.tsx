@@ -1,10 +1,12 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { User } from "lucide-react";
+import { SlidersHorizontal, User } from "lucide-react";
 import { cx } from "../lib/utils";
 import ProfileTab from "./settings/ProfileTab";
+import PreferencesTab from "./settings/PreferencesTab";
 
 const TABS = [
   { to: "profile", label: "Profile & Security", icon: User },
+  { to: "preferences", label: "Preferences", icon: SlidersHorizontal },
 ];
 
 export default function Settings() {
@@ -38,6 +40,7 @@ export default function Settings() {
           <Routes>
             <Route index element={<Navigate to="profile" replace />} />
             <Route path="profile" element={<ProfileTab />} />
+            <Route path="preferences" element={<PreferencesTab />} />
           </Routes>
         </div>
       </div>
