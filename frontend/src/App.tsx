@@ -48,7 +48,7 @@ export default function App() {
           <Route path="transactions" element={<Transactions />} />
           <Route path="import" element={<Import />} />
           <Route path="budget" element={<Budget />} />
-          <Route path="settings" element={<Settings />} />
+          <Route path="settings/*" element={<Settings />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
