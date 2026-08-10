@@ -131,3 +131,62 @@ def discretionary_spend_in_range(db: Session, user_id: int, start: date, end: da
     excludes bills, savings movements, and card subscriptions already
     counted elsewhere. See module docstring."""
     return discretionary_spend_checking(db, user_id, start, end) + discretionary_spend_card(db, user_id, start, end)
+
+
+from dataclasses import dataclass
+
+
+@dataclass
+class WeeklySpendable:
+    spendable_this_week: Decimal
+    spendable_today: Decimal
+    days_left_in_week: int
+    on_pace: bool
+
+
+def compute_weekly_spendable(db: Session, user_id: int, leftover: Decimal, as_of: date) -> WeeklySpendable:
+    """The weekly/daily spendable pacer. `leftover` is the caller's already-
+    computed monthly discretionary budget (budget_snapshot.py's `leftover` --
+    income minus fixed bills minus savings/groceries budgets). Recomputed
+    fresh every call from actual transactions; no persisted state. See
+    module docstring for the rollover model.
+
+    IMPORTANT: the pool that gets divided across remaining weeks must be
+    depleted only by spend from BEFORE this week (`spend_prior_to_this_week`)
+    -- not month-to-date spend. Month-to-date always includes this week's
+    own spend-so-far (effective_week_start is always >= month_start), so
+    subtracting the full MTD total here and then ALSO subtracting this
+    week's spend from the per-week target a few lines down would double
+    count every dollar spent so far this week. Depleting the pool by prior
+    weeks only, then subtracting this week's own spend exactly once from
+    this_week_target, is what makes a prior week's overspend roll into
+    later weeks without a second, redundant deduction inside the very week
+    that spend happened in.
+    """
+    month_start = as_of.replace(day=1)
+    week_start, week_end = week_bounds(as_of)
+    effective_week_start = max(week_start, month_start)
+
+    if effective_week_start > month_start:
+        spend_prior_to_this_week = discretionary_spend_in_range(
+            db, user_id, month_start, effective_week_start - timedelta(days=1)
+        )
+    else:
+        spend_prior_to_this_week = Decimal("0")  # this week IS the first week of the month
+    remaining_pool = leftover - spend_prior_to_this_week
+
+    weeks_left = weeks_remaining_in_month(as_of)
+    this_week_target = remaining_pool / weeks_left
+
+    spend_this_week = discretionary_spend_in_range(db, user_id, effective_week_start, as_of)
+    spendable_this_week = (this_week_target - spend_this_week).quantize(Decimal("0.01"))
+
+    days_left_in_week = (week_end - as_of).days + 1
+    spendable_today = (spendable_this_week / Decimal(days_left_in_week)).quantize(Decimal("0.01"))
+
+    return WeeklySpendable(
+        spendable_this_week=spendable_this_week,
+        spendable_today=spendable_today,
+        days_left_in_week=days_left_in_week,
+        on_pace=spendable_this_week >= 0,
+    )
