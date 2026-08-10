@@ -88,17 +88,21 @@ def _digest_html(user: "models.User", digest) -> tuple[str, str]:
             f"{body}</div>"
         )
 
-    def stat_card(label: str, value: str, color: str) -> str:
+    def stat_card(label: str, value: str, color: str, sub: str = "") -> str:
+        sub_html = f"<div style='font-size:10px;color:{color};margin-top:2px'>{sub}</div>" if sub else ""
         return (
-            f"<td style='padding:12px;background:#f9fafb;border-radius:8px;text-align:center;width:50%'>"
+            f"<td style='padding:14px;background:#f9fafb;border-radius:10px;text-align:center;width:50%;"
+            f"box-shadow:0 1px 2px rgba(0,0,0,0.04)'>"
             f"<div style='font-size:11px;color:#6b7280;margin-bottom:4px'>{label}</div>"
-            f"<div style='font-size:20px;font-weight:700;color:{color}'>{value}</div></td>"
+            f"<div style='font-size:22px;font-weight:700;color:{color}'>{value}</div>{sub_html}</td>"
         )
 
+    pace_color = "#059669" if snap.on_pace else "#dc2626"
+    pace_text = f"${abs(float(snap.spendable_today)):,.2f}/day" + (" · on pace" if snap.on_pace else " · over pace")
     snapshot_html = section(
         "Household Snapshot",
-        f"<table style='width:100%;border-spacing:8px 0'><tr>"
-        f"{stat_card('Left to Spend (this week)', fmt(snap.left_to_spend_weekly), '#059669')}"
+        f"<table style='width:100%;border-spacing:10px 0'><tr>"
+        f"{stat_card('Spendable this week', fmt(snap.left_to_spend_weekly), pace_color, pace_text)}"
         f"{stat_card('Not Saving (this week)', fmt(snap.not_saving_weekly), '#d97706')}"
         f"</tr></table>"
         f"<p style='font-size:12px;color:#9ca3af;margin:8px 0 0'>Monthly: {fmt(snap.left_to_spend)} left to spend, "
@@ -141,9 +145,10 @@ def _digest_html(user: "models.User", digest) -> tuple[str, str]:
         risk_text = f"\nBALANCE RISK\n  Projected to drop to {fmt(digest.risk.amount)} on {digest.risk.date.strftime('%B %-d, %Y')}.\n"
 
     html = f"""<!DOCTYPE html>
-<html><body style='font-family:-apple-system,sans-serif;max-width:600px;margin:0 auto;padding:24px;color:#1f2937;background:#ffffff'>
-<h2 style='color:#4f46e5;margin-bottom:4px'>OfflineBudget Weekly Digest</h2>
-<p style='color:#6b7280;margin-top:0;font-size:13px'>{digest.week_start.strftime("%B %-d")} – {digest.week_end.strftime("%B %-d, %Y")} · For {user.display_name}</p>
+<html><body style='font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;padding:24px;background:#f3f4f6'>
+<div style='max-width:520px;margin:0 auto;padding:28px;color:#1f2937;background:#ffffff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.08)'>
+<h2 style='color:#4f46e5;margin:0 0 4px;font-size:20px'>OfflineBudget Weekly Digest</h2>
+<p style='color:#6b7280;margin:0 0 20px;font-size:13px'>{digest.week_start.strftime("%B %-d")} – {digest.week_end.strftime("%B %-d, %Y")} · For {user.display_name}</p>
 
 <p style='font-size:14px'>Total spent this week: <b>{fmt(digest.total_spent)}</b></p>
 
@@ -153,7 +158,8 @@ def _digest_html(user: "models.User", digest) -> tuple[str, str]:
 {cat_html}
 {merchant_html}
 
-<p style='color:#9ca3af;font-size:12px;margin-top:24px'>Sent by OfflineBudget</p>
+<p style='color:#9ca3af;font-size:11px;margin-top:20px'>Sent by OfflineBudget</p>
+</div>
 </body></html>"""
 
     cat_text = "\n".join(f"  {c.category_name}: {fmt(c.total)}" for c in digest.categories) or "  No categorized spending this week"
@@ -171,7 +177,7 @@ For {user.display_name}
 Total spent this week: {fmt(digest.total_spent)}
 
 HOUSEHOLD SNAPSHOT
-  Left to Spend this week: {fmt(snap.left_to_spend_weekly)} (monthly: {fmt(snap.left_to_spend)})
+  Spendable this week: {fmt(snap.left_to_spend_weekly)} ({fmt(snap.spendable_today)}/day, {"on pace" if snap.on_pace else "over pace"})
   Not Saving this week: {fmt(snap.not_saving_weekly)} (monthly: {fmt(snap.not_saving)})
 {risk_text}
 CREDIT CARDS
