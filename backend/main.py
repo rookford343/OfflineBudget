@@ -66,7 +66,7 @@ def _send_daily_summaries() -> None:
         return
     from backend.database import SessionLocal
     from backend import models
-    from backend.services.email_service import send_email
+    from backend.services.email_service import send_email, parse_recipients
     from backend.services.summary_generator import generate_daily_summary
     db = SessionLocal()
     try:
@@ -85,7 +85,8 @@ def _send_daily_summaries() -> None:
             try:
                 html_body, text_body = generate_daily_summary(db, user)
                 subject = f"Daily Budget Summary — {date.today().strftime('%B %-d, %Y')}"
-                send_email(user.email, subject, html_body, text_body)
+                for recipient in parse_recipients(user.email):
+                    send_email(recipient, subject, html_body, text_body)
             except Exception as exc:
                 logger.error("Summary failed for %s: %s", user.username, exc)
     finally:
