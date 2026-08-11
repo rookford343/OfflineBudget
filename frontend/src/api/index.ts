@@ -255,3 +255,19 @@ export const exportsApi = {
   downloadBudgetReport: (year: number, month: number, format = "csv") =>
     api.get("/export/budget-report", { params: { year, month, format }, responseType: "blob" }).then((r) => r.data),
 };
+
+// ── Verification Flags ──────────────────────────────────────────────────────
+export const verificationFlagsApi = {
+  list: (params?: { feature?: string; status?: string }) =>
+    api.get("/verification-flags", { params }).then((r) => r.data),
+  create: (data: {
+    feature: string;
+    reference_type?: string;
+    reference_id?: number;
+    observed: object;
+    expected_value?: number;
+    note?: string;
+  }) => api.post("/verification-flags", data).then((r) => r.data),
+  resolve: (id: number, newStatus: "open" | "resolved") =>
+    api.patch(`/verification-flags/${id}`, { status: newStatus }).then((r) => r.data),
+};
