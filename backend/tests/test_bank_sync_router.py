@@ -180,6 +180,7 @@ def test_sync_now_invokes_service_and_reports_errors(client, db_session):
 
     def fake_sync(db, conn):
         conn.last_error = "simulated failure"
+        return (0, 0)
 
     with patch("backend.routers.bank_sync.sync_connection", side_effect=fake_sync):
         resp = test_client.post("/bank-sync/sync-now")
@@ -188,6 +189,32 @@ def test_sync_now_invokes_service_and_reports_errors(client, db_session):
     body = resp.json()
     assert body["synced_connections"] == 1
     assert body["errors"] == ["simulated failure"]
+    assert body["imported"] == 0
+    assert body["skipped_duplicates"] == 0
+
+
+def test_sync_now_reports_imported_and_skipped_counts(client, db_session):
+    """Regression: Sync Now used to only expose synced_connections/errors --
+    a clean run that found nothing new looked identical to one that pulled in
+    real transactions, with no way to tell them apart short of eyeballing
+    whether last_synced_at moved."""
+    test_client, user = client
+    conn1 = models.BankConnection(user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url"))
+    conn2 = models.BankConnection(user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url"))
+    db_session.add_all([conn1, conn2])
+    db_session.commit()
+
+    counts = iter([(3, 1), (0, 0)])
+
+    def fake_sync(db, conn):
+        return next(counts)
+
+    with patch("backend.routers.bank_sync.sync_connection", side_effect=fake_sync):
+        resp = test_client.post("/bank-sync/sync-now")
+
+    body = resp.json()
+    assert body["imported"] == 3
+    assert body["skipped_duplicates"] == 1
 
 
 def test_sync_now_includes_errored_connections(client, db_session):
@@ -214,6 +241,7 @@ def test_sync_now_includes_errored_connections(client, db_session):
     def fake_sync(db, conn):
         attempted.append(conn.id)
         conn.last_error = None
+        return (0, 0)
 
     with patch("backend.routers.bank_sync.sync_connection", side_effect=fake_sync):
         resp = test_client.post("/bank-sync/sync-now")

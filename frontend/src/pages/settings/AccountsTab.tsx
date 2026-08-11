@@ -32,15 +32,18 @@ export default function AccountsTab() {
     onSuccess: (accts: any[], connectionId: number) =>
       setPendingConnect({ connection_id: connectionId, accounts: accts }),
   });
+  const [syncResult, setSyncResult] = useState<{ imported: number; skipped_duplicates: number } | null>(null);
   const syncNowMut = useMutation({
     mutationFn: bankSyncApi.syncNow,
-    onSuccess: () => {
+    onSuccess: (data: { imported: number; skipped_duplicates: number }) => {
       qc.invalidateQueries({ queryKey: ["bank-connections"] });
       qc.invalidateQueries({ queryKey: ["accounts"] });
       // A sync updates linked card balances too, so refresh both keys the
       // codebase uses for credit cards.
       qc.invalidateQueries({ queryKey: ["credit-cards"] });
       qc.invalidateQueries({ queryKey: ["cards"] });
+      setSyncResult(data);
+      setTimeout(() => setSyncResult(null), 6000);
     },
   });
   const disconnectMut = useMutation({
@@ -151,6 +154,13 @@ export default function AccountsTab() {
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Connects to your bank via SimpleFIN Bridge (~$15/yr, read-only) to pull transactions automatically. Syncs daily at 5am.
           </p>
+          {syncResult && (
+            <p className="text-xs text-emerald-600 dark:text-emerald-400">
+              {syncResult.imported > 0
+                ? `✓ ${syncResult.imported} new transaction${syncResult.imported === 1 ? "" : "s"}${syncResult.skipped_duplicates > 0 ? ` (${syncResult.skipped_duplicates} already had)` : ""}`
+                : "✓ Up to date — nothing new since your bank's last refresh"}
+            </p>
+          )}
 
           {bankConnections.map((conn: any) => (
             <div key={conn.id} className="border border-gray-100 dark:border-gray-700 rounded-lg p-3">
