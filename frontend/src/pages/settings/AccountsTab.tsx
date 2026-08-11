@@ -152,7 +152,7 @@ export default function AccountsTab() {
         </div>
         <div className="space-y-4">
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Connects to your bank via SimpleFIN Bridge (~$15/yr, read-only) to pull transactions automatically. Syncs daily at 5am.
+            Connects to your bank via SimpleFIN Bridge (~$15/yr, read-only) to pull transactions automatically. Syncs daily at 5am ET.
           </p>
           {syncResult && (
             <p className="text-xs text-emerald-600 dark:text-emerald-400">
@@ -170,7 +170,7 @@ export default function AccountsTab() {
                     Connection #{conn.id} — {conn.status}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {conn.last_synced_at ? `Last synced ${new Date(conn.last_synced_at).toLocaleString()}` : "Never synced"}
+                    {conn.last_synced_at ? `Last synced ${new Date(conn.last_synced_at).toLocaleString(undefined, { timeZoneName: "short" })}` : "Never synced"}
                   </p>
                   {conn.last_error && <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1"><AlertTriangle size={12} /> {conn.last_error}</p>}
                 </div>
