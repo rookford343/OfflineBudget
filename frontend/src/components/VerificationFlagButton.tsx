@@ -29,12 +29,14 @@ export function VerificationFlagButton({
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!enabled) return null;
 
   async function submit() {
     const filled = expectedFields.filter((f) => values[f.key]?.trim());
     if (filled.length === 0 && !note.trim()) return;
+    setError(null);
     setSubmitting(true);
     try {
       const submissions = filled.length > 0 ? filled : [null];
@@ -55,6 +57,8 @@ export function VerificationFlagButton({
         setDone(false);
         setOpen(false);
       }, 1500);
+    } catch {
+      setError("Couldn't save — try again");
     } finally {
       setSubmitting(false);
     }
@@ -98,6 +102,9 @@ export function VerificationFlagButton({
                   onChange={(e) => setNote(e.target.value)}
                 />
               </label>
+              {error && (
+                <p className="text-xs text-red-600 dark:text-red-400 mb-2">{error}</p>
+              )}
               <div className="flex justify-end gap-2">
                 <button type="button" onClick={() => setOpen(false)} className="btn-secondary text-xs px-2 py-1">
                   Cancel
