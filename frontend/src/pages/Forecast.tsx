@@ -437,6 +437,7 @@ export default function Forecast() {
       {activeAccountId && (
         <RiskBanner
           risk={risk}
+          accountId={activeAccountId}
           sourceAccounts={accounts.filter((a: any) => a.id !== activeAccountId).map((a: any) => ({ id: a.id, name: a.name }))}
           onAcceptSuggestion={(amount, targetDate, fromAccountId) =>
             acceptSuggestionMut.mutate({ to_account_id: activeAccountId, from_account_id: fromAccountId, amount, target_date: targetDate, suggested: true })

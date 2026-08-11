@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowRightLeft } from "lucide-react";
 import { fmt } from "../lib/utils";
+import { VerificationFlagButton } from "./VerificationFlagButton";
 
 interface SourceAccount {
   id: number;
@@ -31,10 +32,12 @@ function formatDate(iso: string): string {
 
 export function RiskBanner({
   risk,
+  accountId,
   sourceAccounts = [],
   onAcceptSuggestion,
 }: {
   risk: Risk | undefined;
+  accountId?: number;
   sourceAccounts?: SourceAccount[];
   onAcceptSuggestion?: (amount: string, date: string, fromAccountId: number) => void;
 }) {
@@ -180,11 +183,20 @@ export function RiskBanner({
           <div className="flex items-start gap-3">
             <AlertTriangle size={18} className="text-red-500 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-red-900 dark:text-red-200 text-sm">
-                {parseFloat(risk.threshold) > 0
-                  ? `Projected to drop below ${fmt(parseFloat(risk.threshold))} on ${formatDate(risk.date!)}`
-                  : `Projected to go negative on ${formatDate(risk.date!)}`}
-              </p>
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-semibold text-red-900 dark:text-red-200 text-sm">
+                  {parseFloat(risk.threshold) > 0
+                    ? `Projected to drop below ${fmt(parseFloat(risk.threshold))} on ${formatDate(risk.date!)}`
+                    : `Projected to go negative on ${formatDate(risk.date!)}`}
+                </p>
+                <VerificationFlagButton
+                  feature="forecast"
+                  referenceType="account"
+                  referenceId={accountId}
+                  observed={{ projected_balance: risk.amount, risk_date: risk.date, threshold: risk.threshold }}
+                  expectedFields={[{ key: "projected_balance", label: "Projected Balance" }]}
+                />
+              </div>
               <p className="text-xs text-red-700 dark:text-red-400 mt-0.5">
                 Projected balance: <strong>{fmt(parseFloat(risk.amount!))}</strong>
               </p>
