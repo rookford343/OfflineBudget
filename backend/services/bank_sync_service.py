@@ -19,14 +19,20 @@ _OVERLAP_DAYS = 3  # re-fetch a few days of overlap each sync so late-posting
                     # anything already imported
 
 
-def sync_connection(db: Session, connection: models.BankConnection) -> None:
+def sync_connection(db: Session, connection: models.BankConnection) -> tuple[int, int]:
     """Sync every linked account for one BankConnection. Isolates failures per
     account so one broken link doesn't block the others, and isolates the
     decrypt step so a corrupted/key-mismatched token can't propagate out to
-    the caller (sync_all iterates other connections in the same job)."""
+    the caller (sync_all iterates other connections in the same job).
+
+    Returns (imported, skipped_duplicates) totals across every link on this
+    connection -- lets a caller (the "Sync Now" button) tell "ran, found
+    nothing new" apart from "ran, here's what changed" instead of the
+    timestamp-only signal that used to be the only feedback available.
+    """
     user = db.get(models.User, connection.user_id)
     if not user:
-        return
+        return (0, 0)
 
     try:
         access_url = decrypt(connection.access_url_encrypted)
@@ -40,7 +46,7 @@ def sync_connection(db: Session, connection: models.BankConnection) -> None:
         connection.status = models.BankConnectionStatus.error
         connection.last_synced_at = datetime.utcnow()
         db.commit()
-        return
+        return (0, 0)
 
     links = db.query(models.BankConnectionAccountLink).filter(
         models.BankConnectionAccountLink.connection_id == connection.id,
@@ -48,9 +54,13 @@ def sync_connection(db: Session, connection: models.BankConnection) -> None:
 
     any_success = False
     connection.last_error = None
+    total_imported = 0
+    total_skipped = 0
     for link in links:
         try:
-            _sync_link(db, user, access_url, link)
+            imported, skipped = _sync_link(db, user, access_url, link)
+            total_imported += imported
+            total_skipped += skipped
             any_success = True
         except Exception as exc:  # noqa: BLE001 -- one link's failure (SimpleFinError or
             # anything unexpected out of build_preview/run_import) must never
@@ -71,9 +81,12 @@ def sync_connection(db: Session, connection: models.BankConnection) -> None:
         connection.status = models.BankConnectionStatus.error
     connection.last_synced_at = datetime.utcnow()
     db.commit()
+    return (total_imported, total_skipped)
 
 
-def _sync_link(db: Session, user: models.User, access_url: str, link: models.BankConnectionAccountLink) -> None:
+def _sync_link(
+    db: Session, user: models.User, access_url: str, link: models.BankConnectionAccountLink,
+) -> tuple[int, int]:
     since = (
         link.last_synced_at - timedelta(days=_OVERLAP_DAYS)
         if link.last_synced_at
@@ -89,6 +102,8 @@ def _sync_link(db: Session, user: models.User, access_url: str, link: models.Ban
         for t in txns
     ]
 
+    imported = 0
+    skipped = 0
     if parsed_rows:
         preview_rows = build_preview(db, user, parsed_rows)
         # build_preview stamps each preview row with the index of the ParsedRow
@@ -103,13 +118,15 @@ def _sync_link(db: Session, user: models.User, access_url: str, link: models.Ban
             )
             for r in preview_rows
         ]
-        run_import(
+        result = run_import(
             db, user, confirm_rows,
             account_id=link.local_account_id,
             card_id=link.local_credit_card_id,
             source=models.TransactionSource.bank_sync,
             card_source=models.CardTransactionSource.bank_sync,
         )
+        imported = result.imported
+        skipped = result.skipped_duplicates
 
     if link.local_account_id:
         account = db.get(models.Account, link.local_account_id)
@@ -126,6 +143,7 @@ def _sync_link(db: Session, user: models.User, access_url: str, link: models.Ban
 
     link.last_synced_at = datetime.utcnow()
     db.commit()
+    return (imported, skipped)
 
 
 def sync_all(db: Session) -> None:

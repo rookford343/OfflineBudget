@@ -155,11 +155,18 @@ def sync_now(
         models.BankConnection.status != models.BankConnectionStatus.disconnected,
     ).all()
     errors = []
+    total_imported = 0
+    total_skipped = 0
     for connection in connections:
-        sync_connection(db, connection)
+        imported, skipped = sync_connection(db, connection)
+        total_imported += imported
+        total_skipped += skipped
         if connection.last_error:
             errors.append(connection.last_error)
-    return schemas.BankSyncNowResponse(synced_connections=len(connections), errors=errors)
+    return schemas.BankSyncNowResponse(
+        synced_connections=len(connections), errors=errors,
+        imported=total_imported, skipped_duplicates=total_skipped,
+    )
 
 
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
