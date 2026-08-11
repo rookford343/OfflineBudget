@@ -12,6 +12,10 @@ from backend.services.budget_snapshot import compute_budget_snapshot
 _STALE_SYNC_HOURS = 24
 
 
+def _fmt(v: Decimal) -> str:
+    return f"${v:,.2f}"
+
+
 # ── Daily email summary ───────────────────────────────────────────────────────
 
 def _stale_bank_connections(db: Session, user_id: int, now: datetime | None = None) -> list[models.BankConnection]:
@@ -50,8 +54,16 @@ def _fires_soon(item: models.RecurringItem, today: date, days_ahead: int = 7) ->
     return False
 
 
-def generate_daily_summary(db: Session, user: models.User) -> tuple[str, str]:
-    """Return (html_body, text_body) for a daily budget summary email."""
+def generate_daily_summary(
+    db: Session, user: models.User, *, weekly_digest: WeeklyDigest | None = None,
+) -> tuple[str, str]:
+    """Return (html_body, text_body) for a daily budget summary email.
+
+    Pass `weekly_digest` (from `generate_weekly_digest`) on the day the
+    Weekly Digest runs -- its spending-by-category/top-merchants/balance-risk
+    sections get appended to this same email instead of going out as a
+    separate one.
+    """
     today = date.today()
     month_start = today.replace(day=1)
 
@@ -60,6 +72,8 @@ def generate_daily_summary(db: Session, user: models.User) -> tuple[str, str]:
         models.Account.is_active == True,
         models.Account.type == models.AccountType.checking,
     ).all()
+    primary_account = accounts[0] if accounts else None
+    snap = compute_budget_snapshot(db, user, primary_account.id, as_of=today) if primary_account else None
 
     all_recurring = db.query(models.RecurringItem).filter(
         models.RecurringItem.user_id == user.id,
@@ -87,8 +101,7 @@ def generate_daily_summary(db: Session, user: models.User) -> tuple[str, str]:
 
     stale_connections = _stale_bank_connections(db, user.id)
 
-    def fmt(v: Decimal) -> str:
-        return f"${v:,.2f}"
+    fmt = _fmt
 
     def _connection_label(c: models.BankConnection) -> str:
         names = [link.simplefin_account_name for link in c.links if link.simplefin_account_name]
@@ -133,12 +146,34 @@ def generate_daily_summary(db: Session, user: models.User) -> tuple[str, str]:
         for c in cards
     ) or "<tr><td colspan='3' style='color:#888'>No credit cards</td></tr>"
 
+    if snap is not None:
+        household_rows = (
+            f"<tr><td style='padding:4px 12px 4px 0'>Spendable this week</td>"
+            f"<td style='padding:4px 0;text-align:right'><b>{fmt(snap.left_to_spend_weekly)}</b></td></tr>"
+            f"<tr><td style='padding:4px 12px 4px 0'>Not saving (this week)</td>"
+            f"<td style='padding:4px 0;text-align:right'>{fmt(snap.not_saving_weekly)}</td></tr>"
+        )
+        household_html = (
+            f"<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Household Snapshot</h3>"
+            f"<table style='width:100%'>{household_rows}</table>"
+            f"<p style='color:#6b7280;font-size:12px;margin:4px 0 16px'>Monthly: {fmt(snap.left_to_spend)} left to spend, "
+            f"{fmt(snap.not_saving)} before it eats into savings.</p>"
+        )
+    else:
+        household_html = (
+            "<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Household Snapshot</h3>"
+            "<p style='color:#888'>No checking account to compute a snapshot from.</p>"
+        )
+
+    weekly_html, weekly_text = _weekly_digest_section(weekly_digest) if weekly_digest else ("", "")
+
     html = f"""<!DOCTYPE html>
 <html><body style='font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#1f2937'>
 <h2 style='color:#4f46e5;margin-bottom:4px'>OfflineBudget Daily Summary</h2>
 <p style='color:#6b7280;margin-top:0'>{today.strftime("%A, %B %-d, %Y")}</p>
 
 {stale_html}
+{household_html}
 <h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Checking Accounts</h3>
 <table style='width:100%'>{acct_rows}</table>
 
@@ -150,13 +185,23 @@ def generate_daily_summary(db: Session, user: models.User) -> tuple[str, str]:
 
 <h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Credit Cards</h3>
 <table style='width:100%'>{card_rows}</table>
-
+{weekly_html}
 <p style='color:#9ca3af;font-size:12px;margin-top:24px'>Sent by OfflineBudget</p>
 </body></html>"""
 
     acct_text = "\n".join(f"  {a.name}: {fmt(a.current_balance)}" for a in accounts) or "  No checking accounts"
     upcoming_text = "\n".join(f"  {r.name}: {fmt(r.amount)}" for r in upcoming) or "  None in the next 7 days"
     card_text = "\n".join(f"  {c.name}: {fmt(c.current_balance)} (due day {c.due_day})" for c in cards) or "  No credit cards"
+
+    if snap is not None:
+        household_text = (
+            "HOUSEHOLD SNAPSHOT\n"
+            f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}\n"
+            f"  Not saving (this week): {fmt(snap.not_saving_weekly)}\n"
+            f"  Monthly: {fmt(snap.left_to_spend)} left to spend, {fmt(snap.not_saving)} before it eats into savings.\n"
+        )
+    else:
+        household_text = "HOUSEHOLD SNAPSHOT\n  No checking account to compute a snapshot from.\n"
 
     def _stale_reason(c: models.BankConnection) -> str:
         if c.status == models.BankConnectionStatus.error:
@@ -172,6 +217,7 @@ def generate_daily_summary(db: Session, user: models.User) -> tuple[str, str]:
 
     text = f"""OfflineBudget Daily Summary — {today.strftime("%B %-d, %Y")}
 {stale_text}
+{household_text}
 CHECKING ACCOUNTS
 {acct_text}
 
@@ -183,6 +229,67 @@ MONTH-TO-DATE
 
 CREDIT CARDS
 {card_text}
+{weekly_text}"""
+    return html, text
+
+
+def _weekly_digest_section(digest: WeeklyDigest) -> tuple[str, str]:
+    """Render the Weekly Digest's own content (spending by category, top
+    merchants, balance risk) as an HTML/text fragment appended to that
+    day's Daily Summary -- the Household Snapshot and Credit Cards sections
+    already live in the Daily Summary itself, so they aren't repeated here.
+    """
+    fmt = _fmt
+
+    cat_rows = "".join(
+        f"<tr><td style='padding:4px 12px 4px 0'>{c.category_name}</td>"
+        f"<td style='padding:4px 0;text-align:right'>{fmt(c.total)}</td></tr>"
+        for c in digest.categories
+    ) or "<tr><td style='color:#888'>No categorized spending this week</td></tr>"
+    cat_text = "\n".join(
+        f"  {c.category_name}: {fmt(c.total)}" for c in digest.categories
+    ) or "  No categorized spending this week"
+
+    merchant_rows = "".join(
+        f"<tr><td style='padding:4px 12px 4px 0'>{m.name}</td>"
+        f"<td style='padding:4px 0;text-align:right'>{fmt(m.total)}</td></tr>"
+        for m in digest.top_merchants[:10]
+    ) or "<tr><td style='color:#888'>No merchant activity this week</td></tr>"
+    merchant_text = "\n".join(
+        f"  {m.name}: {fmt(m.total)}" for m in digest.top_merchants[:10]
+    ) or "  No merchant activity this week"
+
+    risk_html = ""
+    risk_text = ""
+    if digest.risk.at_risk and digest.risk.date is not None:
+        risk_html = (
+            f"<div style='background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;margin:12px 0'>"
+            f"<p style='margin:0;color:#991b1b;font-weight:600;font-size:13px'>Balance Risk</p>"
+            f"<p style='margin:4px 0 0;color:#991b1b;font-size:13px'>Projected to drop to {fmt(digest.risk.amount)} on "
+            f"{digest.risk.date.strftime('%B %-d, %Y')}.</p></div>"
+        )
+        risk_text = f"\n  Balance risk: projected to drop to {fmt(digest.risk.amount)} on {digest.risk.date.strftime('%B %-d, %Y')}\n"
+
+    html = f"""
+<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px;margin-top:24px'>Weekly Digest — {digest.week_start.strftime('%B %-d')}–{digest.week_end.strftime('%B %-d, %Y')}</h3>
+<p>Total spent this week: <b>{fmt(digest.total_spent)}</b></p>
+{risk_html}
+<h4 style='margin-bottom:4px'>Spending by Category</h4>
+<table style='width:100%'>{cat_rows}</table>
+
+<h4 style='margin:12px 0 4px'>Top Merchants</h4>
+<table style='width:100%'>{merchant_rows}</table>
+"""
+
+    text = f"""
+WEEKLY DIGEST — {digest.week_start.strftime('%B %-d')} to {digest.week_end.strftime('%B %-d, %Y')}
+  Total spent this week: {fmt(digest.total_spent)}
+{risk_text}
+SPENDING BY CATEGORY (past 7 days)
+{cat_text}
+
+TOP MERCHANTS (past 7 days)
+{merchant_text}
 """
     return html, text
 
