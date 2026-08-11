@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, field_validator
-from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus, PlannedTransferStatus
+from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus, PlannedTransferStatus, VerificationFeature, VerificationFlagStatus
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -1107,7 +1107,33 @@ class MonthlyForecastSummary(BaseModel):
 
 
 
+# ── Verification Flags ────────────────────────────────────────────────────────
 
+class VerificationFlagCreate(BaseModel):
+    feature: VerificationFeature
+    reference_type: Optional[str] = None
+    reference_id: Optional[int] = None
+    observed: dict
+    expected_value: Optional[Decimal] = None
+    note: Optional[str] = None
+
+
+class VerificationFlagOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    feature: VerificationFeature
+    reference_type: Optional[str]
+    reference_id: Optional[int]
+    observed_json: str
+    expected_value: Optional[Decimal]
+    note: Optional[str]
+    status: VerificationFlagStatus
+    created_at: datetime
+    resolved_at: Optional[datetime]
+
+
+class VerificationFlagResolve(BaseModel):
+    status: VerificationFlagStatus
 
 
 # ── Transaction Rules ─────────────────────────────────────────────────────────
