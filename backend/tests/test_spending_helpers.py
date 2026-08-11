@@ -3,7 +3,7 @@ from decimal import Decimal
 from backend import models
 from backend.services.spending_helpers import merchant_totals, category_totals_for_range
 from backend.services.summary_generator import generate_weekly_digest
-from backend.main import _digest_html
+from backend.services.summary_generator import generate_daily_summary
 
 
 def _make_user_account(db):
@@ -213,10 +213,11 @@ def test_generate_weekly_digest_smoke(db_session):
     assert digest.snapshot.as_of == date.today()
 
 
-def test_digest_html_renders_household_snapshot_and_cards_sections(db_session):
+def test_daily_summary_renders_household_snapshot_and_weekly_digest_sections(db_session):
     """Smoke test at the email-render layer -- catches template-string typos
-    in _digest_html that would otherwise only surface in production email
-    logs (Fix 3 of the household-budget-snapshot fix wave)."""
+    in generate_daily_summary's Household Snapshot section (always present)
+    and its Weekly Digest addendum (present when a WeeklyDigest is passed
+    in) that would otherwise only surface in production email logs."""
     user, account = _make_user_account(db_session)
     groceries = models.Category(user_id=user.id, name="Groceries", type=models.CategoryType.expense)
     db_session.add(groceries)
@@ -228,12 +229,15 @@ def test_digest_html_renders_household_snapshot_and_cards_sections(db_session):
     db_session.commit()
 
     digest = generate_weekly_digest(db_session, user, account.id)
-    html, text = _digest_html(user, digest)
+    html, text = generate_daily_summary(db_session, user, weekly_digest=digest)
 
     assert "Household Snapshot" in html
     assert "Credit Cards" in html
+    assert "Weekly Digest" in html
+    assert "Groceries" in html
     assert "HOUSEHOLD SNAPSHOT" in text
     assert "CREDIT CARDS" in text
+    assert "WEEKLY DIGEST" in text
 
 
 def test_generate_weekly_digest_reconciles_uncategorized_spend(db_session):

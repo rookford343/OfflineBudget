@@ -31,17 +31,27 @@ def test_is_digest_day_fails_open_on_unsupported_cron_forms():
     assert _is_digest_day(date(2026, 8, 14), "4") is False
 
 
-# ── Daily-summary skip gating ────────────────────────────────────────────────
+# ── Weekly-digest addendum gating ────────────────────────────────────────────
+#
+# The Daily Summary always sends now -- it no longer gets skipped on the
+# Weekly Digest's day. Instead, on that day, the Weekly Digest's own
+# section (spending by category, top merchants, balance risk) gets computed
+# and passed into generate_daily_summary() as an addendum, appended to that
+# same email rather than going out as a second, separate one.
 
 import backend.main as main_module
 
 
-def _daily_summary_ran(monkeypatch, *, recipients: str, today: date) -> bool:
-    """Runs _send_daily_summaries with a stubbed clock and settings, and
-    reports whether it got past the digest-day skip (True) or returned
-    early (False). The DB work past the guard is stubbed out."""
+def _run_send_daily_summaries(monkeypatch, *, recipients: str, today: date, weekly_digest_day: str = "fri"):
+    """Runs _send_daily_summaries against one active user with one checking
+    account, stubbing generate_daily_summary/generate_weekly_digest/send_email.
+    Returns the `weekly_digest` value generate_daily_summary was called with
+    (None if the addendum wasn't computed for that run)."""
+    import backend.models as models
+    from decimal import Decimal
+
     monkeypatch.setattr(main_module.settings, "DIGEST_RECIPIENTS", recipients, raising=False)
-    monkeypatch.setattr(main_module.settings, "WEEKLY_DIGEST_DAY", "fri", raising=False)
+    monkeypatch.setattr(main_module.settings, "WEEKLY_DIGEST_DAY", weekly_digest_day, raising=False)
 
     class _FakeDate(date):
         @classmethod
@@ -50,36 +60,55 @@ def _daily_summary_ran(monkeypatch, *, recipients: str, today: date) -> bool:
 
     monkeypatch.setattr(main_module, "date", _FakeDate)
 
-    reached = {"past_guard": False}
+    user = models.User(id=1, username="dan", hashed_password="x", display_name="Dan", email="dan@example.com", is_active=True)
+    account = models.Account(id=1, user_id=1, name="Checking", type=models.AccountType.checking, current_balance=Decimal("100.00"))
+
+    class _FakeQuery:
+        def __init__(self, model):
+            self.model = model
+        def filter(self, *a, **kw):
+            return self
+        def all(self):
+            if self.model is models.User:
+                return [user]
+            if self.model is models.Account:
+                return [account]
+            return []
 
     class _FakeSession:
-        def query(self, *a, **kw):
-            reached["past_guard"] = True
-            raise RuntimeError("stop here -- the guard is all this test cares about")
-
+        def query(self, model):
+            return _FakeQuery(model)
         def close(self):
             pass
 
     monkeypatch.setattr("backend.database.SessionLocal", lambda: _FakeSession())
-    try:
-        main_module._send_daily_summaries()
-    except RuntimeError:
-        pass
-    return reached["past_guard"]
+
+    captured = {"weekly_digest": "not-called"}
+
+    def _fake_generate_daily_summary(db, u, *, weekly_digest=None):
+        captured["weekly_digest"] = weekly_digest
+        return ("<html>", "text")
+
+    monkeypatch.setattr("backend.services.summary_generator.generate_daily_summary", _fake_generate_daily_summary)
+    monkeypatch.setattr("backend.services.summary_generator.generate_weekly_digest", lambda db, u, account_id: "WEEKLY_DIGEST_STUB")
+    monkeypatch.setattr("backend.services.email_service.send_email", lambda *a, **kw: None)
+
+    main_module._send_daily_summaries()
+    return captured["weekly_digest"]
 
 
-def test_daily_summary_is_skipped_on_digest_day_when_recipients_are_configured(monkeypatch):
-    assert _daily_summary_ran(monkeypatch, recipients="dan@example.com", today=date(2026, 8, 14)) is False
+def test_daily_summary_gets_the_weekly_addendum_on_digest_day_when_recipients_are_configured(monkeypatch):
+    assert _run_send_daily_summaries(monkeypatch, recipients="dan@example.com", today=date(2026, 8, 14)) == "WEEKLY_DIGEST_STUB"
 
 
-def test_daily_summary_still_sends_on_digest_day_when_the_digest_is_disabled(monkeypatch):
-    """Regression: a blank DIGEST_RECIPIENTS disables the Weekly Digest, so
-    skipping the Daily Summary that day would send nothing at all."""
-    assert _daily_summary_ran(monkeypatch, recipients="", today=date(2026, 8, 14)) is True
+def test_daily_summary_has_no_addendum_on_digest_day_when_the_digest_is_disabled(monkeypatch):
+    """Regression: a blank DIGEST_RECIPIENTS disables the Weekly Digest
+    addendum -- the Daily Summary itself must still send."""
+    assert _run_send_daily_summaries(monkeypatch, recipients="", today=date(2026, 8, 14)) is None
 
 
-def test_daily_summary_sends_on_a_non_digest_day(monkeypatch):
-    assert _daily_summary_ran(monkeypatch, recipients="dan@example.com", today=date(2026, 8, 13)) is True
+def test_daily_summary_has_no_addendum_on_a_non_digest_day(monkeypatch):
+    assert _run_send_daily_summaries(monkeypatch, recipients="dan@example.com", today=date(2026, 8, 13)) is None
 
 
 # ── Multi-recipient daily summary ────────────────────────────────────────────
@@ -128,10 +157,12 @@ def test_daily_summary_emails_every_recipient_in_a_multi_address_field(monkeypat
             self.model = model
         def filter(self, *a, **kw):
             return self
-        def count(self):
-            return 1
         def all(self):
-            return [user] if self.model is models.User else []
+            if self.model is models.User:
+                return [user]
+            if self.model is models.Account:
+                return [account]
+            return []
 
     class _FakeSession:
         def query(self, model):
@@ -140,7 +171,7 @@ def test_daily_summary_emails_every_recipient_in_a_multi_address_field(monkeypat
             pass
 
     monkeypatch.setattr("backend.database.SessionLocal", lambda: _FakeSession())
-    monkeypatch.setattr("backend.services.summary_generator.generate_daily_summary", lambda db, u: ("<html>", "text"))
+    monkeypatch.setattr("backend.services.summary_generator.generate_daily_summary", lambda db, u, **kw: ("<html>", "text"))
     sent_to = []
     monkeypatch.setattr("backend.services.email_service.send_email", lambda to, *a, **kw: sent_to.append(to))
 

@@ -18,9 +18,14 @@ class Settings(BaseSettings):
     SMTP_PASS: str | None = None
     SMTP_FROM: str | None = None
     DAILY_SUMMARY_HOUR: int = 7  # 24-hour local time to send daily summaries
-    WEEKLY_DIGEST_DAY: str = "fri"    # APScheduler cron day_of_week value
-    WEEKLY_DIGEST_HOUR: int = 7       # 24-hour local time
-    DIGEST_RECIPIENTS: str = ""       # comma-separated email addresses
+    WEEKLY_DIGEST_DAY: str = "fri"    # APScheduler cron day_of_week value -- the day the Weekly
+    # Digest section (spending by category, top merchants, balance risk) gets appended to that
+    # day's Daily Summary email. WEEKLY_DIGEST_HOUR is unused now that the digest rides along in
+    # the Daily Summary rather than sending as its own email at its own time.
+    WEEKLY_DIGEST_HOUR: int = 7       # unused (kept for backward-compat with existing .env files)
+    DIGEST_RECIPIENTS: str = ""       # on/off switch only now -- blank disables the Weekly Digest
+    # addendum entirely (Daily Summary still sends). The addresses here are no longer used for
+    # delivery; the digest goes to each user's own email (same recipients as the Daily Summary).
     BANK_TOKEN_ENCRYPTION_KEY: str | None = None  # Fernet key for encrypting SimpleFIN access URLs at rest
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
