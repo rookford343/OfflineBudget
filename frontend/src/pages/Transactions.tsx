@@ -4,6 +4,7 @@ import { transactionsApi, accountsApi, categoriesApi, cardsApi, reconciliationAp
 import { fmt, today, firstOfMonth, quickRange } from "../lib/utils";
 import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check, Upload, Landmark } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import { VerificationFlagButton } from "../components/VerificationFlagButton";
 
 // Small inline indicator for where a transaction came from -- manual entry is
 // the unmarked default (most common, shouldn't add visual noise); CSV/OFX
@@ -372,7 +373,16 @@ export default function Transactions() {
                         {parseFloat(t.amount) >= 0 ? "+" : ""}{fmt(t.amount)}
                       </td>
                       <td className="px-4 py-3">
-                        <button onClick={() => setDeleteId(t.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                        <div className="flex items-center justify-end gap-2">
+                          <VerificationFlagButton
+                            feature="transactions"
+                            referenceType="transaction"
+                            referenceId={t.id}
+                            observed={{ date: t.date, amount: t.amount, description: t.description, category_id: t.category_id }}
+                            expectedFields={[{ key: "amount", label: "Amount" }]}
+                          />
+                          <button onClick={() => setDeleteId(t.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -395,6 +405,7 @@ export default function Transactions() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Merchant</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Category</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                    <th className="px-4 py-3 w-10"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
@@ -411,6 +422,15 @@ export default function Transactions() {
                       </td>
                       <td className="px-4 py-3 text-right font-semibold tabular-nums text-red-600">
                         {fmt(t.amount)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <VerificationFlagButton
+                          feature="transactions"
+                          referenceType="card_transaction"
+                          referenceId={t.id}
+                          observed={{ date: t.date, amount: t.amount, merchant: t.merchant, category_id: t.category_id }}
+                          expectedFields={[{ key: "amount", label: "Amount" }]}
+                        />
                       </td>
                     </tr>
                   ))}
