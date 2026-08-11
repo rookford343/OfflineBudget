@@ -9,6 +9,7 @@ import { TrendBadge } from "../components/TrendBadge";
 import { SparkLine } from "../components/SparkLine";
 import { RiskBanner } from "../components/RiskBanner";
 import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
+import { VerificationFlagButton } from "../components/VerificationFlagButton";
 
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
 
@@ -160,6 +161,22 @@ export default function Dashboard() {
               <div className="flex items-center gap-2 mb-3">
                 <Wallet size={16} className="text-emerald-600" />
                 <h3 className="font-semibold text-gray-900 dark:text-white">Household Snapshot</h3>
+                <VerificationFlagButton
+                  feature="household_snapshot"
+                  referenceType="account"
+                  referenceId={primaryChecking?.id}
+                  observed={{
+                    left_to_spend: snapshot.left_to_spend,
+                    left_to_spend_weekly: snapshot.left_to_spend_weekly,
+                    not_saving: snapshot.not_saving,
+                    not_saving_weekly: snapshot.not_saving_weekly,
+                  }}
+                  expectedFields={[
+                    { key: "left_to_spend", label: "Left to Spend (monthly)" },
+                    { key: "not_saving", label: "Not Saving (monthly)" },
+                  ]}
+                  className="ml-auto"
+                />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
