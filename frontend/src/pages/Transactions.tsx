@@ -335,7 +335,7 @@ export default function Transactions() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Category</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Account</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-                    <th className="px-4 py-3 w-10"></th>
+                    <th className="px-4 py-3 w-16"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
@@ -378,7 +378,7 @@ export default function Transactions() {
                             feature="transactions"
                             referenceType="transaction"
                             referenceId={t.id}
-                            observed={{ date: t.date, amount: t.amount, description: t.description, category_id: t.category_id }}
+                            observed={{ date: t.date, amount: t.amount, description: t.description, category: t.category_id ? catMap[t.category_id] ?? null : null, category_id: t.category_id }}
                             expectedFields={[{ key: "amount", label: "Amount" }]}
                           />
                           <button onClick={() => setDeleteId(t.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
@@ -428,7 +428,7 @@ export default function Transactions() {
                           feature="transactions"
                           referenceType="card_transaction"
                           referenceId={t.id}
-                          observed={{ date: t.date, amount: t.amount, merchant: t.merchant, category_id: t.category_id }}
+                          observed={{ date: t.date, amount: t.amount, merchant: t.merchant, category: t.category_id ? catMap[t.category_id] ?? null : null, category_id: t.category_id }}
                           expectedFields={[{ key: "amount", label: "Amount" }]}
                         />
                       </td>

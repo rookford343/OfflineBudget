@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { verificationFlagsApi } from "../../api";
 import { CheckCircle2, Circle } from "lucide-react";
+import { fmt } from "../../lib/utils";
 
 const FEATURE_LABELS: Record<string, string> = {
   forecast: "Forecast",
@@ -45,7 +46,7 @@ export default function VerificationFeedbackTab() {
             <p className="text-xs text-gray-400">{new Date(flag.created_at).toLocaleString()}</p>
             {flag.expected_value != null && (
               <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
-                Expected: <strong>{flag.expected_value}</strong>
+                Expected: <strong>{fmt(flag.expected_value)}</strong>
               </p>
             )}
             {flag.note && <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{flag.note}</p>}
