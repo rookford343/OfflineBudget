@@ -696,6 +696,8 @@ class BankConnectionStatusOut(BaseModel):
 class BankSyncNowResponse(BaseModel):
     synced_connections: int
     errors: list[str]
+    imported: int
+    skipped_duplicates: int
 
 
 # ── Forecast Day Checkpoints ──────────────────────────────────────────────────

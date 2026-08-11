@@ -77,8 +77,9 @@ def test_sync_connection_imports_transactions_and_updates_balance(db_session):
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
          patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("47.10"))):
-        sync_connection(db_session, connection)
+        imported_count, skipped_count = sync_connection(db_session, connection)
 
+    assert (imported_count, skipped_count) == (1, 0)
     db_session.refresh(account)
     db_session.refresh(link)
     db_session.refresh(connection)
@@ -100,8 +101,9 @@ def test_sync_connection_dedupes_on_rerun(db_session):
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
          patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("47.10"))):
         sync_connection(db_session, connection)
-        sync_connection(db_session, connection)  # re-run, overlapping window re-fetches the same txn
+        second_run = sync_connection(db_session, connection)  # re-run, overlapping window re-fetches the same txn
 
+    assert second_run == (0, 1)  # nothing new imported, the one txn skipped as a duplicate
     imported = db_session.query(models.Transaction).filter_by(account_id=account.id).all()
     assert len(imported) == 1
 
