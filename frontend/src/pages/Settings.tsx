@@ -9,14 +9,21 @@ import TaxTab from "./settings/TaxTab";
 import HouseholdTab from "./settings/HouseholdTab";
 import DangerZoneTab from "./settings/DangerZoneTab";
 
+// Absolute paths, not relative ("profile" instead of "/settings/profile") --
+// these NavLinks sit next to a second, nested <Routes> inside a component
+// mounted on a splat route (App.tsx's "settings/*"). A relative `to` there
+// resolves against the splat's CURRENT matched value, not a fixed base, so
+// each click appended another segment instead of replacing the last one
+// (…/profile/preferences/accounts/… -- confirmed live, screenshot from
+// production). Absolute paths sidestep the ambiguity entirely.
 const TABS = [
-  { to: "profile", label: "Profile & Security", icon: User },
-  { to: "preferences", label: "Preferences", icon: SlidersHorizontal },
-  { to: "accounts", label: "Accounts & Bank Sync", icon: Link },
-  { to: "categories", label: "Categories & Rules", icon: Tags },
-  { to: "tax", label: "Tax", icon: Receipt },
-  { to: "household", label: "Household", icon: UsersIcon },
-  { to: "danger", label: "Danger Zone", icon: AlertTriangle, danger: true },
+  { to: "/settings/profile", label: "Profile & Security", icon: User },
+  { to: "/settings/preferences", label: "Preferences", icon: SlidersHorizontal },
+  { to: "/settings/accounts", label: "Accounts & Bank Sync", icon: Link },
+  { to: "/settings/categories", label: "Categories & Rules", icon: Tags },
+  { to: "/settings/tax", label: "Tax", icon: Receipt },
+  { to: "/settings/household", label: "Household", icon: UsersIcon },
+  { to: "/settings/danger", label: "Danger Zone", icon: AlertTriangle, danger: true },
 ];
 
 export default function Settings() {
@@ -50,7 +57,7 @@ export default function Settings() {
         </nav>
         <div className="flex-1 min-w-0">
           <Routes>
-            <Route index element={<Navigate to="profile" replace />} />
+            <Route index element={<Navigate to="/settings/profile" replace />} />
             <Route path="profile" element={<ProfileTab />} />
             <Route path="preferences" element={<PreferencesTab />} />
             <Route path="accounts" element={<AccountsTab />} />
