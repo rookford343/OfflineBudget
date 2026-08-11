@@ -134,6 +134,19 @@ def upgrade_schema():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )""",
+        """CREATE TABLE IF NOT EXISTS verification_flags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            feature VARCHAR(20) NOT NULL,
+            reference_type VARCHAR(32),
+            reference_id INTEGER,
+            observed_json TEXT NOT NULL,
+            expected_value NUMERIC(14,2),
+            note TEXT,
+            status VARCHAR(10) NOT NULL DEFAULT 'open',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            resolved_at DATETIME
+        )""",
     ]
     with engine.connect() as conn:
         for s in stmts:

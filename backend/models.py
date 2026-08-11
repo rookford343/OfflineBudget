@@ -61,6 +61,17 @@ class RecurringFrequency(str, PyEnum):
     biweekly = "biweekly"
 
 
+class VerificationFeature(str, PyEnum):
+    forecast = "forecast"
+    transactions = "transactions"
+    household_snapshot = "household_snapshot"
+
+
+class VerificationFlagStatus(str, PyEnum):
+    open = "open"
+    resolved = "resolved"
+
+
 class RuleField(str, PyEnum):
     description = "description"
     merchant = "merchant"
@@ -661,3 +672,31 @@ class PlannedTransfer(Base):
     from_account: Mapped["Account | None"] = relationship(foreign_keys=[from_account_id])
     to_account: Mapped["Account"] = relationship(foreign_keys=[to_account_id])
     verified_transaction: Mapped["Transaction | None"] = relationship()
+
+
+# ── Verification Flags ────────────────────────────────────────────────────────
+
+class VerificationFlag(Base):
+    __tablename__ = "verification_flags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    feature: Mapped[VerificationFeature] = mapped_column(Enum(VerificationFeature), nullable=False)
+    # What `reference_id` points at, e.g. "account", "transaction",
+    # "card_transaction" -- loose by design, each feature picks its own.
+    reference_type: Mapped[str | None] = mapped_column(String(32))
+    reference_id: Mapped[int | None] = mapped_column(Integer)
+    # JSON snapshot of exactly what the app displayed at flag time (values,
+    # not just ids, so the entry stays meaningful after the underlying data
+    # changes). Stored as TEXT and (de)serialized at the API layer -- this
+    # codebase has no precedent for a native JSON column type.
+    observed_json: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_value: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    note: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[VerificationFlagStatus] = mapped_column(
+        Enum(VerificationFlagStatus), default=VerificationFlagStatus.open, nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    user: Mapped["User"] = relationship()
