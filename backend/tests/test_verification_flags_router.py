@@ -85,3 +85,29 @@ def test_a_user_cannot_see_or_resolve_another_users_flag(client, db_session):
 
     resp = test_client.patch(f"/verification-flags/{other_flag.id}", json={"status": "resolved"})
     assert resp.status_code == 404
+
+
+def test_reopening_a_resolved_flag_clears_resolved_at(client):
+    test_client, user = client
+    created = test_client.post("/verification-flags", json={"feature": "transactions", "observed": {"amount": "5.00"}}).json()
+    test_client.patch(f"/verification-flags/{created['id']}", json={"status": "resolved"})
+
+    resp = test_client.patch(f"/verification-flags/{created['id']}", json={"status": "open"})
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "open"
+    assert resp.json()["resolved_at"] is None
+
+
+def test_observed_json_round_trips_through_the_api(client):
+    test_client, user = client
+    resp = test_client.post("/verification-flags", json={
+        "feature": "household_snapshot",
+        "observed": {"left_to_spend": "-6999.59", "flagged_field": "left_to_spend"},
+    })
+    created = resp.json()
+
+    import json
+    assert json.loads(created["observed_json"]) == {"left_to_spend": "-6999.59", "flagged_field": "left_to_spend"}
+
+    listed = test_client.get("/verification-flags").json()
+    assert json.loads(listed[0]["observed_json"]) == {"left_to_spend": "-6999.59", "flagged_field": "left_to_spend"}
