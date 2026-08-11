@@ -1,5 +1,5 @@
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { User, SlidersHorizontal, Link, Tags, Receipt, Users as UsersIcon, AlertTriangle } from "lucide-react";
+import { User, SlidersHorizontal, Link, Tags, Receipt, Users as UsersIcon, AlertTriangle, Flag } from "lucide-react";
 import { cx } from "../lib/utils";
 import ProfileTab from "./settings/ProfileTab";
 import PreferencesTab from "./settings/PreferencesTab";
@@ -8,6 +8,7 @@ import CategoriesTab from "./settings/CategoriesTab";
 import TaxTab from "./settings/TaxTab";
 import HouseholdTab from "./settings/HouseholdTab";
 import DangerZoneTab from "./settings/DangerZoneTab";
+import VerificationFeedbackTab from "./settings/VerificationFeedbackTab";
 
 // Absolute paths, not relative ("profile" instead of "/settings/profile") --
 // these NavLinks sit next to a second, nested <Routes> inside a component
@@ -24,6 +25,7 @@ const TABS = [
   { to: "/settings/tax", label: "Tax", icon: Receipt },
   { to: "/settings/household", label: "Household", icon: UsersIcon },
   { to: "/settings/danger", label: "Danger Zone", icon: AlertTriangle, danger: true },
+  { to: "/settings/verification", label: "Verification Feedback", icon: Flag },
 ];
 
 export default function Settings() {
@@ -65,6 +67,7 @@ export default function Settings() {
             <Route path="tax" element={<TaxTab />} />
             <Route path="household" element={<HouseholdTab />} />
             <Route path="danger" element={<DangerZoneTab />} />
+            <Route path="verification" element={<VerificationFeedbackTab />} />
           </Routes>
         </div>
       </div>
