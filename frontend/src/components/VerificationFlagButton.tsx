@@ -1,0 +1,120 @@
+import { useState } from "react";
+import { Flag } from "lucide-react";
+import { verificationFlagsApi } from "../api";
+import { useParallelOpsEnabled } from "../store/parallelOps";
+
+interface ExpectedField {
+  key: string;
+  label: string;
+}
+
+export function VerificationFlagButton({
+  feature,
+  referenceType,
+  referenceId,
+  observed,
+  expectedFields,
+  className = "",
+}: {
+  feature: "forecast" | "transactions" | "household_snapshot";
+  referenceType?: string;
+  referenceId?: number;
+  observed: Record<string, unknown>;
+  expectedFields: ExpectedField[];
+  className?: string;
+}) {
+  const enabled = useParallelOpsEnabled();
+  const [open, setOpen] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+
+  if (!enabled) return null;
+
+  async function submit() {
+    const filled = expectedFields.filter((f) => values[f.key]?.trim());
+    if (filled.length === 0 && !note.trim()) return;
+    setSubmitting(true);
+    try {
+      const submissions = filled.length > 0 ? filled : [null];
+      for (const field of submissions) {
+        await verificationFlagsApi.create({
+          feature,
+          reference_type: referenceType,
+          reference_id: referenceId,
+          observed: field ? { ...observed, flagged_field: field.key } : observed,
+          expected_value: field ? parseFloat(values[field.key]) : undefined,
+          note: note.trim() || undefined,
+        });
+      }
+      setDone(true);
+      setValues({});
+      setNote("");
+      setTimeout(() => {
+        setDone(false);
+        setOpen(false);
+      }, 1500);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className={`relative inline-block ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title="Flag this as wrong"
+        className="text-gray-300 hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400"
+      >
+        <Flag size={14} />
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-64 card p-3 shadow-lg text-left">
+          {done ? (
+            <p className="text-sm text-emerald-600 dark:text-emerald-400">Flagged — thanks, I'll look into it.</p>
+          ) : (
+            <>
+              <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">What should this be?</p>
+              {expectedFields.map((f) => (
+                <label key={f.key} className="block mb-2 text-xs text-gray-500 dark:text-gray-400">
+                  {f.label}
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="input w-full text-sm mt-0.5"
+                    value={values[f.key] ?? ""}
+                    onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
+                  />
+                </label>
+              ))}
+              <label className="block mb-2 text-xs text-gray-500 dark:text-gray-400">
+                Note
+                <textarea
+                  className="input w-full text-sm mt-0.5"
+                  rows={2}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                />
+              </label>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setOpen(false)} className="btn-secondary text-xs px-2 py-1">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={submit}
+                  disabled={submitting}
+                  className="btn-primary text-xs px-2 py-1 disabled:opacity-50"
+                >
+                  {submitting ? "Saving…" : "Flag it"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

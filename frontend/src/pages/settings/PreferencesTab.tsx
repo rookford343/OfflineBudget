@@ -2,12 +2,20 @@ import { useState, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { authApi } from "../../api";
 import { getTheme, setTheme } from "../../store/theme";
-import { Moon, Sun, Wand2 } from "lucide-react";
+import { isParallelOpsEnabled, setParallelOpsEnabled } from "../../store/parallelOps";
+import { Moon, Sun, Wand2, Flag } from "lucide-react";
 import { PINNABLE_ITEMS, loadPinnedNav, PINNED_STORAGE_KEY } from "../../lib/navItems";
 
 export default function PreferencesTab() {
   const [dark, setDark] = useState(getTheme() === "dark");
   function toggleDark() { const next = !dark; setDark(next); setTheme(next); }
+
+  const [parallelOps, setParallelOpsState] = useState(isParallelOpsEnabled());
+  function toggleParallelOps() {
+    const next = !parallelOps;
+    setParallelOpsState(next);
+    setParallelOpsEnabled(next);
+  }
 
   // Seeded from the server so the displayed value matches the current
   // setting on load, same as the original Settings.tsx's shared `me` effect.
@@ -37,6 +45,21 @@ export default function PreferencesTab() {
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${dark ? "bg-indigo-600" : "bg-gray-200"}`}
         >
           <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${dark ? "translate-x-6" : "translate-x-1"}`} />
+        </button>
+      </div>
+      <div className="flex items-center justify-between py-2 border-t border-gray-100 dark:border-gray-700">
+        <div className="flex items-center gap-3">
+          <Flag size={16} className="text-red-400" />
+          <div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Parallel Ops</span>
+            <p className="text-xs text-gray-400">Show a flag icon on Forecast, Transactions, and Household Snapshot to report numbers that look wrong</p>
+          </div>
+        </div>
+        <button
+          onClick={toggleParallelOps}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${parallelOps ? "bg-indigo-600" : "bg-gray-200"}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${parallelOps ? "translate-x-6" : "translate-x-1"}`} />
         </button>
       </div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100 dark:border-gray-700">
