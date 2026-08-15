@@ -159,6 +159,7 @@ def upgrade_schema():
         "ALTER TABLE users ADD COLUMN ss_withheld_ytd_as_of DATE",
         # Debug-only raw bank-sync payload capture -- see BankSyncRawSnapshot.
         "ALTER TABLE users ADD COLUMN debug_capture_raw_bank_data BOOLEAN DEFAULT 0",
+        "ALTER TABLE categories ADD COLUMN is_discretionary BOOLEAN DEFAULT 0",
         # SchedulerRun, BankSyncRawSnapshot and AppSetting are brand-new
         # tables, created automatically by create_tables()'s
         # Base.metadata.create_all -- no ALTER TABLE needed for them.

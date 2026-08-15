@@ -122,8 +122,13 @@ def merchant_totals(
     this window, which is what a same-merchant refund looks like and what an
     unrelated deposit never does.
     """
+    from backend.services.merchant_normalizer import build_alias_map, display_name
+
     totals: dict[str, Decimal] = {}
     counts: dict[str, int] = {}
+    # Group by normalized merchant, not the raw descriptor. Keyed raw, Amazon
+    # split across 138 strings totalling $6,762 in 2026 and never surfaced.
+    alias_map = build_alias_map(db, user_id)
 
     checking_q = (
         db.query(models.Transaction)
@@ -145,7 +150,7 @@ def merchant_totals(
     debit_rows = [t for t in checking_q.all() if is_real_checking_spend(t.description, cards)]
     debit_descriptions = {t.description for t in debit_rows if t.description}
     for t in debit_rows:
-        key = t.description or "Unknown"
+        key = display_name(t.description, alias_map)
         totals[key] = totals.get(key, Decimal("0")) + abs(t.amount)
         counts[key] = counts.get(key, 0) + 1
 
@@ -161,7 +166,7 @@ def merchant_totals(
         if account_id:
             refund_q = refund_q.filter(models.Transaction.account_id == account_id)
         for t in refund_q.all():
-            key = t.description or "Unknown"
+            key = display_name(t.description, alias_map)
             totals[key] = totals.get(key, Decimal("0")) - t.amount
 
     card_q = db.query(models.CreditCardTransaction).filter(
@@ -174,7 +179,7 @@ def merchant_totals(
     for t in card_q.all():
         if is_card_payment(t.merchant):
             continue
-        key = t.merchant or "Unknown"
+        key = display_name(t.merchant, alias_map)
         totals[key] = totals.get(key, Decimal("0")) + t.amount
         if t.amount > 0:
             counts[key] = counts.get(key, 0) + 1

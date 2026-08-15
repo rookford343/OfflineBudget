@@ -85,7 +85,7 @@ def test_payment_excluded_from_top_merchants(db_session):
     names = [name for name, _, _ in merchants]
 
     assert "AUTOMATIC PAYMENT - THANK" not in names
-    assert names == ["MEIJER STORE #130"]
+    assert names == ["Meijer"]  # normalized from "MEIJER STORE #130" (2026-08-15)
 
 
 def test_payment_excluded_from_discretionary_spend(db_session):
