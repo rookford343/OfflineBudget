@@ -258,3 +258,20 @@ def category_totals_for_range(db: Session, user_id: int, start: date, end: date)
         totals[t.category_id] = totals.get(t.category_id, Decimal("0")) + t.amount
 
     return totals
+
+def filter_real_spend(db: Session, user_id: int, rows: list) -> list:
+    """Drop card payoffs and internal transfers from fetched checking rows.
+
+    The list-level companion to is_real_checking_spend, for the endpoints that
+    build their own query rather than going through merchant_totals /
+    category_totals_for_range.
+
+    Those endpoints are exactly where this kept getting missed. On Dan's real
+    data the Trends chart reported ~$58,000 for April 2026; $32,000 of it was
+    a single "Online Transfer to SAV" and another $5,915 a Chase autopay --
+    neither a dollar of spending. Same defect the Spending page had, in a
+    different query, because each endpoint filtered `amount < 0` itself.
+    """
+    cards = _active_cards(db, user_id)
+    return [t for t in rows if is_real_checking_spend(t.description, cards)]
+

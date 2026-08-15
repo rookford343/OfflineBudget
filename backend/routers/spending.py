@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
-from backend.services.spending_helpers import NOT_SAVINGS, merchant_totals
+from backend.services.spending_helpers import filter_real_spend, is_card_payment, looks_like_internal_transfer, NOT_SAVINGS, merchant_totals
 from backend.services.summary_generator import generate_weekly_digest
 from backend.services.budget_snapshot import compute_budget_snapshot
 
@@ -216,7 +216,7 @@ def spending_by_category(
         )
 
     for t in card_txns:
-        if t.amount <= 0 or not t.category_id:
+        if t.amount <= 0 or not t.category_id or is_card_payment(t.merchant):
             continue
         sub_breakdown.setdefault(t.category_id, {})
         label = card_map.get(t.card_id, "Credit Card")
@@ -237,6 +237,10 @@ def spending_by_category(
 
     # Build top-level → sub-categories
     top_categories = [c for c in categories if c.parent_id is None and c.type == "expense"]
+    # Budgets are monthly; the range may be any length. Scale so "spent vs
+    # budgeted" compares like with like -- see _range_month_fraction.
+    months_factor = _range_month_fraction(start, end)
+
     result: list[schemas.SpendingTopLevel] = []
     total_budgeted = Decimal("0")
     total_actual = Decimal("0")
@@ -248,7 +252,7 @@ def spending_by_category(
         for child in sorted(top.children, key=lambda c: c.sort_order):
             breakdown = sub_breakdown.get(child.id, {})
             actual = sum(breakdown.values(), Decimal("0"))
-            budgeted = budget_by_cat.get(child.id, Decimal("0"))
+            budgeted = budget_by_cat.get(child.id, Decimal("0")) * months_factor
             top_actual += actual
             children_out.append(schemas.SpendingSubCategory(
                 category_id=child.id,
@@ -268,9 +272,9 @@ def spending_by_category(
         # Entertainment/Subscriptions under it do), so reading only the parent
         # row reported "Wants" as $0 budgeted against real spend -- and
         # understated total_budgeted by the whole $4,050 those leaves carry.
-        top_budgeted = budget_by_cat.get(top.id, Decimal("0")) + sum(
+        top_budgeted = (budget_by_cat.get(top.id, Decimal("0")) + sum(
             (c.budgeted for c in children_out), Decimal("0")
-        )
+        )) * months_factor
 
         total_budgeted += top_budgeted
         total_actual += top_actual
@@ -298,7 +302,7 @@ def spending_by_category(
             continue
         own_spend = sum(sub_breakdown.get(cat.id, {}).values(), Decimal("0"))
         disc_actual += own_spend
-        disc_budgeted += budget_by_cat.get(cat.id, Decimal("0"))
+        disc_budgeted += budget_by_cat.get(cat.id, Decimal("0")) * months_factor
 
     return schemas.SpendingOverview(
         start_date=start,
@@ -464,6 +468,7 @@ def spending_yearly_trends(
                 NOT_SAVINGS,
             )
         ).all()
+        txns = filter_real_spend(db, user.id, txns)
         for t in txns:
             months_data[str(t.date.month)] += abs(t.amount)
         card_txns = db.query(models.CreditCardTransaction).filter(
@@ -473,6 +478,11 @@ def spending_yearly_trends(
             models.CreditCardTransaction.amount > 0,
         ).all()
         for t in card_txns:
+            # "AUTOMATIC PAYMENT - THANK" etc. reach the card table with a
+            # positive (charge-side) amount, so they inflate spend instead of
+            # netting out -- the card-side twin of the checking payoff.
+            if is_card_payment(t.merchant):
+                continue
             months_data[str(t.date.month)] += t.amount
         result.append(schemas.YearlyTrendEntry(year=year, months=months_data))
     return result
@@ -506,6 +516,7 @@ def spending_rolling_monthly(
             NOT_SAVINGS,
         )
     ).all()
+    txns = filter_real_spend(db, user.id, txns)
     for t in txns:
         key = t.date.strftime("%Y-%m")
         results[key] = results.get(key, Decimal("0")) + abs(t.amount)
@@ -516,6 +527,8 @@ def spending_rolling_monthly(
         models.CreditCardTransaction.amount > 0,
     ).all()
     for t in card_txns:
+        if is_card_payment(t.merchant):
+            continue
         key = t.date.strftime("%Y-%m")
         results[key] = results.get(key, Decimal("0")) + t.amount
 
@@ -534,6 +547,34 @@ def monthly_summary(
 ):
     from backend.services.summary_generator import generate_summary
     return generate_summary(db, user.id, year, month)
+
+
+def _range_month_fraction(start: date, end: date) -> Decimal:
+    """How many months the [start, end] range covers, counting partial months
+    proportionally. 06/01-08/15 -> 1 + 1 + 15/31 = 2.48.
+
+    Budgets are stored as MONTHLY amounts, so comparing one against a
+    multi-month range understated the budget and made every longer range look
+    like a blowout. Live on 2026-08-15 the Spending page reported "$8,171.44
+    over" for a 2.5-month window: $13,671 spent against a $5,500 budget that
+    was only ever one month's worth. Scaled, that same window is $13,750
+    budgeted -- essentially on target rather than 2.5x over.
+    """
+    total = Decimal("0")
+    y, m = start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        days_in_month = calendar.monthrange(y, m)[1]
+        first = date(y, m, 1)
+        last = date(y, m, days_in_month)
+        lo = max(first, start)
+        hi = min(last, end)
+        if hi >= lo:
+            total += Decimal((hi - lo).days + 1) / Decimal(days_in_month)
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+    return total
 
 
 def _months_in_range(start: date, end: date) -> list[int]:
@@ -579,6 +620,11 @@ def spending_sankey(
     income_totals: dict[str, Decimal] = {}
     expense_totals: dict[str, Decimal] = {}
 
+    # A transfer in from savings is not household income, and a transfer out
+    # or card payoff is not spending -- both would make the flow diagram claim
+    # money entered or left the household when it only moved between accounts.
+    txns = [x for x in txns if not looks_like_internal_transfer(x.description)]
+    txns = filter_real_spend(db, user.id, txns)
     for t in txns:
         cat_name = t.category.name if t.category else "Uncategorized"
         cat_type = t.category.type if t.category else None
@@ -588,6 +634,8 @@ def spending_sankey(
             expense_totals[cat_name] = expense_totals.get(cat_name, Decimal("0")) + abs(t.amount)
 
     for t in card_txns:
+        if is_card_payment(t.merchant):
+            continue
         cat_name = t.category.name if t.category else "Uncategorized"
         if t.amount > 0:
             expense_totals[cat_name] = expense_totals.get(cat_name, Decimal("0")) + t.amount
@@ -742,6 +790,10 @@ def tax_estimate(
         state_withheld=Decimal(str(user.state_withholding_ytd or 0)),
     )
     result["year"] = year
+    # Surface the year the bracket tables actually encode so the UI can warn
+    # on a mismatch rather than silently applying the wrong year's brackets.
+    from backend.services.tax_service import BRACKET_YEAR
+    result["bracket_year"] = BRACKET_YEAR
     result["itemized_breakdown"] = {
         "mortgage_interest": float(user.itemized_mortgage_interest or 0),
         "donations": float(user.itemized_donations or 0),
