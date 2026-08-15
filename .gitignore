@@ -72,3 +72,6 @@ frontend/data/
 
 # Superpowers scratch workspaces
 .superpowers/
+
+# Retired v1 prototype (removed 2026-08-14). Recoverable from git history.
+old_version/
