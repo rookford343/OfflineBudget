@@ -158,3 +158,25 @@ def test_due_for_retry_compares_the_stored_utc_timestamp_against_local_date():
     assert scheduler_state.due_for_retry(
         _FakeSession(), "bank_sync", target_hour=0, now=datetime.now(),
     ) is False, "a success 30 minutes ago must not be considered missed"
+
+
+# --- The sweep actually runs (2026-08-15) --------------------------------
+
+def test_scheduler_sweep_runs_without_raising(monkeypatch):
+    """Regression: _scheduler_sweep called app_settings.get_effective but its
+    local import block only pulled in scheduler_state, so every 20-minute
+    tick died with NameError: name 'app_settings' is not defined -- silently,
+    inside APScheduler, taking the whole catch-up mechanism down with it.
+
+    No test had ever invoked the sweep; the pieces underneath it were all
+    covered individually, which is exactly how a missing import in the glue
+    survives a green suite. This calls the real function with the real
+    imports.
+    """
+    import backend.main as main_module
+
+    calls = []
+    monkeypatch.setattr(main_module, "_run_bank_sync", lambda: calls.append("bank_sync"))
+    monkeypatch.setattr(main_module, "_send_daily_summaries", lambda: calls.append("daily_summary"))
+
+    main_module._scheduler_sweep()  # must not raise
