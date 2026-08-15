@@ -19,7 +19,7 @@ overnight, each needing its own fix:
 """
 from __future__ import annotations
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from sqlalchemy.orm import Session
 from backend import models
 
@@ -43,12 +43,12 @@ def _write(db: Session, job_name: str, mutate) -> None:
 
 
 def record_attempt(db: Session, job_name: str) -> None:
-    _write(db, job_name, lambda run: setattr(run, "last_attempt_at", datetime.now()))
+    _write(db, job_name, lambda run: setattr(run, "last_attempt_at", datetime.utcnow()))
 
 
 def record_success(db: Session, job_name: str) -> None:
     def mutate(run):
-        run.last_success_at = datetime.now()
+        run.last_success_at = datetime.utcnow()
         run.last_error = None
     _write(db, job_name, mutate)
 
@@ -67,12 +67,15 @@ def due_for_retry(db: Session, job_name: str, *, target_hour: int, now: datetime
     the app simply wasn't running yet) looks identical here to one that fired
     and failed -- both need the same retry, and both are equally "missed"
     from Dan's perspective."""
-    # Local time, matching APScheduler's own default: main.py never passes a
-    # timezone to BackgroundScheduler(), so its cron `hour=` fields (and this
-    # function's target_hour) are already the system's local hour -- Dan's
-    # Mac, Eastern. Using UTC here would misalign both the hour comparison
-    # and the date() comparison against local wall-clock reality by the UTC
-    # offset.
+    # Two different clocks on purpose, and mixing them up is the whole trap
+    # here. `target_hour` is an APScheduler cron hour: main.py never passes a
+    # timezone to BackgroundScheduler(), so cron `hour=` means LOCAL wall
+    # clock. The gate below must therefore compare against local time.
+    # `last_success_at`, by contrast, is stored UTC-naive like every other
+    # timestamp in this codebase (see the utcnow() calls above), so deciding
+    # "did it already succeed today" means converting it to local first --
+    # comparing a UTC timestamp's .date() against a local date() silently
+    # returns the wrong answer for the whole UTC-offset window each night.
     now = now or datetime.now()
     if now.hour < target_hour:
         return False
@@ -83,4 +86,5 @@ def due_for_retry(db: Session, job_name: str, *, target_hour: int, now: datetime
         return False
     if not run or not run.last_success_at:
         return True
-    return run.last_success_at.date() < date.today()
+    last_success_local = run.last_success_at.replace(tzinfo=timezone.utc).astimezone()
+    return last_success_local.date() < now.date()

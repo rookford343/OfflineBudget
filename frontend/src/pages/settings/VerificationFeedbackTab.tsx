@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { verificationFlagsApi } from "../../api";
 import { CheckCircle2, Circle } from "lucide-react";
-import { fmt } from "../../lib/utils";
+import { fmt, parseServerDateTime } from "../../lib/utils";
 
 const FEATURE_LABELS: Record<string, string> = {
   forecast: "Forecast",
@@ -43,7 +43,7 @@ export default function VerificationFeedbackTab() {
       <div key={flag.id} className="p-3 rounded-lg border border-gray-100 dark:border-gray-700">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="text-xs text-gray-400">{new Date(flag.created_at).toLocaleString()}</p>
+            <p className="text-xs text-gray-400">{parseServerDateTime(flag.created_at).toLocaleString()}</p>
             {flag.expected_value != null && (
               <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
                 Expected: <strong>{fmt(flag.expected_value)}</strong>

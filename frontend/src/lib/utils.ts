@@ -17,6 +17,26 @@ export function fmtDate(d: string): string {
   });
 }
 
+/** Parse a datetime the backend produced.
+ *
+ * Every timestamp column here is written with `datetime.utcnow()` or SQLite's
+ * `func.now()`, both of which store UTC with NO timezone suffix. Pydantic
+ * serializes that as "2026-08-14T20:02:20.421731" — and per the ES2015 spec a
+ * date-TIME string without an offset is parsed as LOCAL time, not UTC. So
+ * `new Date(conn.last_synced_at)` silently shifted every timestamp in the UI
+ * by the full UTC offset (4h in EDT), and `toLocaleString(…, timeZoneName)`
+ * then stamped a confident "EDT" on the wrong number. Appending the Z is what
+ * makes the parse mean what the backend wrote.
+ *
+ * Date-ONLY strings ("2026-08-14") are left alone: those parse as UTC
+ * midnight, which is why the rest of this file uses the `+ "T12:00:00"`
+ * midday trick instead.
+ */
+export function parseServerDateTime(iso: string): Date {
+  const hasZone = /[Zz]$|[+-]\d{2}:?\d{2}$/.test(iso);
+  return new Date(hasZone ? iso : iso + "Z");
+}
+
 export function cx(...classes: (string | undefined | null | false)[]): string {
   return classes.filter(Boolean).join(" ");
 }

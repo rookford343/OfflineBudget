@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { authApi } from "../../api";
 import { User, Mail, KeyRound } from "lucide-react";
+import { parseServerDateTime } from "../../lib/utils";
 
 export default function ProfileTab() {
   const qc = useQueryClient();
@@ -107,7 +108,7 @@ export default function ProfileTab() {
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
             {me?.recovery_code_created_at
-              ? `Recovery code generated on ${new Date(me.recovery_code_created_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
+              ? `Recovery code generated on ${parseServerDateTime(me.recovery_code_created_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric" })}`
               : "No recovery code set"}
           </p>
           <button
