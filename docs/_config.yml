@@ -1,0 +1,27 @@
+# GitHub Pages / Jekyll config for the docs site.
+#
+# Added 2026-08-15 to fix a Pages build that had been failing since Aug 14.
+# The error was:
+#
+#   Liquid syntax error (line 1019): Variable
+#   '{{ width: `${Math.min(100, c.utilization_pct)}' was not properly
+#   terminated with regexp: /\}\}/
+#
+# Jekyll runs every .md file through Liquid before Markdown, and Liquid
+# treats "{{" as the start of a template variable. The planning docs under
+# superpowers/ quote React/JSX, where `style={{ width: ... }}` is ordinary
+# code -- so Liquid tried to parse JSX as a template and died. Three docs
+# trip it today; any future plan containing JSX would trip it again.
+#
+# Excluding rather than wrapping each snippet in {% raw %}: these are
+# internal build plans and specs, not pages of the user-facing docs site.
+# They stay readable on GitHub as source, they just aren't rendered as
+# website pages -- which was never the intent. Fixing it by escaping would
+# leave the same landmine armed for the next plan written.
+exclude:
+  - superpowers/
+
+# The docs actually meant for readers.
+title: OfflineBudget
+description: Forecasting-first personal budget tracker
+theme: jekyll-theme-primer
