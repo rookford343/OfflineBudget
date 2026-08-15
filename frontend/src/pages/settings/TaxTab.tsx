@@ -21,6 +21,8 @@ export default function TaxTab() {
   const [ssGross, setSsGross] = useState("");
   const [ssWageBase, setSsWageBase] = useState("");
   const [ssBonus, setSsBonus] = useState("");
+  const [ssWithheld, setSsWithheld] = useState("");
+  const [ssWithheldAsOf, setSsWithheldAsOf] = useState("");
 
   const taxMut = useMutation({
     mutationFn: authApi.updateMe,
@@ -30,8 +32,10 @@ export default function TaxTab() {
   useEffect(() => {
     if (me) {
       setSsGross(me.ss_gross_per_paycheck ?? "");
-      setSsWageBase(me.ss_wage_base ?? "176100");
+      setSsWageBase(me.ss_wage_base ?? "184500");
       setSsBonus(me.ss_bonus_ytd ?? "");
+      setSsWithheld(me.ss_withheld_ytd ?? "");
+      setSsWithheldAsOf(me.ss_withheld_ytd_as_of ?? "");
       setTaxFilingStatus(me.tax_filing_status ?? "single");
       setTaxState(me.tax_state ?? "");
       setTaxSalary(me.annual_salary ?? "");
@@ -112,7 +116,7 @@ export default function TaxTab() {
           <div className="flex items-center gap-2 mb-1">
             <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Social Security Tracker</p>
           </div>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">Track when you hit the SS wage base to plan for your resulting paycheck increase (~6.2% of gross). The 2025 wage base is $176,100.</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">Track when you hit the SS wage base to plan for your resulting paycheck increase (~6.2% of gross). The 2026 wage base is $184,500.</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl">
             <div>
               <label className="label">Gross Per Paycheck ($)</label>
@@ -120,12 +124,45 @@ export default function TaxTab() {
             </div>
             <div>
               <label className="label">SS Wage Base ($)</label>
-              <input type="number" step="1" className="input" placeholder="176100" value={ssWageBase} onChange={e => setSsWageBase(e.target.value)} />
+              <input type="number" step="1" className="input" placeholder="184500" value={ssWageBase} onChange={e => setSsWageBase(e.target.value)} />
             </div>
-            <div>
-              <label className="label">YTD Bonus Subject to SS ($)</label>
-              <input type="number" step="0.01" className="input" placeholder="0" value={ssBonus} onChange={e => setSsBonus(e.target.value)} />
+          </div>
+
+          {/* Added 2026-08-15. The checkpoint below was previously settable
+              only by running a script, while the UI showed "YTD Bonus" -- a
+              field the checkpoint completely overrides. Editing a superseded
+              input and seeing nothing change is the worst version of this. */}
+          <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 dark:border-indigo-900/50 dark:bg-indigo-950/20">
+            <p className="text-xs font-medium text-gray-700 dark:text-gray-300">Pay stub checkpoint (preferred)</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+              The most accurate input: copy the year-to-date Social Security tax from a recent pay
+              stub. Gross wages are derived from it directly, which stays correct through raises.
+              When set, this replaces the legacy estimate below.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg">
+              <div>
+                <label className="label">YTD SS Tax Withheld ($)</label>
+                <input type="number" step="0.01" className="input" placeholder="11343.06"
+                  value={ssWithheld} onChange={e => setSsWithheld(e.target.value)} />
+              </div>
+              <div>
+                <label className="label">As of paycheck date</label>
+                <input type="date" className="input" value={ssWithheldAsOf}
+                  onChange={e => setSsWithheldAsOf(e.target.value)} />
+              </div>
             </div>
+          </div>
+
+          <div className="mt-3 max-w-xs">
+            <label className="label">
+              YTD Bonus Subject to SS ($)
+              {ssWithheld && <span className="ml-1.5 text-xs font-normal text-gray-400">— unused while a checkpoint is set</span>}
+            </label>
+            <input type="number" step="0.01" className={`input ${ssWithheld ? "opacity-50" : ""}`}
+              placeholder="0" value={ssBonus} onChange={e => setSsBonus(e.target.value)} />
+            <p className="text-xs text-gray-400 mt-1">
+              Legacy estimate, used only when no pay stub checkpoint is set.
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -147,6 +184,8 @@ export default function TaxTab() {
               ss_gross_per_paycheck: ssGross ? parseFloat(ssGross) : null,
               ss_wage_base: ssWageBase ? parseFloat(ssWageBase) : null,
               ss_bonus_ytd: ssBonus ? parseFloat(ssBonus) : null,
+              ss_withheld_ytd: ssWithheld ? parseFloat(ssWithheld) : null,
+              ss_withheld_ytd_as_of: ssWithheldAsOf || null,
             })}
           >
             {taxMut.isPending ? "Saving…" : "Save Tax Profile"}

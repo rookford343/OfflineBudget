@@ -26,8 +26,6 @@ of the request and the reasoning belongs next to the allowlist:
                         that points back at this form.
   DATABASE_URL          bootstrap: it is how this table is reached in the
                         first place, so it cannot live inside it.
-  HOST / PORT           bind-time only; changing them at runtime does
-                        nothing until restart, so a form would lie.
   ALLOWED_ORIGINS       a CORS allowlist editable from a browser is a CSRF
                         foothold -- a tricked admin request could widen it
                         to '*' and open the API to any origin.
@@ -64,8 +62,6 @@ ENV_ONLY_KEYS = [
     "JWT_SECRET",
     "DATABASE_URL",
     "ALLOWED_ORIGINS",
-    "HOST",
-    "PORT",
     "APP_ENCRYPTION_KEY",
 ]
 
@@ -88,10 +84,7 @@ def _coerce(raw: str | None, typ: type):
 def _env_default(key: str):
     """The .env / config.py value a DB row overrides."""
     if key == "WEEKLY_DIGEST_ENABLED":
-        # Legacy shape: DIGEST_RECIPIENTS was repurposed into an on/off flag
-        # (non-blank = enabled) long before it had a real boolean. Preserve
-        # that meaning so an existing .env keeps behaving identically.
-        return bool(settings.digest_recipients_list)
+        return settings.weekly_digest_enabled
     if key == "REPORT_RECIPIENTS":
         # No .env equivalent -- recipients used to come from User.email.
         # Falling back to None lets get_recipients() do that lookup.

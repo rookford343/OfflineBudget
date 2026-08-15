@@ -49,6 +49,11 @@ def test_connect_stores_encrypted_token_and_returns_accounts(client, db_session)
 
 def test_connect_fails_without_encryption_key(db_session, monkeypatch):
     monkeypatch.setattr(crypto.settings, "BANK_TOKEN_ENCRYPTION_KEY", None)
+    # Both names must be cleared: APP_ENCRYPTION_KEY is the current name
+    # and BANK_TOKEN_ENCRYPTION_KEY only its legacy alias, so clearing one
+    # leaves encryption configured. Also keeps this test independent of
+    # whatever the developer happens to have in their real .env.
+    monkeypatch.setattr(crypto.settings, "APP_ENCRYPTION_KEY", None, raising=False)
     user = models.User(username="dan", hashed_password="x", display_name="Dan")
     db_session.add(user)
     db_session.commit()
