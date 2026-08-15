@@ -31,24 +31,14 @@ from backend.services.spending_helpers import NOT_SAVINGS, is_card_payment
 # routinely type their "Savings"/"Groceries" categories as `expense`.
 _EXCLUDED_CATEGORY_NAMES = ("Groceries", "Savings")
 
-_TRANSFER_DESCRIPTION_MARKERS = ("online transfer", "transfer to", "transfer from")
-
-
-def _looks_like_internal_transfer(description: str) -> bool:
-    """True when a bank description looks like money moved between the user's
-    own accounts (checking -> savings, checking -> checking) rather than spent.
-
-    HEURISTIC, not a fact: `Transaction` has no persisted `is_transfer` column
-    (it exists only transiently on CSV-import row schemas and is discarded once
-    categorization decisions are made), so the description text is the only
-    signal available at this layer. False positives (a merchant literally named
-    "Transfer To ...") and false negatives (a bank wording we don't list) are
-    both possible. That is the same accuracy tolerance the codebase already
-    accepts from `card_matching.card_matches_description`, which is used for
-    exactly this class of "is this row really spending?" question.
-    """
-    desc = (description or "").lower()
-    return any(marker in desc for marker in _TRANSFER_DESCRIPTION_MARKERS)
+# Moved to spending_helpers 2026-08-15 and re-exported here for the existing
+# tests that import it. Holding the only copy in this module is why the
+# Spending page and the weekly email -- which read through spending_helpers --
+# never got this exclusion and counted card payoffs and transfers as spend.
+from backend.services.spending_helpers import (  # noqa: E402
+    looks_like_internal_transfer as _looks_like_internal_transfer,
+    is_real_checking_spend,
+)
 
 
 def week_bounds(as_of: date) -> tuple[date, date]:
@@ -156,11 +146,7 @@ def discretionary_spend_checking(db: Session, user_id: int, start: date, end: da
     def is_spend(t: models.Transaction) -> bool:
         if t.id in verified_txn_ids:
             return False
-        if any(card_matches_description(card, t.description) for card in active_cards):
-            return False
-        if _looks_like_internal_transfer(t.description):
-            return False
-        return True
+        return is_real_checking_spend(t.description, active_cards)
 
     debit_rows = [t for t in rows if is_spend(t)]
     total = sum((abs(t.amount) for t in debit_rows), Decimal("0"))
