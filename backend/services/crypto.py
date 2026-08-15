@@ -1,23 +1,37 @@
-"""Fernet-based encryption for the SimpleFIN access URL, so a stolen budget.db
-does not itself leak live bank access. Uses a key separate from JWT_SECRET
-so rotating one never affects the other."""
+"""Fernet-based encryption for secrets at rest -- the SimpleFIN access URL and
+the SMTP password set from the Settings page -- so a stolen budget.db does not
+itself leak live bank access or mail credentials. Uses a key separate from
+JWT_SECRET so rotating one never affects the other."""
 from __future__ import annotations
 from cryptography.fernet import Fernet, InvalidToken
 from backend.config import settings
 
 
 class EncryptionNotConfigured(Exception):
-    """Raised when BANK_TOKEN_ENCRYPTION_KEY is unset or wrong -- callers must
-    never fall back to storing the token in plaintext."""
+    """Raised when the app encryption key is unset or wrong -- callers must
+    never fall back to storing the secret in plaintext."""
 
 
 def _fernet() -> Fernet:
-    if not settings.BANK_TOKEN_ENCRYPTION_KEY:
-        raise EncryptionNotConfigured("BANK_TOKEN_ENCRYPTION_KEY is not set in .env")
+    key = settings.app_encryption_key
+    if not key:
+        raise EncryptionNotConfigured(
+            "APP_ENCRYPTION_KEY (or legacy BANK_TOKEN_ENCRYPTION_KEY) is not set in .env"
+        )
     try:
-        return Fernet(settings.BANK_TOKEN_ENCRYPTION_KEY.encode())
+        return Fernet(key.encode())
     except Exception as exc:
-        raise EncryptionNotConfigured(f"BANK_TOKEN_ENCRYPTION_KEY is not a valid Fernet key: {exc}") from exc
+        raise EncryptionNotConfigured(f"App encryption key is not a valid Fernet key: {exc}") from exc
+
+
+def is_encryption_configured() -> bool:
+    """Non-raising probe, so the Settings page can show whether secrets can be
+    stored without forcing the caller into a try/except."""
+    try:
+        _fernet()
+        return True
+    except EncryptionNotConfigured:
+        return False
 
 
 def assert_encryption_configured() -> None:

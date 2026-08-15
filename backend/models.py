@@ -763,6 +763,34 @@ class VerificationFlag(Base):
     user: Mapped["User"] = relationship()
 
 
+class AppSetting(Base):
+    """Server configuration editable from the Settings page, overriding the
+    matching .env default at runtime.
+
+    Key/value rather than typed columns because the set of settings changes
+    far more often than the schema should: adding one is a constant in
+    app_settings.py, not a migration. Values are stored as TEXT and coerced
+    on read by the accessor that knows the type.
+
+    `is_secret` rows (currently just the SMTP password) are Fernet-encrypted
+    at rest with the same key that protects bank tokens, and the API never
+    returns them -- see routers/settings.py. A stolen budget.db therefore
+    leaks no more than it did before this table existed.
+
+    Deliberately NOT covering JWT_SECRET, the encryption key itself,
+    DATABASE_URL, HOST/PORT or ALLOWED_ORIGINS: those are bootstrap values
+    (needed before this table can be read), or rotating them from a web form
+    would break the very session doing the rotating. app_settings.EDITABLE is
+    the allowlist and the router refuses anything outside it.
+    """
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str | None] = mapped_column(Text)
+    is_secret: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
 class SchedulerRun(Base):
     """One row per scheduled job name -- tracks whether it actually succeeded
     today, independent of whether APScheduler's own trigger fired. The Mac

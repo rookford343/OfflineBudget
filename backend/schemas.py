@@ -570,6 +570,70 @@ class RawSnapshotOut(BaseModel):
     captured_at: datetime
 
 
+class EnvStatusEntry(BaseModel):
+    """An env-only setting's name and whether it's set. Never its value."""
+    key: str
+    configured: bool
+
+
+class AppSettingsOut(BaseModel):
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_user: Optional[str] = None
+    smtp_from: Optional[str] = None
+    daily_summary_hour: Optional[int] = None
+    weekly_digest_day: Optional[str] = None
+    weekly_digest_enabled: Optional[bool] = None
+    report_recipients: Optional[str] = None
+    # Presence flag, not the secret -- see routers/settings.py.
+    smtp_pass_set: bool = False
+    encryption_configured: bool = False
+    env_status: list[EnvStatusEntry] = []
+
+
+class AppSettingsUpdate(BaseModel):
+    """All optional: PATCH semantics, exclude_unset distinguishes "clear this"
+    (explicit null/"") from "leave it alone" (absent)."""
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_user: Optional[str] = None
+    smtp_pass: Optional[str] = None
+    smtp_from: Optional[str] = None
+    daily_summary_hour: Optional[int] = None
+    weekly_digest_day: Optional[str] = None
+    weekly_digest_enabled: Optional[bool] = None
+    report_recipients: Optional[str] = None
+
+    @field_validator("daily_summary_hour")
+    @classmethod
+    def _valid_hour(cls, v):
+        if v is not None and not (0 <= v <= 23):
+            raise ValueError("daily_summary_hour must be between 0 and 23")
+        return v
+
+    @field_validator("weekly_digest_day")
+    @classmethod
+    def _valid_day(cls, v):
+        if v is None or v == "":
+            return v
+        allowed = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
+        if v.strip().lower() not in allowed:
+            raise ValueError(f"weekly_digest_day must be one of {sorted(allowed)}")
+        return v.strip().lower()
+
+    @field_validator("report_recipients")
+    @classmethod
+    def _valid_recipients(cls, v):
+        """Catch a typo'd address at save time rather than discovering it as a
+        silent non-delivery a day later."""
+        if not v or not v.strip():
+            return v
+        bad = [p.strip() for p in v.split(",") if p.strip() and "@" not in p]
+        if bad:
+            raise ValueError(f"Not valid email addresses: {', '.join(bad)}")
+        return v
+
+
 class SchedulerRunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     job_name: str
