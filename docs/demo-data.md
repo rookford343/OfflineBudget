@@ -153,3 +153,33 @@ python scripts/seed_demo.py
 ```
 
 Because the script deletes the existing `demo` user before re-seeding, changes take effect immediately on the next run.
+
+---
+
+## Loading the demo
+
+```bash
+source .venv/bin/activate
+DATABASE_URL="sqlite:///./data/demo.db" python scripts/seed_demo.py
+```
+
+Pointing `DATABASE_URL` at a separate file keeps the demo entirely away from
+your real `budget.db`. To run the app against it:
+
+```bash
+DATABASE_URL="sqlite:///./data/demo.db" \
+  ALLOWED_ORIGINS="http://127.0.0.1:5174,http://localhost:5174" \
+  uvicorn backend.main:app --host 127.0.0.1 --port 8001
+
+# in another terminal
+cd frontend && VITE_API_URL="http://127.0.0.1:8001" bun run dev --port 5174
+```
+
+Sign in with **demo / demo123**.
+
+Transaction dates are generated relative to today — last month and this month
+— so every page that defaults to the current month has data in it. Seeding it
+in December works the same as seeding it in August.
+
+Every screenshot in the README and on the docs site is captured from exactly
+this dataset.

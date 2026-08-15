@@ -275,5 +275,5 @@ PYTHONPATH=. pytest tests/ -v
 cd frontend && npx tsc --noEmit
 
 # Frontend build (catches all import/type errors)
-cd frontend && npm run build
+cd frontend && bun run build
 ```
