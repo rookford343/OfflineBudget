@@ -1,6 +1,15 @@
-"""2025 federal + state tax estimation. Results are estimates, not tax advice."""
+"""Federal + state tax estimation. Results are estimates, not tax advice.
+
+BRACKET_YEAR is the tax year the tables below actually encode. It is exported
+and returned by the API so the UI can warn when the year being estimated is
+not the year the brackets are for, instead of quietly applying the wrong
+table behind a line of fine print. Update the tables and this constant
+together.
+"""
 from __future__ import annotations
 from decimal import Decimal
+
+BRACKET_YEAR = 2025
 
 # 2025 federal brackets: (rate, bracket_floor)
 _BRACKETS = {
