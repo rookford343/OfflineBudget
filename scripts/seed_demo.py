@@ -25,8 +25,60 @@ from backend.auth import hash_password
 from backend import models
 from backend.seed import seed_default_categories
 
+
+# ── Relative dating ───────────────────────────────────────────────────────────
+# Transaction dates used to be hardcoded to Apr/May 2026, so the demo looked
+# empty on every page that defaults to the current month -- Budget showed
+# "$0.00 spent of $7,415.00" and Spending had nothing to chart. Anchoring to
+# today keeps the demo meaningful whenever it's seeded: month 1 = last month,
+# month 2 = this month.
+import calendar as _calendar
+
+_TODAY = date.today()
+
+
+def _month_start(offset_back: int) -> date:
+    """First day of the month `offset_back` months before this one."""
+    y, m = _TODAY.year, _TODAY.month - offset_back
+    while m < 1:
+        m += 12
+        y -= 1
+    return date(y, m, 1)
+
+
+def _d(month_slot: int, day: int) -> date:
+    """month_slot 1 = last month, 2 = this month. Day is clamped so a 31st
+    doesn't blow up in a 30-day month."""
+    base = _month_start(1 if month_slot == 1 else 0)
+    last = _calendar.monthrange(base.year, base.month)[1]
+    return date(base.year, base.month, min(day, last))
+
+
 create_tables()
 db = SessionLocal()
+
+
+# ─── Discretionary flags ──────────────────────────────────────────────────────
+# Which categories are a CHOICE this month vs committed before it started.
+# The Spending page leads with the discretionary number, so without this the
+# demo reports "$0.00 discretionary" and every dollar as a fixed commitment --
+# which makes the headline feature look broken.
+DISCRETIONARY_CATEGORIES = {
+    "Wants", "Food & Drinks", "Shopping", "Entertainment",
+    "Travel", "Subscriptions", "Groceries", "Other",
+}
+
+
+def _flag_discretionary(db, user_id: int) -> int:
+    rows = db.query(models.Category).filter(models.Category.user_id == user_id).all()
+    n = 0
+    for c in rows:
+        if c.name in DISCRETIONARY_CATEGORIES:
+            c.is_discretionary = True
+            n += 1
+    db.commit()
+    return n
+
 
 # ─── 1. User ──────────────────────────────────────────────────────────────────
 
@@ -45,6 +97,7 @@ db.add(user)
 db.commit()
 db.refresh(user)
 seed_default_categories(db, user)
+_flag_discretionary(db, user.id)
 print(f"✓ Created user 'demo' (id={user.id})")
 
 # ─── 2. Accounts ──────────────────────────────────────────────────────────────
@@ -192,42 +245,42 @@ print(f"✓ Created {len(ri_objects)} recurring items")
 
 actuals = [
     # ── April 2026 ────────────────────────────────────────────────────────────
-    (date(2026, 4, 1),  Decimal("-2185.00"), "Mortgage Payment",       checking.id, mortgage_id),
-    (date(2026, 4, 2),  Decimal("-400.00"),  "Transfer to Savings",    checking.id, savings_id),
-    (date(2026, 4, 5),  Decimal("-125.00"),  "Charitable Giving",      checking.id, charity_id),
-    (date(2026, 4, 6),  Decimal("-17.99"),   "Spotify Family",         checking.id, subscriptions_id),
-    (date(2026, 4, 7),  Decimal("-672.00"),  "Honda CR-V Payment",     checking.id, transport_id),
-    (date(2026, 4, 8),  Decimal("-135.13"),  "Verizon Family Plan",    checking.id, utilities_id),
-    (date(2026, 4, 9),  Decimal("-214.00"),  "State Farm Auto",        checking.id, insurance_id),
-    (date(2026, 4, 11), Decimal("-69.88"),   "Xfinity Internet",       checking.id, utilities_id),
-    (date(2026, 4, 13), Decimal("-20.14"),   "Netflix Standard",       checking.id, subscriptions_id),
-    (date(2026, 4, 14), Decimal("-121.04"),  "Duke Energy Electric",   checking.id, utilities_id),
-    (date(2026, 4, 15), Decimal("3600.00"),  "Paycheck 1",             checking.id, income_id),
-    (date(2026, 4, 19), Decimal("-12.99"),   "Disney+ / Hulu Bundle",  checking.id, subscriptions_id),
-    (date(2026, 4, 19), Decimal("-84.00"),   "Water & Sewer",          checking.id, utilities_id),
-    (date(2026, 4, 20), Decimal("-445.00"),  "Toyota Camry Payment",   checking.id, transport_id),
-    (date(2026, 4, 22), Decimal("-63.35"),   "Natural Gas",            checking.id, utilities_id),
-    (date(2026, 4, 23), Decimal("-14.99"),   "Amazon Prime",           checking.id, subscriptions_id),
-    (date(2026, 4, 30), Decimal("3600.00"),  "Paycheck 2",             checking.id, income_id),
+    (_d(1, 1),  Decimal("-2185.00"), "Mortgage Payment",       checking.id, mortgage_id),
+    (_d(1, 2),  Decimal("-400.00"),  "Transfer to Savings",    checking.id, savings_id),
+    (_d(1, 5),  Decimal("-125.00"),  "Charitable Giving",      checking.id, charity_id),
+    (_d(1, 6),  Decimal("-17.99"),   "Spotify Family",         checking.id, subscriptions_id),
+    (_d(1, 7),  Decimal("-672.00"),  "Honda CR-V Payment",     checking.id, transport_id),
+    (_d(1, 8),  Decimal("-135.13"),  "Verizon Family Plan",    checking.id, utilities_id),
+    (_d(1, 9),  Decimal("-214.00"),  "State Farm Auto",        checking.id, insurance_id),
+    (_d(1, 11), Decimal("-69.88"),   "Xfinity Internet",       checking.id, utilities_id),
+    (_d(1, 13), Decimal("-20.14"),   "Netflix Standard",       checking.id, subscriptions_id),
+    (_d(1, 14), Decimal("-121.04"),  "Duke Energy Electric",   checking.id, utilities_id),
+    (_d(1, 15), Decimal("3600.00"),  "Paycheck 1",             checking.id, income_id),
+    (_d(1, 19), Decimal("-12.99"),   "Disney+ / Hulu Bundle",  checking.id, subscriptions_id),
+    (_d(1, 19), Decimal("-84.00"),   "Water & Sewer",          checking.id, utilities_id),
+    (_d(1, 20), Decimal("-445.00"),  "Toyota Camry Payment",   checking.id, transport_id),
+    (_d(1, 22), Decimal("-63.35"),   "Natural Gas",            checking.id, utilities_id),
+    (_d(1, 23), Decimal("-14.99"),   "Amazon Prime",           checking.id, subscriptions_id),
+    (_d(1, 30), Decimal("3600.00"),  "Paycheck 2",             checking.id, income_id),
 
     # ── May 2026 ──────────────────────────────────────────────────────────────
-    (date(2026, 5, 1),  Decimal("-2185.00"), "Mortgage Payment",       checking.id, mortgage_id),
-    (date(2026, 5, 2),  Decimal("-400.00"),  "Transfer to Savings",    checking.id, savings_id),
-    (date(2026, 5, 5),  Decimal("-125.00"),  "Charitable Giving",      checking.id, charity_id),
-    (date(2026, 5, 6),  Decimal("-17.99"),   "Spotify Family",         checking.id, subscriptions_id),
-    (date(2026, 5, 7),  Decimal("-672.00"),  "Honda CR-V Payment",     checking.id, transport_id),
-    (date(2026, 5, 8),  Decimal("-135.13"),  "Verizon Family Plan",    checking.id, utilities_id),
-    (date(2026, 5, 9),  Decimal("-214.00"),  "State Farm Auto",        checking.id, insurance_id),
-    (date(2026, 5, 11), Decimal("-69.88"),   "Xfinity Internet",       checking.id, utilities_id),
-    (date(2026, 5, 13), Decimal("-20.14"),   "Netflix Standard",       checking.id, subscriptions_id),
-    (date(2026, 5, 14), Decimal("-132.54"),  "Duke Energy Electric",   checking.id, utilities_id),
-    (date(2026, 5, 15), Decimal("3600.00"),  "Paycheck 1",             checking.id, income_id),
-    (date(2026, 5, 19), Decimal("-12.99"),   "Disney+ / Hulu Bundle",  checking.id, subscriptions_id),
-    (date(2026, 5, 19), Decimal("-84.00"),   "Water & Sewer",          checking.id, utilities_id),
-    (date(2026, 5, 20), Decimal("-445.00"),  "Toyota Camry Payment",   checking.id, transport_id),
-    (date(2026, 5, 22), Decimal("-71.19"),   "Natural Gas",            checking.id, utilities_id),
-    (date(2026, 5, 23), Decimal("-14.99"),   "Amazon Prime",           checking.id, subscriptions_id),
-    (date(2026, 5, 31), Decimal("3600.00"),  "Paycheck 2",             checking.id, income_id),
+    (_d(2, 1),  Decimal("-2185.00"), "Mortgage Payment",       checking.id, mortgage_id),
+    (_d(2, 2),  Decimal("-400.00"),  "Transfer to Savings",    checking.id, savings_id),
+    (_d(2, 5),  Decimal("-125.00"),  "Charitable Giving",      checking.id, charity_id),
+    (_d(2, 6),  Decimal("-17.99"),   "Spotify Family",         checking.id, subscriptions_id),
+    (_d(2, 7),  Decimal("-672.00"),  "Honda CR-V Payment",     checking.id, transport_id),
+    (_d(2, 8),  Decimal("-135.13"),  "Verizon Family Plan",    checking.id, utilities_id),
+    (_d(2, 9),  Decimal("-214.00"),  "State Farm Auto",        checking.id, insurance_id),
+    (_d(2, 11), Decimal("-69.88"),   "Xfinity Internet",       checking.id, utilities_id),
+    (_d(2, 13), Decimal("-20.14"),   "Netflix Standard",       checking.id, subscriptions_id),
+    (_d(2, 14), Decimal("-132.54"),  "Duke Energy Electric",   checking.id, utilities_id),
+    (_d(2, 15), Decimal("3600.00"),  "Paycheck 1",             checking.id, income_id),
+    (_d(2, 19), Decimal("-12.99"),   "Disney+ / Hulu Bundle",  checking.id, subscriptions_id),
+    (_d(2, 19), Decimal("-84.00"),   "Water & Sewer",          checking.id, utilities_id),
+    (_d(2, 20), Decimal("-445.00"),  "Toyota Camry Payment",   checking.id, transport_id),
+    (_d(2, 22), Decimal("-71.19"),   "Natural Gas",            checking.id, utilities_id),
+    (_d(2, 23), Decimal("-14.99"),   "Amazon Prime",           checking.id, subscriptions_id),
+    (_d(2, 31), Decimal("3600.00"),  "Paycheck 2",             checking.id, income_id),
 ]
 
 # Map paycheck names to their recurring item objects for linking
@@ -250,44 +303,44 @@ print(f"✓ Created {len(actuals)} checking transactions (Apr–May 2026)")
 
 card_txns = [
     # ── Chase Sapphire — April ────────────────────────────────────────────────
-    (chase.id, date(2026, 4, 3),  Decimal("163.64"),  "Kroger",                food_id),
-    (chase.id, date(2026, 4, 5),  Decimal("59.72"),   "Chick-fil-A",           food_id),
-    (chase.id, date(2026, 4, 8),  Decimal("79.52"),   "Shell Gas Station",     transport_id),
-    (chase.id, date(2026, 4, 9),  Decimal("272.45"),  "Target",                shopping_id),
-    (chase.id, date(2026, 4, 11), Decimal("47.86"),   "Panera Bread",          food_id),
-    (chase.id, date(2026, 4, 14), Decimal("25.20"),   "McDonald's",            food_id),
-    (chase.id, date(2026, 4, 16), Decimal("196.02"),  "Amazon",                shopping_id),
-    (chase.id, date(2026, 4, 18), Decimal("142.86"),  "Kroger",                food_id),
-    (chase.id, date(2026, 4, 19), Decimal("36.49"),   "Chipotle",              food_id),
-    (chase.id, date(2026, 4, 21), Decimal("78.28"),   "BP Gas",                transport_id),
-    (chase.id, date(2026, 4, 23), Decimal("168.26"),  "Costco",                food_id),
-    (chase.id, date(2026, 4, 25), Decimal("30.87"),   "Regal Cinemas",         entertainment_id),
-    (chase.id, date(2026, 4, 27), Decimal("68.48"),   "Old Navy",              shopping_id),
-    (chase.id, date(2026, 4, 28), Decimal("100.09"),  "Kroger",                food_id),
+    (chase.id, _d(1, 3),  Decimal("163.64"),  "Kroger",                food_id),
+    (chase.id, _d(1, 5),  Decimal("59.72"),   "Chick-fil-A",           food_id),
+    (chase.id, _d(1, 8),  Decimal("79.52"),   "Shell Gas Station",     transport_id),
+    (chase.id, _d(1, 9),  Decimal("272.45"),  "Target",                shopping_id),
+    (chase.id, _d(1, 11), Decimal("47.86"),   "Panera Bread",          food_id),
+    (chase.id, _d(1, 14), Decimal("25.20"),   "McDonald's",            food_id),
+    (chase.id, _d(1, 16), Decimal("196.02"),  "Amazon",                shopping_id),
+    (chase.id, _d(1, 18), Decimal("142.86"),  "Kroger",                food_id),
+    (chase.id, _d(1, 19), Decimal("36.49"),   "Chipotle",              food_id),
+    (chase.id, _d(1, 21), Decimal("78.28"),   "BP Gas",                transport_id),
+    (chase.id, _d(1, 23), Decimal("168.26"),  "Costco",                food_id),
+    (chase.id, _d(1, 25), Decimal("30.87"),   "Regal Cinemas",         entertainment_id),
+    (chase.id, _d(1, 27), Decimal("68.48"),   "Old Navy",              shopping_id),
+    (chase.id, _d(1, 28), Decimal("100.09"),  "Kroger",                food_id),
 
     # ── Chase Sapphire — May ──────────────────────────────────────────────────
-    (chase.id, date(2026, 5, 2),  Decimal("177.05"),  "Kroger",                food_id),
-    (chase.id, date(2026, 5, 4),  Decimal("40.64"),   "Chick-fil-A",           food_id),
-    (chase.id, date(2026, 5, 6),  Decimal("46.11"),   "Raising Cane's",        food_id),
-    (chase.id, date(2026, 5, 7),  Decimal("81.19"),   "Shell Gas Station",     transport_id),
-    (chase.id, date(2026, 5, 10), Decimal("155.39"),  "Target",                shopping_id),
-    (chase.id, date(2026, 5, 12), Decimal("117.30"),  "Amazon",                shopping_id),
-    (chase.id, date(2026, 5, 14), Decimal("53.73"),   "Olive Garden",          food_id),
-    (chase.id, date(2026, 5, 17), Decimal("265.00"),  "Home Depot",            shopping_id),
-    (chase.id, date(2026, 5, 18), Decimal("85.17"),   "BP Gas",                transport_id),
-    (chase.id, date(2026, 5, 21), Decimal("165.43"),  "Costco",                food_id),
-    (chase.id, date(2026, 5, 24), Decimal("41.66"),   "Chipotle",              food_id),
-    (chase.id, date(2026, 5, 26), Decimal("97.93"),  "Kohl's",                shopping_id),
-    (chase.id, date(2026, 5, 29), Decimal("30.13"),   "AMC Theaters",          entertainment_id),
-    (chase.id, date(2026, 5, 31), Decimal("147.54"),  "Kroger",                food_id),
+    (chase.id, _d(2, 2),  Decimal("177.05"),  "Kroger",                food_id),
+    (chase.id, _d(2, 4),  Decimal("40.64"),   "Chick-fil-A",           food_id),
+    (chase.id, _d(2, 6),  Decimal("46.11"),   "Raising Cane's",        food_id),
+    (chase.id, _d(2, 7),  Decimal("81.19"),   "Shell Gas Station",     transport_id),
+    (chase.id, _d(2, 10), Decimal("155.39"),  "Target",                shopping_id),
+    (chase.id, _d(2, 12), Decimal("117.30"),  "Amazon",                shopping_id),
+    (chase.id, _d(2, 14), Decimal("53.73"),   "Olive Garden",          food_id),
+    (chase.id, _d(2, 17), Decimal("265.00"),  "Home Depot",            shopping_id),
+    (chase.id, _d(2, 18), Decimal("85.17"),   "BP Gas",                transport_id),
+    (chase.id, _d(2, 21), Decimal("165.43"),  "Costco",                food_id),
+    (chase.id, _d(2, 24), Decimal("41.66"),   "Chipotle",              food_id),
+    (chase.id, _d(2, 26), Decimal("97.93"),  "Kohl's",                shopping_id),
+    (chase.id, _d(2, 29), Decimal("30.13"),   "AMC Theaters",          entertainment_id),
+    (chase.id, _d(2, 31), Decimal("147.54"),  "Kroger",                food_id),
 
     # ── Apple Card — April & May ──────────────────────────────────────────────
-    (apple.id, date(2026, 4, 6),  Decimal("12.99"),   "App Store",             entertainment_id),
-    (apple.id, date(2026, 4, 15), Decimal("2.99"),    "iCloud+ 200GB",         subscriptions_id),
-    (apple.id, date(2026, 4, 28), Decimal("9.99"),    "Apple TV+",             subscriptions_id),
-    (apple.id, date(2026, 5, 3),  Decimal("8.49"),    "App Store",             entertainment_id),
-    (apple.id, date(2026, 5, 15), Decimal("2.99"),    "iCloud+ 200GB",         subscriptions_id),
-    (apple.id, date(2026, 5, 22), Decimal("26.66"),   "Apple Arcade Annual",   subscriptions_id),
+    (apple.id, _d(1, 6),  Decimal("12.99"),   "App Store",             entertainment_id),
+    (apple.id, _d(1, 15), Decimal("2.99"),    "iCloud+ 200GB",         subscriptions_id),
+    (apple.id, _d(1, 28), Decimal("9.99"),    "Apple TV+",             subscriptions_id),
+    (apple.id, _d(2, 3),  Decimal("8.49"),    "App Store",             entertainment_id),
+    (apple.id, _d(2, 15), Decimal("2.99"),    "iCloud+ 200GB",         subscriptions_id),
+    (apple.id, _d(2, 22), Decimal("26.66"),   "Apple Arcade Annual",   subscriptions_id),
 ]
 
 for card_id, dt, amount, merchant, cat_id in card_txns:
