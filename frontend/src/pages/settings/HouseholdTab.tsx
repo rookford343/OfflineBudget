@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { adminApi, authApi } from "../../api";
 import { isAdmin } from "../../store/auth";
 import { Shield, Activity, User, Link, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { parseServerDateTime } from "../../lib/utils";
 
 const emptyUser = { username: "", display_name: "", password: "", role: "viewer", linked_to_user_id: "" };
 
@@ -130,7 +131,7 @@ export default function HouseholdTab() {
               {(logData?.items ?? []).map((log: any) => (
                 <tr key={log.id} className="border-b border-gray-50 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30">
                   <td className="py-1.5 pr-4 text-gray-500 whitespace-nowrap">
-                    {new Date(log.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                    {parseServerDateTime(log.timestamp).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                   </td>
                   <td className="py-1.5 pr-4 text-gray-700 dark:text-gray-300">{log.username ?? "—"}</td>
                   <td className="py-1.5 pr-4">
