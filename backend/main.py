@@ -175,7 +175,7 @@ def _scheduler_sweep() -> None:
     (e.g. a slow success landed between the miss check and the retry) costs
     nothing beyond one redundant run."""
     from backend.database import SessionLocal
-    from backend.services import scheduler_state
+    from backend.services import scheduler_state, app_settings
     db = SessionLocal()
     try:
         if scheduler_state.due_for_retry(db, "bank_sync", target_hour=_BANK_SYNC_HOUR):
