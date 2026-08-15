@@ -1,0 +1,20 @@
+#!/bin/sh
+# Blocks bank data and databases from being committed.
+#
+# Backstop for .gitignore, which is only as good as its spelling: the
+# 2026-08-14 leak got through because the folder was "transaction_flies"
+# and the ignore said "transaction_files". This checks what is actually
+# STAGED, so a typo'd path or a `git add -f` still gets caught.
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -z "$staged" ] && exit 0
+
+blocked=$(printf '%s\n' "$staged" | grep -iE '\.(csv|xlsx|xls|ofx|qfx)$|\.db$|\.sqlite' | grep -viE '^backend/tests/|^frontend/src/|fixture|sample|example|\.gitkeep$')
+
+if [ -n "$blocked" ]; then
+  echo "BLOCKED: these look like bank data or a database:" >&2
+  printf '  %s\n' $blocked >&2
+  echo "" >&2
+  echo "This repo is PUBLIC. If one of these is genuinely safe, commit with --no-verify." >&2
+  exit 1
+fi
+exit 0

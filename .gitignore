@@ -75,3 +75,17 @@ frontend/data/
 
 # Retired v1 prototype (removed 2026-08-14). Recoverable from git history.
 old_version/
+
+# --- Bank data: spelling-proof ---------------------------------------------
+# A real leak happened because the folder was created as "transaction_flies"
+# while this file said "transaction_files", so the ignore never matched and
+# 735 real transactions went to a PUBLIC repo (purged 2026-08-14). Match on
+# the FILE TYPE anywhere under data/, not on one exact folder name.
+data/**/*.csv
+data/**/*.CSV
+data/**/*.xlsx
+data/**/*.xls
+data/**/*.ofx
+data/**/*.qfx
+data/**/*.db
+data/**/*.sqlite*
