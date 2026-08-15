@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, cardsApi, bankSyncApi } from "../../api";
-import { fmt } from "../../lib/utils";
+import { fmt, parseServerDateTime } from "../../lib/utils";
 import { Plus, Pencil, Trash2, X, Check, AlertTriangle, Link } from "lucide-react";
 
 const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", interest_rate: "", notes: "" };
@@ -170,7 +170,7 @@ export default function AccountsTab() {
                     Connection #{conn.id} — {conn.status}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    {conn.last_synced_at ? `Last synced ${new Date(conn.last_synced_at).toLocaleString(undefined, { timeZoneName: "short" })}` : "Never synced"}
+                    {conn.last_synced_at ? `Last synced ${parseServerDateTime(conn.last_synced_at).toLocaleString(undefined, { timeZoneName: "short" })}` : "Never synced"}
                   </p>
                   {conn.last_error && <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1"><AlertTriangle size={12} /> {conn.last_error}</p>}
                 </div>

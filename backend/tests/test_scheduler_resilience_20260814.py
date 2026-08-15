@@ -128,3 +128,33 @@ def test_raw_snapshot_overwrites_in_place_on_resync(db_session):
     rows = db_session.query(models.BankSyncRawSnapshot).filter_by(external_id="sf-raw-2").all()
     assert len(rows) == 1, "must overwrite, not accumulate"
     assert "false" in rows[0].raw_json.lower()
+
+
+# --- Timezone correctness (found in the 2026-08-14 cleanup audit) --------
+
+def test_due_for_retry_compares_the_stored_utc_timestamp_against_local_date():
+    """last_success_at is stored UTC-naive; target_hour is an APScheduler cron
+    hour, which means LOCAL wall clock. Comparing the raw UTC .date() against
+    a local date() gets the answer wrong for the whole UTC-offset window each
+    night -- in EDT (UTC-4), a job that succeeded at 21:00 local Monday is
+    stored as 01:00 UTC Tuesday, so a naive comparison on Monday night would
+    call it "already succeeded today" a full day early.
+
+    Verified against the real function rather than a reimplementation: a
+    success 30 minutes ago must never read as due, whatever the offset.
+    """
+    from datetime import datetime as dt
+
+    class _Run:
+        last_success_at = dt.utcnow() - timedelta(minutes=30)
+
+    class _FakeSession:
+        def query(self, *a, **kw):
+            class _Q:
+                def filter_by(self, **kw): return self
+                def first(self): return _Run()
+            return _Q()
+
+    assert scheduler_state.due_for_retry(
+        _FakeSession(), "bank_sync", target_hour=0, now=datetime.now(),
+    ) is False, "a success 30 minutes ago must not be considered missed"

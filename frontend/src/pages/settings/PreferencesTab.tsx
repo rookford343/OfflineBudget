@@ -5,6 +5,7 @@ import { getTheme, setTheme } from "../../store/theme";
 import { isParallelOpsEnabled, setParallelOpsEnabled } from "../../store/parallelOps";
 import { Moon, Sun, Wand2, Flag, Bug, Clock } from "lucide-react";
 import { PINNABLE_ITEMS, loadPinnedNav, PINNED_STORAGE_KEY } from "../../lib/navItems";
+import { parseServerDateTime } from "../../lib/utils";
 
 export default function PreferencesTab() {
   const [dark, setDark] = useState(getTheme() === "dark");
@@ -37,7 +38,7 @@ export default function PreferencesTab() {
   const JOB_LABELS: Record<string, string> = { bank_sync: "Bank Sync", daily_summary: "Daily Summary Email" };
   function relativeTime(iso: string | null) {
     if (!iso) return "never";
-    const diffMs = Date.now() - new Date(iso).getTime();
+    const diffMs = Date.now() - parseServerDateTime(iso).getTime();
     const hrs = diffMs / 3_600_000;
     if (hrs < 1) return `${Math.max(1, Math.round(diffMs / 60_000))}m ago`;
     if (hrs < 48) return `${Math.round(hrs)}h ago`;
