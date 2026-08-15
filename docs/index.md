@@ -1,8 +1,11 @@
 # OfflineBudget
 
-A forecasting-first household budget tracker that runs entirely on your own
-network. No subscriptions, no cloud sync, no third party holding your
-financial data.
+A forecasting-first household budget tracker you host yourself. Your ledger
+lives on your machine in a single SQLite file — bank sync and email are
+opt-in and off by default, so you can run the whole thing with nothing
+leaving your network.
+
+See [what leaves your machine](PRIVACY.md) for the specifics.
 
 Built with FastAPI + SQLite on the backend and React + TypeScript on the
 frontend.
@@ -15,6 +18,7 @@ frontend.
 |-------|--------------|
 | [Getting Started](start-guide.md) | Install, first run, LAN access, setting up your first budget |
 | [Technical Guide](technical-guide.md) | Architecture, data model, the forecast engine, adding features |
+| [Privacy](PRIVACY.md) | What's stored, the three outbound calls, and how to delete everything |
 | [Demo Data](demo-data.md) | The bundled sample household and how to load it |
 | [Future Work](future-work.md) | What's planned next |
 
