@@ -2,6 +2,7 @@
 and feeds them through the existing CSV-import pipeline so dedup, auto-
 categorization, and rules apply identically regardless of source."""
 from __future__ import annotations
+import json
 import logging
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -94,6 +95,9 @@ def _sync_link(
     )
     txns, balance = fetch_transactions(access_url, link.simplefin_account_id, since)
 
+    if user.debug_capture_raw_bank_data and txns:
+        _capture_raw_snapshots(db, user.id, txns)
+
     parsed_rows = [
         ParsedRow(
             date=t.posted.date(), description=t.description, amount=t.amount,
@@ -144,6 +148,29 @@ def _sync_link(
     link.last_synced_at = datetime.utcnow()
     db.commit()
     return (imported, skipped)
+
+
+def _capture_raw_snapshots(db: Session, user_id: int, txns: list) -> None:
+    """Debug-only: overwrite this user's raw snapshot for each external_id so
+    a re-synced overlap window updates the capture in place instead of
+    accumulating duplicate rows for the same transaction (_OVERLAP_DAYS
+    re-fetches the last few days on every sync)."""
+    existing = {
+        s.external_id: s
+        for s in db.query(models.BankSyncRawSnapshot).filter(
+            models.BankSyncRawSnapshot.user_id == user_id,
+            models.BankSyncRawSnapshot.external_id.in_([t.id for t in txns]),
+        ).all()
+    }
+    for t in txns:
+        raw_json = json.dumps(t.raw, default=str)
+        if t.id in existing:
+            existing[t.id].raw_json = raw_json
+            existing[t.id].captured_at = datetime.utcnow()
+        else:
+            db.add(models.BankSyncRawSnapshot(
+                user_id=user_id, external_id=t.id, raw_json=raw_json,
+            ))
 
 
 def sync_all(db: Session) -> None:

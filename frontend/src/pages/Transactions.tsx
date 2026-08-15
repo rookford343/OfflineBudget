@@ -1,10 +1,61 @@
 import { useState, useEffect, useRef } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { transactionsApi, accountsApi, categoriesApi, cardsApi, reconciliationApi, exportsApi, dayCheckpointsApi, recurringApi } from "../api";
+import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
+import { transactionsApi, accountsApi, categoriesApi, cardsApi, authApi, reconciliationApi, exportsApi, dayCheckpointsApi, recurringApi } from "../api";
 import { fmt, today, firstOfMonth, quickRange } from "../lib/utils";
-import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check, Upload, Landmark } from "lucide-react";
+import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check, Upload, Landmark, Code2 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
+
+// A single row shape both checking transactions and card charges normalize
+// into for the "All" tab -- lets one table render a chronological, source-
+// tagged view across every account and card without either data shape
+// leaking through.
+interface UnifiedRow {
+  id: number;
+  kind: "checking" | "card";
+  date: string;
+  description: string;
+  // Normalized to checking's sign convention (spend = negative, credit/
+  // refund = positive) regardless of source. Card transactions store the
+  // OPPOSITE convention (positive = charge) -- displaying that raw would
+  // color every card purchase green in a list that's mostly checking debits.
+  amount: number;
+  source: string;
+  sourceLabel: string;
+  externalId: string | null;
+}
+
+function RawDataButton({ externalId }: { externalId: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["raw-txn", externalId],
+    queryFn: () => transactionsApi.raw(externalId),
+    enabled: open,
+    retry: false,
+  });
+  return (
+    <div className="relative inline-block">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="text-gray-300 hover:text-amber-500 shrink-0"
+        title="View raw bank data (debug)"
+      >
+        <Code2 size={13} />
+      </button>
+      {open && (
+        <div className="absolute z-10 right-0 mt-1 w-80 max-h-64 overflow-auto card p-2 shadow-lg text-left">
+          {isLoading && <p className="text-xs text-gray-400">Loading…</p>}
+          {isError && <p className="text-xs text-gray-400">No raw data captured for this transaction — turn on "Capture Raw Bank Data" in Settings → Preferences before the next sync.</p>}
+          {data && (
+            <pre className="text-[10px] whitespace-pre-wrap break-all text-gray-600 dark:text-gray-300">
+              {JSON.stringify(JSON.parse(data.raw_json), null, 2)}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Small inline indicator for where a transaction came from -- manual entry is
 // the unmarked default (most common, shouldn't add visual noise); CSV/OFX
@@ -24,7 +75,7 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-type TxnTab = "checking" | "card" | "reconcile";
+type TxnTab = "all" | "checking" | "card" | "reconcile";
 
 interface CategoryCellProps {
   txnId: number;
@@ -114,11 +165,12 @@ export default function Transactions() {
       amount_min: filterAmountMin || undefined,
       amount_max: filterAmountMax || undefined,
     }),
-    enabled: txnTab === "checking",
+    enabled: txnTab === "checking" || txnTab === "all",
   });
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoriesApi.list });
   const { data: cards = [] } = useQuery({ queryKey: ["cards"], queryFn: cardsApi.list });
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
 
   const activeCardId = selectedCardId ?? (cards[0]?.id ?? null);
 
@@ -127,6 +179,44 @@ export default function Transactions() {
     queryFn: () => cardsApi.transactions(activeCardId!, { start, end }),
     enabled: txnTab === "card" && !!activeCardId,
   });
+
+  // "All" tab: every card in parallel, unfiltered by the single-card
+  // selector the "Credit Cards" tab uses. useQueries (not N useQuery calls)
+  // because `cards` is only known after its own query resolves -- a fixed
+  // number of hooks can't be written for a dynamic card count.
+  const allCardsQueries = useQueries({
+    queries: (cards as any[]).map((c: any) => ({
+      queryKey: ["card-transactions", c.id, start, end],
+      queryFn: () => cardsApi.transactions(c.id, { start, end }),
+      enabled: txnTab === "all",
+    })),
+  });
+  const allCardsLoading = txnTab === "all" && allCardsQueries.some(q => q.isLoading);
+
+  const cardNameMap: Record<number, string> = Object.fromEntries((cards as any[]).map((c: any) => [c.id, c.name]));
+  const accountNameMap: Record<number, string> = Object.fromEntries((accounts as any[]).map((a: any) => [a.id, a.name]));
+
+  const unifiedRows: UnifiedRow[] = txnTab === "all" ? [
+    ...txns.map((t: any) => ({
+      id: t.id, kind: "checking" as const, date: t.date, description: t.description,
+      amount: parseFloat(t.amount), source: t.source, sourceLabel: accountNameMap[t.account_id] ?? "Checking",
+      externalId: t.external_id ?? null,
+    })),
+    ...allCardsQueries.flatMap((q, i) => (q.data ?? []).map((t: any) => ({
+      id: t.id, kind: "card" as const, date: t.date, description: t.merchant || t.description || "",
+      amount: -parseFloat(t.amount), // flip: card convention is positive=charge, opposite of checking
+      source: t.source, sourceLabel: cardNameMap[(cards as any[])[i]?.id] ?? "Card",
+      externalId: t.external_id ?? null,
+    }))),
+  ]
+    .filter(r => {
+      if (debouncedQ && !r.description.toLowerCase().includes(debouncedQ.toLowerCase())) return false;
+      const amt = Math.abs(r.amount);
+      if (filterAmountMin && amt < parseFloat(filterAmountMin)) return false;
+      if (filterAmountMax && amt > parseFloat(filterAmountMax)) return false;
+      return true;
+    })
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id) : [];
 
   const activeReconcileAccountId = reconcileAccountId ?? ((accounts as any[]).filter((a: any) => a.type === "checking")[0]?.id ?? null);
   const { data: reconcileData, isLoading: reconcileLoading } = useQuery({
@@ -233,7 +323,7 @@ export default function Transactions() {
 
   const accountMap = Object.fromEntries(accounts.map((a: any) => [a.id, a.name]));
   const catMap = Object.fromEntries(allCats.map((c: any) => [c.id, c.name]));
-  const loading = txnTab === "checking" ? isLoading : cardLoading;
+  const loading = txnTab === "checking" ? isLoading : txnTab === "all" ? (isLoading || allCardsLoading) : cardLoading;
 
   return (
     <div className="space-y-6">
@@ -242,17 +332,21 @@ export default function Transactions() {
           <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-1.5">Transactions <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           {txnTab !== "reconcile" && (
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              {txnTab === "checking" ? `${txns.length} transaction${txns.length !== 1 ? "s" : ""}` : `${cardTxns.length} card charge${cardTxns.length !== 1 ? "s" : ""}`}
+              {txnTab === "checking"
+                ? `${txns.length} transaction${txns.length !== 1 ? "s" : ""}`
+                : txnTab === "all"
+                  ? `${unifiedRows.length} transaction${unifiedRows.length !== 1 ? "s" : ""} across ${1 + (cards as any[]).length} account${(cards as any[]).length !== 0 ? "s" : ""}`
+                  : `${cardTxns.length} card charge${cardTxns.length !== 1 ? "s" : ""}`}
             </p>
           )}
         </div>
         <div className="flex gap-2 flex-wrap">
           <div className="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
-            {(["checking", "card", "reconcile"] as TxnTab[]).map(t => (
+            {(["all", "checking", "card", "reconcile"] as TxnTab[]).map(t => (
               <button key={t} type="button"
                 onClick={() => setTxnTab(t)}
                 className={`px-3 py-1 text-xs font-medium rounded-md capitalize transition-colors ${txnTab === t ? "bg-white dark:bg-gray-800 shadow-sm text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}`}>
-                {t === "checking" ? "Checking" : t === "card" ? "Credit Cards" : "Reconcile"}
+                {t === "all" ? "All" : t === "checking" ? "Checking" : t === "card" ? "Credit Cards" : "Reconcile"}
               </button>
             ))}
           </div>
@@ -286,8 +380,8 @@ export default function Transactions() {
         </div>
       </div>
 
-      {/* Filter bar — checking tab only */}
-      {txnTab === "checking" && (
+      {/* Filter bar — checking and all tabs */}
+      {(txnTab === "checking" || txnTab === "all") && (
         <div className="flex flex-wrap gap-2">
           <input
             className="input flex-1 min-w-[12rem] text-sm"
@@ -295,16 +389,18 @@ export default function Transactions() {
             value={searchQ}
             onChange={e => setSearchQ(e.target.value)}
           />
-          <select
-            className="input w-auto text-sm"
-            value={filterCatId ?? ""}
-            onChange={e => setFilterCatId(e.target.value ? parseInt(e.target.value) : null)}
-          >
-            <option value="">All categories</option>
-            {allCats.map((c: any) => (
-              <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
-            ))}
-          </select>
+          {txnTab === "checking" && (
+            <select
+              className="input w-auto text-sm"
+              value={filterCatId ?? ""}
+              onChange={e => setFilterCatId(e.target.value ? parseInt(e.target.value) : null)}
+            >
+              <option value="">All categories</option>
+              {allCats.map((c: any) => (
+                <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
+              ))}
+            </select>
+          )}
           <input type="number" className="input w-28 text-sm" placeholder="Min $" step="0.01"
             value={filterAmountMin} onChange={e => setFilterAmountMin(e.target.value)} />
           <input type="number" className="input w-28 text-sm" placeholder="Max $" step="0.01"
@@ -321,6 +417,52 @@ export default function Transactions() {
 
       {txnTab !== "reconcile" && <div className="card overflow-hidden p-0">
         {loading && <p className="text-sm text-gray-400 text-center py-8">Loading…</p>}
+
+        {/* All: checking + every card, merged and sorted chronologically */}
+        {txnTab === "all" && !loading && (
+          <>
+            {unifiedRows.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No transactions in this period</p>}
+            {unifiedRows.length > 0 && (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-700">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Source</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                    {me?.debug_capture_raw_bank_data && <th className="px-4 py-3 w-8"></th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                  {unifiedRows.map(r => (
+                    <tr key={`${r.kind}-${r.id}`} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                        {new Date(r.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </td>
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
+                        <div className="truncate flex items-center gap-1.5"><SourceBadge source={r.source} />{r.description}</div>
+                        <span className="text-xs text-gray-400 md:hidden">{r.sourceLabel}</span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 hidden md:table-cell">
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${r.kind === "card" ? "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400" : "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400"}`}>
+                          {r.sourceLabel}
+                        </span>
+                      </td>
+                      <td className={`px-4 py-3 text-right font-semibold tabular-nums ${r.amount >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {r.amount >= 0 ? "+" : ""}{fmt(r.amount)}
+                      </td>
+                      {me?.debug_capture_raw_bank_data && (
+                        <td className="px-4 py-3 text-right">
+                          {r.externalId && <RawDataButton externalId={r.externalId} />}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
 
         {/* Checking transactions */}
         {txnTab === "checking" && !loading && (

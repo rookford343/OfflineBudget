@@ -42,6 +42,7 @@ export const bankSyncApi = {
   accounts: (connectionId: number) => api.get(`/bank-sync/${connectionId}/accounts`).then((r) => r.data),
   status: () => api.get("/bank-sync/status").then((r) => r.data),
   syncNow: () => api.post("/bank-sync/sync-now").then((r) => r.data),
+  schedulerStatus: () => api.get("/bank-sync/scheduler-status").then((r) => r.data),
   disconnect: (connectionId: number) => api.delete(`/bank-sync/${connectionId}`),
 };
 
@@ -85,6 +86,10 @@ export const transactionsApi = {
   create: (data: object) => api.post("/transactions", data).then((r) => r.data),
   update: (id: number, data: object) => api.patch(`/transactions/${id}`, data).then((r) => r.data),
   remove: (id: number) => api.delete(`/transactions/${id}`),
+  // Debug-only -- 404s whenever debug_capture_raw_bank_data was off at sync
+  // time, which is the normal case. Callers treat a 404 as "no raw data",
+  // not an error.
+  raw: (externalId: string) => api.get(`/transactions/raw/${encodeURIComponent(externalId)}`).then((r) => r.data),
 };
 
 // ── Budget ────────────────────────────────────────────────────────────────────
