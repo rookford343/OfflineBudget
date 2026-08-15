@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { NavLink } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { authApi } from "../../api";
 import { User, Mail, KeyRound } from "lucide-react";
@@ -77,12 +78,25 @@ export default function ProfileTab() {
           {profileSaved && <span className="text-sm text-green-600">Saved!</span>}
         </div>
         <div className="space-y-2">
-          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2"><Mail size={14} /> Email Notifications</h4>
-          <p className="text-xs text-gray-500 dark:text-gray-400">Used for daily summary emails. Requires SMTP to be configured on the server. Enter multiple addresses separated by commas to send to more than one person.</p>
+          <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-2"><Mail size={14} /> Account Email</h4>
+          {/* Scoped down 2026-08-15: this used to claim it controlled daily
+              summary delivery and accepted a comma-separated list, which now
+              duplicates (and is overridden by) Notifications & Email →
+              Report Recipients. Two places to set "who gets the email", with
+              one silently winning, is worse than one. This is the account's
+              own address — identity and password reset — and the fallback
+              when no recipient list is configured. */}
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Your account address, used for password reset. It's also the fallback for the daily
+            summary when no recipients are set under{" "}
+            <NavLink to="/settings/notifications" className="text-indigo-600 dark:text-indigo-400 hover:underline">
+              Notifications &amp; Email
+            </NavLink>, which is where to configure who actually receives it.
+          </p>
           <div className="flex items-end gap-3">
             <div className="flex-1 max-w-xs">
-              <label className="label">Email Address(es)</label>
-              <input type="email" multiple className="input" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} placeholder="you@example.com, spouse@example.com" />
+              <label className="label">Email Address</label>
+              <input type="email" className="input" value={profileEmail} onChange={e => setProfileEmail(e.target.value)} placeholder="you@example.com" />
             </div>
             <button
               onClick={() => updateMeMut.mutate({ email: profileEmail || null })}
