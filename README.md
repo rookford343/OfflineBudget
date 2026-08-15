@@ -6,6 +6,47 @@ Built with **FastAPI + SQLite** on the backend, **React + TypeScript** on the fr
 
 ---
 
+## Screenshots
+
+All screenshots use the bundled demo dataset (`scripts/seed_demo.py`) — a
+fictional dual-income household. No real financial data appears anywhere in
+this repo.
+
+### Dashboard
+Household Snapshot, Available to Spend, and a plain-English month in review.
+
+![Dashboard](docs/images/dashboard.png)
+
+### Budget
+One headline answering "how much is left this month", then a progress bar per
+category. Checking-vs-card detail is one click away rather than a column.
+
+![Budget](docs/images/budget.png)
+
+### Spending
+Leads with *discretionary* spend — the part you actually decide — with fixed
+commitments (mortgage, tithe, insurance) reported separately so they don't
+drown it out.
+
+![Spending](docs/images/spending.png)
+
+### Forecast
+Day-by-day balance projection with credit cards due and planned one-offs.
+
+![Forecast](docs/images/forecast.png)
+
+### Transactions
+Checking and every card in one chronological view, sign-normalized.
+
+![Transactions](docs/images/transactions.png)
+
+### Recurring
+Income and bills that repeat, with monthly/quarterly/yearly frequencies.
+
+![Recurring](docs/images/recurring.png)
+
+---
+
 ## Features at a Glance
 
 | Area | Highlights |
@@ -19,6 +60,8 @@ Built with **FastAPI + SQLite** on the backend, **React + TypeScript** on the fr
 | [Reconciliation](#reconciliation) | Link transactions to recurring items; quarterly balance checkpoints |
 | [Net Worth](#net-worth) | Assets and liabilities with historical snapshots |
 | [Savings Goals](#savings-goals) | Track named goals with target amounts and target dates |
+| [Bank Sync](#transaction-import) | Optional automated daily sync via SimpleFIN Bridge, with self-healing catch-up if the machine was asleep |
+| [Settings](#settings-overview) | SMTP, report recipients, and schedule all configurable in the UI; secrets encrypted at rest |
 | [CLI](#cli) | All core operations available from the terminal without running the server |
 
 ---
@@ -31,7 +74,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 
 # 2. Install frontend dependencies
-cd frontend && npm install && cd ..
+cd frontend && bun install && cd ..
 
 # 3. Configure environment
 cp .env.example .env
@@ -123,6 +166,23 @@ The forecast engine generates projections on-the-fly from recurring items each t
 ---
 
 ## Spending Analysis
+
+**Discretionary vs. fixed.** Spending leads with the part you actually decide
+this month. Fixed commitments — mortgage, tithe, insurance — are reported
+separately, because a list topped by the mortgage tells you nothing you can
+act on. Mark a category discretionary in Settings → Categories.
+
+**Merchant grouping.** Bank descriptors are noisy: transaction ids, store
+numbers and payment references split one merchant across many rows. Amazon
+alone can fragment across 100+ distinct strings and never surface in a top-10
+list. Merchants are normalized automatically, and any grouping the heuristics
+get wrong can be renamed or merged from the Merchants tab.
+
+**What counts as spending.** Transfers between your own accounts and
+credit-card payoffs are excluded. A card payoff settles charges already
+counted individually, so counting the payment too would double-count the
+whole statement.
+
 
 The **Spending** page has five tabs:
 
@@ -218,10 +278,17 @@ The import preview groups similar transactions by normalizing descriptions (stri
 
 ## Budget Tracking
 
-- Set monthly budgets per sub-category from **Settings → Categories**
-- Budget amounts apply to all months (month=0) unless overridden
-- Rollover: enable per-category rollover so unspent budget carries forward
-- **Budget overview** — side-by-side actual vs. budgeted with variance for every category in the current month
+The Budget page leads with one number — everything budgeted minus everything
+spent — then a progress bar per category that turns amber at 80% and red past
+100%.
+
+- Set a budget inline from the pencil on any category row
+- Budget amounts apply to all months unless overridden for a specific month
+- A parent category's budget is the sum of its children, so budgeting at the
+  leaf (Shopping, Food & Drinks) rolls up correctly
+- **Rollover** — carry unspent budget forward per category
+- Expand a row to see the checking-vs-card split, or turn rollover on
+- Categories with no budget and no spending are folded out of the way
 
 ---
 
@@ -254,14 +321,16 @@ The **Transactions → Reconcile** tab helps you match records against bank stat
 
 | Section | What you can configure |
 |---------|----------------------|
-| **Preferences** | Dark mode toggle; navigation sidebar order (click arrows to reorder) |
+| **Preferences** | Dark mode; pinned sidebar items; suggested transfer increment; Parallel Ops feedback mode; background-job status; raw bank-data debug capture |
+| **Notifications & Email** *(admin)* | SMTP settings, daily send hour, weekly digest day, and the report recipient list. Password encrypted at rest and never returned by the API |
 | **Accounts** | Add / edit / delete accounts; low-balance alert threshold; interest rate; click any balance to correct it |
 | **Categories** | Hierarchical CRUD; budget amounts (inline edit); color; type (income / expense / savings); tax-deductible flag |
 | **Transaction Rules** | Auto-categorization rules with live pattern testing |
-| **Profile** | Display name; email address for daily summaries; password change |
-| **Tax Profile** | Filing status, state, salary, withholding, itemized deductions, Social Security tracker |
+| **Profile** | Display name; account email (used for password reset, and as the report fallback); password change; recovery code |
+| **Tax Profile** | Filing status, state, salary, withholding, itemized deductions, and a Social Security tracker that takes a pay-stub YTD checkpoint |
 | **Users** *(admin)* | Create admin or view-only users; toggle active status; reset passwords |
 | **Activity Log** *(admin)* | Browse all write operations with timestamp, user, method, path, and status |
+| **Verification Feedback** | Review values you flagged as wrong while Parallel Ops is on |
 | **Danger Zone** | Clear checking transactions; clear CC transactions; delete account |
 
 ---
@@ -303,20 +372,31 @@ python cli/budget.py cards list --username alice
 
 ## Email Notifications
 
-Configure SMTP in `.env` to enable daily summary emails:
+Everything here is configurable in the UI at **Settings → Notifications &
+Email** — SMTP host/port/credentials, the send hour, the weekly digest day,
+and the recipient list. Values set there override `.env` at runtime, so a
+fresh install can stay entirely file-configured and an existing one can move
+to the UI without an edit.
 
-```
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=you@gmail.com
-SMTP_PASS=<app-password>
-SMTP_FROM=OfflineBudget <you@gmail.com>
-DAILY_SUMMARY_HOUR=7
-```
+**Multiple recipients.** The daily report goes to a dedicated recipient list,
+separate from your login email — the people who read it don't need accounts.
+Comma-separate addresses.
 
-Each user sets their own email address in **Settings → Profile** and can send a test email to verify delivery. The summary includes checking balances, upcoming bills (7-day window), month-to-date expenses, and credit card balances.
+**The daily summary** includes the Household Snapshot, checking balances,
+upcoming bills for the next 7 days with real dates, month-to-date spending,
+and per-card balances with utilization. On the configured digest day it also
+carries spending by category, top merchants, and a balance-risk warning.
 
-> For Gmail: enable 2FA → Google Account → Security → App Passwords → generate a password for "Mail".
+**Reliability.** Both the daily email and the bank sync self-heal when the
+machine was asleep or offline at the scheduled time. A generous misfire grace
+window fires a missed trigger as soon as the process resumes, and a
+20-minute sweep separately retries any job that hasn't *succeeded* today —
+which catches the case where the trigger fired on time but the network wasn't
+up yet. Status is visible at Settings → Preferences → Background Jobs.
+
+**Secrets.** The SMTP password is encrypted at rest with `APP_ENCRYPTION_KEY`
+and is never returned by the API. Without an encryption key configured the
+app refuses to store it rather than falling back to plaintext.
 
 ---
 

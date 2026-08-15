@@ -6,7 +6,7 @@
 |------|---------|-------|
 | Python | 3.11+ | `python3 --version` |
 | Node.js | 20+ | `node --version` |
-| npm | 9+ | `npm --version` |
+| bun | 1.0+ | `bun --version` |
 
 ---
 
@@ -25,7 +25,7 @@ source .venv/bin/activate           # macOS/Linux
 pip install -r backend/requirements.txt
 
 # Install frontend dependencies
-cd frontend && npm install && cd ..
+cd frontend && bun install && cd ..
 
 # Copy the environment file
 cp .env.example .env
@@ -248,3 +248,63 @@ If you changed `JWT_SECRET` in `.env`, all existing tokens are invalidated. Log 
 
 **HTTPS cert not trusted by browser**
 Self-signed certificates from `setup-ssl.sh` will show a warning. Click "Advanced → Proceed" once per browser. For permanent trust, use `mkcert` — see [SECURITY.md](../SECURITY.md).
+
+---
+
+## Email reports and bank sync
+
+Both are optional and both are configured in the app rather than in files.
+
+### Set up email
+
+1. **Settings → Notifications & Email** (admin only).
+2. Fill in your SMTP host, port, username, password and from-address. For
+   Gmail use an [app password](https://support.google.com/accounts/answer/185833),
+   not your account password.
+3. Add **Daily Report Recipients** — comma-separated. These people don't need
+   accounts in the app; this is just who receives the report. Leave it blank
+   and it falls back to your own account email.
+4. Pick the send hour and, if you want the weekly digest, the day it rides
+   along on.
+5. Hit **Send test email**. A saved form proves nothing about whether mail
+   actually leaves your machine.
+
+> The SMTP password is encrypted before storage and is never sent back to the
+> browser. That requires `APP_ENCRYPTION_KEY` in your `.env` — generate one
+> with:
+> ```bash
+> python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+> ```
+> Without it the app refuses to store the password rather than writing it in
+> plaintext.
+
+### If your machine sleeps
+
+Scheduled jobs on a laptop are unreliable by nature. Two mechanisms cover it:
+
+- A missed trigger fires as soon as the process resumes, within a 12-hour
+  grace window.
+- A sweep every 20 minutes retries any job that hasn't *succeeded* today.
+  This catches the case the grace window can't: the trigger fired on time,
+  but the network wasn't up yet after waking.
+
+Check **Settings → Preferences → Background Jobs** to see when each job last
+succeeded, or what it failed with.
+
+---
+
+## Making Spending useful
+
+Two settings change how much the Spending page tells you:
+
+**Mark your discretionary categories.** In Settings → Categories, flag the
+ones that are a choice each month — Shopping, Food & Drinks, Entertainment,
+Subscriptions, Groceries. Everything else (mortgage, insurance, tithe) counts
+as a fixed commitment. Spending then leads with the discretionary number,
+which is the only part you can act on.
+
+**Fix any merchant grouping that looks wrong.** Merchant names are grouped
+automatically from raw bank descriptors, which are noisy — store numbers,
+transaction ids, payment references. Hover any row on the Merchants tab and
+click the pencil to rename it, or type an existing merchant's name to merge
+the two together.
