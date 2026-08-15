@@ -9,7 +9,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine,
   AreaChart, Area, Sector,
 } from "recharts";
-import { ChevronDown, ChevronRight, HelpCircle, Pencil } from "lucide-react";
+import { ChevronDown, ChevronRight, HelpCircle, Pencil, AlertTriangle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
 function isDarkMode(): boolean {
@@ -145,6 +145,16 @@ export default function Spending() {
       return entry;
     });
   }, [monthlyByCat, visibleCatIds]);
+
+  // Overview's Top Merchants panel. Its own query so it follows the page's
+  // date range and source filter, and stays loaded on the Overview tab rather
+  // than only when the Merchants tab is open.
+  const { data: overviewMerchantsRaw = [] } = useQuery<any[]>({
+    queryKey: ["spending-merchants-overview", start, end, selectedAccountId, selectedCardId],
+    queryFn: () => spendingApi.byMerchant(start, end, selectedAccountId ?? undefined, selectedCardId ?? undefined, 8),
+    enabled: activeTab === "overview" && !!start && !!end,
+  });
+  const overviewMerchants = overviewMerchantsRaw.slice(0, 8);
 
   // Pie chart data
   const pieData = (overview?.categories ?? [])
@@ -465,30 +475,41 @@ export default function Spending() {
             </div>
           )}
 
-          {/* Donut chart */}
-          {pieData.length > 0 && (
+          {/* Top merchants. Replaced the donut 2026-08-15: it plotted the same
+              category totals the stacked bar chart directly above already
+              showed, just in a shape that's worse at comparison. Merchants are
+              the one cut of this data not available anywhere else on the
+              Overview, and the actionable one -- categories tell you Groceries
+              is high, merchants tell you where it went. */}
+          {overviewMerchants.length > 0 && (
             <div className="card">
-              <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8] mb-4">Period Totals by Category</h3>
-              <ResponsiveContainer width="100%" height={260}>
-                <PieChart>
-                  <Pie
-                    data={pieData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={65}
-                    outerRadius={105}
-                    paddingAngle={2}
-                    dataKey="value"
-                    activeIndex={activeIndex}
-                    activeShape={renderActiveShape}
-                    onMouseEnter={(_, index) => setActiveIndex(index)}
-                    onMouseLeave={() => setActiveIndex(-1)}
-                  >
-                    {pieData.map((entry: any, i: number) => <Cell key={i} fill={entry.color} />)}
-                  </Pie>
-                  <Legend formatter={(v) => <span style={{ color: ct.tick }} className="text-sm">{v}</span>} />
-                </PieChart>
-              </ResponsiveContainer>
+              <div className="flex items-baseline justify-between mb-3">
+                <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8]">Top Merchants</h3>
+                <button onClick={() => setActiveTab("merchants")}
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
+                  See all →
+                </button>
+              </div>
+              <div className="space-y-2">
+                {overviewMerchants.map((m: any) => {
+                  const top = Number(overviewMerchants[0].total) || 1;
+                  const pct = (Number(m.total) / top) * 100;
+                  return (
+                    <div key={m.name}>
+                      <div className="flex items-baseline justify-between gap-3 text-sm">
+                        <span className="truncate text-gray-700 dark:text-gray-300">{m.name}</span>
+                        <span className="shrink-0 tabular-nums font-medium text-gray-900 dark:text-gray-100">
+                          {fmt(m.total)}
+                          <span className="ml-1.5 text-xs font-normal text-gray-400">{m.count}x</span>
+                        </span>
+                      </div>
+                      <div className="mt-1 h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full bg-indigo-400" style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -717,7 +738,10 @@ export default function Spending() {
                   <div className="card space-y-2">
                     <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Income</h4>
                     <dl className="space-y-1 text-sm">
-                      <div className="flex justify-between"><dt className="text-gray-500">Gross salary</dt><dd className="tabular-nums">{fmt(te.federal_withheld + Number(te.federal_tax) > 0 ? (Number(te.annual_salary ?? 0)) : 0)}{fmt(Number((taxEstimate as any).taxable_income) + Number((taxEstimate as any).deduction_used))}</dd></div>
+                      <div className="flex justify-between"><dt className="text-gray-500">Gross salary</dt><dd className="tabular-nums">{/* Gross = taxable income + whichever deduction was applied. The old
+    expression rendered a dead ternary ($0.00) immediately followed by the
+    real figure, so the row read "$0.00$205,296.00". */}
+                      {fmt(Number(te.taxable_income) + Number(te.deduction_used))}</dd></div>
                       <div className="flex justify-between"><dt className="text-gray-500">Deduction ({te.used_itemized ? "itemized" : "standard"})</dt><dd className="tabular-nums text-green-600">−{fmt(te.deduction_used)}</dd></div>
                       <div className="flex justify-between border-t border-gray-100 dark:border-gray-700 pt-1 font-medium"><dt>Taxable income</dt><dd className="tabular-nums">{fmt(te.taxable_income)}</dd></div>
                       {te.used_itemized && te.itemized_breakdown && (() => {
@@ -771,16 +795,56 @@ export default function Spending() {
                     </table>
                   </div>
                 )}
-                <p className="text-xs text-gray-400">Estimates use 2025 federal brackets. State tax uses approximate effective rates. This is not tax advice — consult a tax professional.</p>
+                <>
+                  {(taxEstimate as any)?.bracket_year && (taxEstimate as any).bracket_year !== taxYear && (
+                    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 mb-2 dark:border-amber-900/60 dark:bg-amber-950/40">
+                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                      <p className="text-xs text-amber-800 dark:text-amber-200">
+                        You're estimating <b>{taxYear}</b>, but the bundled bracket tables are{" "}
+                        <b>{(taxEstimate as any).bracket_year}</b>. Rates, bracket floors and the standard
+                        deduction all shift year to year, so treat this as a rough figure until the {taxYear} tables ship.
+                      </p>
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-400">
+                    Estimates use {(taxEstimate as any)?.bracket_year ?? "bundled"} federal brackets. State tax uses
+                    approximate effective rates. This is not tax advice — consult a tax professional.
+                  </p>
+                </>
               </div>
             );
           })()}
         </div>
       )}
       {showHelp && <HelpPanel title="Spending Analysis" body={"Analyze your spending by category across any date range.\n\nOverview tab: budgeted vs. actual by category with breakdown by account and card.\nTrends tab: year-over-year comparison and 24-month rolling totals.\nFlow tab: Sankey diagram showing income sources flowing into expense categories.\nTax Export tab: download a CSV of deductible transactions for tax filing."} onClose={() => setShowHelp(false)} />}
+      {renameTarget && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+             onClick={() => setRenameTarget(null)}>
+          <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Rename merchant</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Merchant names are grouped automatically from raw bank descriptors. Rename
+              <span className="font-medium"> {renameTarget}</span> — or type an existing merchant's
+              name to merge the two together.
+            </p>
+            <input className="input w-full" value={renameValue} autoFocus
+              onChange={e => setRenameValue(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && renameValue.trim()) renameMut.mutate({ pattern: renameTarget, display_name: renameValue.trim() }); }} />
+            <div className="flex justify-end gap-2">
+              <button className="btn-secondary text-sm" onClick={() => setRenameTarget(null)}>Cancel</button>
+              <button className="btn-primary text-sm"
+                disabled={!renameValue.trim() || renameMut.isPending}
+                onClick={() => renameMut.mutate({ pattern: renameTarget, display_name: renameValue.trim() })}>
+                {renameMut.isPending ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
 
 function SankeyChart({ data }: { data: any }) {
   const WIDTH = 720;
@@ -853,30 +917,6 @@ function SankeyChart({ data }: { data: any }) {
         })}
       </svg>
 
-      {renameTarget && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
-             onClick={() => setRenameTarget(null)}>
-          <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
-            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Rename merchant</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Merchant names are grouped automatically from raw bank descriptors. Rename
-              <span className="font-medium"> {renameTarget}</span> — or type an existing merchant's
-              name to merge the two together.
-            </p>
-            <input className="input w-full" value={renameValue} autoFocus
-              onChange={e => setRenameValue(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter" && renameValue.trim()) renameMut.mutate({ pattern: renameTarget, display_name: renameValue.trim() }); }} />
-            <div className="flex justify-end gap-2">
-              <button className="btn-secondary text-sm" onClick={() => setRenameTarget(null)}>Cancel</button>
-              <button className="btn-primary text-sm"
-                disabled={!renameValue.trim() || renameMut.isPending}
-                onClick={() => renameMut.mutate({ pattern: renameTarget, display_name: renameValue.trim() })}>
-                {renameMut.isPending ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
