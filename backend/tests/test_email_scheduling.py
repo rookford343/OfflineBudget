@@ -68,6 +68,13 @@ def _run_send_daily_summaries(monkeypatch, *, recipients: str, today: date, week
             self.model = model
         def filter(self, *a, **kw):
             return self
+        def filter_by(self, **kw):
+            return self
+        def first(self):
+            # No AppSetting rows -> app_settings falls back to the .env
+            # defaults these tests already configure via monkeypatched
+            # settings, keeping each test's original intent.
+            return None
         def all(self):
             if self.model is models.User:
                 return [user]
@@ -91,7 +98,7 @@ def _run_send_daily_summaries(monkeypatch, *, recipients: str, today: date, week
 
     monkeypatch.setattr("backend.services.summary_generator.generate_daily_summary", _fake_generate_daily_summary)
     monkeypatch.setattr("backend.services.summary_generator.generate_weekly_digest", lambda db, u, account_id: "WEEKLY_DIGEST_STUB")
-    monkeypatch.setattr("backend.services.email_service.send_email", lambda *a, **kw: None)
+    monkeypatch.setattr("backend.services.email_service.send_email_via", lambda *a, **kw: (True, None))
 
     main_module._send_daily_summaries()
     return captured["weekly_digest"]
@@ -157,6 +164,13 @@ def test_daily_summary_emails_every_recipient_in_a_multi_address_field(monkeypat
             self.model = model
         def filter(self, *a, **kw):
             return self
+        def filter_by(self, **kw):
+            return self
+        def first(self):
+            # No AppSetting rows -> app_settings falls back to the .env
+            # defaults these tests already configure via monkeypatched
+            # settings, keeping each test's original intent.
+            return None
         def all(self):
             if self.model is models.User:
                 return [user]
@@ -173,7 +187,12 @@ def test_daily_summary_emails_every_recipient_in_a_multi_address_field(monkeypat
     monkeypatch.setattr("backend.database.SessionLocal", lambda: _FakeSession())
     monkeypatch.setattr("backend.services.summary_generator.generate_daily_summary", lambda db, u, **kw: ("<html>", "text"))
     sent_to = []
-    monkeypatch.setattr("backend.services.email_service.send_email", lambda to, *a, **kw: sent_to.append(to))
+
+    def _capture(db, to, *a, **kw):
+        sent_to.append(to)
+        return (True, None)
+
+    monkeypatch.setattr("backend.services.email_service.send_email_via", _capture)
 
     main_module._send_daily_summaries()
 
