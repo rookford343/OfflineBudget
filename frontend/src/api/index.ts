@@ -43,6 +43,13 @@ export const bankSyncApi = {
   status: () => api.get("/bank-sync/status").then((r) => r.data),
   syncNow: () => api.post("/bank-sync/sync-now").then((r) => r.data),
   schedulerStatus: () => api.get("/bank-sync/scheduler-status").then((r) => r.data),
+};
+
+// ── Server settings (admin only) ──────────────────────────────────────────────
+export const appSettingsApi = {
+  get: () => api.get("/settings").then((r) => r.data),
+  update: (data: object) => api.patch("/settings", data).then((r) => r.data),
+  testEmail: () => api.post("/settings/test-email").then((r) => r.data),
   disconnect: (connectionId: number) => api.delete(`/bank-sync/${connectionId}`),
 };
 

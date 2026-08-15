@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     # addendum entirely (Daily Summary still sends). The addresses here are no longer used for
     # delivery; the digest goes to each user's own email (same recipients as the Daily Summary).
     BANK_TOKEN_ENCRYPTION_KEY: str | None = None  # Fernet key for encrypting SimpleFIN access URLs at rest
+    # Same Fernet key, honest name: it now protects every secret at rest, not
+    # only bank tokens (the SMTP password stored via the Settings page uses it
+    # too). Falls back to BANK_TOKEN_ENCRYPTION_KEY so existing .env files
+    # keep working unchanged -- see app_encryption_key below.
+    APP_ENCRYPTION_KEY: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -43,6 +48,13 @@ class Settings(BaseSettings):
     @property
     def digest_recipients_list(self) -> list[str]:
         return [e.strip() for e in self.DIGEST_RECIPIENTS.split(",") if e.strip()]
+
+    @property
+    def app_encryption_key(self) -> str | None:
+        """One Fernet key for every secret at rest. APP_ENCRYPTION_KEY is the
+        name going forward; BANK_TOKEN_ENCRYPTION_KEY is honoured so existing
+        deployments (and Dan's live .env) need no change."""
+        return self.APP_ENCRYPTION_KEY or self.BANK_TOKEN_ENCRYPTION_KEY
 
 
 settings = Settings()

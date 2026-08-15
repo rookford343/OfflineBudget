@@ -28,6 +28,7 @@ from backend.routers import data as data_router_module
 from backend.routers import bank_sync as bank_sync_router_module
 from backend.routers import planned_transfers as planned_transfers_router_module
 from backend.routers import verification_flags as verification_flags_router_module
+from backend.routers import settings as settings_router_module
 
 logger = logging.getLogger(__name__)
 
@@ -70,22 +71,28 @@ _MISFIRE_GRACE_SECONDS = 12 * 3600
 def _send_daily_summaries() -> None:
     from backend.database import SessionLocal
     from backend import models
-    from backend.services.email_service import send_email, parse_recipients
+    from backend.services.email_service import send_email_via
     from backend.services.summary_generator import generate_daily_summary, generate_weekly_digest
-    from backend.services import scheduler_state
-
-    is_digest_day = bool(settings.digest_recipients_list) and _is_digest_day(date.today(), settings.WEEKLY_DIGEST_DAY)
+    from backend.services import scheduler_state, app_settings
 
     db = SessionLocal()
+    # Read through app_settings so a change made on the Settings page takes
+    # effect on the next run without a restart or an .env edit.
+    is_digest_day = bool(app_settings.get_effective(db, "WEEKLY_DIGEST_ENABLED")) and _is_digest_day(
+        date.today(), app_settings.get_effective(db, "WEEKLY_DIGEST_DAY") or settings.WEEKLY_DIGEST_DAY,
+    )
     scheduler_state.record_attempt(db, "daily_summary")
     last_error: str | None = None
     try:
-        users = db.query(models.User).filter(
-            models.User.is_active == True,
-            models.User.email.isnot(None),
-            models.User.email != "",
-        ).all()
+        # No longer filtered on User.email being non-empty: recipients can now
+        # come from REPORT_RECIPIENTS instead, so a user with a blank account
+        # email can still have a report going to their household. The
+        # per-user recipient check below is what decides whether to send.
+        users = db.query(models.User).filter(models.User.is_active == True).all()
         for user in users:
+            recipients = app_settings.get_recipients(db, user)
+            if not recipients:
+                continue
             accounts = db.query(models.Account).filter(
                 models.Account.user_id == user.id,
                 models.Account.is_active == True,
@@ -102,8 +109,10 @@ def _send_daily_summaries() -> None:
                 subject = f"Daily Budget Summary — {date.today().strftime('%B %-d, %Y')}"
                 if weekly_digest is not None:
                     subject += " + Weekly Digest"
-                for recipient in parse_recipients(user.email):
-                    send_email(recipient, subject, html_body, text_body)
+                for recipient in recipients:
+                    ok, err = send_email_via(db, recipient, subject, html_body, text_body)
+                    if not ok:
+                        last_error = f"{recipient}: {err}"
             except Exception as exc:
                 logger.error("Summary failed for %s: %s", user.username, exc)
                 last_error = f"{user.username}: {exc}"
@@ -171,7 +180,15 @@ def _scheduler_sweep() -> None:
         if scheduler_state.due_for_retry(db, "bank_sync", target_hour=_BANK_SYNC_HOUR):
             logger.info("Scheduler sweep: bank_sync missed today, retrying")
             _run_bank_sync()
-        if scheduler_state.due_for_retry(db, "daily_summary", target_hour=settings.DAILY_SUMMARY_HOUR):
+        summary_hour = app_settings.get_effective(db, "DAILY_SUMMARY_HOUR")
+        if summary_hour is None:
+            summary_hour = settings.DAILY_SUMMARY_HOUR
+        # The cron trigger's own hour is fixed at process start (APScheduler
+        # reads it once), so changing the hour on the Settings page takes full
+        # effect on the next restart. Until then the sweep is what honours it:
+        # it re-checks every 20 minutes and fires the job once the new hour has
+        # passed without a success, so a changed hour still sends the same day.
+        if scheduler_state.due_for_retry(db, "daily_summary", target_hour=summary_hour):
             logger.info("Scheduler sweep: daily_summary missed today, retrying")
             _send_daily_summaries()
     finally:
@@ -244,6 +261,7 @@ app.include_router(data_router_module.router)
 app.include_router(bank_sync_router_module.router)
 app.include_router(planned_transfers_router_module.router)
 app.include_router(verification_flags_router_module.router)
+app.include_router(settings_router_module.router)
 
 
 @app.get("/health", tags=["health"])
