@@ -38,6 +38,63 @@ def is_card_payment(merchant: str | None) -> bool:
     return _CARD_PAYMENT_PATTERNS.search(merchant) is not None
 
 
+# Bank wordings for money moved between the user's own accounts.
+_TRANSFER_DESCRIPTION_MARKERS = ("online transfer", "transfer to", "transfer from")
+
+
+def looks_like_internal_transfer(description: str | None) -> bool:
+    """True when a CHECKING description looks like money moved between the
+    user's own accounts rather than spent.
+
+    HEURISTIC, not a fact: `Transaction` has no persisted `is_transfer`
+    column (it exists only transiently on CSV-import row schemas and is
+    discarded once categorization decisions are made), so the description
+    text is the only signal available at this layer. False positives (a
+    merchant literally named "Transfer To ...") and false negatives (a bank
+    wording we don't list) are both possible -- the same accuracy tolerance
+    the codebase already accepts from card_matching.card_matches_description.
+    """
+    desc = (description or "").lower()
+    return any(marker in desc for marker in _TRANSFER_DESCRIPTION_MARKERS)
+
+
+def is_real_checking_spend(description: str | None, active_cards: list) -> bool:
+    """Whether a negative checking row is money actually leaving the household.
+
+    Two things routinely land in checking as plain uncategorized debits and
+    are not spending:
+
+      - A credit-card payoff ("CHASE CREDIT CRD AUTOPAY"). The charges it
+        settles were already counted individually on the card side, so
+        counting the payment double-counts the entire statement. Live on
+        2026-08-15 this was $11,312.54 -- by far the largest "merchant" in
+        Dan's July list, above his mortgage.
+      - An internal transfer ("Online Transfer to CHK ...0054"). It never
+        leaves the household at all, yet showed up as the top August
+        "merchant" at $1,000.
+
+    This predicate is the single source of truth for that question.
+    spendable_pacer.py held the only copy until 2026-08-15, which is exactly
+    why the Spending page and the weekly email -- built on
+    spending_helpers -- never got the fix and stayed inflated. Same class of
+    drift as forecast_engine._fires_on vs summary_generator._fires_soon.
+    """
+    from backend.services.card_matching import card_matches_description
+
+    if any(card_matches_description(card, description or "") for card in active_cards):
+        return False
+    if looks_like_internal_transfer(description):
+        return False
+    return True
+
+
+def _active_cards(db: Session, user_id: int) -> list:
+    return db.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user_id,
+        models.CreditCard.is_active == True,
+    ).all()
+
+
 def merchant_totals(
     db: Session,
     user_id: int,
@@ -82,7 +139,10 @@ def merchant_totals(
     )
     if account_id:
         checking_q = checking_q.filter(models.Transaction.account_id == account_id)
-    debit_rows = checking_q.all()
+    # Card payoffs and internal transfers can't be expressed as SQL: both need
+    # the description matched against Python-side data. Filter after fetch.
+    cards = _active_cards(db, user_id)
+    debit_rows = [t for t in checking_q.all() if is_real_checking_spend(t.description, cards)]
     debit_descriptions = {t.description for t in debit_rows if t.description}
     for t in debit_rows:
         key = t.description or "Unknown"
@@ -120,7 +180,13 @@ def merchant_totals(
             counts[key] = counts.get(key, 0) + 1
 
     sorted_entries = sorted(totals.items(), key=lambda x: x[1], reverse=True)[:limit]
-    return [(name, total, counts[name]) for name, total in sorted_entries]
+    # counts.get, not counts[]: a merchant appearing ONLY as a refund in this
+    # window (negative card row) lands in `totals` but never increments
+    # `counts`, which is guarded to charges. That raised KeyError and took the
+    # whole Spending page down with a 500. Latent before 2026-08-15 and only
+    # reachable once the transfer/payoff filter changed which rows survive --
+    # hit immediately on Dan's real July data ("MICHAELS STORES 9951").
+    return [(name, total, counts.get(name, 0)) for name, total in sorted_entries]
 
 
 def category_totals_for_range(db: Session, user_id: int, start: date, end: date) -> dict[int | None, Decimal]:
@@ -150,7 +216,8 @@ def category_totals_for_range(db: Session, user_id: int, start: date, end: date)
             NOT_SAVINGS,
         )
     )
-    debit_rows = checking_q.all()
+    cards = _active_cards(db, user_id)
+    debit_rows = [t for t in checking_q.all() if is_real_checking_spend(t.description, cards)]
     debit_descriptions = {t.description for t in debit_rows if t.description}
     for t in debit_rows:
         totals[t.category_id] = totals.get(t.category_id, Decimal("0")) + abs(t.amount)
