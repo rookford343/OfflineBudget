@@ -25,7 +25,7 @@ function chartTheme() {
   };
 }
 
-const emptyExpense = { name: "", amount: "", expected_date: today(), notes: "", account_id: "" };
+const emptyExpense = { name: "", amount: "", expected_date: today(), notes: "", account_id: "", card_id: "", direction: "outflow" };
 
 export default function Forecast() {
   const qc = useQueryClient();
@@ -88,6 +88,12 @@ export default function Forecast() {
     queryKey: ["cards-upcoming-due"],
     queryFn: cardsApi.upcomingDue,
   });
+
+  const { data: cards = [] } = useQuery<any[]>({
+    queryKey: ["cards"],
+    queryFn: cardsApi.list,
+  });
+  const activeCards = (cards as any[]).filter((c: any) => c.is_active);
 
   const { data: dayCheckpoints = [] } = useQuery<any[]>({
     queryKey: ["day-checkpoints", activeAccountId],
@@ -237,24 +243,38 @@ export default function Forecast() {
 
   // Baseline chart data split at today for actual vs projected
   const todayStr = today();
-  const chartData = (quarters as any[]).flatMap((q: any) =>
-    q.days.filter((_: any, i: number) => i % 3 === 0).map((d: any) => {
-      const balance = parseFloat(d.projected_balance);
-      return {
-        date: d.date,
-        baseline: balance,
-        actual: d.date <= todayStr ? balance : null,
-        projected: d.date >= todayStr ? balance : null,
-        label: new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-      };
-    })
-  );
+  // Sampled to every 3rd day to keep the line readable, but each quarter's
+  // lowest-balance day is always kept. That trough is exactly what
+  // /forecast/risk scans for, and dropping it meant the red banner could warn
+  // about a dip that was invisible on the graph it sits above.
+  const chartData = (quarters as any[]).flatMap((q: any) => {
+    const lowest = (q.days as any[]).reduce(
+      (lo: any, d: any) => (parseFloat(d.projected_balance) < parseFloat(lo.projected_balance) ? d : lo),
+      q.days[0],
+    );
+    return (q.days as any[])
+      .filter((d: any, i: number) => i % 3 === 0 || d.date === lowest?.date)
+      .map((d: any) => {
+        const balance = parseFloat(d.projected_balance);
+        return {
+          date: d.date,
+          baseline: balance,
+          actual: d.date <= todayStr ? balance : null,
+          projected: d.date >= todayStr ? balance : null,
+          label: new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        };
+      });
+  });
 
   // Merge scenario trace into chart data
   const scenarioMap: Record<string, number> = {};
   if (scenarioId !== null && (scenarioQuarters as any[]).length > 0) {
+    // Every day, not every 3rd: this is a lookup keyed by date, and sampling it
+    // separately from chartData left the scenario line with holes wherever the
+    // two filters disagreed (which they now do, since chartData also keeps each
+    // quarter's trough). Extra keys are simply never read.
     (scenarioQuarters as any[]).forEach((q: any) =>
-      q.days.filter((_: any, i: number) => i % 3 === 0).forEach((d: any) => {
+      (q.days as any[]).forEach((d: any) => {
         scenarioMap[d.date] = parseFloat(d.projected_balance);
       })
     );
@@ -275,20 +295,25 @@ export default function Forecast() {
     expenses: parseFloat(q.total_expenses),
   }));
 
-  // SS limit estimate
+  // SS limit: read the real crossing date off the forecast's own boosted
+  // paychecks (is_ss_boosted) rather than re-deriving one client-side. The old
+  // client model assumed a strict 14-day cadence from Jan 1 and ignored
+  // paychecks already received, and landed two months early (July vs the
+  // backend's real September) against Dan's actual semimonthly pay dates and
+  // YTD wages. Found live 2026-08-12 comparing the rendered banner to the
+  // fixed backend forecast.
   const ssGross = me?.ss_gross_per_paycheck ? parseFloat(me.ss_gross_per_paycheck) : null;
-  const ssWageBase = me?.ss_wage_base ? parseFloat(me.ss_wage_base) : 176100;
-  const ssBonus = me?.ss_bonus_ytd ? parseFloat(me.ss_bonus_ytd) : 0;
   const ssConfigured = ssGross !== null && ssGross > 0;
   let ssLimitMonth: string | null = null;
   let ssPerPaycheckIncrease: number | null = null;
   if (ssConfigured) {
-    const remainingWageBase = ssWageBase - ssBonus;
-    const payPeriodsToLimit = Math.ceil(remainingWageBase / ssGross!);
-    const ssDate = new Date(year, 0, 1);
-    ssDate.setDate(ssDate.getDate() + (payPeriodsToLimit - 1) * 14);
-    ssLimitMonth = ssDate.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-    ssPerPaycheckIncrease = ssGross! * 0.062;
+    const boostedDay = (quarters as any[])
+      .flatMap((q: any) => q.days as any[])
+      .find((d: any) => (d.transactions as any[]).some((t: any) => t.is_ss_boosted));
+    if (boostedDay) {
+      ssLimitMonth = new Date(boostedDay.date + "T12:00:00").toLocaleDateString("en-US", { month: "long", year: "numeric" });
+      ssPerPaycheckIncrease = ssGross! * 0.062;
+    }
   }
 
   const CustomTooltip = ({ active, payload, label }: any) => {
@@ -517,7 +542,7 @@ export default function Forecast() {
       )}
 
       {/* SS Tax Info */}
-      {ssConfigured && (
+      {ssConfigured && ssLimitMonth && (
         <div className="card bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
           <div className="flex items-start gap-3">
             <TrendingUp size={18} className="text-green-600 mt-0.5 shrink-0" />
@@ -529,7 +554,7 @@ export default function Forecast() {
                   <> · Paycheck increases by ~<strong>{fmt(ssPerPaycheckIncrease)}</strong> after that</>
                 )}
               </p>
-              <p className="text-xs text-green-600 dark:text-green-500 mt-0.5">Based on ${ssGross?.toLocaleString()}/paycheck gross · ${ssWageBase.toLocaleString()} wage base</p>
+              <p className="text-xs text-green-600 dark:text-green-500 mt-0.5">Based on ${ssGross?.toLocaleString()}/paycheck gross · from your actual forecast, not estimated</p>
             </div>
           </div>
         </div>
@@ -567,14 +592,14 @@ export default function Forecast() {
       <div className="card">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Planned Expenses</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400">One-off future costs that appear in the balance projection</p>
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Planned One-Offs</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400">One-off future costs — or money coming in — that appear in the balance projection</p>
           </div>
           <button onClick={() => setShowExpenseForm(true)} className="btn-primary btn-sm text-xs px-3 py-1.5"><Plus size={14} /> Add</button>
         </div>
 
         {(plannedExpenses as any[]).length === 0 && !showExpenseForm && (
-          <p className="text-sm text-gray-400 text-center py-4">No planned expenses yet — add a vacation, down payment, or other future cost</p>
+          <p className="text-sm text-gray-400 text-center py-4">No planned one-offs yet — add a vacation, a down payment, or an expected bonus</p>
         )}
 
         {(plannedExpenses as any[]).length > 0 && (
@@ -597,20 +622,38 @@ export default function Forecast() {
                         <input type="date" className="input" value={editExpenseForm.expected_date} onChange={e => setEditExpenseForm({ ...editExpenseForm, expected_date: e.target.value })} />
                       </div>
                       <div>
-                        <label className="label">Account (optional)</label>
-                        <select className="input" value={editExpenseForm.account_id} onChange={e => setEditExpenseForm({ ...editExpenseForm, account_id: e.target.value })}>
-                          <option value="">Any account</option>
-                          {checkingAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                        <label className="label">Direction</label>
+                        <select className="input" value={editExpenseForm.direction} onChange={e => setEditExpenseForm({ ...editExpenseForm, direction: e.target.value })}>
+                          <option value="outflow">Money out</option>
+                          <option value="inflow">Money in</option>
                         </select>
                       </div>
                       <div>
+                        {/* Encodes which of account_id/card_id this expense hits: "" = any
+                            account, "account:<id>" = checking, "card:<id>" = card (paid off
+                            later, on that card's next due date -- not on Expected Date). */}
+                        <label className="label">Charge to</label>
+                        <select
+                          className="input"
+                          value={editExpenseForm.card_id ? `card:${editExpenseForm.card_id}` : editExpenseForm.account_id ? `account:${editExpenseForm.account_id}` : ""}
+                          onChange={e => {
+                            const [kind, id] = e.target.value.split(":");
+                            setEditExpenseForm({ ...editExpenseForm, account_id: kind === "account" ? id : "", card_id: kind === "card" ? id : "" });
+                          }}
+                        >
+                          <option value="">Any checking account</option>
+                          {checkingAccounts.map((a: any) => <option key={`a${a.id}`} value={`account:${a.id}`}>{a.name}</option>)}
+                          {activeCards.map((c: any) => <option key={`c${c.id}`} value={`card:${c.id}`}>Card: {c.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="col-span-2">
                         <label className="label">Notes (optional)</label>
                         <input className="input" value={editExpenseForm.notes} onChange={e => setEditExpenseForm({ ...editExpenseForm, notes: e.target.value })} />
                       </div>
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => updateExpenseMut.mutate({ id: pe.id, data: { name: editExpenseForm.name, amount: parseFloat(editExpenseForm.amount), expected_date: editExpenseForm.expected_date, notes: editExpenseForm.notes || null, account_id: editExpenseForm.account_id ? parseInt(editExpenseForm.account_id) : null } })}
+                        onClick={() => updateExpenseMut.mutate({ id: pe.id, data: { name: editExpenseForm.name, amount: parseFloat(editExpenseForm.amount), expected_date: editExpenseForm.expected_date, notes: editExpenseForm.notes || null, account_id: editExpenseForm.account_id ? parseInt(editExpenseForm.account_id) : null, card_id: editExpenseForm.card_id ? parseInt(editExpenseForm.card_id) : null, direction: editExpenseForm.direction } })}
                         disabled={!editExpenseForm.name || !editExpenseForm.amount || updateExpenseMut.isPending}
                         className="btn-primary text-sm"
                       >
@@ -625,12 +668,15 @@ export default function Forecast() {
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{pe.name}</p>
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         {new Date(pe.expected_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        {pe.card_id && <> · via {activeCards.find((c: any) => c.id === pe.card_id)?.name ?? "card"}</>}
                         {pe.notes && <> · {pe.notes}</>}
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className="font-semibold text-red-600">{fmt(pe.amount)}</span>
-                      <button onClick={() => { setEditExpenseId(pe.id); setEditExpenseForm({ name: pe.name, amount: String(pe.amount), expected_date: pe.expected_date, notes: pe.notes ?? "", account_id: pe.account_id ? String(pe.account_id) : "" }); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={14} /></button>
+                      <span className={`font-semibold ${pe.direction === "inflow" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                        {pe.direction === "inflow" ? "+" : "−"}{fmt(pe.amount)}
+                      </span>
+                      <button onClick={() => { setEditExpenseId(pe.id); setEditExpenseForm({ name: pe.name, amount: String(pe.amount), expected_date: pe.expected_date, notes: pe.notes ?? "", account_id: pe.account_id ? String(pe.account_id) : "", card_id: pe.card_id ? String(pe.card_id) : "", direction: pe.direction ?? "outflow" }); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={14} /></button>
                       <button onClick={() => deleteExpenseMut.mutate(pe.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
                     </div>
                   </div>
@@ -643,7 +689,7 @@ export default function Forecast() {
         {showExpenseForm && (
           <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
             <div className="flex justify-between items-center mb-3">
-              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Planned Expense</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Planned One-Off</p>
               <button onClick={() => setShowExpenseForm(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -660,19 +706,37 @@ export default function Forecast() {
                 <input type="date" className="input" value={expenseForm.expected_date} onChange={e => setExpenseForm({ ...expenseForm, expected_date: e.target.value })} />
               </div>
               <div>
-                <label className="label">Account (optional)</label>
-                <select className="input" value={expenseForm.account_id} onChange={e => setExpenseForm({ ...expenseForm, account_id: e.target.value })}>
-                  <option value="">Any account</option>
-                  {checkingAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                <label className="label">Direction</label>
+                <select className="input" value={expenseForm.direction} onChange={e => setExpenseForm({ ...expenseForm, direction: e.target.value })}>
+                  <option value="outflow">Money out</option>
+                  <option value="inflow">Money in</option>
                 </select>
               </div>
               <div>
+                <label className="label">Charge to</label>
+                <select
+                  className="input"
+                  value={expenseForm.card_id ? `card:${expenseForm.card_id}` : expenseForm.account_id ? `account:${expenseForm.account_id}` : ""}
+                  onChange={e => {
+                    const [kind, id] = e.target.value.split(":");
+                    setExpenseForm({ ...expenseForm, account_id: kind === "account" ? id : "", card_id: kind === "card" ? id : "" });
+                  }}
+                >
+                  <option value="">Any checking account</option>
+                  {checkingAccounts.map((a: any) => <option key={`a${a.id}`} value={`account:${a.id}`}>{a.name}</option>)}
+                  {activeCards.map((c: any) => <option key={`c${c.id}`} value={`card:${c.id}`}>Card: {c.name}</option>)}
+                </select>
+                {expenseForm.card_id && (
+                  <p className="text-xs text-gray-400 mt-1">Won't hit checking until this card's next statement is paid off.</p>
+                )}
+              </div>
+              <div className="col-span-2">
                 <label className="label">Notes (optional)</label>
                 <input className="input" value={expenseForm.notes} onChange={e => setExpenseForm({ ...expenseForm, notes: e.target.value })} />
               </div>
               <div className="col-span-2 flex gap-2">
                 <button
-                  onClick={() => createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null, account_id: expenseForm.account_id ? parseInt(expenseForm.account_id) : null })}
+                  onClick={() => createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null, account_id: expenseForm.account_id ? parseInt(expenseForm.account_id) : null, card_id: expenseForm.card_id ? parseInt(expenseForm.card_id) : null, direction: expenseForm.direction })}
                   disabled={!expenseForm.name || !expenseForm.amount || createExpenseMut.isPending}
                   className="btn-primary"
                 >

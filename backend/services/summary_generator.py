@@ -38,20 +38,51 @@ def _stale_bank_connections(db: Session, user_id: int, now: datetime | None = No
     ]
 
 
-def _fires_soon(item: models.RecurringItem, today: date, days_ahead: int = 7) -> bool:
+def _next_fire_date(item: models.RecurringItem, today: date, days_ahead: int = 7) -> date | None:
+    """The next date within [today, today+days_ahead] this item fires, or
+    None. The single source of truth _fires_soon delegates to (bool) and the
+    email's Upcoming list reads from directly (to show and sort by the real
+    date, not day_of_month alone).
+
+    Honours frequency. Matching on day-of-month alone made every yearly item
+    look due in every month: once the annual card subscriptions and insurance
+    renewals were entered, the email's "upcoming bills" list showed all nine of
+    them ($4,313, including a $2,800 vehicle-insurance renewal) every single
+    week regardless of month. Weekly/biweekly items step from start_date, and
+    quarterly/yearly only fire in their designated month(s) -- the same rules
+    forecast_engine._fires_on uses.
+    """
+    if not item.is_active:
+        return None
     for offset in range(days_ahead + 1):
         d = today + timedelta(days=offset)
         if item.start_date > d:
             continue
         if item.end_date and item.end_date < d:
             continue
-        if not item.is_active:
-            return False
+        if item.frequency == models.RecurringFrequency.weekly:
+            if (d - item.start_date).days % 7 == 0:
+                return d
+            continue
+        if item.frequency == models.RecurringFrequency.biweekly:
+            if (d - item.start_date).days % 14 == 0:
+                return d
+            continue
+        if item.frequency == models.RecurringFrequency.quarterly:
+            if item.month_of_year and (d.month - item.month_of_year) % 3 != 0:
+                continue
+        elif item.frequency == models.RecurringFrequency.yearly and item.month_of_year != d.month:
+            continue
         target_day = item.day_of_month or calendar.monthrange(d.year, d.month)[1]
         target_day = min(target_day, calendar.monthrange(d.year, d.month)[1])
         if d.day == target_day:
-            return True
-    return False
+            return d
+    return None
+
+
+def _fires_soon(item: models.RecurringItem, today: date, days_ahead: int = 7) -> bool:
+    """Whether a recurring item is due in the next `days_ahead` days."""
+    return _next_fire_date(item, today, days_ahead) is not None
 
 
 def generate_daily_summary(
@@ -79,9 +110,16 @@ def generate_daily_summary(
         models.RecurringItem.user_id == user.id,
         models.RecurringItem.is_active == True,
     ).all()
+    # (item, real fire date) pairs, sorted chronologically by that date --
+    # not by day_of_month, which sorts a window spanning a month boundary
+    # out of order (an item firing 8/30, two days out, would previously sort
+    # AFTER one firing 9/2, five days out, because 30 > 2). The date is also
+    # what the email was missing entirely: the old "Upcoming" list showed a
+    # bare name and amount with no indication of which of the next 7 days it
+    # actually lands on.
     upcoming = sorted(
-        [r for r in all_recurring if _fires_soon(r, today, 7)],
-        key=lambda x: x.day_of_month or 31,
+        ((r, d) for r in all_recurring if (d := _next_fire_date(r, today, 7)) is not None),
+        key=lambda pair: pair[1],
     )
 
     mtd_txns = db.query(models.Transaction).filter(
@@ -128,77 +166,164 @@ def generate_daily_summary(
     ) if stale_connections else ""
 
     acct_rows = "".join(
-        f"<tr><td style='padding:4px 12px 4px 0'>{a.name}</td>"
-        f"<td style='padding:4px 0;text-align:right'><b>{fmt(a.current_balance)}</b></td></tr>"
+        f"<tr><td style='padding:6px 12px 6px 0;color:#374151'>{a.name}</td>"
+        f"<td style='padding:6px 0;text-align:right'><b style='color:#111827'>{fmt(a.current_balance)}</b></td></tr>"
         for a in accounts
-    ) or "<tr><td style='color:#888'>No checking accounts</td></tr>"
+    ) or "<tr><td style='color:#9ca3af'>No checking accounts</td></tr>"
+
+    def _day_label(d: date) -> str:
+        offset = (d - today).days
+        if offset == 0:
+            return "Today"
+        if offset == 1:
+            return "Tomorrow"
+        return d.strftime("%a %b %-d")
 
     upcoming_rows = "".join(
-        f"<tr><td style='padding:4px 12px 4px 0'>{r.name}</td>"
-        f"<td style='padding:4px 0;text-align:right'>{fmt(r.amount)}</td></tr>"
-        for r in upcoming
-    ) or "<tr><td style='color:#888'>None in the next 7 days</td></tr>"
+        (
+            lambda is_income: (
+                f"<tr><td style='padding:6px 12px 6px 0;color:#9ca3af;font-size:12px;white-space:nowrap;vertical-align:top'>{_day_label(d)}</td>"
+                f"<td style='padding:6px 12px 6px 0;color:#374151'>{r.name}</td>"
+                f"<td style='padding:6px 0;text-align:right;white-space:nowrap'>"
+                f"<b style='color:{'#059669' if is_income else '#dc2626'}'>{'+' if is_income else '−'}{fmt(r.amount)}</b></td></tr>"
+            )
+        )(r.type == models.RecurringType.income)
+        for r, d in upcoming
+    ) or "<tr><td style='color:#9ca3af'>None in the next 7 days</td></tr>"
 
-    card_rows = "".join(
-        f"<tr><td style='padding:4px 12px 4px 0'>{c.name}</td>"
-        f"<td style='padding:4px 0;text-align:right'>{fmt(c.current_balance)}</td>"
-        f"<td style='padding:4px 0;text-align:right;color:#888'>due day&nbsp;{c.due_day}</td></tr>"
-        for c in cards
-    ) or "<tr><td colspan='3' style='color:#888'>No credit cards</td></tr>"
+    # snap.cards carries utilization_pct and pending_charges already computed
+    # for the exact same reason the Dashboard's card list does -- reusing it
+    # here means the email and the app can never quietly disagree about a
+    # card's numbers the way two independent computations eventually would.
+    snap_cards_by_id = {c.id: c for c in snap.cards} if snap is not None else {}
+
+    def _card_row(c: models.CreditCard) -> str:
+        sc = snap_cards_by_id.get(c.id)
+        util = sc.utilization_pct if sc else (
+            round(float(c.current_balance) / float(c.credit_limit) * 100, 1) if c.credit_limit else 0.0
+        )
+        util_color = "#dc2626" if util >= 80 else "#d97706" if util >= 50 else "#6b7280"
+        pending = sc.pending_charges if sc else Decimal("0")
+        pending_html = f" <span style='color:#9ca3af'>(+{fmt(pending)} pending)</span>" if pending else ""
+        due_in = None
+        if c.due_day:
+            days_out = (c.due_day - today.day) % calendar.monthrange(today.year, today.month)[1]
+            due_in = "due today" if days_out == 0 else f"due in {days_out}d"
+        return (
+            f"<tr><td style='padding:6px 12px 6px 0;color:#374151'>{c.name}</td>"
+            f"<td style='padding:6px 0;text-align:right'><b style='color:#111827'>{fmt(c.current_balance)}</b>{pending_html}</td>"
+            f"<td style='padding:6px 0 6px 12px;text-align:right;white-space:nowrap;font-size:12px'>"
+            f"<span style='color:{util_color}'>{util:.0f}% used</span>"
+            + (f" <span style='color:#9ca3af'>&middot; {due_in}</span>" if due_in else "")
+            + "</td></tr>"
+        )
+
+    card_rows = "".join(_card_row(c) for c in cards) or "<tr><td colspan='3' style='color:#9ca3af'>No credit cards</td></tr>"
 
     if snap is not None:
-        household_rows = (
-            f"<tr><td style='padding:4px 12px 4px 0'>Spendable this week</td>"
-            f"<td style='padding:4px 0;text-align:right'><b>{fmt(snap.left_to_spend_weekly)}</b></td></tr>"
-            f"<tr><td style='padding:4px 12px 4px 0'>Not saving (this week)</td>"
-            f"<td style='padding:4px 0;text-align:right'>{fmt(snap.not_saving_weekly)}</td></tr>"
-        )
-        household_html = (
-            f"<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Household Snapshot</h3>"
-            f"<table style='width:100%'>{household_rows}</table>"
-            f"<p style='color:#6b7280;font-size:12px;margin:4px 0 16px'>Monthly: {fmt(snap.left_to_spend)} left to spend, "
-            f"{fmt(snap.not_saving)} before it eats into savings.</p>"
-        )
+        spendable_color = "#059669" if snap.on_pace else "#dc2626"
+        pace_color = "#10b981" if snap.on_pace else "#ef4444"
+        margin_color = "#dc2626" if snap.safety_margin_weekly < 0 else "#d97706"
+        spendable_today_sign = "−" if snap.spendable_today < 0 else ""
+        # The quarter trough is the sanity check behind the weekly number: it is
+        # what says whether a big purchase is safe. Dan's spreadsheet keeps the
+        # amount and its date together ('2026 Overview'!B23:C27).
+        trough_html = ""
+        if snap.lookahead_minimum_date is not None:
+            trough_color = "#dc2626" if snap.lookahead_minimum < 0 else "#065f46"
+            trough_html = (
+                f"<p style='color:#047857;font-size:12px;margin:12px 0 0;text-align:center'>"
+                f"Lowest projected balance in the next 3 months: "
+                f"<b style='color:{trough_color}'>{fmt(snap.lookahead_minimum)}</b> on "
+                f"{snap.lookahead_minimum_date.strftime('%b %-d')}</p>"
+            )
+        household_html = f"""
+<div style='background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:16px;margin-bottom:20px'>
+  <h3 style='margin:0 0 12px;color:#065f46;font-size:15px'>Household Snapshot</h3>
+  <table style='width:100%;border-collapse:separate' cellspacing='8' cellpadding='0'>
+    <tr>
+      <td style='width:50%;background:#ffffff;border-radius:8px;padding:14px;text-align:center;vertical-align:top'>
+        <p style='margin:0 0 6px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Spendable this week</p>
+        <p style='margin:0;color:{spendable_color};font-size:24px;font-weight:700'>{fmt(snap.left_to_spend_weekly)}</p>
+        <p style='margin:6px 0 0;color:{pace_color};font-size:12px'>{spendable_today_sign}{fmt(abs(snap.spendable_today))}/day &middot; {"on pace" if snap.on_pace else "over pace"}</p>
+        <p style='margin:4px 0 0;color:#9ca3af;font-size:11px'>{fmt(snap.left_to_spend)} this month</p>
+      </td>
+      <td style='width:50%;background:#ffffff;border-radius:8px;padding:14px;text-align:center;vertical-align:top'>
+        <p style='margin:0 0 6px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Safety Margin (this week)</p>
+        <p style='margin:0;color:{margin_color};font-size:24px;font-weight:700'>{fmt(snap.safety_margin_weekly)}</p>
+        <p style='margin:6px 0 0;color:#9ca3af;font-size:11px'>{fmt(snap.safety_margin)} this month</p>
+      </td>
+    </tr>
+  </table>
+  {trough_html}
+</div>"""
     else:
         household_html = (
-            "<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Household Snapshot</h3>"
-            "<p style='color:#888'>No checking account to compute a snapshot from.</p>"
+            "<div style='background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:20px'>"
+            "<h3 style='margin:0 0 4px;color:#374151;font-size:15px'>Household Snapshot</h3>"
+            "<p style='color:#9ca3af;margin:0'>No checking account to compute a snapshot from.</p></div>"
         )
 
     weekly_html, weekly_text = _weekly_digest_section(weekly_digest) if weekly_digest else ("", "")
 
+    net_color = "#059669" if monthly_income - mtd_expenses >= 0 else "#dc2626"
+
+    def _section(icon: str, title: str, body: str) -> str:
+        return (
+            f"<div style='margin-bottom:22px'>"
+            f"<h3 style='margin:0 0 8px;padding-bottom:6px;border-bottom:1px solid #e5e7eb;"
+            f"color:#111827;font-size:14px;font-weight:600'>{icon}&nbsp; {title}</h3>"
+            f"{body}</div>"
+        )
+
     html = f"""<!DOCTYPE html>
-<html><body style='font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;color:#1f2937'>
-<h2 style='color:#4f46e5;margin-bottom:4px'>OfflineBudget Daily Summary</h2>
-<p style='color:#6b7280;margin-top:0'>{today.strftime("%A, %B %-d, %Y")}</p>
+<html><body style='font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f3f4f6;margin:0;padding:24px 0'>
+<div style='max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;padding:24px;color:#1f2937'>
+<h2 style='color:#4f46e5;margin:0 0 4px;font-size:19px'>OfflineBudget Daily Summary</h2>
+<p style='color:#6b7280;margin:0 0 20px;font-size:13px'>{today.strftime("%A, %B %-d, %Y")}</p>
 
 {stale_html}
 {household_html}
-<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Checking Accounts</h3>
-<table style='width:100%'>{acct_rows}</table>
-
-<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Upcoming (next 7 days)</h3>
-<table style='width:100%'>{upcoming_rows}</table>
-
-<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Month-to-Date Spending</h3>
-<p>Expenses: <b>{fmt(mtd_expenses)}</b> &nbsp;|&nbsp; Monthly income: <b>{fmt(monthly_income)}</b></p>
-
-<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px'>Credit Cards</h3>
-<table style='width:100%'>{card_rows}</table>
+{_section("🏦", "Checking Accounts", f"<table style='width:100%;font-size:14px'>{acct_rows}</table>")}
+{_section("📅", "Upcoming (next 7 days)", f"<table style='width:100%;font-size:14px'>{upcoming_rows}</table>")}
+{_section("📊", "Month-to-Date Spending", (
+    f"<table style='width:100%;font-size:14px'><tr>"
+    f"<td style='padding:4px 12px 4px 0;color:#374151'>Expenses</td>"
+    f"<td style='padding:4px 0;text-align:right'><b style='color:#dc2626'>{fmt(mtd_expenses)}</b></td></tr>"
+    f"<tr><td style='padding:4px 12px 4px 0;color:#374151'>Monthly income</td>"
+    f"<td style='padding:4px 0;text-align:right'><b style='color:#059669'>{fmt(monthly_income)}</b></td></tr>"
+    f"<tr><td style='padding:4px 12px 4px 0;color:#374151;border-top:1px solid #f3f4f6'>Net so far</td>"
+    f"<td style='padding:4px 0;text-align:right;border-top:1px solid #f3f4f6'><b style='color:{net_color}'>{fmt(monthly_income - mtd_expenses)}</b></td></tr>"
+    f"</table>"
+))}
+{_section("💳", "Credit Cards", f"<table style='width:100%;font-size:14px'>{card_rows}</table>")}
 {weekly_html}
-<p style='color:#9ca3af;font-size:12px;margin-top:24px'>Sent by OfflineBudget</p>
+<p style='color:#9ca3af;font-size:11px;margin-top:24px;text-align:center'>Sent by OfflineBudget</p>
+</div>
 </body></html>"""
 
     acct_text = "\n".join(f"  {a.name}: {fmt(a.current_balance)}" for a in accounts) or "  No checking accounts"
-    upcoming_text = "\n".join(f"  {r.name}: {fmt(r.amount)}" for r in upcoming) or "  None in the next 7 days"
-    card_text = "\n".join(f"  {c.name}: {fmt(c.current_balance)} (due day {c.due_day})" for c in cards) or "  No credit cards"
+    upcoming_text = "\n".join(
+        f"  {_day_label(d):<10} {r.name}: {'+' if r.type == models.RecurringType.income else '-'}{fmt(r.amount)}"
+        for r, d in upcoming
+    ) or "  None in the next 7 days"
+    card_text = "\n".join(
+        f"  {c.name}: {fmt(c.current_balance)} "
+        f"({(snap_cards_by_id.get(c.id).utilization_pct if snap_cards_by_id.get(c.id) else 0):.0f}% used, due day {c.due_day})"
+        for c in cards
+    ) or "  No credit cards"
 
     if snap is not None:
         household_text = (
             "HOUSEHOLD SNAPSHOT\n"
             f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}\n"
-            f"  Not saving (this week): {fmt(snap.not_saving_weekly)}\n"
-            f"  Monthly: {fmt(snap.left_to_spend)} left to spend, {fmt(snap.not_saving)} before it eats into savings.\n"
+            f"  Safety margin (this week): {fmt(snap.safety_margin_weekly)}\n"
+            f"  Monthly: {fmt(snap.left_to_spend)} left to spend, {fmt(snap.safety_margin)} before your spending starts eating into savings.\n"
+            + (
+                f"  Lowest projected balance in the next 3 months: {fmt(snap.lookahead_minimum)}"
+                f" on {snap.lookahead_minimum_date.strftime('%b %-d')}.\n"
+                if snap.lookahead_minimum_date is not None else ""
+            )
         )
     else:
         household_text = "HOUSEHOLD SNAPSHOT\n  No checking account to compute a snapshot from.\n"
@@ -225,7 +350,7 @@ UPCOMING BILLS (next 7 days)
 {upcoming_text}
 
 MONTH-TO-DATE
-  Expenses: {fmt(mtd_expenses)} | Monthly income: {fmt(monthly_income)}
+  Expenses: {fmt(mtd_expenses)} | Monthly income: {fmt(monthly_income)} | Net so far: {fmt(monthly_income - mtd_expenses)}
 
 CREDIT CARDS
 {card_text}
@@ -271,14 +396,16 @@ def _weekly_digest_section(digest: WeeklyDigest) -> tuple[str, str]:
         risk_text = f"\n  Balance risk: projected to drop to {fmt(digest.risk.amount)} on {digest.risk.date.strftime('%B %-d, %Y')}\n"
 
     html = f"""
-<h3 style='border-bottom:1px solid #e5e7eb;padding-bottom:4px;margin-top:24px'>Weekly Digest — {digest.week_start.strftime('%B %-d')}–{digest.week_end.strftime('%B %-d, %Y')}</h3>
-<p>Total spent this week: <b>{fmt(digest.total_spent)}</b></p>
+<div style='margin-bottom:22px'>
+<h3 style='margin:24px 0 8px;padding-bottom:6px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:14px;font-weight:600'>🗓️&nbsp; Weekly Digest — {digest.week_start.strftime('%B %-d')}–{digest.week_end.strftime('%B %-d, %Y')}</h3>
+<p style='font-size:14px;color:#374151;margin:0 0 8px'>Total spent this week: <b style='color:#111827'>{fmt(digest.total_spent)}</b></p>
 {risk_html}
-<h4 style='margin-bottom:4px'>Spending by Category</h4>
-<table style='width:100%'>{cat_rows}</table>
+<h4 style='margin:12px 0 4px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em'>Spending by Category</h4>
+<table style='width:100%;font-size:14px'>{cat_rows}</table>
 
-<h4 style='margin:12px 0 4px'>Top Merchants</h4>
-<table style='width:100%'>{merchant_rows}</table>
+<h4 style='margin:14px 0 4px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em'>Top Merchants</h4>
+<table style='width:100%;font-size:14px'>{merchant_rows}</table>
+</div>
 """
 
     text = f"""

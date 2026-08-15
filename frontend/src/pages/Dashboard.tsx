@@ -23,6 +23,7 @@ Key sections:
 export default function Dashboard() {
   const navigate = useNavigate();
   const [showHelp, setShowHelp] = useState(false);
+  const [snapshotHelp, setSnapshotHelp] = useState<"spendable" | "margin" | null>(null);
   const [editingPending, setEditingPending] = useState<number | null>(null);
   const [pendingValue, setPendingValue] = useState("");
   const qc = useQueryClient();
@@ -168,31 +169,55 @@ export default function Dashboard() {
                   observed={{
                     left_to_spend: snapshot.left_to_spend,
                     left_to_spend_weekly: snapshot.left_to_spend_weekly,
-                    not_saving: snapshot.not_saving,
-                    not_saving_weekly: snapshot.not_saving_weekly,
+                    safety_margin: snapshot.safety_margin,
+                    safety_margin_weekly: snapshot.safety_margin_weekly,
                   }}
                   expectedFields={[
                     { key: "left_to_spend", label: "Left to Spend (monthly)" },
-                    { key: "not_saving", label: "Not Saving (monthly)" },
+                    { key: "safety_margin", label: "Safety Margin (monthly)" },
                   ]}
                   className="ml-auto"
                 />
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Spendable this week</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center justify-center gap-1">
+                    Spendable this week
+                    <button onClick={() => setSnapshotHelp("spendable")} className="text-gray-300 hover:text-indigo-500 dark:text-gray-500 dark:hover:text-indigo-400" aria-label="What is Spendable this week?">
+                      <HelpCircle size={12} />
+                    </button>
+                  </p>
                   <p className={`text-xl font-bold tabular-nums ${snapshot.on_pace ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>{fmt(parseFloat(snapshot.left_to_spend_weekly))}</p>
                   <p className={`text-xs mt-1 ${snapshot.on_pace ? "text-emerald-500 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
-                    {fmt(Math.abs(parseFloat(snapshot.spendable_today)))}/day · {snapshot.on_pace ? "on pace" : "over pace"}
+                    {/* Signed, not Math.abs(). When the week is overspent this
+                        figure is how much a day must come BACK, and stripping
+                        the minus rendered an over-pace deficit as a positive
+                        daily allowance -- the opposite of what it means, on the
+                        one number the household reads before spending. */}
+                    {parseFloat(snapshot.spendable_today) < 0 ? "−" : ""}{fmt(Math.abs(parseFloat(snapshot.spendable_today)))}/day · {snapshot.on_pace ? "on pace" : "over pace"}
                   </p>
                   <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.left_to_spend))} this month</p>
                 </div>
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Not Saving (this week)</p>
-                  <p className="text-xl font-bold text-amber-600 dark:text-amber-400 tabular-nums">{fmt(parseFloat(snapshot.not_saving_weekly))}</p>
-                  <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.not_saving))} this month</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center justify-center gap-1">
+                    Safety Margin (this week)
+                    <button onClick={() => setSnapshotHelp("margin")} className="text-gray-300 hover:text-indigo-500 dark:text-gray-500 dark:hover:text-indigo-400" aria-label="What is Safety Margin?">
+                      <HelpCircle size={12} />
+                    </button>
+                  </p>
+                  <p className={`text-xl font-bold tabular-nums ${parseFloat(snapshot.safety_margin_weekly) < 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>{fmt(parseFloat(snapshot.safety_margin_weekly))}</p>
+                  <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.safety_margin))} this month</p>
                 </div>
               </div>
+              {snapshot.lookahead_minimum_date && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 text-center">
+                  Lowest projected balance in the next 3 months:{" "}
+                  <span className={`font-semibold tabular-nums ${parseFloat(snapshot.lookahead_minimum) < 0 ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-200"}`}>
+                    {fmt(parseFloat(snapshot.lookahead_minimum))}
+                  </span>{" "}
+                  on {new Date(snapshot.lookahead_minimum_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -461,6 +486,20 @@ export default function Dashboard() {
         </div>
       )}
       {showHelp && <HelpPanel title="Dashboard" body={DASHBOARD_HELP} onClose={() => setShowHelp(false)} />}
+      {snapshotHelp === "spendable" && (
+        <HelpPanel
+          title="Spendable this week"
+          body={"How much you can spend on everyday things (groceries, eating out, shopping) between now and the end of the week, after bills, savings, and tithing are already set aside.\n\nGoes down as you spend. If it's negative, you've spent more than this week's share — it'll say \"over pace\" and show what to pull back."}
+          onClose={() => setSnapshotHelp(null)}
+        />
+      )}
+      {snapshotHelp === "margin" && (
+        <HelpPanel
+          title="Safety Margin"
+          body={"The lowest your checking account is projected to go over the next 3 months, after also setting aside the credit card bills still coming due this month.\n\nPositive means that's how much room you have above $0 before you'd need to pull from savings. Negative means the plan already dips into savings, even before anything unexpected happens — worth a closer look before a big purchase."}
+          onClose={() => setSnapshotHelp(null)}
+        />
+      )}
     </div>
   );
 }

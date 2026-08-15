@@ -142,6 +142,15 @@ def status_list(
     return db.query(models.BankConnection).filter(models.BankConnection.user_id == user.id).all()
 
 
+@router.get("/scheduler-status", response_model=list[schemas.SchedulerRunOut])
+def scheduler_status(db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    """Not scoped to `user` -- SchedulerRun tracks the two background jobs
+    themselves (daily_summary, bank_sync), which run once per process across
+    every user, not per-user state. `user` stays a dependency purely to keep
+    this endpoint authenticated like every other route in the app."""
+    return db.query(models.SchedulerRun).all()
+
+
 @router.post("/sync-now", response_model=schemas.BankSyncNowResponse)
 def sync_now(
     db: Session = Depends(get_db),

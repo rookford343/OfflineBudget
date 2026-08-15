@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from decimal import Decimal
 from sqlalchemy import or_
@@ -8,6 +9,33 @@ NOT_SAVINGS = or_(
     models.Transaction.category_id.is_(None),
     models.Category.type != models.CategoryType.savings,
 )
+
+# Merchant text that means "this row is a payment settling the card", not a
+# purchase. Paying the card moves money between accounts; the charges being
+# settled were already counted individually, so counting the payment too
+# double-counts the whole statement.
+#
+# These reach the card table with a positive (charge-side) amount, so they
+# inflate spend rather than netting out. Found live 2026-08-12: a single
+# "AUTOMATIC PAYMENT - THANK" row of $11,312.54 was the largest line in Dan's
+# card spending and the top entry in the weekly email's merchant list. The
+# checking side already excludes the mirror-image debit via
+# card_matching.card_matches_description; this is the card-side counterpart.
+#
+# Matched on a word-boundary basis against the whole merchant string so
+# "MINDBODY PAYMENTS" (a real gym charge) is not caught.
+_CARD_PAYMENT_PATTERNS = re.compile(
+    r"(^|\b)(automatic\s+payment|autopay|online\s+payment|payment\s*-\s*thank"
+    r"|payment\s+thank\s+you|mobile\s+payment|electronic\s+payment)(\b|$)",
+    re.IGNORECASE,
+)
+
+
+def is_card_payment(merchant: str | None) -> bool:
+    """True when a card-table row is a payment against the card, not a purchase."""
+    if not merchant:
+        return False
+    return _CARD_PAYMENT_PATTERNS.search(merchant) is not None
 
 
 def merchant_totals(
@@ -84,6 +112,8 @@ def merchant_totals(
     if card_id:
         card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
     for t in card_q.all():
+        if is_card_payment(t.merchant):
+            continue
         key = t.merchant or "Unknown"
         totals[key] = totals.get(key, Decimal("0")) + t.amount
         if t.amount > 0:
@@ -151,6 +181,8 @@ def category_totals_for_range(db: Session, user_id: int, start: date, end: date)
         )
     )
     for t in card_q.all():
+        if is_card_payment(t.merchant):
+            continue
         totals[t.category_id] = totals.get(t.category_id, Decimal("0")) + t.amount
 
     return totals

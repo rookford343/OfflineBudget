@@ -6,7 +6,7 @@ positive = credit/income, negative = debit/charge. No sign flip needed.
 from __future__ import annotations
 import base64
 import binascii
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 import httpx
@@ -31,6 +31,14 @@ class SimpleFinTransaction:
     posted: datetime
     amount: Decimal
     description: str
+    # The full, unmapped record SimpleFIN sent for this transaction --
+    # everything above is a deliberately narrow projection of it. Always
+    # populated by fetch_transactions (free, it's the dict already in hand);
+    # whether it gets PERSISTED is a separate decision made by the caller
+    # based on User.debug_capture_raw_bank_data. Defaulted to {} rather than
+    # required so existing hand-built test fixtures that don't care about raw
+    # capture keep constructing this the same way they always have.
+    raw: dict = field(default_factory=dict)
 
 
 def claim_setup_token(setup_token: str, timeout: float = 15.0) -> str:
@@ -100,6 +108,7 @@ def fetch_transactions(
                 posted=datetime.fromtimestamp(t["posted"]),
                 amount=Decimal(str(t["amount"])),
                 description=t.get("description") or t.get("payee") or "Unknown",
+                raw=t,
             ))
         except (KeyError, TypeError, ValueError, InvalidOperation, OSError) as exc:
             raise SimpleFinError(f"SimpleFIN returned a malformed transaction record: {exc}") from exc

@@ -32,6 +32,12 @@ def create_planned_expense(
         expected_date=body.expected_date,
         notes=body.notes,
         category_id=body.category_id,
+        # account_id was accepted by the schema but silently dropped here, so
+        # every planned expense behaved as "applies to all accounts" (the
+        # forecast treats a null account_id that way).
+        account_id=body.account_id,
+        card_id=body.card_id,
+        direction=body.direction,
     )
     db.add(expense)
     db.commit()

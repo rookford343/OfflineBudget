@@ -22,6 +22,67 @@ def _last_day_of_month(d: date) -> int:
     return monthrange(d.year, d.month)[1]
 
 
+def _next_occurrence_on_or_after(day_of_month: int, after: date) -> date:
+    """The first date on/after `after` whose day-of-month is `day_of_month`
+    (0 = last day of month, matching RecurringItem's day_of_month convention).
+    Rolls to next month if this month's occurrence has already passed."""
+    last_day = _last_day_of_month(after)
+    day = min(day_of_month, last_day) if day_of_month > 0 else last_day
+    candidate = date(after.year, after.month, day)
+    if candidate >= after:
+        return candidate
+    year, month = (after.year, after.month + 1) if after.month < 12 else (after.year + 1, 1)
+    last_day2 = monthrange(year, month)[1]
+    day2 = min(day_of_month, last_day2) if day_of_month > 0 else last_day2
+    return date(year, month, day2)
+
+
+def _card_payoff_date_for_charge(card: "models.CreditCard", charge_date: date) -> date:
+    """When a charge made on `charge_date` actually leaves checking: the due
+    date of the FIRST statement that closes on or after the charge -- not
+    just the next calendar due_day.
+
+    A statement closes ~3-4 weeks before its own due date (Dan's Chase:
+    closes the 28th, due the 25th of the FOLLOWING month), so a charge
+    posting even one day before a nearby due_day has almost always already
+    missed that statement's close and won't be paid off until the NEXT
+    cycle. Found live 2026-08-13: a charge Dan makes 8/24 was routed to the
+    8/25 due date -- one day later -- when in reality that statement closed
+    back on 7/28, so the charge can't be paid off until 9/25.
+
+    Two steps: find the close date (first statement_day on/after the
+    charge), then the first due_day strictly after that close -- "strictly"
+    matters because a due_day numerically less than statement_day (the
+    common case) would otherwise match an already-passed same-month date."""
+    close_date = _next_occurrence_on_or_after(card.statement_day, charge_date)
+    return _next_occurrence_on_or_after(card.due_day, close_date + timedelta(days=1))
+
+
+def _card_subscription_charges(
+    items: list["models.RecurringItem"], start_date: date, end_date: date,
+) -> dict[date, Decimal]:
+    """Total charged to a card on each day by its own recurring subscriptions.
+
+    Scanned from well before `start_date` because a charge is paid off a
+    statement cycle later: a subscription billed in June is what leaves
+    checking in late July, so the window has to reach back far enough to catch
+    the charges whose payoff lands inside the forecast. Two months plus a few
+    days covers Dan's Chase cycle (closes the 28th, due the 25th of the
+    following month) with room to spare.
+
+    Reuses _fires_on so quarterly, yearly, weekly and biweekly subscriptions
+    all land on the same dates the checking walk would put them on.
+    """
+    charges: dict[date, Decimal] = {}
+    current = start_date - timedelta(days=70)
+    while current <= end_date:
+        for item in items:
+            if _fires_on(item, current):
+                charges[current] = charges.get(current, Decimal("0")) + item.amount
+        current += timedelta(days=1)
+    return charges
+
+
 def _adjust_for_weekend(d: date) -> date:
     if d.weekday() == 5:  # Saturday
         return d - timedelta(days=1)
@@ -126,6 +187,17 @@ def _fires_on(item: models.RecurringItem, d: date) -> bool:
         month_of_year = getattr(item, "month_of_year", None)
         if month_of_year and d.month != month_of_year:
             return False
+    # Quarterly items fire in month_of_year and every third month after it, so
+    # month_of_year names the FIRST month of the cycle rather than the only one
+    # (3 -> Mar/Jun/Sep/Dec). Dan's Stormwater bill is the case this exists
+    # for: Budget!C15 marks it "Qtr" and the sheet charges $14.82 on 9/30 and
+    # 12/31 while carrying $4.94 as the monthly accrual in Budget!B15. Modeling
+    # it as monthly instead put a twelfth of the bill on checking every month --
+    # right over a quarter, wrong on any given day.
+    if frequency == models.RecurringFrequency.quarterly:
+        month_of_year = getattr(item, "month_of_year", None)
+        if month_of_year and (d.month - month_of_year) % 3 != 0:
+            return False
     if item.day_of_month == 0:
         return d.day == _last_day_of_month(d)
     target = min(item.day_of_month, _last_day_of_month(d))
@@ -168,20 +240,61 @@ def build_forecast(
     ss_remaining_gross: Decimal | None = None
     ss_boost_per_check = Decimal("0")
     ss_limit_reached = False
+    ss_checkpoint_date: date | None = None
     if (
         user
         and user.ss_gross_per_paycheck and user.ss_gross_per_paycheck > 0
         and user.ss_wage_base and user.ss_wage_base > 0
     ):
         ss_gross = user.ss_gross_per_paycheck
-        ss_bonus_ytd = user.ss_bonus_ytd or Decimal("0")
-        ss_remaining_gross = user.ss_wage_base - ss_bonus_ytd
-        ss_boost_per_check = ss_gross * Decimal("0.062")
+        if user.ss_withheld_ytd is not None and user.ss_withheld_ytd_as_of is not None:
+            # Preferred: a direct checkpoint off a real pay stub's YTD SS
+            # withholding line, rather than reconstructing YTD gross wages by
+            # counting actual paychecks against a flat per-paycheck figure.
+            # ss_withheld_ytd / 0.062 recovers gross wages actually subject to
+            # SS as of that stub -- correct through every raise in the year
+            # with no reconstruction, unlike ss_bonus_ytd below. Dan's April
+            # raise alone misdated the 2026 crossing by a full paycheck under
+            # the old method (found 2026-08-14, YTD withheld $11,343.06 as of
+            # the 8/14 check implies gross $182,952.58, still $1,547.42 under
+            # the $184,500 base -- crossing is 8/31, not 8/14).
+            SS_EMPLOYEE_RATE = Decimal("0.062")
+            gross_ytd_at_checkpoint = (user.ss_withheld_ytd / SS_EMPLOYEE_RATE).quantize(Decimal("0.01"))
+            ss_remaining_gross = user.ss_wage_base - gross_ytd_at_checkpoint
+            ss_checkpoint_date = user.ss_withheld_ytd_as_of
+        else:
+            ss_bonus_ytd = user.ss_bonus_ytd or Decimal("0")
+            ss_remaining_gross = user.ss_wage_base - ss_bonus_ytd
+        # Quantized like the monthly interest credit -- it is a dollar amount
+        # landing in an account, and unrounded it produced paychecks of
+        # $6,600.00112.
+        ss_boost_per_check = (ss_gross * Decimal("0.062")).quantize(Decimal("0.01"))
+        # Which recurring income items are paychecks (and so stop having Social
+        # Security withheld once the wage base is hit)? Compared against
+        # ss_gross_per_paycheck, but note the units differ: a recurring income
+        # item holds the NET amount that lands in checking, while
+        # ss_gross_per_paycheck is gross. Net runs roughly 55-85% of gross after
+        # tax, retirement, and benefits, so the old two-sided 0.9..1.1 band
+        # could never match a real paycheck -- Dan's is 6066.63/8602.76 = 0.705,
+        # which meant the boost silently never fired for anyone and left Q4 2026
+        # about $3,150 (6 paychecks x $533) low against his spreadsheet.
+        # Confirmed live 2026-08-12.
+        #
+        # The lower bound stays well above incidental recurring income (a
+        # smoothed bonus twelfth, a rental payment) without needing to know the
+        # exact withholding rate; the upper bound keeps net from exceeding gross
+        # by more than rounding.
         for item in recurring_items:
             if item.type == models.RecurringType.income and item.amount > 0:
                 ratio = item.amount / ss_gross
-                if Decimal("0.9") <= ratio <= Decimal("1.1"):
+                if Decimal("0.5") <= ratio <= Decimal("1.1"):
                     ss_paycheck_item_ids.add(item.id)
+
+    all_active_cards = db.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user_id,
+        models.CreditCard.is_active == True,
+    ).all()
+    active_cards_by_id = {c.id: c for c in all_active_cards}
 
     planned = db.query(models.PlannedExpense).options(
         joinedload(models.PlannedExpense.category)
@@ -191,27 +304,66 @@ def build_forecast(
         models.PlannedExpense.expected_date <= end_date,
     ).all()
     planned_by_date: dict[date, list[models.PlannedExpense]] = {}
+    # Card-linked planned expenses don't hit checking on expected_date -- a
+    # charge doesn't touch checking until the card gets paid off. Routed
+    # instead to the checking hit on the card's NEXT statement due date,
+    # alongside the recurring CC payoff/estimate injections below.
+    card_planned_by_date: dict[date, list[tuple[models.PlannedExpense, models.CreditCard]]] = {}
     for pe in planned:
         # Only include planned expenses for this account (or unlinked ones)
-        if pe.account_id is None or pe.account_id == account_id:
+        if pe.account_id is not None and pe.account_id != account_id:
+            continue
+        card = active_cards_by_id.get(pe.card_id) if pe.card_id else None
+        if card:
+            payoff_date = _card_payoff_date_for_charge(card, pe.expected_date)
+            card_planned_by_date.setdefault(payoff_date, []).append((pe, card))
+        else:
             planned_by_date.setdefault(pe.expected_date, []).append(pe)
+
+    today = date.today()
+
+    # Card-linked expense items -- excluded from the checking walk above (they
+    # hit the card, not checking), but they ARE what a lightly-used card is
+    # expected to be charged, so they drive its spend estimate below.
+    card_expense_items = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user_id,
+        models.RecurringItem.account_id == account_id,
+        models.RecurringItem.is_active == True,
+        models.RecurringItem.include_in_forecast == True,
+        models.RecurringItem.type == models.RecurringType.expense,
+        models.RecurringItem.card_id.isnot(None),
+    ).all()
+    card_items_by_card: dict[int, list[models.RecurringItem]] = {}
+    for item in card_expense_items:
+        card_items_by_card.setdefault(item.card_id, []).append(item)
 
     # CC payment injections: cards with next_payment_date set, balance_due > 0,
     # and no existing recurring CC payment item already handling this card (avoid double-count).
     recurring_cc_card_ids = {item.card_id for item in recurring_items if item.type == models.RecurringType.credit_card_payment}
     cc_payments: dict[date, list[tuple[str, Decimal]]] = {}
     cc_estimates_by_date: dict[date, list[tuple[str, Decimal]]] = {}
-
-    all_active_cards = db.query(models.CreditCard).filter(
-        models.CreditCard.user_id == user_id,
-        models.CreditCard.is_active == True,
-    ).all()
     for card in all_active_cards:
         if card.id in recurring_cc_card_ids:
             continue  # recurring CC payment item already handles this card
+
+        # A next_payment_date that has gone stale must not swallow the balance.
+        # Dan's Apple Card sat at 2026-05-25 with $287.15 due while the forecast
+        # ran August: the window check below never matched, so the card was
+        # invisible to the forecast entirely -- no payoff, and no estimate
+        # either, because its monthly_spend_estimate was 0. Cards that only sync
+        # monthly will drift like this by design, so roll a past due date
+        # forward to the next real one instead of dropping the money.
+        next_payment = card.next_payment_date
         if (
-            card.next_payment_date is not None
-            and start_date <= card.next_payment_date <= end_date
+            next_payment is not None
+            and next_payment < today
+            and card.balance_due and card.balance_due > 0
+        ):
+            next_payment = _next_occurrence_on_or_after(card.due_day, max(today, start_date))
+
+        if (
+            next_payment is not None
+            and start_date <= next_payment <= end_date
             and card.balance_due and card.balance_due > 0
         ):
             # balance_due only, NOT + pending_charges -- Dan's real
@@ -221,33 +373,98 @@ def build_forecast(
             # exactly once via budget_snapshot.py's new_spending_total.
             # Adding it here too double-counted it: once in this payoff
             # projection, once again downstream. Confirmed live 2026-08-09.
-            cc_payments.setdefault(card.next_payment_date, []).append(
+            cc_payments.setdefault(next_payment, []).append(
                 (card.name, Decimal(str(card.balance_due)))
             )
+
+        def _covered_by_real_payment(when: date) -> bool:
+            """Something better than an estimate already lands in this month --
+            either the locked balance_due payoff, or the carried-balance figure
+            derived below. A flat estimate on top of either would charge the
+            same statement twice."""
+            if derived_due is not None and (derived_due.year, derived_due.month) == (when.year, when.month):
+                return True
+            return (
+                next_payment is not None
+                and next_payment.year == when.year
+                and next_payment.month == when.month
+                and bool(card.balance_due and card.balance_due > 0)
+            )
+
+        # The cycle right after a locked payoff is not a guess -- most of it is
+        # already sitting on the card. Dan derives it exactly this way
+        # (2026-08-14): "based on current balance due on 8/25 of $9104.29 and
+        # running balance of $12418.45 we get the forecast for next credit
+        # card due date which would be 9/25." The gap between running balance
+        # and statemented balance is spending already made that simply has not
+        # been billed yet; add the subscriptions that will still post before
+        # the statement closes and the cycle is nearly determined. A flat
+        # monthly estimate ignores all of that and overstated Dan's 9/25 payoff
+        # by roughly $1,900.
+        derived_due: date | None = None
+        derived_amount = Decimal("0")
+        if (
+            next_payment is not None
+            and card.balance_due and card.balance_due > 0
+            and card.current_balance is not None
+        ):
+            carried = (
+                Decimal(str(card.current_balance))
+                + Decimal(str(card.pending_charges or 0))
+                - Decimal(str(card.balance_due))
+            )
+            carried = max(carried, Decimal("0"))
+            next_close = _next_occurrence_on_or_after(card.statement_day, max(today, start_date))
+            derived_due = _next_occurrence_on_or_after(card.due_day, next_close + timedelta(days=1))
+            upcoming = Decimal("0")
+            cursor = max(today, start_date) + timedelta(days=1)
+            while cursor <= next_close:
+                for item in card_items_by_card.get(card.id, []):
+                    if _fires_on(item, cursor):
+                        upcoming += item.amount
+                cursor += timedelta(days=1)
+            derived_amount = carried + upcoming
+
+        if derived_due is not None and start_date <= derived_due <= end_date and derived_amount > 0:
+            cc_estimates_by_date.setdefault(derived_due, []).append((card.name, derived_amount))
+
         if card.monthly_spend_estimate and card.monthly_spend_estimate > 0:
+            # A manually-set estimate wins: it is Dan's own read on a card he
+            # spends freely from (Chase, $5,500/mo), which subscriptions alone
+            # would badly understate.
             estimate = Decimal(str(card.monthly_spend_estimate))
             cur = date(start_date.year, start_date.month, 1)
             while cur <= end_date:
                 due_day = min(card.due_day, _last_day_of_month(cur))
                 inject_date = date(cur.year, cur.month, due_day)
-                # Skip estimate when we already have the real balance_due for this payment
-                payment_covers_this_date = (
-                    card.next_payment_date is not None
-                    and card.next_payment_date.year == cur.year
-                    and card.next_payment_date.month == cur.month
-                    and card.balance_due and card.balance_due > 0
-                )
-                if start_date <= inject_date <= end_date and not payment_covers_this_date:
+                if start_date <= inject_date <= end_date and not _covered_by_real_payment(inject_date):
                     cc_estimates_by_date.setdefault(inject_date, []).append((card.name, estimate))
                 cur = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
+        else:
+            # No manual estimate: build one from the subscriptions actually
+            # assigned to this card. Dan's Apple Card is only ever charged by
+            # its subscriptions, and bank sync refreshes it monthly at best, so
+            # the recurring items are a better forward signal than a balance
+            # that is stale most of the time (his call, 2026-08-14). Charges are
+            # routed through _card_payoff_date_for_charge rather than dropped on
+            # the due date in their own month -- a subscription billed the 30th
+            # misses that statement's close and is not paid off for another full
+            # cycle.
+            by_payoff: dict[date, Decimal] = {}
+            for charge_date, amount in _card_subscription_charges(
+                card_items_by_card.get(card.id, []), start_date, end_date,
+            ).items():
+                payoff = _card_payoff_date_for_charge(card, charge_date)
+                by_payoff[payoff] = by_payoff.get(payoff, Decimal("0")) + amount
+            for payoff, amount in sorted(by_payoff.items()):
+                if start_date <= payoff <= end_date and not _covered_by_real_payment(payoff):
+                    cc_estimates_by_date.setdefault(payoff, []).append((card.name, amount))
 
     # Build override map: recurring_item_id -> amount_delta
     override_map: dict[int, Decimal] = {}
     if overrides:
         for ov in overrides:
             override_map[ov["recurring_item_id"]] = Decimal(str(ov["amount_delta"]))
-
-    today = date.today()
 
     # Load all actuals in the forecast window.
     # For dates in the past: current_balance already reflects them, so we reconstruct
@@ -333,6 +550,53 @@ def build_forecast(
         if t.recurring_item_id:
             actual_by_ri.setdefault(t.recurring_item_id, []).append(t.date)
 
+    # Draw the wage base down for paychecks already RECEIVED this calendar year,
+    # before projecting forward. Past days are served from actuals, which
+    # `continue` past the projection branch where the drawdown lives, so without
+    # this the base only ever saw future paychecks and the boost landed far too
+    # late -- or never arrived at all.
+    #
+    # Counted from January 1 of the forecast year rather than from start_date,
+    # because the wage base is a calendar-year quantity. Scoping it to the
+    # window instead made the answer depend on the window: /forecast/risk asks
+    # for today..+90 and would see zero prior paychecks, so it never applied the
+    # boost and ran ~$533 short per paycheck against the Jan-anchored
+    # /forecast/quarters the chart draws. That put a false at-risk alert
+    # (-$230.23 on 2026-08-25) under a chart whose trough was +$1,083 on the
+    # very same day. Found live 2026-08-12.
+    #
+    # Counted, not summed: SS is withheld on gross, while the stored actual is
+    # the net deposit. Only paychecks strictly before today count -- from today
+    # onward the day walk does its own drawdown.
+    #
+    # With a checkpoint, this only needs to bridge the gap between the pay
+    # stub's date and today -- ss_remaining_gross already reflects everything
+    # through the checkpoint itself, so counting from Jan 1 would double-count
+    # every paycheck already folded into ss_withheld_ytd.
+    if ss_remaining_gross is not None and ss_paycheck_item_ids:
+        catchup_filter = (
+            models.Transaction.date > ss_checkpoint_date
+            if ss_checkpoint_date is not None
+            # No checkpoint: legacy behaviour, unchanged -- counts from Jan 1
+            # inclusive, matching how ss_bonus_ytd has always been reconciled.
+            else models.Transaction.date >= date(start_date.year, 1, 1)
+        )
+        received = (
+            db.query(models.Transaction)
+            .filter(
+                models.Transaction.user_id == user_id,
+                models.Transaction.is_actual == True,
+                models.Transaction.recurring_item_id.in_(ss_paycheck_item_ids),
+                catchup_filter,
+                models.Transaction.date < today,
+            )
+            .count()
+        )
+        if received:
+            ss_remaining_gross -= ss_gross * received
+            if ss_remaining_gross <= 0:
+                ss_limit_reached = True
+
     entries: list[ForecastEntry] = []
     current = start_date
 
@@ -402,14 +666,41 @@ def build_forecast(
 
             # SS paycheck boost: accumulate gross, apply boost once wage base is hit
             ss_boost = Decimal("0")
-            if ss_remaining_gross is not None and item.id in ss_paycheck_item_ids:
+            # The checkpoint date's own paycheck is already fully accounted
+            # for inside ss_remaining_gross (the checkpoint is "as of and
+            # including" that date) -- decrementing for it again here would
+            # subtract it twice. This only matters on the one day where the
+            # checkpoint coincides with a day the live walk still projects
+            # (no actual on record for it yet, e.g. it landed today but bank
+            # sync hasn't imported it).
+            if ss_remaining_gross is not None and item.id in ss_paycheck_item_ids and current == ss_checkpoint_date:
+                pass
+            elif ss_remaining_gross is not None and item.id in ss_paycheck_item_ids:
                 if ss_limit_reached:
                     ss_boost = ss_boost_per_check
                 else:
-                    ss_remaining_gross -= item.amount
+                    # Draw down by GROSS, not item.amount -- the wage base is a
+                    # gross-wages figure, while item.amount is the net deposit.
+                    # Decrementing by net stretched the run-up ~40% too far
+                    # (Dan: 118,260 remaining / 6,066.63 net = 19.5 paychecks,
+                    # landing in late Oct 2027 instead of autumn 2026), so the
+                    # boost never arrived inside the forecast window at all.
+                    ss_remaining_gross -= ss_gross
                     if ss_remaining_gross <= 0:
                         ss_limit_reached = True
-                        ss_boost = ss_boost_per_check
+                        # The CROSSING paycheck only gets a partial boost: SS is
+                        # still withheld on the wages up to the base, and only
+                        # the remainder above it comes back. Granting the full
+                        # $533.37 here overstated that one check and, worse,
+                        # pulled the whole step-up a paycheck early -- caught
+                        # 2026-08-14 reconciling to Budget.xlsx, where the app
+                        # boosted the 8/14 check while the sheet held flat until
+                        # 9/15. After the subtraction above, -ss_remaining_gross
+                        # IS the gross above the base, so it needs no separate
+                        # bookkeeping. Every check after this one gets the full
+                        # boost via the ss_limit_reached branch.
+                        excess = min(-ss_remaining_gross, ss_gross)
+                        ss_boost = (excess * Decimal("0.062")).quantize(Decimal("0.01"))
 
             signed = (base_amount + ss_boost) if item.type == models.RecurringType.income else -base_amount
             balance += signed
@@ -422,6 +713,7 @@ def build_forecast(
                 is_actual=False,
                 is_cc_payment=is_cc,
                 recurring_item_id=item.id,
+                is_ss_boosted=ss_boost > 0,
             ))
 
         # Apply linked actuals that arrived on a different day than their natural_fires date.
@@ -452,15 +744,45 @@ def build_forecast(
             ))
 
         for pe in planned_by_date.get(current, []):
-            signed = -abs(pe.amount)
+            # abs() then re-sign from `direction`, so a row stored with either
+            # sign behaves the same and an inflow is not silently flipped
+            # negative -- which is what happened before `direction` existed and
+            # was why a known one-off inflow (a bonus, an Airbnb payout) could
+            # not be modeled at all.
+            is_inflow = pe.direction == models.PlannedDirection.inflow
+            signed = abs(pe.amount) if is_inflow else -abs(pe.amount)
             balance += signed
             day_transactions.append(ForecastTransaction(
                 name=pe.name,
                 amount=signed,
-                type="expense",
+                type="income" if is_inflow else "expense",
                 category_name=pe.category.name if pe.category else None,
                 is_actual=False,
                 is_planned=True,
+            ))
+
+        for pe, card in card_planned_by_date.get(current, []):
+            # Card-linked planned expenses land here, on the card's due date,
+            # not on pe.expected_date -- see card_planned_by_date's comment
+            # above. Suppression against a real posted charge is deliberately
+            # NOT attempted here: unlike the recurring CC payoff/estimate
+            # injections (which suppress against ANY actual near the due
+            # date), a one-off planned purchase has no reliable way to match
+            # itself to one specific imported transaction among many on the
+            # same statement, so it would risk suppressing on an unrelated
+            # charge. Mark the plan resolved by deleting it once the real
+            # purchase posts.
+            is_inflow = pe.direction == models.PlannedDirection.inflow
+            signed = abs(pe.amount) if is_inflow else -abs(pe.amount)
+            balance += signed
+            day_transactions.append(ForecastTransaction(
+                name=f"{pe.name} (via {card.name})",
+                amount=signed,
+                type="income" if is_inflow else "expense",
+                category_name=pe.category.name if pe.category else None,
+                is_actual=False,
+                is_planned=True,
+                is_cc_payment=True,
             ))
 
         for card_name, amount in cc_payments.get(current, []):
@@ -477,6 +799,7 @@ def build_forecast(
                 category_name=None,
                 is_actual=False,
                 is_cc_payment=True,
+                is_cc_locked=True,
             ))
 
         for card_name, amount in cc_estimates_by_date.get(current, []):

@@ -55,15 +55,30 @@ def _is_digest_day(today: date, digest_day: str) -> bool:
     return _WEEKDAY_ABBREVIATIONS[today.weekday()] == day or _WEEKDAY_FULL_NAMES[today.weekday()] == day
 
 
+_BANK_SYNC_HOUR = 5
+
+# Generous on purpose -- covers "the Mac slept straight through the trigger
+# and only woke hours later." APScheduler fires a missed cron trigger once on
+# resume if wall-clock time is still within this window of the scheduled
+# fire; past it, that day's run is skipped rather than firing something
+# arbitrarily stale. This is the "didn't fire at all" half of the fix; the
+# "fired but failed" half is _scheduler_sweep below, which doesn't need a
+# grace window because it isn't reacting to a missed trigger at all.
+_MISFIRE_GRACE_SECONDS = 12 * 3600
+
+
 def _send_daily_summaries() -> None:
     from backend.database import SessionLocal
     from backend import models
     from backend.services.email_service import send_email, parse_recipients
     from backend.services.summary_generator import generate_daily_summary, generate_weekly_digest
+    from backend.services import scheduler_state
 
     is_digest_day = bool(settings.digest_recipients_list) and _is_digest_day(date.today(), settings.WEEKLY_DIGEST_DAY)
 
     db = SessionLocal()
+    scheduler_state.record_attempt(db, "daily_summary")
+    last_error: str | None = None
     try:
         users = db.query(models.User).filter(
             models.User.is_active == True,
@@ -91,6 +106,14 @@ def _send_daily_summaries() -> None:
                     send_email(recipient, subject, html_body, text_body)
             except Exception as exc:
                 logger.error("Summary failed for %s: %s", user.username, exc)
+                last_error = f"{user.username}: {exc}"
+        # A per-user exception is caught above and never propagates, so
+        # "the function returned" cannot itself signal success -- a bad SMTP
+        # config would otherwise get recorded as a successful run forever.
+        if last_error:
+            scheduler_state.record_failure(db, "daily_summary", last_error)
+        else:
+            scheduler_state.record_success(db, "daily_summary")
     finally:
         db.close()
 
@@ -100,7 +123,9 @@ def _run_bank_sync() -> None:
     from backend import models
     from backend.services.bank_sync_service import sync_all
     from backend.services.transfer_verification import verify_scheduled_transfers
+    from backend.services import scheduler_state
     db = SessionLocal()
+    scheduler_state.record_attempt(db, "bank_sync")
     try:
         sync_all(db)
         for user in db.query(models.User).filter(models.User.is_active == True).all():
@@ -109,15 +134,62 @@ def _run_bank_sync() -> None:
             except Exception as exc:
                 logger.error("Transfer verification failed for %s: %s", user.username, exc)
                 db.rollback()
+        # sync_connection is the only writer of BankConnection.status/last_error
+        # and already isolates per-connection failures, so it's the more
+        # precise signal for "did the sync actually work" than this
+        # function's own control flow, which -- like the summary job -- never
+        # raises on a per-connection failure.
+        errored = db.query(models.BankConnection).filter(
+            models.BankConnection.status == models.BankConnectionStatus.error,
+        ).all()
+        if errored:
+            scheduler_state.record_failure(
+                db, "bank_sync", "; ".join(f"{c.id}: {c.last_error}" for c in errored),
+            )
+        else:
+            scheduler_state.record_success(db, "bank_sync")
     except Exception as exc:
         logger.error("Bank sync job failed: %s", exc)
+        scheduler_state.record_failure(db, "bank_sync", str(exc))
     finally:
         db.close()
 
 
+def _scheduler_sweep() -> None:
+    """Runs every _SWEEP_MINUTES. Catches the failure shape misfire_grace_time
+    can't: a trigger that DID fire (the process was awake and running) but the
+    job failed -- most often no network yet in the first few minutes after a
+    scheduled wake. Idempotent by construction: both jobs are safe to re-run
+    (sync dedupes by external_id, the email loop just sends the same day's
+    summary again), so a retry that turns out to have been unnecessary
+    (e.g. a slow success landed between the miss check and the retry) costs
+    nothing beyond one redundant run."""
+    from backend.database import SessionLocal
+    from backend.services import scheduler_state
+    db = SessionLocal()
+    try:
+        if scheduler_state.due_for_retry(db, "bank_sync", target_hour=_BANK_SYNC_HOUR):
+            logger.info("Scheduler sweep: bank_sync missed today, retrying")
+            _run_bank_sync()
+        if scheduler_state.due_for_retry(db, "daily_summary", target_hour=settings.DAILY_SUMMARY_HOUR):
+            logger.info("Scheduler sweep: daily_summary missed today, retrying")
+            _send_daily_summaries()
+    finally:
+        db.close()
+
+
+_SWEEP_MINUTES = 20
+
 _scheduler = BackgroundScheduler()
-_scheduler.add_job(_send_daily_summaries, "cron", hour=settings.DAILY_SUMMARY_HOUR)
-_scheduler.add_job(_run_bank_sync, "cron", hour=5)
+_scheduler.add_job(
+    _send_daily_summaries, "cron", hour=settings.DAILY_SUMMARY_HOUR,
+    misfire_grace_time=_MISFIRE_GRACE_SECONDS,
+)
+_scheduler.add_job(
+    _run_bank_sync, "cron", hour=_BANK_SYNC_HOUR,
+    misfire_grace_time=_MISFIRE_GRACE_SECONDS,
+)
+_scheduler.add_job(_scheduler_sweep, "interval", minutes=_SWEEP_MINUTES)
 
 
 @asynccontextmanager

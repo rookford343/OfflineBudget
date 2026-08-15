@@ -1,7 +1,7 @@
 """Shared import logic used by both the HTTP router and CLI."""
 from __future__ import annotations
 import re
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -269,8 +269,31 @@ def _normalize_desc(desc: str) -> str:
     return _WHITESPACE_RE.sub(" ", desc.strip())
 
 
+_DATE_WINDOW_DAYS = 3
+
+
+def _pick_closest(candidates: list, row_date: date, text_of, normalized: str, consumed: set[int]):
+    """Choose the single best duplicate among heuristic candidates.
+
+    Requires the whitespace-normalized description to match, then prefers the
+    candidate whose date is closest to the incoming row (ties broken by id, so
+    the choice is deterministic). `consumed` holds the ids already claimed by
+    earlier rows in the same import batch, keeping matching strictly 1:1 --
+    without it a genuine repeat charge would match the same stored row as its
+    predecessor and be silently dropped.
+    """
+    matches = [
+        c for c in candidates
+        if c.id not in consumed and _normalize_desc(text_of(c)) == normalized
+    ]
+    if not matches:
+        return None
+    return min(matches, key=lambda c: (abs((c.date - row_date).days), c.id))
+
+
 def _find_duplicate_transaction(
     db: Session, user_id: int, account_id: int, row: schemas.ImportConfirmRow,
+    consumed: set[int] | None = None,
 ) -> models.Transaction | None:
     """Duplicate lookup for a checking-account import row.
 
@@ -281,13 +304,25 @@ def _find_duplicate_transaction(
     to the heuristic but restricted to rows that predate this column
     (external_id IS NULL), so upgrading an existing database doesn't re-import
     already-synced history. Rows without an external_id (CSV, OFX, manual) use
-    the original heuristic unchanged. Description comparison is whitespace-
+    the heuristic against everything. Description comparison is whitespace-
     normalized in Python (not at the DB level) -- see _normalize_desc.
+
+    The heuristic matches within +/-_DATE_WINDOW_DAYS rather than on an exact
+    date. A bank or card CSV export carries the transaction date while
+    SimpleFIN reports the *post* date, routinely 1-2 days later, so exact-date
+    matching let sync re-import history a CSV had already loaded -- confirmed
+    live 2026-08-12: 130 card transactions ($7,702.40) were double-counted
+    across 2026-07-10..2026-08-04 this way, inflating the Household Snapshot's
+    category totals and the weekly email. Matching is 1:1 via `consumed`, so
+    widening the window cannot swallow a genuine repeat charge.
     """
+    consumed = consumed if consumed is not None else set()
+    lo = row.date - timedelta(days=_DATE_WINDOW_DAYS)
+    hi = row.date + timedelta(days=_DATE_WINDOW_DAYS)
     base = db.query(models.Transaction).filter(
         models.Transaction.user_id == user_id,
         models.Transaction.account_id == account_id,
-        models.Transaction.date == row.date,
+        models.Transaction.date.between(lo, hi),
         models.Transaction.amount == row.amount,
     )
     normalized = _normalize_desc(row.description)
@@ -302,21 +337,27 @@ def _find_duplicate_transaction(
         candidates = base.filter(models.Transaction.external_id.is_(None)).all()
     else:
         candidates = base.all()
-    return next((c for c in candidates if _normalize_desc(c.description) == normalized), None)
+    return _pick_closest(candidates, row.date, lambda c: c.description, normalized, consumed)
 
 
 def _find_duplicate_card_transaction(
     db: Session, user_id: int, card_id: int, row: schemas.ImportConfirmRow,
+    consumed: set[int] | None = None,
 ) -> models.CreditCardTransaction | None:
-    """Card-side twin of _find_duplicate_transaction -- same rationale.
+    """Card-side twin of _find_duplicate_transaction -- same rationale, and the
+    side where the exact-date window actually bit (all 130 live duplicates were
+    card rows; checking was clean).
 
     Compares against -row.amount, not abs(row.amount) -- see run_import's
     CreditCardTransaction creation for why the sign flips on the way in.
     """
+    consumed = consumed if consumed is not None else set()
+    lo = row.date - timedelta(days=_DATE_WINDOW_DAYS)
+    hi = row.date + timedelta(days=_DATE_WINDOW_DAYS)
     base = db.query(models.CreditCardTransaction).filter(
         models.CreditCardTransaction.user_id == user_id,
         models.CreditCardTransaction.card_id == card_id,
-        models.CreditCardTransaction.date == row.date,
+        models.CreditCardTransaction.date.between(lo, hi),
         models.CreditCardTransaction.amount == -row.amount,
     )
     normalized = _normalize_desc(row.description)
@@ -331,7 +372,7 @@ def _find_duplicate_card_transaction(
         candidates = base.filter(models.CreditCardTransaction.external_id.is_(None)).all()
     else:
         candidates = base.all()
-    return next((c for c in candidates if _normalize_desc(c.merchant) == normalized), None)
+    return _pick_closest(candidates, row.date, lambda c: c.merchant, normalized, consumed)
 
 
 def run_import(
@@ -347,11 +388,16 @@ def run_import(
     imported = 0
     skipped = 0
     now = datetime.utcnow()
+    # Ids already claimed as a duplicate by an earlier row in this batch, so
+    # two incoming rows can never both dedupe against the same stored one --
+    # see _pick_closest.
+    consumed: set[int] = set()
 
     for row in rows:
         if account_id:
-            dup = _find_duplicate_transaction(db, user.id, account_id, row)
+            dup = _find_duplicate_transaction(db, user.id, account_id, row, consumed)
             if dup:
+                consumed.add(dup.id)
                 skipped += 1
                 continue
 
@@ -390,8 +436,9 @@ def run_import(
             imported += 1
 
         elif card_id:
-            dup = _find_duplicate_card_transaction(db, user.id, card_id, row)
+            dup = _find_duplicate_card_transaction(db, user.id, card_id, row, consumed)
             if dup:
+                consumed.add(dup.id)
                 skipped += 1
                 continue
 

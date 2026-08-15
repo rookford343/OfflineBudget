@@ -1,6 +1,6 @@
 """Weekly spendable pacer -- a transaction-driven, calendar-week view into
 the same monthly discretionary budget `budget_snapshot.py` already computes
-as `leftover`. Does NOT touch left_to_spend/not_saving (spreadsheet-verified,
+as `leftover`. Does NOT touch left_to_spend/safety_margin (spreadsheet-verified,
 balance-derived, unchanged) -- this is a second, independent calculation
 that fixes the gap those formulas have: discretionary checking/debit
 spending never moved them at all, only credit card balances did.
@@ -19,7 +19,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from backend import models
 from backend.services.card_matching import card_matches_description
-from backend.services.spending_helpers import NOT_SAVINGS
+from backend.services.spending_helpers import NOT_SAVINGS, is_card_payment
 
 
 # Categories whose BUDGETED amount budget_snapshot.py already removes from the
@@ -195,9 +195,13 @@ def discretionary_spend_card(db: Session, user_id: int, start: date, end: date) 
     subscriptions already counted in `leftover`.
 
     Refunds net unconditionally here (no `amount > 0` filter) -- unlike the
-    checking side, CreditCardTransaction only ever holds charges and their
-    refunds, never unrelated income, so a negative amount is always a credit
-    against that same card's discretionary spend.
+    checking side, CreditCardTransaction holds charges and their refunds, so a
+    negative amount is a credit against that same card's discretionary spend.
+
+    The one thing in this table that is neither is a payment settling the card,
+    which arrives charge-side and so inflates spend instead of netting out; it
+    is filtered by spending_helpers.is_card_payment. The mirror-image checking
+    debit is already excluded via card_matching.card_matches_description.
     """
     rows = (
         db.query(models.CreditCardTransaction)
@@ -217,7 +221,7 @@ def discretionary_spend_card(db: Session, user_id: int, start: date, end: date) 
         )
         .all()
     )
-    total = sum((t.amount for t in rows), Decimal("0"))
+    total = sum((t.amount for t in rows if not is_card_payment(t.merchant)), Decimal("0"))
     if total < 0:
         # Already a net refund period -- a subscription's assumed firing
         # (which may not have even posted as a real row yet, see

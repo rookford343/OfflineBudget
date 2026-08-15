@@ -147,6 +147,21 @@ def upgrade_schema():
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             resolved_at DATETIME
         )""",
+        # Lets a planned event be money coming IN, not just going out. Defaults
+        # to 'outflow' so every existing row keeps its current behaviour.
+        "ALTER TABLE planned_expenses ADD COLUMN direction VARCHAR(8) DEFAULT 'outflow'",
+        # Lets a one-off expense be charged to a card instead of hitting
+        # checking directly -- most of Dan's planned purchases go on a card.
+        "ALTER TABLE planned_expenses ADD COLUMN card_id INTEGER REFERENCES credit_cards(id)",
+        # SS wage-base checkpoint, read straight off a pay stub's YTD
+        # withholding line -- see models.py's User docstring comment.
+        "ALTER TABLE users ADD COLUMN ss_withheld_ytd NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN ss_withheld_ytd_as_of DATE",
+        # Debug-only raw bank-sync payload capture -- see BankSyncRawSnapshot.
+        "ALTER TABLE users ADD COLUMN debug_capture_raw_bank_data BOOLEAN DEFAULT 0",
+        # SchedulerRun and BankSyncRawSnapshot are brand-new tables, created
+        # automatically by create_tables()'s Base.metadata.create_all -- no
+        # ALTER TABLE needed for them.
     ]
     with engine.connect() as conn:
         for s in stmts:

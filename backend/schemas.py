@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, field_validator
-from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus, PlannedTransferStatus, VerificationFeature, VerificationFlagStatus
+from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus, PlannedTransferStatus, VerificationFeature, VerificationFlagStatus, PlannedDirection
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -24,6 +24,9 @@ class UserOut(BaseModel):
     ss_gross_per_paycheck: Optional[Decimal] = None
     ss_wage_base: Optional[Decimal] = None
     ss_bonus_ytd: Optional[Decimal] = None
+    ss_withheld_ytd: Optional[Decimal] = None
+    ss_withheld_ytd_as_of: Optional[date] = None
+    debug_capture_raw_bank_data: bool = False
     tax_filing_status: Optional[str] = None
     tax_state: Optional[str] = None
     annual_salary: Optional[Decimal] = None
@@ -45,6 +48,9 @@ class UserUpdate(BaseModel):
     ss_gross_per_paycheck: Optional[Decimal] = None
     ss_wage_base: Optional[Decimal] = None
     ss_bonus_ytd: Optional[Decimal] = None
+    ss_withheld_ytd: Optional[Decimal] = None
+    ss_withheld_ytd_as_of: Optional[date] = None
+    debug_capture_raw_bank_data: Optional[bool] = None
     tax_filing_status: Optional[str] = None
     tax_state: Optional[str] = None
     annual_salary: Optional[Decimal] = None
@@ -292,6 +298,7 @@ class TransactionOut(BaseModel):
     notes: Optional[str]
     is_actual: bool
     source: str
+    external_id: Optional[str] = None
     created_at: datetime
 
 
@@ -305,10 +312,21 @@ class ForecastTransaction(BaseModel):
     is_actual: bool
     is_planned: bool = False
     is_cc_payment: bool = False
+    # True only on the payoff of an already-statemented balance -- the amount
+    # is known and the date is fixed, so Dan treats it as locked in rather
+    # than forecast ("8/25 is locked in and typically does not change unless a
+    # refund happens", 2026-08-14). Estimated payoffs for later cycles are
+    # is_cc_payment but NOT locked: they are still in flux.
+    is_cc_locked: bool = False
     is_transfer: bool = False
     is_planned_transfer: bool = False
     recurring_item_id: Optional[int] = None
     transaction_id: Optional[int] = None
+    # True on a projected paycheck that includes the SS wage-base boost. Lets
+    # the frontend show the real crossing date instead of re-deriving one --
+    # see forecast_engine.py's ss_boost comment for why a client-side estimate
+    # drifted from this by two months.
+    is_ss_boosted: bool = False
 
 
 class ForecastEntry(BaseModel):
@@ -542,7 +560,22 @@ class CardTransactionOut(BaseModel):
     merchant: str
     description: Optional[str]
     source: str
+    external_id: Optional[str] = None
     created_at: datetime
+
+
+class RawSnapshotOut(BaseModel):
+    external_id: str
+    raw_json: str
+    captured_at: datetime
+
+
+class SchedulerRunOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    job_name: str
+    last_attempt_at: Optional[datetime] = None
+    last_success_at: Optional[datetime] = None
+    last_error: Optional[str] = None
 
 
 # ── Spending Analysis ─────────────────────────────────────────────────────────
@@ -897,6 +930,8 @@ class PlannedExpenseCreate(BaseModel):
     notes: Optional[str] = None
     category_id: Optional[int] = None
     account_id: Optional[int] = None
+    card_id: Optional[int] = None
+    direction: PlannedDirection = PlannedDirection.outflow
 
 
 class PlannedExpenseUpdate(BaseModel):
@@ -906,6 +941,8 @@ class PlannedExpenseUpdate(BaseModel):
     notes: Optional[str] = None
     category_id: Optional[int] = None
     account_id: Optional[int] = None
+    card_id: Optional[int] = None
+    direction: Optional[PlannedDirection] = None
 
 
 class PlannedExpenseOut(BaseModel):
@@ -917,6 +954,8 @@ class PlannedExpenseOut(BaseModel):
     notes: Optional[str]
     category_id: Optional[int]
     account_id: Optional[int]
+    card_id: Optional[int] = None
+    direction: PlannedDirection
     created_at: datetime
 
 
@@ -1041,9 +1080,21 @@ class BudgetSnapshot(BaseModel):
     spendable_today: Decimal
     days_left_in_week: int
     on_pace: bool
-    not_saving: Decimal
-    not_saving_weekly: Decimal
+    # Renamed from not_saving/not_saving_weekly 2026-08-13 -- "Not Saving"
+    # didn't say what it measured and reads oddly once positive. This is the
+    # quarter's lowest projected checking balance after also reserving the
+    # recurring card bills still due this month: positive means that much
+    # room above zero before touching savings; negative means the plan
+    # already runs into savings even before anything unexpected happens.
+    safety_margin: Decimal
+    safety_margin_weekly: Decimal
     days_remaining_in_month: int
+    # The quarter's projected low point and the day it lands. Already computed
+    # for safety_margin; surfaced because it is what Dan checks before
+    # approving a large purchase ('2026 Overview'!B23:C27 keeps the pair side
+    # by side).
+    lookahead_minimum: Decimal = Decimal("0")
+    lookahead_minimum_date: Optional[date] = None
     cards: list[CardSnapshot]
     categories: list[WeeklyDigestCategory]
     top_merchants: list[MerchantSpendingEntry]

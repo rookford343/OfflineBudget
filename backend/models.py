@@ -56,6 +56,7 @@ class UserRole(str, PyEnum):
 
 class RecurringFrequency(str, PyEnum):
     monthly = "monthly"
+    quarterly = "quarterly"
     yearly = "yearly"
     weekly = "weekly"
     biweekly = "biweekly"
@@ -103,6 +104,21 @@ class User(Base):
     ss_gross_per_paycheck: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     ss_wage_base: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     ss_bonus_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # Direct checkpoint from a real pay stub -- the dollar amount of employee-
+    # side 6.2% Social Security tax withheld year-to-date, and the date of the
+    # last paycheck it reflects. Preferred over reconstructing YTD gross wages
+    # by counting actual paychecks against a flat ss_gross_per_paycheck, which
+    # compounds error across every raise in the year (Dan's April raise alone
+    # misdated the 2026 crossing by a full paycheck -- see forecast_engine.py).
+    # ss_withheld_ytd / 0.062 recovers gross wages actually subject to SS,
+    # already correct for every raise, with no reconstruction needed. Falls
+    # back to the legacy ss_bonus_ytd method when unset.
+    ss_withheld_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    ss_withheld_ytd_as_of: Mapped[date | None] = mapped_column(Date)
+    # Debug-only: when on, bank sync writes the full raw SimpleFIN payload per
+    # transaction to BankSyncRawSnapshot. Off by default -- see that model's
+    # docstring for why this is a toggle, not a permanent column.
+    debug_capture_raw_bank_data: Mapped[bool] = mapped_column(Boolean, default=False)
     transfer_increment: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("1000.00"))
 
     linked_to_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
@@ -493,21 +509,46 @@ class ScenarioOverride(Base):
 
 # ── Planned Expenses ─────────────────────────────────────────────────────────
 
+class PlannedDirection(str, PyEnum):
+    outflow = "outflow"
+    inflow = "inflow"
+
+
 class PlannedExpense(Base):
+    """A one-off, non-recurring event on a future date.
+
+    `direction` makes this usable for money arriving as well as leaving. Before
+    it, the forecast forced every row negative, so there was no way to model a
+    known one-off inflow -- Dan's April bonus ($38,347.92), Airbnb money from
+    family, or an eBay payout, all of which his spreadsheet forecast carries as
+    explicit rows. Recurring income belongs in RecurringItem; this is for
+    one-time amounts. Defaults to `outflow`, so existing rows are unaffected.
+
+    `card_id` lets an outflow be charged to a card instead of hitting checking
+    on `expected_date` directly -- most of Dan's one-off purchases (the Holland
+    vacation, e.g.) go on a card, and checking only feels it later, on the
+    card's next statement payoff. Nullable: unset means straight to checking
+    (or `account_id`), same as before this field existed.
+    """
     __tablename__ = "planned_expenses"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
+    card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
     category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     expected_date: Mapped[date] = mapped_column(Date, nullable=False)
+    direction: Mapped[PlannedDirection] = mapped_column(
+        Enum(PlannedDirection), default=PlannedDirection.outflow, nullable=False,
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="planned_expenses")
     account: Mapped[Account | None] = relationship()
+    card: Mapped["CreditCard | None"] = relationship()
     category: Mapped[Category | None] = relationship()
 
 
@@ -641,6 +682,26 @@ class BankConnectionAccountLink(Base):
     local_credit_card: Mapped["CreditCard | None"] = relationship()
 
 
+class BankSyncRawSnapshot(Base):
+    """The full, unmapped SimpleFIN transaction payload -- everything the bank
+    actually sends, most of which SimpleFinTransaction discards down to
+    id/posted/amount/description. Deliberately NOT a column on Transaction or
+    CreditCardTransaction: only written when
+    User.debug_capture_raw_bank_data is on, so it stays a debug capture
+    Dan can turn off, not a permanent widening of the core transaction
+    tables (Dan, 2026-08-14: "a setting to debug rather than a persistent
+    feature"). Keyed on (user_id, external_id) with a fresh row on every
+    sync overlap, so it never accumulates duplicates for the same
+    transaction."""
+    __tablename__ = "bank_sync_raw_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    raw_json: Mapped[str] = mapped_column(Text, nullable=False)
+    captured_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 # ── Planned Transfers ────────────────────────────────────────────────────────
 
 class PlannedTransferStatus(str, PyEnum):
@@ -700,3 +761,20 @@ class VerificationFlag(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     user: Mapped["User"] = relationship()
+
+
+class SchedulerRun(Base):
+    """One row per scheduled job name -- tracks whether it actually succeeded
+    today, independent of whether APScheduler's own trigger fired. The Mac
+    sleeping through 5am is not the only way a run goes missing: the trigger
+    can fire on time and still fail (no network yet after waking). Two
+    distinct failure shapes, two distinct fixes -- see main.py's
+    `misfire_grace_time` (catches "didn't fire") and `_scheduler_sweep`
+    (catches "fired but failed, or fired never at all") -- both consult this
+    table before writing to it."""
+    __tablename__ = "scheduler_runs"
+
+    job_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_error: Mapped[str | None] = mapped_column(Text)

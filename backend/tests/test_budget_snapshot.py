@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
 from backend import models
-from backend.schemas import QuarterSummary, ForecastEntry
+from backend.schemas import ForecastEntry
 from backend.services.budget_snapshot import compute_budget_snapshot
 
 
@@ -15,15 +15,18 @@ def _seed_spreadsheet_scenario(db):
     db.flush()
 
     checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("10000.00"))
-    # balance_due and pending_charges default to 0, so current_balance -
-    # balance_due + pending_charges reduces to current_balance -- matches
     # Dan's real spreadsheet cell for this scenario (2026-08-07): "2026
-    # Overview"!B12 = -9273.76+10524.22+605.99 = 1856.45, i.e. this
-    # current_balance already IS the new-spending-since-statement delta,
-    # not the account's full running balance.
+    # Overview"!B12 = -9273.76+10524.22+605.99 = 1856.45, i.e. the card term
+    # both formulas consume is new-spending-since-statement, NOT the card's
+    # full running balance. Modeled here with the three real columns rather
+    # than by pre-baking 1856.45 into current_balance: the old fixture did
+    # the latter with balance_due=0, which made the two candidate formulas
+    # indistinguishable and hid a $9,236 live error in left_to_spend.
     card = models.CreditCard(
         user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("29000.00"),
-        statement_day=28, due_day=25, current_balance=Decimal("1856.45"),
+        statement_day=28, due_day=25,
+        current_balance=Decimal("10524.22"), balance_due=Decimal("9273.76"),
+        pending_charges=Decimal("605.99"), next_payment_date=date(2026, 8, 25),
     )
     db.add_all([checking, card])
     db.flush()
@@ -87,21 +90,19 @@ def _seed_spreadsheet_scenario(db):
 
 
 def _fake_quarter_min(amount: str):
-    """Returns a QuarterSummary list with one quarter whose days bottom out
-    at `amount`, standing in for build_quarters() -- isolates this test from
-    forecast_engine's own correctness, which has its own test coverage."""
-    return [QuarterSummary(
-        quarter=3, year=2026,
-        open_balance=Decimal(amount), close_balance=Decimal(amount),
-        total_income=Decimal("0"), total_expenses=Decimal("0"), net=Decimal("0"),
-        days=[ForecastEntry(date=date(2026, 8, 20), projected_balance=Decimal(amount), transactions=[])],
-    )]
+    """A one-day forecast bottoming out at `amount`, standing in for
+    build_forecast() -- isolates this test from forecast_engine's own
+    correctness, which has its own test coverage.
+
+    Was a QuarterSummary list until 2026-08-14, when the lookahead minimum
+    moved off build_quarters onto a rolling 3-month build_forecast window."""
+    return [ForecastEntry(date=date(2026, 8, 20), projected_balance=Decimal(amount), transactions=[])]
 
 
-def test_left_to_spend_and_not_saving_match_spreadsheet_exactly(db_session):
+def test_left_to_spend_and_safety_margin_match_spreadsheet_exactly(db_session):
     user, checking, card = _seed_spreadsheet_scenario(db_session)
 
-    with patch("backend.services.budget_snapshot.build_quarters", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     # 1 cent above the spreadsheet's displayed $1,567.72 cell: expected. Excel
@@ -114,9 +115,21 @@ def test_left_to_spend_and_not_saving_match_spreadsheet_exactly(db_session):
     # left_to_spend_weekly is no longer derived from left_to_spend -- it's
     # the transaction-driven weekly pacer now (see test_spendable_pacer.py).
     # Not asserted here; this test only covers the spreadsheet-verified
-    # left_to_spend/not_saving formulas, which are unchanged.
-    assert snapshot.not_saving == Decimal("2085.64")
-    assert snapshot.not_saving_weekly == Decimal("583.98")
+    # left_to_spend/safety_margin formulas.
+    #
+    # safety_margin's golden value changed 2026-08-13: Dan found this metric
+    # (then called "Not Saving") double-counting new_spending_total (the
+    # same shape of bug as the left_to_spend fix above, just on the other
+    # formula) and rewrote '2026 Overview'!B18 to drop that term entirely --
+    # see compute_budget_snapshot's safety_margin comment. This fixture's card
+    # carries $1,856.45 of new_spending_total (see its docstring), so the
+    # old golden value plus that same amount is the new one:
+    # 2085.64 + 1856.45 = 3942.09. Structural check on the formula shape,
+    # not yet re-verified against a live spreadsheet cell -- see
+    # budget_snapshot.py's note that quarter_min itself still needs a fresh
+    # reconciliation pass before this can be trusted to the cent.
+    assert snapshot.safety_margin == Decimal("3942.09")
+    assert snapshot.safety_margin_weekly == Decimal("1103.79")
 
 
 def test_no_active_cards_gives_zero_card_balance(db_session):
@@ -127,7 +140,7 @@ def test_no_active_cards_gives_zero_card_balance(db_session):
     db_session.add(checking)
     db_session.commit()
 
-    with patch("backend.services.budget_snapshot.build_quarters", return_value=_fake_quarter_min("500.00")):
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("500.00")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert snapshot.cards == []
@@ -136,34 +149,39 @@ def test_no_active_cards_gives_zero_card_balance(db_session):
     assert snapshot.left_to_spend == Decimal("0.00")
 
 
-def test_not_saving_reacts_to_pending_charges_but_left_to_spend_does_not(db_session):
-    """Not Saving includes pending_charges via its explicit balance_due_total
-    term (balance_due + pending_charges per card) -- so entering a pending
-    charge should move Not Saving but never Left to Spend (which uses
-    current_balance, not balance_due/pending_charges, and never touches the
-    forecast). This is intentional: it matches the user's stated reason for
-    wanting pending_charges in the first place. Do not "fix" this to isolate
-    Not Saving from it.
+def test_pending_charges_move_left_to_spend_only(db_session):
+    """A pending charge is money already spent, so it must reduce Left to
+    Spend by exactly its amount -- that formula's new_spending_total term
+    (current_balance - balance_due + pending_charges) sees it directly.
 
-    Previously this flowed transitively through quarter_min (the forecast's
-    own CC-payment injection folded pending_charges in) -- that path also
-    double-counted the payoff itself (see
-    test_not_saving_does_not_double_count_the_cc_payoff) and was replaced
-    2026-08-08 with this explicit term. The user-visible reactivity is the
-    same; the mechanism is no longer entangled with the forecast."""
+    Not Saving must NOT move: it stopped using new_spending_total entirely
+    on 2026-08-13 (see compute_budget_snapshot's safety_margin comment), so a
+    pending charge doesn't reach it at all until it actually posts and
+    shows up inside quarter_min's own forecast walk. This inverts the test's
+    original name and assertion (both moving together) -- that was itself
+    the era of the safety_margin double-count Dan later caught.
+
+    Left to Spend's reactivity was corrected 2026-08-12 against "2026
+    Overview"!B17, whose card term is B12 = -balance_due + current_balance +
+    pending_charges.
+
+    current_balance is seeded equal to balance_due so the baseline delta is
+    zero and the pending charge is the only thing moving -- an earlier
+    version left current_balance at its 0 default while balance_due was
+    1000, a state a real card cannot be in."""
     user = models.User(username="pendtest", hashed_password="x", display_name="PendTest")
     db_session.add(user)
     db_session.flush()
     checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("2000.00"))
     card = models.CreditCard(
         user_id=user.id, name="Test Card", credit_limit=Decimal("10000.00"),
-        statement_day=28, due_day=25, balance_due=Decimal("1000.00"),
-        next_payment_date=date(2026, 8, 25),
+        statement_day=28, due_day=25, current_balance=Decimal("1000.00"),
+        balance_due=Decimal("1000.00"), next_payment_date=date(2026, 8, 25),
     )
     db_session.add_all([checking, card])
     db_session.flush()
     # A modest recurring expense so there's a real (non-mocked) forecast to
-    # walk -- this test deliberately does NOT mock build_quarters, unlike
+    # walk -- this test deliberately does NOT mock build_forecast, unlike
     # the golden-value test, because the whole point is to exercise the
     # real forecast path where pending_charges actually lives.
     db_session.add(models.RecurringItem(
@@ -180,21 +198,70 @@ def test_not_saving_reacts_to_pending_charges_but_left_to_spend_does_not(db_sess
 
     with_pending = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
-    assert with_pending.left_to_spend == baseline.left_to_spend, "Left to Spend must never react to pending_charges"
-    assert with_pending.not_saving == baseline.not_saving - Decimal("500.00"), "Not Saving must react by exactly the pending amount (it dropped, since it's a payment)"
+    assert with_pending.left_to_spend == baseline.left_to_spend - Decimal("500.00"), "Left to Spend must drop by exactly the pending amount"
+    assert with_pending.safety_margin == baseline.safety_margin, "Not Saving must NOT react to pending_charges -- it no longer uses new_spending_total at all"
 
 
-def test_not_saving_does_not_double_count_the_cc_payoff(db_session):
+def test_left_to_spend_ignores_already_statemented_balance(db_session):
+    """Reproduces the live 2026-08-12 error directly: Left to Spend must not
+    be reduced by a card's balance_due.
+
+    That amount is the last statement's total. It is already a budgeted
+    payment -- it sits in the Credit Card Bills list and the forecast injects
+    it on the card's due date -- so subtracting it from this month's spending
+    room charges Dan for it twice. Live symptom: the app reported
+    -$8,290.67 while Budget.xlsx reported +$945.85, a gap of $9,236 against
+    $9,560.91 of combined balance_due.
+
+    Two cards with identical NEW spending but wildly different statemented
+    balances must therefore produce the same Left to Spend."""
+    def _seed(username: str, balance_due: str, current_balance: str):
+        user = models.User(username=username, hashed_password="x", display_name=username)
+        db_session.add(user)
+        db_session.flush()
+        checking = models.Account(
+            user_id=user.id, name="Checking", type=models.AccountType.checking,
+            current_balance=Decimal("10000.00"),
+        )
+        card = models.CreditCard(
+            user_id=user.id, name="Card", credit_limit=Decimal("29000.00"),
+            statement_day=28, due_day=25,
+            current_balance=Decimal(current_balance), balance_due=Decimal(balance_due),
+            next_payment_date=date(2026, 8, 25),
+        )
+        db_session.add_all([checking, card])
+        db_session.commit()
+        return user, checking
+
+    # Both carry exactly $500 of new, un-statemented spending.
+    fresh_user, fresh_checking = _seed("freshstmt", "0.00", "500.00")
+    heavy_user, heavy_checking = _seed("heavystmt", "9273.76", "9773.76")
+
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5000.00")):
+        fresh = compute_budget_snapshot(db_session, fresh_user, fresh_checking.id, as_of=date(2026, 8, 12))
+        heavy = compute_budget_snapshot(db_session, heavy_user, heavy_checking.id, as_of=date(2026, 8, 12))
+
+    assert heavy.left_to_spend == fresh.left_to_spend, (
+        "a large statemented balance_due must not reduce Left to Spend -- "
+        "it is an already-budgeted payment, not new spending"
+    )
+    assert heavy.left_to_spend == Decimal("-500.00"), (
+        "with no income or bills seeded, leftover is 0, so Left to Spend is "
+        "just -new_spending_total"
+    )
+
+
+def test_safety_margin_does_not_double_count_the_cc_payoff(db_session):
     """Reproduces a live bug (2026-08-08, corrected 2026-08-09 after reading
     Dan's real spreadsheet): quarter_min's forecast already models paying
     off each card's last-statement balance (balance_due) on its due date --
     confirmed against Dan's own "2026 Forecast" sheet, which hand-models the
-    identical payoff event inline. not_saving must NOT subtract that same
+    identical payoff event inline. safety_margin must NOT subtract that same
     balance_due amount again; it subtracts only new spending accumulated
     since the statement closed (current_balance - balance_due +
     pending_charges). When current_balance == balance_due (no new spending
     since the statement), that delta is zero, so the payoff already inside
-    quarter_min is the only place it gets counted -- not_saving should land
+    quarter_min is the only place it gets counted -- safety_margin should land
     near the un-paid-off balance, not deeply negative.
 
     (An earlier version of this fix instead excluded the payoff from
@@ -223,7 +290,7 @@ def test_not_saving_does_not_double_count_the_cc_payoff(db_session):
 
     # quarter_min already reflects the ~$3,000 payoff (checking dips to
     # ~$2,000 on the due date). new_spending_total is 0 (current_balance ==
-    # balance_due), so not_saving should land near that ~$2,000 floor, not
+    # balance_due), so safety_margin should land near that ~$2,000 floor, not
     # near -$1,000 (which is what a second full-balance subtraction would
     # produce).
-    assert snapshot.not_saving > Decimal("0")
+    assert snapshot.safety_margin > Decimal("0")

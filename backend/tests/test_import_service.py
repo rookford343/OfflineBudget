@@ -120,6 +120,113 @@ def test_card_dedupes_across_whitespace_formatting_difference(db_session):
     assert len(txns) == 1
 
 
+def test_card_dedupes_sync_posted_a_few_days_after_the_csv_date(db_session):
+    """Reproduces the live bug found 2026-08-12: a card CSV export carries the
+    transaction date, SimpleFIN reports the post date 1-2 days later, and
+    exact-date dedupe matched neither -- 130 card rows ($7,702.40) were
+    double-counted across 2026-07-10..2026-08-04, inflating the Household
+    Snapshot's category totals and the weekly email. The real Airbnb charge
+    below appeared on 7/21 in the CSV and 7/22 from sync."""
+    user, card = _make_user_and_card(db_session)
+
+    csv_row = schemas.ImportConfirmRow(
+        date=date(2026, 7, 21), amount=Decimal("-2123.69"),
+        description="AIRBNB * HMXKC4BDXD",
+    )
+    run_import(db_session, user, [csv_row], account_id=None, card_id=card.id)
+
+    sync_row = schemas.ImportConfirmRow(
+        date=date(2026, 7, 22), amount=Decimal("-2123.69"),
+        description="AIRBNB * HMXKC4BDXD",
+        external_id="simplefin-airbnb-1",
+    )
+    result = run_import(db_session, user, [sync_row], account_id=None, card_id=card.id)
+
+    assert result.imported == 0
+    assert result.skipped_duplicates == 1
+    txns = db_session.query(models.CreditCardTransaction).filter_by(card_id=card.id).all()
+    assert len(txns) == 1
+    # The CSV row survives -- it carries the true transaction date, not the
+    # bank's post date, which is what the dedupe script keeps too.
+    assert txns[0].date == date(2026, 7, 21)
+
+
+def test_card_keeps_a_genuine_repeat_charge_outside_the_window(db_session):
+    """A real second charge at the same merchant for the same amount, far
+    enough out to be unambiguous, must still import. Guards the widened
+    window against over-collapsing."""
+    user, card = _make_user_and_card(db_session)
+
+    first = schemas.ImportConfirmRow(
+        date=date(2026, 7, 2), amount=Decimal("-8.75"), description="MTA*NYCT PAYGO",
+    )
+    run_import(db_session, user, [first], account_id=None, card_id=card.id)
+
+    later = schemas.ImportConfirmRow(
+        date=date(2026, 7, 9), amount=Decimal("-8.75"), description="MTA*NYCT PAYGO",
+    )
+    result = run_import(db_session, user, [later], account_id=None, card_id=card.id)
+
+    assert result.imported == 1
+    assert db_session.query(models.CreditCardTransaction).filter_by(card_id=card.id).count() == 2
+
+
+def test_card_two_synced_charges_do_not_collapse_onto_one_csv_row(db_session):
+    """The 1:1 guard. Dan really does hit MTA*NYCT PAYGO for $3.00 several
+    times a day. If one CSV row is already stored and sync then delivers two
+    genuine charges inside the window, exactly one may be treated as its
+    duplicate -- the other is new money and must import. Before `consumed`,
+    both matched the same stored row and one real charge vanished."""
+    user, card = _make_user_and_card(db_session)
+
+    csv_row = schemas.ImportConfirmRow(
+        date=date(2026, 6, 2), amount=Decimal("-3.00"), description="MTA*NYCT PAYGO",
+    )
+    run_import(db_session, user, [csv_row], account_id=None, card_id=card.id)
+
+    sync_rows = [
+        schemas.ImportConfirmRow(
+            date=date(2026, 6, 3), amount=Decimal("-3.00"),
+            description="MTA*NYCT PAYGO", external_id="sf-mta-1",
+        ),
+        schemas.ImportConfirmRow(
+            date=date(2026, 6, 3), amount=Decimal("-3.00"),
+            description="MTA*NYCT PAYGO", external_id="sf-mta-2",
+        ),
+    ]
+    result = run_import(db_session, user, sync_rows, account_id=None, card_id=card.id)
+
+    assert result.skipped_duplicates == 1
+    assert result.imported == 1
+    assert db_session.query(models.CreditCardTransaction).filter_by(card_id=card.id).count() == 2
+
+
+def test_checking_dedupes_sync_posted_a_day_after_the_csv_date(db_session):
+    """Checking-side twin of the post-date window fix. Live data happened to be
+    clean on this side, but the same matcher runs there."""
+    user = models.User(username="chk", hashed_password="x", display_name="Chk")
+    db_session.add(user)
+    db_session.flush()
+    account = models.Account(user_id=user.id, name="Checking", type=models.AccountType.checking)
+    db_session.add(account)
+    db_session.flush()
+
+    csv_row = schemas.ImportConfirmRow(
+        date=date(2026, 8, 3), amount=Decimal("-200.00"), description="VICKY HOUSE CLEAN",
+    )
+    run_import(db_session, user, [csv_row], account_id=account.id, card_id=None)
+
+    sync_row = schemas.ImportConfirmRow(
+        date=date(2026, 8, 5), amount=Decimal("-200.00"),
+        description="VICKY HOUSE CLEAN", external_id="sf-vicky-1",
+    )
+    result = run_import(db_session, user, [sync_row], account_id=account.id, card_id=None)
+
+    assert result.imported == 0
+    assert result.skipped_duplicates == 1
+    assert db_session.query(models.Transaction).filter_by(account_id=account.id).count() == 1
+
+
 def test_a_synced_charge_and_its_refund_net_to_zero_discretionary_spend(db_session):
     """End-to-end regression, reproducing the real Ozwell scenario from a
     SimpleFIN-style sync: a $25 charge (negative row.amount) and its $25
