@@ -46,6 +46,12 @@ export const bankSyncApi = {
 };
 
 // ── Server settings (admin only) ──────────────────────────────────────────────
+export const merchantsApi = {
+  listAliases: () => api.get("/merchants/aliases").then((r) => r.data),
+  createAlias: (data: object) => api.post("/merchants/aliases", data).then((r) => r.data),
+  removeAlias: (id: number) => api.delete(`/merchants/aliases/${id}`),
+};
+
 export const appSettingsApi = {
   get: () => api.get("/settings").then((r) => r.data),
   update: (data: object) => api.patch("/settings", data).then((r) => r.data),

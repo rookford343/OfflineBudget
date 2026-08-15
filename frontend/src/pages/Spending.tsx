@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { spendingApi, accountsApi, cardsApi, analyticsApi } from "../api";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { spendingApi, accountsApi, cardsApi, analyticsApi, merchantsApi } from "../api";
 import { api } from "../api/client";
 import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyLeft } from "d3-sankey";
 import { fmt, firstOfMonth, today, quickRange } from "../lib/utils";
@@ -9,7 +9,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine,
   AreaChart, Area, Sector,
 } from "recharts";
-import { ChevronDown, ChevronRight, HelpCircle } from "lucide-react";
+import { ChevronDown, ChevronRight, HelpCircle, Pencil } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
 function isDarkMode(): boolean {
@@ -36,6 +36,16 @@ const YEAR_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 export default function Spending() {
   const [showHelp, setShowHelp] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "trends" | "merchants" | "flow" | "tax">("overview");
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const qc = useQueryClient();
+  const renameMut = useMutation({
+    mutationFn: (v: { pattern: string; display_name: string }) => merchantsApi.createAlias(v),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["spending-merchants"] });
+      setRenameTarget(null);
+    },
+  });
   const [taxYear, setTaxYear] = useState(new Date().getFullYear() - 1);
   const [sankeyYear, setSankeyYear] = useState(new Date().getFullYear());
   const [sankeyMonth, setSankeyMonth] = useState(new Date().getMonth() + 1);
@@ -329,23 +339,57 @@ export default function Spending() {
 
       {activeTab === "overview" && overview && (
         <>
-          {/* Summary strip */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="stat-card">
-              <span className="stat-label">Total Spent</span>
-              <span className="stat-value text-gray-900 dark:text-[#c4ccd8]">{fmt(overview.total_actual)}</span>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Budgeted</span>
-              <span className="stat-value text-blue-600 dark:text-blue-400">{fmt(overview.total_budgeted)}</span>
-            </div>
-            <div className="stat-card">
-              <span className="stat-label">Variance</span>
-              <span className={`stat-value ${parseFloat(overview.total_variance) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                {parseFloat(overview.total_variance) >= 0 ? "+" : ""}{fmt(overview.total_variance)}
-              </span>
-            </div>
-          </div>
+          {/* Discretionary first: the part of spending that was actually a
+              decision this month. Fixed commitments (mortgage, tithe,
+              insurance) dominate the raw total and drown it out -- in July
+              they were $9,722 of $15,772, so "Total Spent" alone told Dan
+              nothing he could act on. */}
+          {(() => {
+            const disc = parseFloat(overview.discretionary_actual ?? "0");
+            const discBudget = parseFloat(overview.discretionary_budgeted ?? "0");
+            const fixed = parseFloat(overview.fixed_actual ?? "0");
+            const left = discBudget - disc;
+            const pct = discBudget > 0 ? (disc / discBudget) * 100 : 0;
+            const over = left < 0;
+            return (
+              <div className="space-y-4">
+                {discBudget > 0 && (
+                  <div className={`card ${over
+                    ? "bg-gradient-to-br from-red-50 to-orange-50 border-red-100 dark:from-red-950/40 dark:to-orange-950/30 dark:border-red-900/50"
+                    : "bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-100 dark:from-emerald-950/40 dark:to-teal-950/30 dark:border-emerald-900/50"}`}>
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-1">Discretionary spending</p>
+                    <p className={`text-3xl font-bold tabular-nums ${over ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      {over ? `${fmt(Math.abs(left))} over` : `${fmt(left)} left`}
+                    </p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                      {fmt(disc)} spent of {fmt(discBudget)} budgeted
+                    </p>
+                    <div className="mt-3 h-2.5 bg-white/70 dark:bg-black/30 rounded-full overflow-hidden">
+                      <div className={`h-full rounded-full ${pct >= 100 ? "bg-red-500" : pct >= 80 ? "bg-amber-500" : "bg-emerald-500"}`}
+                        style={{ width: `${Math.min(100, pct)}%` }} />
+                    </div>
+                  </div>
+                )}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="stat-card">
+                    <span className="stat-label">Discretionary</span>
+                    <span className="stat-value text-gray-900 dark:text-[#c4ccd8]">{fmt(disc)}</span>
+                    <span className="text-xs text-gray-400">what you chose</span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-label">Fixed Commitments</span>
+                    <span className="stat-value text-gray-500 dark:text-gray-400">{fmt(fixed)}</span>
+                    <span className="text-xs text-gray-400">mortgage, tithe, insurance</span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-label">Total Spent</span>
+                    <span className="stat-value text-gray-900 dark:text-[#c4ccd8]">{fmt(overview.total_actual)}</span>
+                    <span className="text-xs text-gray-400">of {fmt(overview.total_budgeted)} budgeted</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Total monthly bar chart + average */}
           {barData.length > 1 && (
@@ -560,10 +604,22 @@ export default function Spending() {
                       return (
                         <tr key={m.name} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 relative">
                           <td className="px-4 py-2 text-gray-400 tabular-nums">{i + 1}</td>
-                          <td className="px-4 py-2 text-gray-900 dark:text-gray-100 max-w-xs">
+                          <td className="px-4 py-2 text-gray-900 dark:text-gray-100 max-w-xs group">
                             <div className="relative">
                               <div className="absolute inset-0 bg-indigo-50 dark:bg-indigo-900/20 rounded" style={{ width: `${pct}%` }} />
-                              <span className="relative">{m.name}</span>
+                              <span className="relative inline-flex items-center gap-1.5">
+                                {m.name}
+                                {/* Names are auto-grouped from raw bank descriptors, and the
+                                    heuristics will get some wrong. Renaming here is what keeps a
+                                    bad grouping visible and fixable instead of quietly wrong. */}
+                                <button
+                                  onClick={() => { setRenameTarget(m.name); setRenameValue(m.name); }}
+                                  className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-indigo-500 transition-opacity"
+                                  title="Rename or merge this merchant"
+                                >
+                                  <Pencil size={11} />
+                                </button>
+                              </span>
                             </div>
                           </td>
                           <td className="px-4 py-2 text-right text-gray-400 tabular-nums hidden sm:table-cell">{m.count}×</td>
@@ -796,6 +852,31 @@ function SankeyChart({ data }: { data: any }) {
           );
         })}
       </svg>
+
+      {renameTarget && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+             onClick={() => setRenameTarget(null)}>
+          <div className="card w-full max-w-sm space-y-3" onClick={e => e.stopPropagation()}>
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">Rename merchant</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Merchant names are grouped automatically from raw bank descriptors. Rename
+              <span className="font-medium"> {renameTarget}</span> — or type an existing merchant's
+              name to merge the two together.
+            </p>
+            <input className="input w-full" value={renameValue} autoFocus
+              onChange={e => setRenameValue(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter" && renameValue.trim()) renameMut.mutate({ pattern: renameTarget, display_name: renameValue.trim() }); }} />
+            <div className="flex justify-end gap-2">
+              <button className="btn-secondary text-sm" onClick={() => setRenameTarget(null)}>Cancel</button>
+              <button className="btn-primary text-sm"
+                disabled={!renameValue.trim() || renameMut.isPending}
+                onClick={() => renameMut.mutate({ pattern: renameTarget, display_name: renameValue.trim() })}>
+                {renameMut.isPending ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

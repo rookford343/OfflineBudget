@@ -29,6 +29,7 @@ from backend.routers import bank_sync as bank_sync_router_module
 from backend.routers import planned_transfers as planned_transfers_router_module
 from backend.routers import verification_flags as verification_flags_router_module
 from backend.routers import settings as settings_router_module
+from backend.routers import merchants as merchants_router_module
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +263,7 @@ app.include_router(bank_sync_router_module.router)
 app.include_router(planned_transfers_router_module.router)
 app.include_router(verification_flags_router_module.router)
 app.include_router(settings_router_module.router)
+app.include_router(merchants_router_module.router)
 
 
 @app.get("/health", tags=["health"])

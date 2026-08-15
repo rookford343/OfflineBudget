@@ -201,6 +201,13 @@ class Category(Base):
     rollover_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     rollover_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), server_default="0")
     tax_deductible: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # Discretionary = spending Dan can actually decide about this month
+    # (Shopping, Food & Drinks, Entertainment). Fixed = committed before the
+    # month starts (Mortgage, Tithe, Insurance). Mixing them made the
+    # Spending page headline Mortgage $4,405 and Tithe $1,300 as if they were
+    # choices, burying the ~$1,500 that is actually steerable. Mirrors the
+    # discretionary grid in Dan's spreadsheet ('2026 Overview'!E3:E8).
+    is_discretionary: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
 
     user: Mapped[User] = relationship(back_populates="categories")
     parent: Mapped[Category | None] = relationship(remote_side="Category.id", back_populates="children")
@@ -761,6 +768,25 @@ class VerificationFlag(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     user: Mapped["User"] = relationship()
+
+
+class MerchantAlias(Base):
+    """A user correction to merchant grouping.
+
+    merchant_normalizer's heuristics will mis-group some bank's wording, and
+    a wrong grouping nobody can fix is worse than no grouping at all -- the
+    totals just quietly lie. `pattern` matches either a raw bank descriptor
+    or the normalizer's own output, so a correction can target one specific
+    descriptor when two things were wrongly merged, or the merged name when
+    it simply needs renaming.
+    """
+    __tablename__ = "merchant_aliases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    pattern: Mapped[str] = mapped_column(String(256), nullable=False)
+    display_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class AppSetting(Base):

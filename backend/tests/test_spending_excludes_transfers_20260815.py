@@ -85,7 +85,7 @@ def test_merchant_totals_excludes_payoff_and_transfer(db_session):
     rows = merchant_totals(db_session, user.id, date(2026, 7, 1), date(2026, 7, 31))
     names = [n for n, _, _ in rows]
 
-    assert names == ["KROGER #5001"], f"only real spend should appear, got {names}"
+    assert names == ["Kroger"], f"only real spend should appear, got {names}"
     assert sum(t for _, t, _ in rows) == Decimal("120.00")
 
 
@@ -123,7 +123,7 @@ def test_a_refund_only_merchant_does_not_crash(db_session):
     db_session.commit()
 
     rows = merchant_totals(db_session, user.id, date(2026, 7, 1), date(2026, 7, 31))
-    entry = next((r for r in rows if r[0] == "MICHAELS STORES 9951"), None)
+    entry = next((r for r in rows if r[0] == "Michaels Stores"), None)
     assert entry is not None
     assert entry[2] == 0, "a refund-only merchant has zero charges"
 
@@ -140,4 +140,64 @@ def test_a_real_refund_still_nets_against_its_charge(db_session):
     db_session.commit()
 
     rows = merchant_totals(db_session, user.id, date(2026, 7, 1), date(2026, 7, 31))
-    assert dict((n, t) for n, t, _ in rows)["TARGET"] == Decimal("70.00")
+    assert dict((n, t) for n, t, _ in rows)["Target"] == Decimal("70.00")
+
+
+# --- Merchant normalization (Dan, 2026-08-15) ----------------------------
+
+def test_normalizer_collapses_the_descriptor_variants_that_split_merchants():
+    """The measured failure: Amazon fragmented across 138 raw strings and
+    never appeared in the top list despite being $6,762 of 2026 spend."""
+    from backend.services.merchant_normalizer import normalize_merchant as n
+
+    assert n("AMAZON MKTPL*BJ1O92ZW1") == "Amazon"
+    assert n("Amazon.com*BS7US6590") == "Amazon"
+    assert n("AMZN MKTP US*1A2B3C") == "Amazon"
+    # store numbers split one chain into a row per location
+    assert n("KROGER #5001") == n("KROGER #970") == "Kroger"
+    assert n("CHIPOTLE 0686") == n("CHIPOTLE 0421") == "Chipotle"
+
+
+def test_normalizer_leaves_readable_names_alone():
+    """Banks that already write a clean name must not be mangled."""
+    from backend.services.merchant_normalizer import normalize_merchant as n
+    assert n("Netflix") == "Netflix"
+    assert n("ZAZZLE INC") == "Zazzle Inc"
+
+
+def test_normalizer_never_returns_empty():
+    """A descriptor the rules don't understand must still show up rather
+    than vanishing into an Unknown bucket."""
+    from backend.services.merchant_normalizer import normalize_merchant as n
+    assert n("X7") == "X7"
+    assert n("") == "Unknown"
+    assert n(None) == "Unknown"
+
+
+def test_merchant_totals_group_across_variants(db_session):
+    user, account, card = _setup(db_session)
+    for ref in ["AMAZON MKTPL*BJ1O92ZW1", "Amazon.com*BS7US6590", "AMAZON MKTPL*QQ9Z11X22"]:
+        db_session.add(models.CreditCardTransaction(
+            user_id=user.id, card_id=card.id, date=date(2026, 7, 8),
+            amount=Decimal("50.00"), merchant=ref,
+        ))
+    db_session.commit()
+
+    rows = dict((n, t) for n, t, _ in merchant_totals(db_session, user.id, date(2026, 7, 1), date(2026, 7, 31)))
+    assert rows["Amazon"] == Decimal("150.00"), f"variants must merge, got {rows}"
+
+
+def test_a_user_alias_overrides_the_heuristic(db_session):
+    """The heuristics will mis-group something. A correction that can't be
+    made is worse than no grouping, because the total silently lies."""
+    user, account, card = _setup(db_session)
+    db_session.add(models.CreditCardTransaction(
+        user_id=user.id, card_id=card.id, date=date(2026, 7, 8),
+        amount=Decimal("25.00"), merchant="MOTW COFFE &amp; PASTRIES",
+    ))
+    db_session.add(models.MerchantAlias(user_id=user.id, pattern="MOTW COFFE &amp; PASTRIES",
+                                        display_name="MOTW Coffee"))
+    db_session.commit()
+
+    rows = dict((n, t) for n, t, _ in merchant_totals(db_session, user.id, date(2026, 7, 1), date(2026, 7, 31)))
+    assert "MOTW Coffee" in rows

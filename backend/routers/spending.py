@@ -263,7 +263,14 @@ def spending_by_category(
         # Also catch transactions categorized directly to top-level
         top_direct = sub_breakdown.get(top.id, {})
         top_actual += sum(top_direct.values(), Decimal("0"))
-        top_budgeted = budget_by_cat.get(top.id, Decimal("0"))
+        # A parent's budget is its own row PLUS its children's. Dan budgets at
+        # the leaf ("Wants" has no row of its own; Shopping/Food & Drinks/
+        # Entertainment/Subscriptions under it do), so reading only the parent
+        # row reported "Wants" as $0 budgeted against real spend -- and
+        # understated total_budgeted by the whole $4,050 those leaves carry.
+        top_budgeted = budget_by_cat.get(top.id, Decimal("0")) + sum(
+            (c.budgeted for c in children_out), Decimal("0")
+        )
 
         total_budgeted += top_budgeted
         total_actual += top_actual
@@ -275,8 +282,23 @@ def spending_by_category(
             budgeted=top_budgeted,
             actual=top_actual,
             variance=top_budgeted - top_actual,
+            is_discretionary=bool(getattr(top, "is_discretionary", False)),
             children=children_out,
         ))
+
+    # Discretionary is a LEAF property, not a top-level one: Groceries sits
+    # under "Necessities" (fixed) while Shopping/Food & Drinks sit under
+    # "Wants". Summing only top-level rows would file Groceries as fixed and
+    # miss it entirely. So walk every category and attribute each one's own
+    # spend by its own flag, parent be damned.
+    disc_actual = Decimal("0")
+    disc_budgeted = Decimal("0")
+    for cat in categories:
+        if not getattr(cat, "is_discretionary", False):
+            continue
+        own_spend = sum(sub_breakdown.get(cat.id, {}).values(), Decimal("0"))
+        disc_actual += own_spend
+        disc_budgeted += budget_by_cat.get(cat.id, Decimal("0"))
 
     return schemas.SpendingOverview(
         start_date=start,
@@ -285,6 +307,9 @@ def spending_by_category(
         total_budgeted=total_budgeted,
         total_actual=total_actual,
         total_variance=total_budgeted - total_actual,
+        discretionary_actual=disc_actual,
+        discretionary_budgeted=disc_budgeted,
+        fixed_actual=total_actual - disc_actual,
     )
 
 

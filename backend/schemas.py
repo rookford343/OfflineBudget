@@ -570,6 +570,18 @@ class RawSnapshotOut(BaseModel):
     captured_at: datetime
 
 
+class MerchantAliasCreate(BaseModel):
+    pattern: str
+    display_name: str
+
+
+class MerchantAliasOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    pattern: str
+    display_name: str
+
+
 class EnvStatusEntry(BaseModel):
     """An env-only setting's name and whether it's set. Never its value."""
     key: str
@@ -661,6 +673,10 @@ class SpendingTopLevel(BaseModel):
     budgeted: Decimal
     actual: Decimal
     variance: Decimal
+    # Spending you can decide about this month, vs commitments made before it
+    # started. Without the split the page headlines Mortgage and Tithe as if
+    # they were choices and buries the part that is actually steerable.
+    is_discretionary: bool = False
     children: list[SpendingSubCategory]
 
 
@@ -671,6 +687,9 @@ class SpendingOverview(BaseModel):
     total_budgeted: Decimal
     total_actual: Decimal
     total_variance: Decimal
+    discretionary_actual: Decimal = Decimal("0")
+    discretionary_budgeted: Decimal = Decimal("0")
+    fixed_actual: Decimal = Decimal("0")
 
 
 class MonthlySpendingEntry(BaseModel):

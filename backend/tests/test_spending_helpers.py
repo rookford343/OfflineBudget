@@ -148,7 +148,10 @@ def test_merchant_totals_nets_a_card_refund_against_the_charge(db_session):
     db_session.commit()
 
     result = merchant_totals(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7))
-    assert result == [("Ozwell, Llc", Decimal("0.00"), 1)]  # refund doesn't count as a second purchase
+    assert result == [("Ozwell Llc", Decimal("0.00"), 1)]  # refund doesn't count as a second purchase
+    # Name is the normalized form as of 2026-08-15: "OZWELL, LLC" and
+    # "OZWELL  LLC" were two separate rows in Dan's real data and are now
+    # one merchant.
 
 
 def test_category_totals_for_range_nets_a_card_refund(db_session):
