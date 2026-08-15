@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { authApi } from "../../api";
+import { authApi, bankSyncApi } from "../../api";
 import { getTheme, setTheme } from "../../store/theme";
 import { isParallelOpsEnabled, setParallelOpsEnabled } from "../../store/parallelOps";
-import { Moon, Sun, Wand2, Flag } from "lucide-react";
+import { Moon, Sun, Wand2, Flag, Bug, Clock } from "lucide-react";
 import { PINNABLE_ITEMS, loadPinnedNav, PINNED_STORAGE_KEY } from "../../lib/navItems";
 
 export default function PreferencesTab() {
@@ -23,6 +23,26 @@ export default function PreferencesTab() {
   const [transferIncrement, setTransferIncrement] = useState("");
   useEffect(() => { if (me) setTransferIncrement(me.transfer_increment ?? "1000"); }, [me]);
   const taxMut = useMutation({ mutationFn: authApi.updateMe });
+
+  const debugRawBankData = !!me?.debug_capture_raw_bank_data;
+  function toggleDebugRawBankData() {
+    taxMut.mutate({ debug_capture_raw_bank_data: !debugRawBankData });
+  }
+
+  const { data: schedulerRuns = [] } = useQuery({
+    queryKey: ["scheduler-status"],
+    queryFn: bankSyncApi.schedulerStatus,
+    refetchInterval: 60_000,
+  });
+  const JOB_LABELS: Record<string, string> = { bank_sync: "Bank Sync", daily_summary: "Daily Summary Email" };
+  function relativeTime(iso: string | null) {
+    if (!iso) return "never";
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const hrs = diffMs / 3_600_000;
+    if (hrs < 1) return `${Math.max(1, Math.round(diffMs / 60_000))}m ago`;
+    if (hrs < 48) return `${Math.round(hrs)}h ago`;
+    return `${Math.round(hrs / 24)}d ago`;
+  }
 
   const [pinned, setPinned] = useState<string[]>(loadPinnedNav);
   function togglePin(to: string) {
@@ -120,6 +140,45 @@ export default function PreferencesTab() {
             </button>
           </div>
         </div>
+      </div>
+      <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+        <div className="flex items-center gap-2 mb-2">
+          <Clock size={16} className="text-gray-400" />
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Background Jobs</span>
+        </div>
+        <p className="text-xs text-gray-400 mb-2">
+          Bank sync and the daily email run on a schedule, and self-retry if the Mac was asleep or offline when they were due.
+        </p>
+        <div className="space-y-1.5">
+          {(schedulerRuns as any[]).length === 0 && (
+            <p className="text-xs text-gray-400 italic">No runs recorded yet.</p>
+          )}
+          {(schedulerRuns as any[]).map((run: any) => (
+            <div key={run.job_name} className="flex items-center justify-between text-xs py-1">
+              <span className="text-gray-600 dark:text-gray-300">{JOB_LABELS[run.job_name] ?? run.job_name}</span>
+              <span className={run.last_error ? "text-red-600 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}>
+                {run.last_error
+                  ? `failed ${relativeTime(run.last_attempt_at)}: ${run.last_error}`
+                  : `last succeeded ${relativeTime(run.last_success_at)}`}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="flex items-center justify-between py-2 border-t border-gray-100 dark:border-gray-700">
+        <div className="flex items-center gap-3">
+          <Bug size={16} className="text-amber-500" />
+          <div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Capture Raw Bank Data (debug)</span>
+            <p className="text-xs text-gray-400">Save the full unmapped bank-sync record per transaction so you can inspect what fields the bank actually sends. Off by default — turn on only while debugging, then back off.</p>
+          </div>
+        </div>
+        <button
+          onClick={toggleDebugRawBankData}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${debugRawBankData ? "bg-amber-500" : "bg-gray-200"}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${debugRawBankData ? "translate-x-6" : "translate-x-1"}`} />
+        </button>
       </div>
     </div>
   );

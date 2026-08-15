@@ -58,3 +58,17 @@ data/transaction_files/*
 # Worktrees (isolated SDD workspaces)
 .worktrees/
 .claude/*
+
+# Database backups — contain REAL financial data and encrypted bank tokens.
+# data/*.db does NOT match these (a gitignore * never crosses /), so without
+# this line `git add -A` would publish them. This repo is PUBLIC.
+data/backups/
+data/*.db-*
+data/.DS_Store
+
+# Stray SQLite artifacts from a misconfigured run (April 2026): the app was
+# briefly started with the frontend as cwd, creating an empty second DB here.
+frontend/data/
+
+# Superpowers scratch workspaces
+.superpowers/

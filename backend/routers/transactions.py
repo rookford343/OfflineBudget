@@ -10,6 +10,25 @@ from backend.dependencies import get_db, get_current_user
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
+@router.get("/raw/{external_id}", response_model=schemas.RawSnapshotOut)
+def get_raw_snapshot(
+    external_id: str,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Debug capture only -- see BankSyncRawSnapshot. 404 whenever
+    debug_capture_raw_bank_data was off at sync time (the normal case), not
+    just when the transaction itself doesn't exist; the frontend treats both
+    identically (no raw data to show)."""
+    snap = db.query(models.BankSyncRawSnapshot).filter(
+        models.BankSyncRawSnapshot.user_id == user.id,
+        models.BankSyncRawSnapshot.external_id == external_id,
+    ).first()
+    if not snap:
+        raise HTTPException(status_code=404, detail="No raw snapshot captured for this transaction")
+    return snap
+
+
 @router.get("", response_model=list[schemas.TransactionOut])
 def list_transactions(
     account_id: int | None = None,

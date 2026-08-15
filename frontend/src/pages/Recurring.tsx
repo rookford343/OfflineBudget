@@ -46,7 +46,7 @@ export default function Recurring() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: form.frequency === "yearly" ? parseInt(form.month_of_year) : null, end_date: form.end_date || null };
+    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null };
     if (editItem) updateMut.mutate({ id: editItem.id, data });
     else createMut.mutate(data);
   }
@@ -58,17 +58,24 @@ export default function Recurring() {
   const ccCharges = items.filter((i: any) => i.type === "expense" && i.card_id && i.is_active);
   const ccPayments = items.filter((i: any) => i.type === "credit_card_payment" && i.is_active);
   const inactive = items.filter((i: any) => !i.is_active);
-  const monthlyIncome = income.reduce((s: number, i: any) => s + (i.frequency === "yearly" ? parseFloat(i.amount) / 12 : parseFloat(i.amount)), 0);
-  const monthlyExpenses = [...checkingExpenses, ...ccCharges, ...ccPayments].reduce((s: number, i: any) => s + (i.frequency === "yearly" ? parseFloat(i.amount) / 12 : parseFloat(i.amount)), 0);
+  // Both totals are "per month", so a bill covering several months is spread
+  // across them -- the same accrual the backend's _monthly_expenses does.
+  const perMonth = (i: any) => parseFloat(i.amount) / (i.frequency === "yearly" ? 12 : i.frequency === "quarterly" ? 3 : 1);
+  const monthlyIncome = income.reduce((s: number, i: any) => s + perMonth(i), 0);
+  const monthlyExpenses = [...checkingExpenses, ...ccCharges, ...ccPayments].reduce((s: number, i: any) => s + perMonth(i), 0);
 
   function ItemRow({ item }: { item: any }) {
     const isYearly = item.frequency === "yearly";
+    const isQuarterly = item.frequency === "quarterly";
     const isCcPayment = item.type === "credit_card_payment";
     const isCcCharge = item.type === "expense" && item.card_id;
     const cardName = (isCcPayment || isCcCharge) ? activeCards.find((c: any) => c.id === item.card_id)?.name : null;
+    const dayNoun = item.day_of_month === 0 ? "last day" : item.day_of_month;
     const dayLabel = isYearly
-      ? `${MONTHS[(item.month_of_year ?? 1) - 1]} ${item.day_of_month === 0 ? "last day" : item.day_of_month} each year`
-      : `${item.day_of_month === 0 ? "Last day" : `Day ${item.day_of_month}`} each month`;
+      ? `${MONTHS[(item.month_of_year ?? 1) - 1]} ${dayNoun} each year`
+      : isQuarterly
+        ? `${MONTHS[(item.month_of_year ?? 1) - 1]} ${dayNoun}, then every 3 months`
+        : `${item.day_of_month === 0 ? "Last day" : `Day ${item.day_of_month}`} each month`;
     return (
       <div className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
         <div>
@@ -76,7 +83,7 @@ export default function Recurring() {
           <div className="flex items-center gap-1.5 mt-0.5">
             {isCcPayment
               ? <span className="badge-blue">CC payment</span>
-              : <span className={isYearly ? "badge-amber" : "badge-blue"}>{isYearly ? "yearly" : "monthly"}</span>
+              : <span className={isYearly || isQuarterly ? "badge-amber" : "badge-blue"}>{item.frequency}</span>
             }
             <span className="text-xs text-gray-400">{dayLabel}</span>
             {cardName && <span className="text-xs text-gray-400">· {cardName}</span>}
@@ -87,7 +94,7 @@ export default function Recurring() {
             <span className={`text-sm font-bold tabular-nums ${item.type === "income" ? "text-green-600" : "text-red-600"}`}>
               {item.type === "income" ? "+" : "-"}{fmt(item.amount)}
             </span>
-            {isYearly && <p className="text-xs text-gray-400 tabular-nums">{fmt(parseFloat(item.amount) / 12)}/mo</p>}
+            {(isYearly || isQuarterly) && <p className="text-xs text-gray-400 tabular-nums">{fmt(perMonth(item))}/mo</p>}
           </div>
           <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Pencil size={14} /></button>
           <button onClick={() => setDeleteId(item.id)} className="btn-ghost p-1 text-red-500 hover:bg-red-50"><Trash2 size={14} /></button>
@@ -110,16 +117,16 @@ export default function Recurring() {
         <div className="stat-card">
           <span className="stat-label">Monthly Income</span>
           <span className="stat-value text-green-600">{fmt(monthlyIncome)}</span>
-          <span className="text-xs text-gray-400">yearly items averaged</span>
+          <span className="text-xs text-gray-400">yearly + quarterly averaged</span>
         </div>
         <div className="stat-card">
           <span className="stat-label">Monthly Expenses</span>
           <span className="stat-value text-red-600">{fmt(monthlyExpenses)}</span>
-          <span className="text-xs text-gray-400">yearly items averaged</span>
+          <span className="text-xs text-gray-400">yearly + quarterly averaged</span>
         </div>
       </div>
 
-      {(income.length > 0 || expenses.length > 0) && (
+      {(income.length > 0 || checkingExpenses.length > 0 || ccCharges.length > 0 || ccPayments.length > 0) && (
         <div className={`card flex items-center justify-between ${monthlyIncome - monthlyExpenses >= 0 ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"}`}>
           <div>
             <p className="text-sm font-semibold text-gray-900 dark:text-white">Monthly Cash Flow</p>
@@ -262,7 +269,7 @@ export default function Recurring() {
               <div>
                 <label className="label">Frequency</label>
                 <div className="flex rounded-lg bg-gray-100 p-1">
-                  {["monthly", "yearly"].map(f => (
+                  {["monthly", "quarterly", "yearly"].map(f => (
                     <button key={f} type="button" onClick={() => setForm({ ...form, frequency: f })}
                       className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors capitalize ${form.frequency === f ? "bg-white shadow-sm text-gray-900" : "text-gray-500"}`}>
                       {f}
@@ -270,12 +277,15 @@ export default function Recurring() {
                   ))}
                 </div>
               </div>
-              {form.frequency === "yearly" && (
+              {(form.frequency === "yearly" || form.frequency === "quarterly") && (
                 <div>
-                  <label className="label">Month</label>
+                  <label className="label">{form.frequency === "quarterly" ? "First month of cycle" : "Month"}</label>
                   <select className="input" value={form.month_of_year} onChange={e => setForm({ ...form, month_of_year: e.target.value })} required>
                     {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
                   </select>
+                  {form.frequency === "quarterly" && (
+                    <p className="text-xs text-gray-400 mt-1">Charges this month and every third month after it.</p>
+                  )}
                 </div>
               )}
               <div><label className="label">Name</label><input className="input" placeholder="Electric Company" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
