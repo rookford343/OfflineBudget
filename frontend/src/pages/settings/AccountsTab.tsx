@@ -4,7 +4,7 @@ import { accountsApi, cardsApi, bankSyncApi } from "../../api";
 import { fmt, parseServerDateTime } from "../../lib/utils";
 import { Plus, Pencil, Trash2, X, Check, AlertTriangle, Link } from "lucide-react";
 
-const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", interest_rate: "", notes: "" };
+const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", interest_rate: "", notes: "", is_emergency_fund: false };
 
 export default function AccountsTab() {
   const qc = useQueryClient();
@@ -83,6 +83,7 @@ export default function AccountsTab() {
       current_balance: parseFloat(accForm.current_balance),
       low_balance_threshold: accForm.low_balance_threshold ? parseFloat(accForm.low_balance_threshold) : null,
       interest_rate: accForm.interest_rate ? parseFloat(accForm.interest_rate) : null,
+      is_emergency_fund: accForm.is_emergency_fund,
     };
     if (editAcc) updateAccMut.mutate({ id: editAcc.id, data });
     else createAccMut.mutate(data);
@@ -90,7 +91,7 @@ export default function AccountsTab() {
   function openNewAcc() { setAccForm({ ...emptyAccount }); setEditAcc(null); setShowAccForm(true); }
   function openEditAcc(a: any) {
     setEditAcc(a);
-    setAccForm({ name: a.name, type: a.type, current_balance: a.current_balance, low_balance_threshold: a.low_balance_threshold ?? "", interest_rate: a.interest_rate ?? "", notes: a.notes ?? "" });
+    setAccForm({ name: a.name, type: a.type, current_balance: a.current_balance, low_balance_threshold: a.low_balance_threshold ?? "", interest_rate: a.interest_rate ?? "", notes: a.notes ?? "", is_emergency_fund: a.is_emergency_fund ?? false });
     setShowAccForm(true);
   }
 
@@ -270,6 +271,22 @@ export default function AccountsTab() {
               <div><label className="label">Current Balance</label><input type="number" step="0.01" className="input" value={accForm.current_balance} onChange={e => setAccForm({ ...accForm, current_balance: e.target.value })} /></div>
               <div><label className="label">Warn When Balance Drops Below (optional)</label><input type="number" step="0.01" className="input" placeholder="e.g. 1000" value={accForm.low_balance_threshold} onChange={e => setAccForm({ ...accForm, low_balance_threshold: e.target.value })} /></div>
               <div><label className="label">Annual Interest Rate % (optional, for savings/HYSA)</label><input type="number" step="0.01" className="input" placeholder="e.g. 4.5" value={accForm.interest_rate} onChange={e => setAccForm({ ...accForm, interest_rate: e.target.value })} /></div>
+              {/* Intent, not product type: a money market can be either an
+                  emergency fund or ordinary savings, and only the owner knows
+                  which. Flagged accounts are held out of any "can I cover
+                  this?" figure so untouchable money never pads it. */}
+              <div>
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input type="checkbox" className="mt-0.5" checked={accForm.is_emergency_fund}
+                    onChange={e => setAccForm({ ...accForm, is_emergency_fund: e.target.checked })} />
+                  <span>
+                    <span className="text-sm text-gray-800 dark:text-gray-200">Emergency fund</span>
+                    <span className="block text-xs text-gray-500 dark:text-gray-400">
+                      Money you don't plan to spend. Excluded from available-savings figures.
+                    </span>
+                  </span>
+                </label>
+              </div>
               <div><label className="label">Notes</label><input className="input" value={accForm.notes} onChange={e => setAccForm({ ...accForm, notes: e.target.value })} /></div>
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="btn-primary flex-1">{editAcc ? "Save" : "Add"}</button>
