@@ -200,15 +200,27 @@ export default function Dashboard() {
                       remaining -- same method the spreadsheet uses, so the two
                       lines are one calculation at two scales. */}
                   <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.left_to_spend))} this month</p>
-                  {/* Zero here is a decision, not just a colour change: below
-                      it, this month's savings transfer gets skipped. */}
+                  {/* Zero here is a decision, not just a colour change. The
+                      ladder Dan actually follows: stay on budget, else skip
+                      the month's savings transfer, and only pull from savings
+                      if skipping still isn't enough. */}
                   {!snapshot.on_pace && parseFloat(snapshot.savings_budget) > 0 && (
-                    <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5 leading-snug">
-                      Skip this month's {fmt(parseFloat(snapshot.savings_budget))} savings
-                      <span className="block text-gray-400 dark:text-gray-500">
-                        → {fmt(parseFloat(snapshot.left_to_spend_if_savings_skipped))} to spend
-                      </span>
-                    </p>
+                    parseFloat(snapshot.left_to_spend_if_savings_skipped) >= 0 ? (
+                      <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5 leading-snug">
+                        Skip this month's {fmt(parseFloat(snapshot.savings_budget))} savings
+                        <span className="block text-gray-400 dark:text-gray-500">
+                          → {fmt(parseFloat(snapshot.left_to_spend_if_savings_skipped))} to spend
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-[11px] text-red-600 dark:text-red-400 mt-1.5 leading-snug">
+                        Skip the {fmt(parseFloat(snapshot.savings_budget))} transfer and still
+                        short {fmt(Math.abs(parseFloat(snapshot.left_to_spend_if_savings_skipped)))}
+                        <span className="block text-gray-400 dark:text-gray-500">
+                          spend {fmt(Math.abs(parseFloat(snapshot.left_to_spend_if_savings_skipped)))} less to avoid pulling
+                        </span>
+                      </p>
+                    )
                   )}
                 </div>
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
@@ -229,6 +241,23 @@ export default function Dashboard() {
                   )}
                 </div>
               </div>
+              {/* The bonus-as-reserve view: no monthly saving happens out of
+                  income, so what matters is whether savings can absorb the
+                  gap until the next bonus lands. */}
+              {parseFloat(snapshot.reserve_needed) > 0 && (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 text-center">
+                  At this month's {fmt(parseFloat(snapshot.shortfall_this_month))} shortfall, covering the
+                  remaining {snapshot.months_left_in_year} months needs{" "}
+                  <span className="font-semibold tabular-nums text-gray-700 dark:text-gray-200">
+                    {fmt(parseFloat(snapshot.reserve_needed))}
+                  </span>{" "}
+                  in savings.{" "}
+                  <span className={parseFloat(snapshot.savings_balance) >= parseFloat(snapshot.reserve_needed)
+                    ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}>
+                    You have {fmt(parseFloat(snapshot.savings_balance))}.
+                  </span>
+                </p>
+              )}
               {snapshot.lookahead_minimum_date && (
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 text-center">
                   Lowest projected balance in the next 3 months:{" "}

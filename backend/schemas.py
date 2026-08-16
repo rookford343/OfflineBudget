@@ -1190,6 +1190,12 @@ class BudgetSnapshot(BaseModel):
     savings_budget: Decimal
     left_to_spend_if_savings_skipped: Decimal
     savings_pull_needed: Decimal
+    # Bonus-as-reserve: how big the gap is this month, what covering it for
+    # the rest of the year would take, and whether savings can absorb that.
+    shortfall_this_month: Decimal
+    reserve_needed: Decimal
+    savings_balance: Decimal
+    months_left_in_year: int
     spendable_today: Decimal
     days_left_in_week: int
     on_pace: bool

@@ -241,7 +241,18 @@ def compute_budget_snapshot(
     monthly_expenses = _monthly_expenses(db, user.id, as_of)
     savings_budget = _budget_allocation_total(db, user.id, "Savings", as_of.year, as_of.month)
     groceries_budget = _budget_allocation_total(db, user.id, "Groceries", as_of.year, as_of.month)
-    leftover = monthly_income - monthly_expenses - savings_budget - groceries_budget
+    # Groceries stays IN the spendable pool. It is a budget line, not a
+    # committed bill: the money hasn't left yet and Dan decides week to week
+    # how much of it goes. Removing it up front understated Left to Spend by
+    # exactly the groceries budget -- $700.00 against his sheet on 2026-08-16,
+    # which is the entire difference between the sheet's -385.84 and its
+    # corrected 314.16. Savings is genuinely different and stays subtracted:
+    # that transfer is money he intends to move out of reach.
+    #
+    # Consequence: groceries SPEND now has to count against the pool, since
+    # its budget is no longer pre-removed. See spendable_pacer's
+    # _EXCLUDED_CATEGORY_NAMES, which drops "Groceries" for this reason.
+    leftover = monthly_income - monthly_expenses - savings_budget
 
     active_cards = db.query(models.CreditCard).filter(
         models.CreditCard.user_id == user.id,
@@ -327,6 +338,33 @@ def compute_budget_snapshot(
     # never lines up with the sheet. Kept for spendable_today's pacing detail
     # and because it does catch discretionary checking spend that
     # left_to_spend is blind to, but it is no longer the headline number.
+    # Bonus-as-reserve strategy (Dan, 2026-08-16). He does not save monthly
+    # out of income -- a big annual bonus funds the gap, and the useful
+    # question is therefore "how much must sit in savings to cover the gap
+    # until the next one?" rather than "did I save this month?".
+    #
+    # The shortfall is taken from left_to_spend rather than a trailing average
+    # of discretionary spend. A trailing average is available and looks
+    # authoritative, but it double-counts against monthly_expenses in ways
+    # that are not reconciled (it read $8,202/mo against a $2,417.80 pool on
+    # real data, which cannot be true of an account that is growing).
+    # left_to_spend is the figure verified against Dan's spreadsheet, so it is
+    # the one worth extrapolating from. It is a snapshot at as_of, so it does
+    # not know what will still be charged this month -- the reserve is a
+    # planning figure, not a promise.
+    shortfall_this_month = max(-left_to_spend, Decimal("0.00"))
+    months_left_in_year = 12 - as_of.month + 1
+    reserve_needed = (shortfall_this_month * months_left_in_year).quantize(Decimal("0.01"))
+
+    savings_balance = sum(
+        (acct.current_balance for acct in db.query(models.Account).filter(
+            models.Account.user_id == user.id,
+            models.Account.is_active == True,
+            models.Account.type.in_([models.AccountType.savings, models.AccountType.money_market]),
+        ).all()),
+        Decimal("0"),
+    )
+
     # What each threshold actually decides, per Dan (2026-08-16). These are
     # not two views of one health bar: crossing zero on the weekly spendable
     # means "skip this month's savings transfer", while crossing zero on
@@ -391,6 +429,10 @@ def compute_budget_snapshot(
         left_to_spend=left_to_spend,
         left_to_spend_weekly=left_to_spend_weekly,
         savings_budget=savings_budget,
+        shortfall_this_month=shortfall_this_month,
+        reserve_needed=reserve_needed,
+        savings_balance=savings_balance,
+        months_left_in_year=months_left_in_year,
         left_to_spend_if_savings_skipped=left_to_spend_if_savings_skipped,
         savings_pull_needed=savings_pull_needed,
         spendable_today=spendable_today,

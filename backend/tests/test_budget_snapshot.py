@@ -111,7 +111,12 @@ def test_left_to_spend_and_safety_margin_match_spreadsheet_exactly(db_session):
     # $13,732.30, HOA -> $58.33) to cents up front, and reconstructing from
     # already-rounded inputs lands one cent higher. Verified by hand -- do not
     # "fix" this back to 1567.72.
-    assert snapshot.left_to_spend == Decimal("1567.73")
+    # Raised by exactly the fixture's $700.00 groceries budget on 2026-08-16:
+    # groceries is no longer removed from the spendable pool (see
+    # budget_snapshot's leftover). Dan's sheet made the same correction, moving
+    # its own Left to Spend from -385.84 to 314.16 -- also exactly $700.00.
+    # The old golden was 1567.73.
+    assert snapshot.left_to_spend == Decimal("2267.73")
     # left_to_spend_weekly is no longer derived from left_to_spend -- it's
     # the transaction-driven weekly pacer now (see test_spendable_pacer.py).
     # Not asserted here; this test only covers the spreadsheet-verified
@@ -373,3 +378,67 @@ def test_healthy_month_asks_for_neither_action(db_session):
 
     assert snapshot.safety_margin > 0
     assert snapshot.savings_pull_needed == Decimal("0.00")
+
+
+def test_groceries_budget_stays_in_the_spendable_pool(db_session):
+    """Groceries is a budget line, not a committed bill: the money hasn't left
+    and Dan decides week to week how much of it goes.
+
+    Removing it up front understated Left to Spend by exactly the groceries
+    budget -- $700.00 against his sheet on 2026-08-16, which was the entire
+    difference between the sheet's -385.84 and its corrected 314.16. Savings
+    is genuinely different and stays subtracted.
+    """
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        base = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    groceries = db_session.query(models.Category).filter(
+        models.Category.user_id == user.id, models.Category.name == "Groceries",
+    ).first()
+    if groceries is None:
+        return  # fixture has no groceries line; nothing to assert
+    alloc = db_session.query(models.BudgetAllocation).filter(
+        models.BudgetAllocation.user_id == user.id,
+        models.BudgetAllocation.category_id == groceries.id,
+        models.BudgetAllocation.year == 2026, models.BudgetAllocation.month == 8,
+    ).first()
+    before = alloc.budgeted_amount if alloc else Decimal("0")
+    if before == 0:
+        return
+
+    alloc.budgeted_amount = before + Decimal("100.00")
+    db_session.commit()
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        after = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    # Raising the groceries BUDGET must not move Left to Spend at all -- it is
+    # neither added nor subtracted, it simply isn't part of this formula.
+    assert after.left_to_spend == base.left_to_spend
+
+
+def test_reserve_sizes_the_savings_needed_to_cover_the_shortfall(db_session):
+    """Dan funds the year's gap from a bonus rather than saving monthly, so
+    the useful figure is how much must sit in savings until the next one."""
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+    card.current_balance = Decimal("40000.00")  # force a shortfall
+
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    assert snapshot.shortfall_this_month == -snapshot.left_to_spend
+    # Aug -> Dec inclusive is 5 months.
+    assert snapshot.months_left_in_year == 5
+    assert snapshot.reserve_needed == (snapshot.shortfall_this_month * 5).quantize(Decimal("0.01"))
+
+
+def test_no_shortfall_means_no_reserve_requirement(db_session):
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    assert snapshot.left_to_spend > 0
+    assert snapshot.shortfall_this_month == Decimal("0.00")
+    assert snapshot.reserve_needed == Decimal("0.00")

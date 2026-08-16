@@ -266,11 +266,15 @@ def test_transfer_heuristic_matches_the_documented_wordings(db_session):
     assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("25.00")
 
 
-def test_excludes_a_groceries_category_checking_transaction(db_session):
-    """Regression: budget_snapshot.py removes the Groceries BUDGET from the
-    monthly pool up front, so counting actual grocery spend here deducts the
-    same money twice. Note type=expense -- the real 'Groceries' category is
-    NOT CategoryType.savings, so the pre-existing NOT_SAVINGS filter missed it."""
+def test_counts_a_groceries_category_checking_transaction(db_session):
+    """Groceries spend is ordinary discretionary spend and must count.
+
+    It used to be excluded because budget_snapshot removed the Groceries
+    BUDGET from the pool up front, so counting the spend as well deducted the
+    same money twice. That pre-removal was wrong -- groceries is a budget
+    line, not a committed bill -- and was dropped on 2026-08-16 to match Dan's
+    spreadsheet. With the budget no longer pre-removed, the spend has to land
+    here instead."""
     user, checking = _make_user_and_checking(db_session)
     groceries = models.Category(user_id=user.id, name="Groceries", type=models.CategoryType.expense)
     db_session.add(groceries)
@@ -282,7 +286,7 @@ def test_excludes_a_groceries_category_checking_transaction(db_session):
     ))
     db_session.commit()
 
-    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("150.00")
 
 
 def test_excludes_an_expense_typed_savings_category_transaction(db_session):
@@ -320,9 +324,13 @@ def test_a_similarly_named_category_is_not_excluded(db_session):
     assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("40.00")
 
 
-def test_excludes_a_groceries_category_card_transaction(db_session):
-    """The costly half of the double-subtraction: real card grocery spend was
-    $1,626.13 in July 2026 alone, none of it excluded."""
+def test_counts_a_groceries_category_card_transaction(db_session):
+    """Card grocery spend counts too, and it is the big half: real card
+    grocery spend was $1,626.13 in July 2026 alone.
+
+    Excluded until 2026-08-16 because the Groceries budget was removed from
+    the pool up front; that pre-removal is gone (see budget_snapshot's
+    leftover), so this spend must land in the total like any other."""
     user, checking = _make_user_and_checking(db_session)
     card = models.CreditCard(
         user_id=user.id, name="Visa", credit_limit=Decimal("5000.00"),
@@ -341,7 +349,8 @@ def test_excludes_a_groceries_category_card_transaction(db_session):
     ))
     db_session.commit()
 
-    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("42.00")
+    # 1626.13 groceries + 42.00 control -- groceries no longer sits outside the total.
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("1668.13")
 
 
 def test_counts_a_plain_card_charge(db_session):
