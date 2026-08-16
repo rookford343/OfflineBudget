@@ -120,6 +120,12 @@ class User(Base):
     # docstring for why this is a toggle, not a permanent column.
     debug_capture_raw_bank_data: Mapped[bool] = mapped_column(Boolean, default=False)
     transfer_increment: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("1000.00"))
+    # How the month is meant to balance, which changes whether the Savings
+    # budget is a commitment. "save_monthly": the transfer is money you intend
+    # to move out, so it leaves the spendable pool. "pull_from_savings": you
+    # are not committing it -- an annual bonus funds the year -- so it stays in
+    # the pool and Left to Spend reads higher by the savings budget.
+    savings_strategy: Mapped[str] = mapped_column(String(32), default="save_monthly")
 
     linked_to_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
     email: Mapped[str | None] = mapped_column(String(256))

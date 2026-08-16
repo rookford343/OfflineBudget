@@ -23,6 +23,8 @@ export default function PreferencesTab() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
   const [transferIncrement, setTransferIncrement] = useState("");
   useEffect(() => { if (me) setTransferIncrement(me.transfer_increment ?? "1000"); }, [me]);
+  const [savingsStrategy, setSavingsStrategy] = useState("save_monthly");
+  useEffect(() => { if (me) setSavingsStrategy(me.savings_strategy ?? "save_monthly"); }, [me]);
   const taxMut = useMutation({ mutationFn: authApi.updateMe });
 
   const debugRawBankData = !!me?.debug_capture_raw_bank_data;
@@ -116,6 +118,31 @@ export default function PreferencesTab() {
               <span className="text-sm text-gray-700 dark:text-gray-300">{item.label}</span>
             </label>
           ))}
+        </div>
+      </div>
+      {/* Whether the monthly savings transfer is a commitment. It changes
+          Left to Spend directly, so the consequence is spelled out rather
+          than left to be discovered. */}
+      <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Savings Strategy</span>
+            <p className="text-xs text-gray-400">
+              {savingsStrategy === "pull_from_savings"
+                ? "Not saving monthly — the savings budget stays spendable, so Left to Spend is higher by it."
+                : "Saving each month — the savings budget leaves the spendable pool."}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              className="input w-48 text-sm"
+              value={savingsStrategy}
+              onChange={(e) => { setSavingsStrategy(e.target.value); taxMut.mutate({ savings_strategy: e.target.value }); }}
+            >
+              <option value="save_monthly">Save each month</option>
+              <option value="pull_from_savings">Pull from savings</option>
+            </select>
+          </div>
         </div>
       </div>
       <div className="pt-3 border-t border-gray-100 dark:border-gray-700">

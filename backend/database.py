@@ -121,6 +121,7 @@ def upgrade_schema():
         "ALTER TABLE recurring_items ADD COLUMN include_in_forecast BOOLEAN DEFAULT 1",
         "ALTER TABLE users ADD COLUMN transfer_increment NUMERIC(14,2) DEFAULT 1000.00",
         "ALTER TABLE accounts ADD COLUMN is_emergency_fund BOOLEAN DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN savings_strategy VARCHAR(32) DEFAULT 'save_monthly'",
         "ALTER TABLE planned_expenses ADD COLUMN settled_on DATE",
         "ALTER TABLE planned_expenses ADD COLUMN actual_amount NUMERIC(14,2)",
         """CREATE TABLE IF NOT EXISTS planned_transfers (
