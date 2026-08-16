@@ -167,14 +167,13 @@ export default function Dashboard() {
                   referenceType="account"
                   referenceId={primaryChecking?.id}
                   observed={{
-                    spendable_this_month: snapshot.spendable_this_month,
+                    left_to_spend: snapshot.left_to_spend,
                     left_to_spend_weekly: snapshot.left_to_spend_weekly,
-                    left_to_spend_legacy: snapshot.left_to_spend,
                     safety_margin: snapshot.safety_margin,
                     safety_margin_weekly: snapshot.safety_margin_weekly,
                   }}
                   expectedFields={[
-                    { key: "spendable_this_month", label: "Spendable (monthly)" },
+                    { key: "left_to_spend", label: "Left to Spend (monthly)" },
                     { key: "safety_margin", label: "Safety Margin (monthly)" },
                   ]}
                   className="ml-auto"
@@ -197,10 +196,10 @@ export default function Dashboard() {
                         one number the household reads before spending. */}
                     {parseFloat(snapshot.spendable_today) < 0 ? "−" : ""}{fmt(Math.abs(parseFloat(snapshot.spendable_today)))}/day · {snapshot.on_pace ? "on pace" : "over pace"}
                   </p>
-                  {/* The pacer's own monthly figure, not left_to_spend: that
-                      one is balance-derived and moved on a different basis,
-                      which showed a week larger than the month it sits in. */}
-                  <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.spendable_this_month))} this month</p>
+                  {/* Weekly is this figure prorated by the share of the month
+                      remaining -- same method the spreadsheet uses, so the two
+                      lines are one calculation at two scales. */}
+                  <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.left_to_spend))} this month</p>
                 </div>
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center justify-center gap-1">
