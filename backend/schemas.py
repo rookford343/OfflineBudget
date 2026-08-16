@@ -1170,6 +1170,12 @@ class BudgetSnapshot(BaseModel):
     leftover: Decimal
     left_to_spend: Decimal
     left_to_spend_weekly: Decimal
+    # Decision support for the two thresholds. Weekly spendable below zero
+    # means this month's savings transfer gets skipped; safety margin below
+    # zero means money has to come back out of savings.
+    savings_budget: Decimal
+    left_to_spend_if_savings_skipped: Decimal
+    savings_pull_needed: Decimal
     spendable_today: Decimal
     days_left_in_week: int
     on_pace: bool
