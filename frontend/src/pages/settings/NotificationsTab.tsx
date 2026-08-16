@@ -26,6 +26,11 @@ export default function NotificationsTab() {
   const [dirty, setDirty] = useState(false);
   const [saved, setSaved] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [runResult, setRunResult] = useState<string | null>(null);
+  // Defaults to self-only: a report being checked for accuracy shouldn't
+  // reach the rest of the household before it's been looked at.
+  const [runSelfOnly, setRunSelfOnly] = useState(true);
+  const [runDigest, setRunDigest] = useState(false);
 
   useEffect(() => {
     if (!cfg) return;
@@ -59,6 +64,16 @@ export default function NotificationsTab() {
       setDirty(false);
       setSaved(true);
     },
+  });
+
+  const runMut = useMutation({
+    mutationFn: () => appSettingsApi.runDailySummary(runSelfOnly, runDigest),
+    onSuccess: (r: any) => {
+      const sent = (r?.sent_to ?? []).join(", ");
+      const errs = (r?.errors ?? []).join("; ");
+      setRunResult(errs ? `Sent to ${sent || "nobody"}. Failed: ${errs}` : `Sent to ${sent}`);
+    },
+    onError: () => setRunResult(null),
   });
 
   const testMut = useMutation({
@@ -221,6 +236,33 @@ export default function NotificationsTab() {
           {dirty && <span className="text-xs text-amber-600 dark:text-amber-400">Unsaved changes</span>}
         </div>
         {testResult && <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{testResult}</p>}
+
+        {/* One-off run. The scheduled job was previously the only thing that
+            ever produced this email, so reviewing a change meant waiting for
+            the next morning. Uses the same generator, so what arrives is what
+            the schedule would have sent. */}
+        <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700">
+          <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Run the report now</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 mb-2">
+            Sends the real Daily Summary immediately. Doesn't affect the scheduled run.
+          </p>
+          <div className="flex flex-wrap items-center gap-4 mb-3">
+            <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+              <input type="checkbox" checked={runSelfOnly} onChange={(e) => setRunSelfOnly(e.target.checked)} />
+              Only send to me{recipientCount > 1 ? ` (skip the other ${recipientCount - 1})` : ""}
+            </label>
+            <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+              <input type="checkbox" checked={runDigest} onChange={(e) => setRunDigest(e.target.checked)} />
+              Include the weekly digest
+            </label>
+          </div>
+          <button className="btn-secondary" disabled={runMut.isPending || !cfg.smtp_host}
+            title={!cfg.smtp_host ? "Save an SMTP host first" : "Send the daily summary now"}
+            onClick={() => { setRunResult(null); runMut.mutate(); }}>
+            {runMut.isPending ? "Sending…" : "Send report now"}
+          </button>
+          {runResult && <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">{runResult}</p>}
+        </div>
       </div>
 
       <div className="card">

@@ -56,6 +56,9 @@ export const appSettingsApi = {
   get: () => api.get("/settings").then((r) => r.data),
   update: (data: object) => api.patch("/settings", data).then((r) => r.data),
   testEmail: () => api.post("/settings/test-email").then((r) => r.data),
+  runDailySummary: (toSelfOnly: boolean, includeDigest: boolean) =>
+    api.post("/settings/run-daily-summary", null,
+      { params: { to_self_only: toSelfOnly, include_digest: includeDigest } }).then((r) => r.data),
   disconnect: (connectionId: number) => api.delete(`/bank-sync/${connectionId}`),
 };
 
