@@ -235,6 +235,12 @@ class WeeklySpendable:
     spendable_today: Decimal
     days_left_in_week: int
     on_pace: bool
+    # The month-level figure this week's number is a share of. Exposed so the
+    # UI can show week and month from ONE calculation: pairing the pacer's
+    # weekly value with the legacy balance-derived left_to_spend showed
+    # $696.65 for the week against $448.25 for the month -- a week larger
+    # than the month it sits inside.
+    remaining_this_month: Decimal
 
 
 def compute_weekly_spendable(db: Session, user_id: int, leftover: Decimal, as_of: date) -> WeeklySpendable:
@@ -302,6 +308,12 @@ def compute_weekly_spendable(db: Session, user_id: int, leftover: Decimal, as_of
     spend_this_week = discretionary_spend_in_range(db, user_id, effective_week_start, as_of)
     spendable_this_week = (this_week_target - spend_this_week).quantize(Decimal("0.01"))
 
+    # remaining_pool is depleted by prior weeks only (see the docstring), so
+    # this week's own spend comes off once more to get true month-to-date
+    # remaining. spendable_this_week <= remaining_this_month falls out of
+    # this_week_share / weeks_left <= 1.
+    remaining_this_month = (remaining_pool - spend_this_week).quantize(Decimal("0.01"))
+
     # Capped at month end for the same reason this_week_days is: spendable_this_week
     # only covers the week's days that fall INSIDE this month, so the daily pace must
     # divide by that same count. Dividing the trailing week's 2 real days of budget
@@ -315,4 +327,5 @@ def compute_weekly_spendable(db: Session, user_id: int, leftover: Decimal, as_of
         spendable_today=spendable_today,
         days_left_in_week=days_left_in_week,
         on_pace=spendable_this_week >= 0,
+        remaining_this_month=remaining_this_month,
     )

@@ -294,3 +294,25 @@ def test_safety_margin_does_not_double_count_the_cc_payoff(db_session):
     # near -$1,000 (which is what a second full-balance subtraction would
     # produce).
     assert snapshot.safety_margin > Decimal("0")
+
+
+def test_dashboard_weekly_and_monthly_spendable_are_one_calculation(db_session):
+    """The two figures the Household Snapshot stacks together must be
+    week-and-month of the SAME calculation.
+
+    Regression (Dan, 2026-08-16): the card showed "$696.65 spendable this
+    week" over "$448.25 this month", because the weekly value came from the
+    transaction-driven pacer while the monthly subline rendered the legacy
+    balance-derived left_to_spend. Both numbers were individually defensible
+    and the pairing was still nonsense. spendable_this_month is the pacer's
+    own monthly figure, so the ordering now holds by construction.
+    """
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    assert snapshot.left_to_spend_weekly <= snapshot.spendable_this_month
+    # And the legacy field is genuinely a different basis -- if these ever
+    # coincide, this test has stopped proving anything.
+    assert snapshot.spendable_this_month != snapshot.left_to_spend

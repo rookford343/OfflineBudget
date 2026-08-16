@@ -351,6 +351,7 @@ def compute_budget_snapshot(
         leftover=leftover,
         left_to_spend=left_to_spend,
         left_to_spend_weekly=weekly_spendable.spendable_this_week,
+        spendable_this_month=weekly_spendable.remaining_this_month,
         spendable_today=weekly_spendable.spendable_today,
         days_left_in_week=weekly_spendable.days_left_in_week,
         on_pace=weekly_spendable.on_pace,

@@ -1170,6 +1170,10 @@ class BudgetSnapshot(BaseModel):
     leftover: Decimal
     left_to_spend: Decimal
     left_to_spend_weekly: Decimal
+    # The monthly figure left_to_spend_weekly is a slice of. left_to_spend is
+    # the older balance-derived number and moves on a different basis, so the
+    # two must not be presented as month/week of one another.
+    spendable_this_month: Decimal
     spendable_today: Decimal
     days_left_in_week: int
     on_pace: bool

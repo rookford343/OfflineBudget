@@ -654,3 +654,28 @@ def test_spendable_this_week_is_stable_across_the_same_week(db_session):
     assert sunday_result.spendable_this_week == Decimal("600.00")
     assert wednesday_result.spendable_this_week == Decimal("600.00")
     assert saturday_result.spendable_this_week == Decimal("600.00")
+
+
+def test_week_never_exceeds_the_month_it_belongs_to(db_session):
+    """The weekly figure is a share of the month's remaining pool, so it can
+    never be larger than that pool.
+
+    Regression: the dashboard paired the pacer's weekly value with the legacy
+    balance-derived `left_to_spend`, which is a different calculation on a
+    different basis. On Dan's real data that read "$696.65 spendable this
+    week" above "$448.25 this month" -- a week bigger than its own month.
+    """
+    from backend.services.spendable_pacer import compute_weekly_spendable
+
+    user, _checking = _make_user_and_checking(db_session)
+    db_session.commit()
+    leftover = Decimal("3316.84")
+    # Walk a whole month so leading stubs, full weeks, and the trailing
+    # partial week are all covered, not just today's position.
+    for day in range(1, 32):
+        as_of = date(2026, 8, day)
+        result = compute_weekly_spendable(db_session, user.id, leftover, as_of)
+        assert result.spendable_this_week <= result.remaining_this_month, (
+            f"{as_of}: week {result.spendable_this_week} > month {result.remaining_this_month}"
+        )
+        assert result.remaining_this_month <= leftover
