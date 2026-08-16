@@ -246,7 +246,7 @@ def generate_daily_summary(
         <p style='margin:0 0 6px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Spendable this week</p>
         <p style='margin:0;color:{spendable_color};font-size:24px;font-weight:700'>{fmt(snap.left_to_spend_weekly)}</p>
         <p style='margin:6px 0 0;color:{pace_color};font-size:12px'>{spendable_today_sign}{fmt(abs(snap.spendable_today))}/day &middot; {"on pace" if snap.on_pace else "over pace"}</p>
-        <p style='margin:4px 0 0;color:#9ca3af;font-size:11px'>{fmt(snap.left_to_spend)} this month</p>
+        <p style='margin:4px 0 0;color:#9ca3af;font-size:11px'>{fmt(snap.spendable_this_month)} this month</p>
       </td>
       <td style='width:50%;background:#ffffff;border-radius:8px;padding:14px;text-align:center;vertical-align:top'>
         <p style='margin:0 0 6px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Safety Margin (this week)</p>
@@ -318,7 +318,7 @@ def generate_daily_summary(
             "HOUSEHOLD SNAPSHOT\n"
             f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}\n"
             f"  Safety margin (this week): {fmt(snap.safety_margin_weekly)}\n"
-            f"  Monthly: {fmt(snap.left_to_spend)} left to spend, {fmt(snap.safety_margin)} before your spending starts eating into savings.\n"
+            f"  Monthly: {fmt(snap.spendable_this_month)} left to spend, {fmt(snap.safety_margin)} before your spending starts eating into savings.\n"
             + (
                 f"  Lowest projected balance in the next 3 months: {fmt(snap.lookahead_minimum)}"
                 f" on {snap.lookahead_minimum_date.strftime('%b %-d')}.\n"
