@@ -230,11 +230,19 @@ def generate_daily_summary(
         # transfer, below zero on safety margin means pulling money back out.
         skip_savings_html = ""
         if not snap.on_pace and snap.savings_budget > 0:
-            skip_savings_html = (
-                f"<p style='margin:6px 0 0;color:#d97706;font-size:11px;line-height:1.4'>"
-                f"Skip this month's {fmt(snap.savings_budget)} savings<br>"
-                f"<span style='color:#9ca3af'>&rarr; {fmt(snap.left_to_spend_if_savings_skipped)} to spend</span></p>"
-            )
+            if snap.left_to_spend_if_savings_skipped >= 0:
+                skip_savings_html = (
+                    f"<p style='margin:6px 0 0;color:#d97706;font-size:11px;line-height:1.4'>"
+                    f"Skip this month's {fmt(snap.savings_budget)} savings<br>"
+                    f"<span style='color:#9ca3af'>&rarr; {fmt(snap.left_to_spend_if_savings_skipped)} to spend</span></p>"
+                )
+            else:
+                short = abs(snap.left_to_spend_if_savings_skipped)
+                skip_savings_html = (
+                    f"<p style='margin:6px 0 0;color:#dc2626;font-size:11px;line-height:1.4'>"
+                    f"Skip the {fmt(snap.savings_budget)} transfer and still short {fmt(short)}<br>"
+                    f"<span style='color:#9ca3af'>spend {fmt(short)} less to avoid pulling</span></p>"
+                )
         pull_savings_html = ""
         if snap.savings_pull_needed > 0:
             pull_savings_html = (
@@ -337,10 +345,17 @@ def generate_daily_summary(
             "HOUSEHOLD SNAPSHOT\n"
             f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}"
             + ("" if snap.on_pace or snap.savings_budget <= 0 else
-               f"  (over budget -- skip this month's {fmt(snap.savings_budget)} savings"
-               f" -> {fmt(snap.left_to_spend_if_savings_skipped)} to spend)")
+               (f"  (over budget -- skip this month's {fmt(snap.savings_budget)} savings"
+                f" -> {fmt(snap.left_to_spend_if_savings_skipped)} to spend)")
+               if snap.left_to_spend_if_savings_skipped >= 0 else
+               (f"  (over budget -- even skipping the {fmt(snap.savings_budget)} transfer leaves"
+                f" {fmt(abs(snap.left_to_spend_if_savings_skipped))} short)"))
             + "\n"
-            f"  Safety margin (this week): {fmt(snap.safety_margin_weekly)}"
+            + (f"  Reserve: at this month's {fmt(snap.shortfall_this_month)} shortfall, covering the"
+               f" remaining {snap.months_left_in_year} months needs {fmt(snap.reserve_needed)}"
+               f" in savings (you have {fmt(snap.savings_balance)}).\n"
+               if snap.reserve_needed > 0 else "")
+            + f"  Safety margin (this week): {fmt(snap.safety_margin_weekly)}"
             + ("" if snap.savings_pull_needed <= 0 else
                f"  (pull {fmt(snap.savings_pull_needed)} from savings)")
             + "\n"
