@@ -103,6 +103,7 @@ def merchant_totals(
     *,
     account_id: int | None = None,
     card_id: int | None = None,
+    category_ids: list[int] | None = None,
     limit: int = 50,
 ) -> list[tuple[str, Decimal, int]]:
     """Returns [(name, total, count), ...] sorted by total descending.
@@ -144,6 +145,12 @@ def merchant_totals(
     )
     if account_id:
         checking_q = checking_q.filter(models.Transaction.account_id == account_id)
+    # Narrowing to a category set is what lets the Budget page ask "which
+    # merchants made up Subscriptions this month?" through this function
+    # rather than a parallel query that would drift from its normalization
+    # and refund-netting rules.
+    if category_ids is not None:
+        checking_q = checking_q.filter(models.Transaction.category_id.in_(category_ids))
     # Card payoffs and internal transfers can't be expressed as SQL: both need
     # the description matched against Python-side data. Filter after fetch.
     cards = _active_cards(db, user_id)
@@ -165,6 +172,8 @@ def merchant_totals(
         )
         if account_id:
             refund_q = refund_q.filter(models.Transaction.account_id == account_id)
+        if category_ids is not None:
+            refund_q = refund_q.filter(models.Transaction.category_id.in_(category_ids))
         for t in refund_q.all():
             key = display_name(t.description, alias_map)
             totals[key] = totals.get(key, Decimal("0")) - t.amount
@@ -176,6 +185,8 @@ def merchant_totals(
     )
     if card_id:
         card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
+    if category_ids is not None:
+        card_q = card_q.filter(models.CreditCardTransaction.category_id.in_(category_ids))
     for t in card_q.all():
         if is_card_payment(t.merchant):
             continue

@@ -2,6 +2,7 @@ from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 from sqlalchemy.orm import Session
+from backend.services.spending_helpers import filter_real_spend, is_card_payment
 from backend import models
 from backend.schemas import BudgetOverviewRow
 
@@ -39,10 +40,13 @@ def compute_overview(
         models.Transaction.date <= end,
         models.Transaction.category_id != None,
     ).all()
+    # Same predicates the Spending page uses. Without them a categorized
+    # internal transfer counts as spending here but not there, so the two
+    # pages disagree on the same month -- Aug 2026 showed $1,000.00 of
+    # "Income" spend on this page from a savings transfer alone.
     checking_by_cat: dict[int, Decimal] = {}
-    for t in checking_txns:
-        if t.amount < 0:  # only expenses
-            checking_by_cat[t.category_id] = checking_by_cat.get(t.category_id, Decimal("0")) + abs(t.amount)
+    for t in filter_real_spend(db, user_id, [x for x in checking_txns if x.amount < 0]):
+        checking_by_cat[t.category_id] = checking_by_cat.get(t.category_id, Decimal("0")) + abs(t.amount)
 
     # Credit card spending
     card_txns = db.query(models.CreditCardTransaction).filter(
@@ -53,7 +57,9 @@ def compute_overview(
     ).all()
     cards_by_cat: dict[int, Decimal] = {}
     for t in card_txns:
-        if t.amount > 0:  # charges
+        # A card payoff settles charges already counted individually, so
+        # counting it too double-counts the whole statement.
+        if t.amount > 0 and not is_card_payment(t.merchant):
             cards_by_cat[t.category_id] = cards_by_cat.get(t.category_id, Decimal("0")) + t.amount
 
     rows: list[BudgetOverviewRow] = []
@@ -66,6 +72,7 @@ def compute_overview(
             category_id=cat.id,
             category_name=cat.name,
             parent_id=cat.parent_id,
+            category_type=cat.type.value if hasattr(cat.type, "value") else str(cat.type),
             budgeted=budgeted,
             actual_checking=actual_checking,
             actual_cards=actual_cards,
