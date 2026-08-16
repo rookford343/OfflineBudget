@@ -39,7 +39,8 @@ class UserOut(BaseModel):
     itemized_property_tax: Optional[Decimal] = None
     itemized_other: Optional[Decimal] = None
     transfer_increment: Optional[Decimal] = None
-    recovery_code_created_at: Optional[datetime] = None
+    savings_strategy: Optional[str] = None
+
 
 
 class UserUpdate(BaseModel):
@@ -63,6 +64,16 @@ class UserUpdate(BaseModel):
     itemized_property_tax: Optional[Decimal] = None
     itemized_other: Optional[Decimal] = None
     transfer_increment: Optional[Decimal] = None
+    savings_strategy: Optional[str] = None
+
+    @field_validator("savings_strategy")
+    @classmethod
+    def _known_strategy(cls, v):
+        # An unrecognized value would fall through to the save_monthly branch
+        # and silently change the headline number, so reject it at the edge.
+        if v is not None and v not in ("save_monthly", "pull_from_savings"):
+            raise ValueError("savings_strategy must be save_monthly or pull_from_savings")
+        return v
 
 
 class UserPasswordChange(BaseModel):
