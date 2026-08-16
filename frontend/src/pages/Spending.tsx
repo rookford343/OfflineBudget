@@ -9,7 +9,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine,
   AreaChart, Area, Sector,
 } from "recharts";
-import { ChevronDown, ChevronRight, HelpCircle, Pencil, AlertTriangle } from "lucide-react";
+import { ChevronDown, ChevronRight, HelpCircle, Pencil, AlertTriangle, X } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
 function isDarkMode(): boolean {
@@ -51,7 +51,6 @@ export default function Spending() {
   const [sankeyMonth, setSankeyMonth] = useState(new Date().getMonth() + 1);
   const [start, setStart] = useState(firstOfMonth());
   const [end, setEnd] = useState(today());
-  const [expanded, setExpanded] = useState<number | null>(null);
   const [sourceKey, setSourceKey] = useState<string>("all");
   const [catFilter, setCatFilter] = useState<Set<number> | null>(null);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -146,6 +145,40 @@ export default function Spending() {
     });
   }, [monthlyByCat, visibleCatIds]);
 
+  // The overview arrives as a Necessities/Wants/Charity tree, but those
+  // buckets aren't what you budget against -- flatten to the budget
+  // categories themselves and rank by spend. A parent that carries spending
+  // directly (no children) stays in the list under its own name.
+  const budgetCategories = useMemo(() => {
+    const out: any[] = [];
+    (overview?.categories ?? []).forEach((parent: any) => {
+      const kids = parent.children ?? [];
+      if (kids.length === 0) {
+        if (parseFloat(parent.actual) > 0 || parseFloat(parent.budgeted) > 0) {
+          out.push({ ...parent, group: null });
+        }
+        return;
+      }
+      kids.forEach((ch: any) => {
+        if (parseFloat(ch.actual) > 0 || parseFloat(ch.budgeted) > 0) {
+          out.push({ ...ch, group: parent.category_name });
+        }
+      });
+      // Spending filed on the parent itself rather than one of its children
+      // would silently vanish if only children were listed.
+      const kidSum = kids.reduce((s: number, ch: any) => s + parseFloat(ch.actual), 0);
+      const direct = parseFloat(parent.actual) - kidSum;
+      if (direct > 0.005) {
+        out.push({
+          category_id: -parent.category_id, category_name: `${parent.category_name} (uncategorized)`,
+          color: parent.color, actual: String(direct), budgeted: "0",
+          breakdown_by_source: {}, group: parent.category_name, children: [],
+        });
+      }
+    });
+    return out.sort((a, b) => parseFloat(b.actual) - parseFloat(a.actual));
+  }, [overview]);
+
   // Overview's Top Merchants panel. Its own query so it follows the page's
   // date range and source filter, and stays loaded on the Overview tab rather
   // than only when the Merchants tab is open.
@@ -155,6 +188,32 @@ export default function Spending() {
     enabled: activeTab === "overview" && !!start && !!end,
   });
   const overviewMerchants = overviewMerchantsRaw.slice(0, 8);
+
+  // Month drill-down: click a bar to see what actually drove that month.
+  const [drillMonth, setDrillMonth] = useState<string | null>(null);
+  const drillRange = drillMonth
+    ? (() => {
+        const [y, m] = drillMonth.split("-").map(Number);
+        const last = new Date(y, m, 0).getDate();
+        return { start: `${drillMonth}-01`, end: `${drillMonth}-${String(last).padStart(2, "0")}` };
+      })()
+    : null;
+
+  const { data: drillMerchants = [] } = useQuery<any[]>({
+    queryKey: ["drill-merchants", drillMonth, selectedAccountId, selectedCardId],
+    queryFn: () => spendingApi.byMerchant(drillRange!.start, drillRange!.end,
+      selectedAccountId ?? undefined, selectedCardId ?? undefined, 10),
+    enabled: !!drillRange,
+  });
+  // Goes through /spending/transactions, not the raw transaction list: these
+  // rows have to add up to the bar that was clicked, so they must share the
+  // bar's filters rather than merely resemble them.
+  const { data: drillTxns = [] } = useQuery<any[]>({
+    queryKey: ["drill-txns", drillMonth, selectedAccountId, selectedCardId],
+    queryFn: () => spendingApi.lineItems(drillRange!.start, drillRange!.end,
+      selectedAccountId ?? undefined, selectedCardId ?? undefined, 12),
+    enabled: !!drillRange,
+  });
 
   // Pie chart data
   const pieData = (overview?.categories ?? [])
@@ -406,19 +465,26 @@ export default function Spending() {
             <div className="card">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8]">Monthly Spending</h3>
-                {avg > 0 && (
-                  <span className="text-xs text-gray-500 dark:text-[#6e7888]">
-                    avg {fmt(avg)}/mo
-                  </span>
-                )}
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-400">click a bar for detail</span>
+                  {avg > 0 && (
+                    <span className="text-xs text-gray-500 dark:text-[#6e7888]">
+                      avg {fmt(avg)}/mo
+                    </span>
+                  )}
+                </div>
               </div>
               <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={barData} margin={{ top: 16, right: 12, left: 0, bottom: 0 }}>
+                <BarChart data={barData} margin={{ top: 16, right: 12, left: 0, bottom: 0 }}
+                  onClick={(state: any) => {
+                    const month = state?.activeLabel;
+                    if (month) setDrillMonth(m => (m === month ? null : month));
+                  }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis dataKey="month" tick={{ fontSize: 11, fill: ct.tick }} axisLine={{ stroke: ct.grid }} tickLine={false} />
                   <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
                   <Tooltip content={<TotalBarTooltip />} cursor={{ fill: isDarkMode() ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }} />
-                  <Bar dataKey="total" fill={ct.barFill} radius={[4, 4, 0, 0]} name="Total" />
+                  <Bar dataKey="total" fill={ct.barFill} radius={[4, 4, 0, 0]} name="Total" className="cursor-pointer" />
                   {avg > 0 && (
                     <ReferenceLine
                       y={avg}
@@ -429,6 +495,65 @@ export default function Spending() {
                   )}
                 </BarChart>
               </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Month drill-down. Answers "why was that month high?" in place,
+              instead of making you re-derive it from the Transactions page. */}
+          {drillMonth && (
+            <div className="card border-indigo-200 dark:border-indigo-900/60">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8]">
+                    {new Date(drillMonth + "-01T12:00:00").toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Top {drillTxns.length} by amount · checking + card, excluding transfers and card payoffs
+                  </p>
+                </div>
+                <button onClick={() => setDrillMonth(null)} className="btn-ghost p-1 text-gray-400 hover:text-gray-600">
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-5">
+                <div>
+                  <h4 className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Top Merchants</h4>
+                  {drillMerchants.length === 0 && <p className="text-sm text-gray-400">No merchant activity.</p>}
+                  <div className="space-y-1.5">
+                    {drillMerchants.map((m: any) => (
+                      <div key={m.name} className="flex items-baseline justify-between gap-3 text-sm">
+                        <span className="truncate text-gray-700 dark:text-gray-300">{m.name}</span>
+                        <span className="shrink-0 tabular-nums font-medium">
+                          {fmt(m.total)}<span className="ml-1.5 text-xs font-normal text-gray-400">{m.count}x</span>
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Largest Transactions</h4>
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                    {drillTxns.map((x: any, i: number) => (
+                        <div key={i} className="flex items-baseline justify-between gap-3 text-sm">
+                          <span className="truncate text-gray-700 dark:text-gray-300" title={x.description}>
+                            <span className="text-gray-400 mr-1.5 text-xs tabular-nums">
+                              {new Date(x.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            </span>
+                            {x.description}
+                            {x.source === "card" && (
+                              <span className="ml-1.5 text-[10px] uppercase tracking-wide text-gray-400">card</span>
+                            )}
+                          </span>
+                          <span className="shrink-0 tabular-nums font-medium text-red-600 dark:text-red-400">
+                            {fmt(x.amount)}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -513,64 +638,50 @@ export default function Spending() {
             </div>
           )}
 
-          {/* Category drill-down */}
+          {/* Spending by budget category. Ranked by spend rather than nested
+              under Necessities/Wants/Charity -- the question is which
+              category ran hot, and the bucket it belongs to is a label, not
+              the grouping. */}
           <div className="card">
-            <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8] mb-4">Category Breakdown</h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8]">Spending by Category</h3>
+              <span className="text-xs text-gray-400 dark:text-[#6e7888]">{budgetCategories.length} categories</span>
+            </div>
+            {budgetCategories.length === 0 && (
+              <p className="text-sm text-gray-400 dark:text-[#525d70]">No categorized spending in this range.</p>
+            )}
             <div className="space-y-3">
-              {overview.categories.map((cat: any) => (
-                <div key={cat.category_id} className="border border-gray-100 dark:border-[#2c3040] rounded-lg overflow-hidden">
-                  <button
-                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-[#272b38] transition-colors"
-                    onClick={() => setExpanded(expanded === cat.category_id ? null : cat.category_id)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-3 h-3 rounded-full shrink-0" style={{ background: cat.color }} />
-                      <span className="font-medium text-gray-900 dark:text-[#c4ccd8]">{cat.category_name}</span>
-                      {cat.children?.length > 0 && (
-                        expanded === cat.category_id
-                          ? <ChevronDown size={14} className="text-gray-400 dark:text-[#525d70]" />
-                          : <ChevronRight size={14} className="text-gray-400 dark:text-[#525d70]" />
-                      )}
+              {budgetCategories.map((cat: any) => {
+                const actual = parseFloat(cat.actual);
+                const budgeted = parseFloat(cat.budgeted);
+                const over = budgeted > 0 && actual > budgeted;
+                return (
+                  <div key={cat.category_id}>
+                    <div className="flex items-baseline justify-between gap-3 mb-1">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: cat.color }} />
+                        <span className="text-sm font-medium text-gray-900 dark:text-[#c4ccd8] truncate">
+                          {cat.category_name}
+                        </span>
+                        {cat.group && (
+                          <span className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-[#525d70] shrink-0">
+                            {cat.group}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-baseline gap-2 shrink-0 text-sm">
+                        <span className={`font-semibold tabular-nums ${over ? "text-red-600 dark:text-[#cc7070]" : "text-gray-900 dark:text-[#c4ccd8]"}`}>
+                          {fmt(actual)}
+                        </span>
+                        <span className="text-xs text-gray-400 dark:text-[#6e7888] tabular-nums">
+                          {budgeted > 0 ? `of ${fmt(budgeted)}` : "unbudgeted"}
+                        </span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-6 text-sm">
-                      <span className="text-gray-500 dark:text-[#6e7888]">{fmt(cat.budgeted)} budget</span>
-                      <span className={`font-semibold ${parseFloat(cat.variance) < 0 ? "text-red-600 dark:text-[#cc7070]" : "text-gray-700 dark:text-[#9aa3b2]"}`}>
-                        {fmt(cat.actual)} spent
-                      </span>
-                    </div>
-                  </button>
-
-                  {parseFloat(cat.budgeted) > 0 && (
-                    <div className="px-4 pb-2">
-                      <ProgressBar actual={parseFloat(cat.actual)} budgeted={parseFloat(cat.budgeted)} />
-                    </div>
-                  )}
-
-                  {expanded === cat.category_id && cat.children?.length > 0 && (
-                    <div className="border-t border-gray-100 dark:border-[#2c3040] divide-y divide-gray-50 dark:divide-[#2c3040]">
-                      {cat.children
-                        .filter((ch: any) => parseFloat(ch.actual) > 0 || parseFloat(ch.budgeted) > 0)
-                        .map((ch: any) => (
-                          <div key={ch.category_id} className="px-6 py-2.5 bg-gray-50/50 dark:bg-[#1a1e2a]">
-                            <div className="flex items-center justify-between mb-1">
-                              <div className="flex items-center gap-2">
-                                <div className="w-2 h-2 rounded-full" style={{ background: ch.color }} />
-                                <span className="text-sm text-gray-700 dark:text-[#9aa3b2]">{ch.category_name}</span>
-                              </div>
-                              <div className="flex items-center gap-4 text-xs text-gray-500 dark:text-[#6e7888]">
-                                {Object.entries(ch.breakdown_by_source).map(([src, amt]: any) => (
-                                  <span key={src}>{src}: <strong className="text-gray-700 dark:text-[#9aa3b2]">{fmt(amt)}</strong></span>
-                                ))}
-                                <span className="font-semibold text-gray-900 dark:text-[#c4ccd8]">{fmt(ch.actual)}</span>
-                              </div>
-                            </div>
-                            {parseFloat(ch.budgeted) > 0 && <ProgressBar actual={parseFloat(ch.actual)} budgeted={parseFloat(ch.budgeted)} />}
-                          </div>
-                        ))}
-                    </div>
-                  )}
-                </div>
-              ))}
+                    {budgeted > 0 && <ProgressBar actual={actual} budgeted={budgeted} />}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </>
