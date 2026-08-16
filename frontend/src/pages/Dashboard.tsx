@@ -200,6 +200,16 @@ export default function Dashboard() {
                       remaining -- same method the spreadsheet uses, so the two
                       lines are one calculation at two scales. */}
                   <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.left_to_spend))} this month</p>
+                  {/* Zero here is a decision, not just a colour change: below
+                      it, this month's savings transfer gets skipped. */}
+                  {!snapshot.on_pace && parseFloat(snapshot.savings_budget) > 0 && (
+                    <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5 leading-snug">
+                      Skip this month's {fmt(parseFloat(snapshot.savings_budget))} savings
+                      <span className="block text-gray-400 dark:text-gray-500">
+                        → {fmt(parseFloat(snapshot.left_to_spend_if_savings_skipped))} to spend
+                      </span>
+                    </p>
+                  )}
                 </div>
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center justify-center gap-1">
@@ -210,6 +220,13 @@ export default function Dashboard() {
                   </p>
                   <p className={`text-xl font-bold tabular-nums ${parseFloat(snapshot.safety_margin_weekly) < 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>{fmt(parseFloat(snapshot.safety_margin_weekly))}</p>
                   <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.safety_margin))} this month</p>
+                  {/* The other decision boundary: below zero the plan already
+                      runs into savings, so money has to come back out. */}
+                  {parseFloat(snapshot.savings_pull_needed) > 0 && (
+                    <p className="text-[11px] text-red-600 dark:text-red-400 mt-1.5 leading-snug">
+                      Pull {fmt(parseFloat(snapshot.savings_pull_needed))} from savings
+                    </p>
+                  )}
                 </div>
               </div>
               {snapshot.lookahead_minimum_date && (

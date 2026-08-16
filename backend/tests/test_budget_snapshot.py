@@ -326,3 +326,50 @@ def test_weekly_proration_matches_dans_spreadsheet_to_the_cent():
     as_of = date(2026, 8, 16)  # 16 days remain -> 2.2857 weeks -> share 0.4375
     assert _weekly_allowance(Decimal("-385.84"), as_of)[0] == Decimal("-168.80")
     assert _weekly_allowance(Decimal("2698.00"), as_of)[0] == Decimal("1180.38")
+
+
+def test_over_budget_names_the_savings_transfer_to_skip(db_session):
+    """Weekly spendable below zero means this month's savings transfer gets
+    skipped (Dan's stated rule, 2026-08-16), so the snapshot must say what
+    skipping it buys back rather than only reporting the deficit.
+
+    leftover already subtracted the Savings budget, so declining the transfer
+    adds back exactly that amount -- not user.transfer_increment, which is a
+    separate setting that merely happens to hold the same $1,000 today.
+    """
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+    # Force the over-budget branch regardless of the fixture's own figures.
+    card.current_balance = Decimal("40000.00")
+
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    assert snapshot.on_pace is False
+    assert snapshot.left_to_spend_if_savings_skipped == snapshot.left_to_spend + snapshot.savings_budget
+
+
+def test_pull_from_savings_rounds_up_to_whole_transfer_increments(db_session):
+    """A shortfall is covered in whole increments because that is how the
+    transfer is actually made: against a $1,000 increment, a $1,412 gap means
+    moving $2,000, not $1,412."""
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+    user.transfer_increment = Decimal("1000.00")
+
+    # Drive safety_margin negative via the quarter minimum it derives from.
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("-5000.00")):
+        snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    assert snapshot.safety_margin < 0
+    assert snapshot.savings_pull_needed % Decimal("1000.00") == 0
+    assert snapshot.savings_pull_needed >= -snapshot.safety_margin
+    assert snapshot.savings_pull_needed - -snapshot.safety_margin < Decimal("1000.00")
+
+
+def test_healthy_month_asks_for_neither_action(db_session):
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    assert snapshot.safety_margin > 0
+    assert snapshot.savings_pull_needed == Decimal("0.00")

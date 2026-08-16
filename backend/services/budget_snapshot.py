@@ -7,7 +7,7 @@ numbers exactly -- see backend/tests/test_budget_snapshot.py.
 from __future__ import annotations
 import calendar
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry
@@ -327,6 +327,29 @@ def compute_budget_snapshot(
     # never lines up with the sheet. Kept for spendable_today's pacing detail
     # and because it does catch discretionary checking spend that
     # left_to_spend is blind to, but it is no longer the headline number.
+    # What each threshold actually decides, per Dan (2026-08-16). These are
+    # not two views of one health bar: crossing zero on the weekly spendable
+    # means "skip this month's savings transfer", while crossing zero on
+    # safety margin means "pull money back OUT of savings". Computing the
+    # consequence here keeps that arithmetic out of the UI and the email,
+    # which both need the same answer.
+    #
+    # savings_budget is the right term for the skip math (not
+    # user.transfer_increment, which happens to be the same $1,000 today):
+    # leftover subtracted exactly this amount up front, so declining the
+    # transfer adds back exactly this amount and nothing else.
+    left_to_spend_if_savings_skipped = left_to_spend + savings_budget
+
+    # Pull-from-savings is sized in whole transfer increments because that is
+    # how the transfer actually gets made -- a $1,412 shortfall against a
+    # $1,000 increment means moving $2,000, not $1,412.
+    increment = user.transfer_increment or Decimal("1000.00")
+    if safety_margin < 0 and increment > 0:
+        steps = (-safety_margin / increment).to_integral_value(rounding=ROUND_CEILING)
+        savings_pull_needed = (steps * increment).quantize(Decimal("0.01"))
+    else:
+        savings_pull_needed = Decimal("0.00")
+
     left_to_spend_weekly, _ = _weekly_allowance(left_to_spend, as_of)
     weekly_spendable = compute_weekly_spendable(db, user.id, leftover, as_of)
 
@@ -367,6 +390,9 @@ def compute_budget_snapshot(
         leftover=leftover,
         left_to_spend=left_to_spend,
         left_to_spend_weekly=left_to_spend_weekly,
+        savings_budget=savings_budget,
+        left_to_spend_if_savings_skipped=left_to_spend_if_savings_skipped,
+        savings_pull_needed=savings_pull_needed,
         spendable_today=spendable_today,
         days_left_in_week=weekly_spendable.days_left_in_week,
         on_pace=left_to_spend_weekly >= 0,

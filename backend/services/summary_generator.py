@@ -224,6 +224,23 @@ def generate_daily_summary(
         spendable_color = "#059669" if snap.on_pace else "#dc2626"
         pace_color = "#10b981" if snap.on_pace else "#ef4444"
         margin_color = "#dc2626" if snap.safety_margin_weekly < 0 else "#d97706"
+
+        # Each threshold names the action it triggers rather than only turning
+        # red: below zero on spendable means skipping the month's savings
+        # transfer, below zero on safety margin means pulling money back out.
+        skip_savings_html = ""
+        if not snap.on_pace and snap.savings_budget > 0:
+            skip_savings_html = (
+                f"<p style='margin:6px 0 0;color:#d97706;font-size:11px;line-height:1.4'>"
+                f"Skip this month's {fmt(snap.savings_budget)} savings<br>"
+                f"<span style='color:#9ca3af'>&rarr; {fmt(snap.left_to_spend_if_savings_skipped)} to spend</span></p>"
+            )
+        pull_savings_html = ""
+        if snap.savings_pull_needed > 0:
+            pull_savings_html = (
+                f"<p style='margin:6px 0 0;color:#dc2626;font-size:11px'>"
+                f"Pull {fmt(snap.savings_pull_needed)} from savings</p>"
+            )
         spendable_today_sign = "−" if snap.spendable_today < 0 else ""
         # The quarter trough is the sanity check behind the weekly number: it is
         # what says whether a big purchase is safe. Dan's spreadsheet keeps the
@@ -247,11 +264,13 @@ def generate_daily_summary(
         <p style='margin:0;color:{spendable_color};font-size:24px;font-weight:700'>{fmt(snap.left_to_spend_weekly)}</p>
         <p style='margin:6px 0 0;color:{pace_color};font-size:12px'>{spendable_today_sign}{fmt(abs(snap.spendable_today))}/day &middot; {"on pace" if snap.on_pace else "over pace"}</p>
         <p style='margin:4px 0 0;color:#9ca3af;font-size:11px'>{fmt(snap.left_to_spend)} this month</p>
+        {skip_savings_html}
       </td>
       <td style='width:50%;background:#ffffff;border-radius:8px;padding:14px;text-align:center;vertical-align:top'>
         <p style='margin:0 0 6px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Safety Margin (this week)</p>
         <p style='margin:0;color:{margin_color};font-size:24px;font-weight:700'>{fmt(snap.safety_margin_weekly)}</p>
         <p style='margin:6px 0 0;color:#9ca3af;font-size:11px'>{fmt(snap.safety_margin)} this month</p>
+        {pull_savings_html}
       </td>
     </tr>
   </table>
@@ -316,8 +335,15 @@ def generate_daily_summary(
     if snap is not None:
         household_text = (
             "HOUSEHOLD SNAPSHOT\n"
-            f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}\n"
-            f"  Safety margin (this week): {fmt(snap.safety_margin_weekly)}\n"
+            f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}"
+            + ("" if snap.on_pace or snap.savings_budget <= 0 else
+               f"  (over budget -- skip this month's {fmt(snap.savings_budget)} savings"
+               f" -> {fmt(snap.left_to_spend_if_savings_skipped)} to spend)")
+            + "\n"
+            f"  Safety margin (this week): {fmt(snap.safety_margin_weekly)}"
+            + ("" if snap.savings_pull_needed <= 0 else
+               f"  (pull {fmt(snap.savings_pull_needed)} from savings)")
+            + "\n"
             f"  Monthly: {fmt(snap.left_to_spend)} left to spend, {fmt(snap.safety_margin)} before your spending starts eating into savings.\n"
             + (
                 f"  Lowest projected balance in the next 3 months: {fmt(snap.lookahead_minimum)}"
