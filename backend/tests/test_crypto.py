@@ -39,3 +39,39 @@ def test_decrypt_raises_on_wrong_key(monkeypatch):
     monkeypatch.setattr(crypto.settings, "APP_ENCRYPTION_KEY", Fernet.generate_key().decode(), raising=False)
     with pytest.raises(EncryptionNotConfigured):
         crypto.decrypt(ciphertext)
+
+
+def test_adding_new_key_name_still_decrypts_legacy_secrets(monkeypatch):
+    """Adding APP_ENCRYPTION_KEY to a deployment that already had
+    BANK_TOKEN_ENCRYPTION_KEY must not strand existing secrets.
+
+    Regression: `app_encryption_key` resolves APP_ENCRYPTION_KEY first, so
+    introducing that name flipped which key was tried and every previously
+    stored secret failed with "Stored token could not be decrypted -- key may
+    have changed". Dan hit this on his live bank connection.
+    """
+    legacy_key = Fernet.generate_key().decode()
+    monkeypatch.setattr(crypto.settings, "APP_ENCRYPTION_KEY", None, raising=False)
+    monkeypatch.setattr(crypto.settings, "BANK_TOKEN_ENCRYPTION_KEY", legacy_key, raising=False)
+    ciphertext = crypto.encrypt("simplefin-access-url")
+
+    # The upgrade: a new primary key appears alongside the legacy one.
+    monkeypatch.setattr(crypto.settings, "APP_ENCRYPTION_KEY", Fernet.generate_key().decode(), raising=False)
+    assert crypto.decrypt(ciphertext) == "simplefin-access-url"
+
+
+def test_reencrypt_under_primary_migrates_without_changing_plaintext(monkeypatch):
+    legacy_key = Fernet.generate_key().decode()
+    monkeypatch.setattr(crypto.settings, "APP_ENCRYPTION_KEY", None, raising=False)
+    monkeypatch.setattr(crypto.settings, "BANK_TOKEN_ENCRYPTION_KEY", legacy_key, raising=False)
+    old = crypto.encrypt("simplefin-access-url")
+
+    primary_key = Fernet.generate_key().decode()
+    monkeypatch.setattr(crypto.settings, "APP_ENCRYPTION_KEY", primary_key, raising=False)
+    migrated = crypto.reencrypt_under_primary(old)
+
+    assert crypto.decrypt(migrated) == "simplefin-access-url"
+    # After migration the primary key alone must suffice, so retiring the
+    # legacy name is safe.
+    monkeypatch.setattr(crypto.settings, "BANK_TOKEN_ENCRYPTION_KEY", None, raising=False)
+    assert crypto.decrypt(migrated) == "simplefin-access-url"
