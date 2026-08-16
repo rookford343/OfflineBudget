@@ -118,6 +118,9 @@ export const budgetApi = {
     api.post(`/budget/rollover/${year}/${month}`).then((r) => r.data),
   setCategoryRollover: (categoryId: number, enabled: boolean) =>
     api.patch(`/budget/categories/${categoryId}/rollover`, { rollover_enabled: enabled }).then((r) => r.data),
+  categoryBreakdown: (categoryId: number, year: number, month: number) =>
+    api.get("/budget/category-breakdown", { params: { category_id: categoryId, year, month } }).then((r) => r.data),
+  remove: (allocationId: number) => api.delete(`/budget/${allocationId}`),
 };
 
 // ── Credit Cards ──────────────────────────────────────────────────────────────
