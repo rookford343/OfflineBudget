@@ -247,7 +247,15 @@ def compute_budget_snapshot(
     # Spend. Confirmed 2026-08-16 by the $700.00 swing between his two formula
     # versions: with F5 surviving the sheet read 314.16, with F5 cancelling it
     # reads -385.84, and -385.84 is the number he wants.
-    leftover = monthly_income - monthly_expenses - savings_budget - groceries_budget
+    # Under "pull_from_savings" the monthly transfer is not a commitment -- the
+    # year is funded by a bonus, not by saving out of each paycheck -- so that
+    # money stays spendable and Left to Spend reads higher by the savings
+    # budget. Under "save_monthly" it leaves the pool, which is the default and
+    # what reconciles to Dan's sheet at -385.84.
+    committed_savings = (
+        Decimal("0.00") if user.savings_strategy == "pull_from_savings" else savings_budget
+    )
+    leftover = monthly_income - monthly_expenses - committed_savings - groceries_budget
 
     active_cards = db.query(models.CreditCard).filter(
         models.CreditCard.user_id == user.id,

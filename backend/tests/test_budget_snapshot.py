@@ -431,3 +431,30 @@ def test_no_shortfall_means_no_reserve_requirement(db_session):
     assert snapshot.left_to_spend > 0
     assert snapshot.shortfall_this_month == Decimal("0.00")
     assert snapshot.reserve_needed == Decimal("0.00")
+
+
+def test_pull_from_savings_strategy_keeps_the_savings_budget_spendable(db_session):
+    """Under "pull_from_savings" the monthly transfer isn't a commitment -- an
+    annual bonus funds the year -- so that money stays in the spendable pool
+    and Left to Spend reads higher by exactly the savings budget.
+
+    "save_monthly" is the default and is what reconciles to Dan's sheet.
+    """
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        saving = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    user.savings_strategy = "pull_from_savings"
+    db_session.commit()
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        pulling = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    assert pulling.left_to_spend == saving.left_to_spend + saving.savings_budget
+    # Safety Margin is balance-derived and must not move with this choice.
+    assert pulling.safety_margin == saving.safety_margin
+
+
+def test_default_strategy_is_save_monthly(db_session):
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+    assert user.savings_strategy == "save_monthly"
