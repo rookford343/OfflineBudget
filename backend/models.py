@@ -171,6 +171,12 @@ class Account(Base):
     low_balance_threshold: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     interest_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # An emergency fund is savings you are deliberately not planning to spend,
+    # so it must not pad any "can I cover this?" figure. Dan's Money Market is
+    # exactly this: counting it made the reserve look covered by $56,240.03
+    # when only $30,007.09 was really available for it. Account TYPE can't
+    # carry this -- money_market vs savings is about the product, not intent.
+    is_emergency_fund: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

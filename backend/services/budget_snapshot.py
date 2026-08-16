@@ -241,18 +241,13 @@ def compute_budget_snapshot(
     monthly_expenses = _monthly_expenses(db, user.id, as_of)
     savings_budget = _budget_allocation_total(db, user.id, "Savings", as_of.year, as_of.month)
     groceries_budget = _budget_allocation_total(db, user.id, "Groceries", as_of.year, as_of.month)
-    # Groceries stays IN the spendable pool. It is a budget line, not a
-    # committed bill: the money hasn't left yet and Dan decides week to week
-    # how much of it goes. Removing it up front understated Left to Spend by
-    # exactly the groceries budget -- $700.00 against his sheet on 2026-08-16,
-    # which is the entire difference between the sheet's -385.84 and its
-    # corrected 314.16. Savings is genuinely different and stays subtracted:
-    # that transfer is money he intends to move out of reach.
-    #
-    # Consequence: groceries SPEND now has to count against the pool, since
-    # its budget is no longer pre-removed. See spendable_pacer's
-    # _EXCLUDED_CATEGORY_NAMES, which drops "Groceries" for this reason.
-    leftover = monthly_income - monthly_expenses - savings_budget
+    # Groceries is committed, not spendable. Dan's sheet formula cancels its
+    # groceries term (F5) on both sides -- it is added into the pool and then
+    # removed again in the same expression -- so it never reaches Left to
+    # Spend. Confirmed 2026-08-16 by the $700.00 swing between his two formula
+    # versions: with F5 surviving the sheet read 314.16, with F5 cancelling it
+    # reads -385.84, and -385.84 is the number he wants.
+    leftover = monthly_income - monthly_expenses - savings_budget - groceries_budget
 
     active_cards = db.query(models.CreditCard).filter(
         models.CreditCard.user_id == user.id,
@@ -361,6 +356,7 @@ def compute_budget_snapshot(
             models.Account.user_id == user.id,
             models.Account.is_active == True,
             models.Account.type.in_([models.AccountType.savings, models.AccountType.money_market]),
+            models.Account.is_emergency_fund == False,
         ).all()),
         Decimal("0"),
     )

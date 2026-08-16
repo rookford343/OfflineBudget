@@ -266,7 +266,7 @@ def test_transfer_heuristic_matches_the_documented_wordings(db_session):
     assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("25.00")
 
 
-def test_counts_a_groceries_category_checking_transaction(db_session):
+def test_excludes_a_groceries_category_checking_transaction(db_session):
     """Groceries spend is ordinary discretionary spend and must count.
 
     It used to be excluded because budget_snapshot removed the Groceries
@@ -286,7 +286,7 @@ def test_counts_a_groceries_category_checking_transaction(db_session):
     ))
     db_session.commit()
 
-    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("150.00")
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
 
 
 def test_excludes_an_expense_typed_savings_category_transaction(db_session):
@@ -324,7 +324,7 @@ def test_a_similarly_named_category_is_not_excluded(db_session):
     assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("40.00")
 
 
-def test_counts_a_groceries_category_card_transaction(db_session):
+def test_excludes_a_groceries_category_card_transaction(db_session):
     """Card grocery spend counts too, and it is the big half: real card
     grocery spend was $1,626.13 in July 2026 alone.
 
@@ -349,8 +349,9 @@ def test_counts_a_groceries_category_card_transaction(db_session):
     ))
     db_session.commit()
 
-    # 1626.13 groceries + 42.00 control -- groceries no longer sits outside the total.
-    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("1668.13")
+    # Only the 42.00 control: groceries is excluded because its BUDGET is
+    # already removed from the pool by budget_snapshot.
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("42.00")
 
 
 def test_counts_a_plain_card_charge(db_session):

@@ -29,12 +29,10 @@ from backend.services.spending_helpers import NOT_SAVINGS, is_card_payment
 # name because that is precisely what budget_snapshot.py hardcodes. The
 # CategoryType.savings check in NOT_SAVINGS does NOT cover these: real users
 # routinely type their "Savings"/"Groceries" categories as `expense`.
-# Only "Savings" now. Groceries used to be excluded here because
-# budget_snapshot removed its BUDGET from the pool up front, so counting the
-# spend too would deduct the same money twice. That pre-removal is gone (see
-# budget_snapshot's leftover), so groceries spend is ordinary discretionary
-# spend again and must count.
-_EXCLUDED_CATEGORY_NAMES = ("Savings",)
+# Groceries is back on this list: budget_snapshot removes the Groceries
+# BUDGET from the pool up front, so counting the actual spend here too would
+# deduct the same money twice.
+_EXCLUDED_CATEGORY_NAMES = ("Groceries", "Savings")
 
 # Moved to spending_helpers 2026-08-15 and re-exported here for the existing
 # tests that import it. Holding the only copy in this module is why the

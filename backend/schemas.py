@@ -142,6 +142,7 @@ class AccountCreate(BaseModel):
     type: AccountType
     current_balance: Decimal = Decimal("0")
     currency: str = "USD"
+    is_emergency_fund: bool = False
     notes: Optional[str] = None
 
 
@@ -152,6 +153,7 @@ class AccountUpdate(BaseModel):
     interest_rate: Optional[Decimal] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
+    is_emergency_fund: Optional[bool] = None
 
 
 class AccountOut(BaseModel):
@@ -164,6 +166,7 @@ class AccountOut(BaseModel):
     low_balance_threshold: Optional[Decimal]
     interest_rate: Optional[Decimal] = None
     is_active: bool
+    is_emergency_fund: bool = False
     notes: Optional[str]
     created_at: datetime
     updated_at: datetime
