@@ -551,12 +551,24 @@ class PlannedExpense(Base):
         Enum(PlannedDirection), default=PlannedDirection.outflow, nullable=False,
     )
     notes: Mapped[str | None] = mapped_column(Text)
+    # Settlement. A one-off is a PREDICTION, so once its date passes it has
+    # either happened (at some real amount, rarely the estimate) or it hasn't.
+    # Leaving it in the list forever made the panel an archive of stale
+    # guesses -- Dan's April bonus still sat there in August. `settled_on`
+    # marks it closed and `actual_amount` records what really moved, so the
+    # estimate can be compared against reality instead of overwritten.
+    settled_on: Mapped[date | None] = mapped_column(Date)
+    actual_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="planned_expenses")
     account: Mapped[Account | None] = relationship()
     card: Mapped["CreditCard | None"] = relationship()
     category: Mapped[Category | None] = relationship()
+
+    @property
+    def is_settled(self) -> bool:
+        return self.settled_on is not None
 
 
 # ── Transaction Rules ─────────────────────────────────────────────────────────

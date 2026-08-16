@@ -218,8 +218,12 @@ export const netWorthApi = {
 
 // ── Planned Expenses ─────────────────────────────────────────────────────────
 export const plannedExpensesApi = {
-  list: () => api.get("/planned-expenses").then((r) => r.data),
+  list: (includeSettled = false) =>
+    api.get("/planned-expenses", { params: { include_settled: includeSettled } }).then((r) => r.data),
   create: (data: object) => api.post("/planned-expenses", data).then((r) => r.data),
+  settle: (id: number, actual_amount: number | null) =>
+    api.post(`/planned-expenses/${id}/settle`, { actual_amount }).then((r) => r.data),
+  unsettle: (id: number) => api.post(`/planned-expenses/${id}/unsettle`).then((r) => r.data),
   update: (id: number, data: object) => api.patch(`/planned-expenses/${id}`, data).then((r) => r.data),
   remove: (id: number) => api.delete(`/planned-expenses/${id}`),
 };

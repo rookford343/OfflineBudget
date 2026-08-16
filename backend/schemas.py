@@ -1039,7 +1039,21 @@ class PlannedExpenseOut(BaseModel):
     account_id: Optional[int]
     card_id: Optional[int] = None
     direction: PlannedDirection
+    settled_on: Optional[date] = None
+    actual_amount: Optional[Decimal] = None
+    is_settled: bool = False
     created_at: datetime
+
+
+class PlannedExpenseSettle(BaseModel):
+    """Close out a one-off once its date has passed.
+
+    `actual_amount` is optional because the two real outcomes differ: it
+    happened (record what actually moved, which is rarely the estimate) or it
+    didn't happen at all (settle with nothing, keeping the row as a record of
+    a prediction that missed rather than deleting the evidence)."""
+    actual_amount: Optional[Decimal] = None
+    settled_on: Optional[date] = None
 
 
 # ── Planned Transfers ────────────────────────────────────────────────────────
