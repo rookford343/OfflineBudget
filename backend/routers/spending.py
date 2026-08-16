@@ -12,6 +12,12 @@ from backend.services.spending_helpers import filter_real_spend, is_card_payment
 from backend.services.summary_generator import generate_weekly_digest
 from backend.services.budget_snapshot import compute_budget_snapshot
 
+# Bands on the stacked monthly chart before the tail collapses into "Other".
+_MAX_STACK_CATEGORIES = 8
+# Sentinel for the synthetic "Other" band; negative so it can never collide
+# with a real category id.
+_OTHER_CATEGORY_ID = -1
+
 router = APIRouter(prefix="/spending", tags=["spending"])
 
 
@@ -41,7 +47,7 @@ def spending_monthly(
     )
     if account_id:
         checking_q = checking_q.filter(models.Transaction.account_id == account_id)
-    for t in checking_q.all():
+    for t in filter_real_spend(db, user.id, checking_q.all()):
         month = t.date.strftime("%Y-%m")
         if month not in results:
             results[month] = {"checking": Decimal("0"), "cards": Decimal("0")}
@@ -57,6 +63,8 @@ def spending_monthly(
     if card_id:
         card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
     for t in card_q.all():
+        if is_card_payment(t.merchant):
+            continue
         month = t.date.strftime("%Y-%m")
         if month not in results:
             results[month] = {"checking": Decimal("0"), "cards": Decimal("0")}
@@ -73,6 +81,67 @@ def spending_monthly(
     ]
 
 
+@router.get("/transactions", response_model=list[schemas.SpendingLineItem])
+def spending_line_items(
+    start: date = Query(...),
+    end: date = Query(...),
+    account_id: Optional[int] = None,
+    card_id: Optional[int] = None,
+    limit: int = 25,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """The rows behind a spending total, largest first.
+
+    Filters are kept identical to /monthly on purpose: the drill-down exists to
+    explain a bar, so anything excluded from the bar (internal transfers, card
+    payoffs) must be excluded here too. Reading the raw transaction list
+    instead put "Transfer to Savings" at the top of a panel captioned
+    "transfers excluded" -- consistent numbers depend on one shared predicate,
+    not two similar ones.
+    """
+    items: list[schemas.SpendingLineItem] = []
+
+    checking_q = (
+        db.query(models.Transaction)
+        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
+        .filter(
+            models.Transaction.user_id == user.id,
+            models.Transaction.is_actual == True,
+            models.Transaction.date >= start,
+            models.Transaction.date <= end,
+            models.Transaction.amount < 0,
+            NOT_SAVINGS,
+        )
+    )
+    if account_id:
+        checking_q = checking_q.filter(models.Transaction.account_id == account_id)
+    for t in filter_real_spend(db, user.id, checking_q.all()):
+        items.append(schemas.SpendingLineItem(
+            date=t.date, description=t.description or "(no description)",
+            amount=abs(t.amount), source="checking",
+        ))
+
+    card_q = db.query(models.CreditCardTransaction).filter(
+        models.CreditCardTransaction.user_id == user.id,
+        models.CreditCardTransaction.date >= start,
+        models.CreditCardTransaction.date <= end,
+        models.CreditCardTransaction.amount > 0,
+    )
+    if card_id:
+        card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
+    for t in card_q.all():
+        if is_card_payment(t.merchant):
+            continue
+        items.append(schemas.SpendingLineItem(
+            date=t.date, description=t.merchant or "(no merchant)",
+            amount=t.amount, source="card",
+        ))
+
+    items.sort(key=lambda i: i.amount, reverse=True)
+    return items[:limit]
+
+
 @router.get("/monthly-by-category", response_model=list[schemas.MonthlyCategoryRow])
 def spending_monthly_by_category(
     start: date = Query(...),
@@ -85,11 +154,15 @@ def spending_monthly_by_category(
     categories = db.query(models.Category).filter(models.Category.user_id == user.id).all()
     cat_map = {c.id: c for c in categories}
 
-    def top_id(cat_id: int) -> Optional[int]:
+    # Group by the budget category the transaction is actually assigned to --
+    # the leaf -- rather than rolling everything up into Necessities/Wants/
+    # Charity. The three top-level buckets are a classification of spending,
+    # not a thing you budget against, so a chart built on them can't answer
+    # "which category ran hot this month". Transactions filed directly on a
+    # parent keep that parent as their own group instead of being dropped.
+    def group_id(cat_id: int) -> Optional[int]:
         c = cat_map.get(cat_id)
-        if c is None:
-            return None
-        return c.id if c.parent_id is None else c.parent_id
+        return None if c is None else c.id
 
     results: dict[str, dict[int, Decimal]] = {}
 
@@ -107,10 +180,10 @@ def spending_monthly_by_category(
     )
     if account_id:
         checking_q = checking_q.filter(models.Transaction.account_id == account_id)
-    for t in checking_q.all():
+    for t in filter_real_spend(db, user.id, checking_q.all()):
         if not t.category_id:
             continue
-        tc = top_id(t.category_id)
+        tc = group_id(t.category_id)
         if tc is None:
             continue
         month = t.date.strftime("%Y-%m")
@@ -126,19 +199,26 @@ def spending_monthly_by_category(
     if card_id:
         card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
     for t in card_q.all():
-        if not t.category_id:
+        if not t.category_id or is_card_payment(t.merchant):
             continue
-        tc = top_id(t.category_id)
+        tc = group_id(t.category_id)
         if tc is None:
             continue
         month = t.date.strftime("%Y-%m")
         results.setdefault(month, {})
         results[month][tc] = results[month].get(tc, Decimal("0")) + t.amount
 
-    top_cats = sorted(
-        [c for c in categories if c.parent_id is None and c.type == "expense"],
-        key=lambda c: c.sort_order,
-    )
+    # Leaf categories are numerous enough that stacking every one of them
+    # produces an unreadable chart, so only the biggest get their own band
+    # across the whole range and the tail collapses into a single "Other".
+    # Ranking spans the range rather than each month so a category keeps the
+    # same colour band month to month.
+    span_totals: dict[int, Decimal] = {}
+    for month_data in results.values():
+        for cid, amt in month_data.items():
+            span_totals[cid] = span_totals.get(cid, Decimal("0")) + amt
+    ranked = sorted(span_totals.items(), key=lambda kv: kv[1], reverse=True)
+    named_ids = {cid for cid, _ in ranked[:_MAX_STACK_CATEGORIES]}
 
     output = []
     for month in sorted(results.keys()):
@@ -146,14 +226,25 @@ def spending_monthly_by_category(
         total = sum(month_data.values(), Decimal("0"))
         cats = [
             schemas.CategoryMonthlyTotal(
-                category_id=tc.id,
-                category_name=tc.name,
-                color=tc.color,
-                total=month_data.get(tc.id, Decimal("0")),
+                category_id=cid,
+                category_name=cat_map[cid].name,
+                color=cat_map[cid].color,
+                total=amt,
             )
-            for tc in top_cats
-            if month_data.get(tc.id, Decimal("0")) > 0
+            for cid, amt in sorted(
+                ((cid, amt) for cid, amt in month_data.items() if cid in named_ids and amt > 0),
+                key=lambda kv: span_totals[kv[0]], reverse=True,
+            )
         ]
+        other = sum(
+            (amt for cid, amt in month_data.items() if cid not in named_ids),
+            Decimal("0"),
+        )
+        if other > 0:
+            cats.append(schemas.CategoryMonthlyTotal(
+                category_id=_OTHER_CATEGORY_ID, category_name="Other",
+                color="#9ca3af", total=other,
+            ))
         output.append(schemas.MonthlyCategoryRow(month=month, total=total, categories=cats))
     return output
 
@@ -346,6 +437,8 @@ def spending_by_card(
 
     sub_totals: dict[int, Decimal] = {}
     for t in txns:
+        if is_card_payment(t.merchant):
+            continue
         if t.category_id:
             sub_totals[t.category_id] = sub_totals.get(t.category_id, Decimal("0")) + t.amount
 
@@ -421,6 +514,9 @@ def available_to_spend(
             NOT_SAVINGS,
         )
     ).all()
+    # Transfers and card payoffs are not this month's discretionary spend --
+    # a payoff settles charges already counted on the card side.
+    txns = filter_real_spend(db, user.id, txns)
     spent_this_month = sum((abs(t.amount) for t in txns), Decimal("0"))
 
     return schemas.AvailableToSpend(

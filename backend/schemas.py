@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, date as date_type, datetime
 from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -1137,6 +1137,16 @@ class MerchantSpendingEntry(BaseModel):
     name: str
     total: Decimal
     count: int
+
+
+class SpendingLineItem(BaseModel):
+    """One row behind a spending total. Deliberately spans both checking and
+    card sources so the drill-down shows exactly what composes the bar --
+    transfers and card payoffs are already excluded upstream."""
+    date: date_type
+    description: str
+    amount: Decimal
+    source: str  # "checking" | "card"
 
 
 class WeeklyDigestCategory(BaseModel):
