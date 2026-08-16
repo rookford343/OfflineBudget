@@ -296,23 +296,33 @@ def test_safety_margin_does_not_double_count_the_cc_payoff(db_session):
     assert snapshot.safety_margin > Decimal("0")
 
 
-def test_dashboard_weekly_and_monthly_spendable_are_one_calculation(db_session):
-    """The two figures the Household Snapshot stacks together must be
-    week-and-month of the SAME calculation.
+def test_weekly_figures_are_the_monthly_ones_prorated(db_session):
+    """Both weekly numbers must be their own monthly value scaled by the share
+    of the month remaining -- the method Dan's spreadsheet uses.
 
-    Regression (Dan, 2026-08-16): the card showed "$696.65 spendable this
-    week" over "$448.25 this month", because the weekly value came from the
-    transaction-driven pacer while the monthly subline rendered the legacy
-    balance-derived left_to_spend. Both numbers were individually defensible
-    and the pairing was still nonsense. spendable_this_month is the pacer's
-    own monthly figure, so the ordering now holds by construction.
+    Verified against the sheet 2026-08-16 with 2.2857 weeks left (share
+    0.4375): Left to Spend -385.84 -> -168.80 and Safety Margin 2698.00 ->
+    1180.38, both to the cent. Note the invariant is on MAGNITUDE, not order:
+    with a negative pool the weekly figure is numerically larger than the
+    monthly one, which is correct and is why an earlier `week <= month`
+    assertion was wrong.
     """
     user, checking, card = _seed_spreadsheet_scenario(db_session)
 
     with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
-    assert snapshot.left_to_spend_weekly <= snapshot.spendable_this_month
-    # And the legacy field is genuinely a different basis -- if these ever
-    # coincide, this test has stopped proving anything.
-    assert snapshot.spendable_this_month != snapshot.left_to_spend
+    # Aug 7: 25 days remain -> 25/7 weeks, so one week is 7/25 of the month.
+    share = Decimal("7") / Decimal("25")
+    assert snapshot.left_to_spend_weekly == (snapshot.left_to_spend * share).quantize(Decimal("0.01"))
+    assert snapshot.safety_margin_weekly == (snapshot.safety_margin * share).quantize(Decimal("0.01"))
+    assert abs(snapshot.left_to_spend_weekly) <= abs(snapshot.left_to_spend)
+
+
+def test_weekly_proration_matches_dans_spreadsheet_to_the_cent():
+    """The two ratios the sheet showed on 2026-08-16, checked directly."""
+    from backend.services.budget_snapshot import _weekly_allowance
+
+    as_of = date(2026, 8, 16)  # 16 days remain -> 2.2857 weeks -> share 0.4375
+    assert _weekly_allowance(Decimal("-385.84"), as_of)[0] == Decimal("-168.80")
+    assert _weekly_allowance(Decimal("2698.00"), as_of)[0] == Decimal("1180.38")

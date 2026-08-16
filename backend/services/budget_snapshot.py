@@ -316,7 +316,23 @@ def compute_budget_snapshot(
     safety_margin = quarter_min - cc_budget_total + charged_so_far
 
     safety_margin_weekly, days_remaining = _weekly_allowance(safety_margin, as_of)
+
+    # Both weekly figures prorate their own monthly value by the same share of
+    # the month remaining. This is the model Dan's spreadsheet uses, confirmed
+    # to the cent against it on 2026-08-16: Left to Spend -385.84 * 0.4375 =
+    # -168.80 and Safety Margin 2698.00 * 0.4375 = 1180.38, where 0.4375 is
+    # one week of the 2.2857 remaining. The transaction-driven pacer below is
+    # a different model -- it re-slices the pool each Sunday, so the number
+    # jumps at a week boundary (Sat -45.59 -> Sun 616.45 on real data) and
+    # never lines up with the sheet. Kept for spendable_today's pacing detail
+    # and because it does catch discretionary checking spend that
+    # left_to_spend is blind to, but it is no longer the headline number.
+    left_to_spend_weekly, _ = _weekly_allowance(left_to_spend, as_of)
     weekly_spendable = compute_weekly_spendable(db, user.id, leftover, as_of)
+
+    # Daily pace divides the same prorated weekly figure, so the two agree.
+    days_left_in_week = weekly_spendable.days_left_in_week
+    spendable_today = (left_to_spend_weekly / Decimal(days_left_in_week)).quantize(Decimal("0.01"))
 
     cards = [
         CardSnapshot(
@@ -350,11 +366,10 @@ def compute_budget_snapshot(
         as_of=as_of,
         leftover=leftover,
         left_to_spend=left_to_spend,
-        left_to_spend_weekly=weekly_spendable.spendable_this_week,
-        spendable_this_month=weekly_spendable.remaining_this_month,
-        spendable_today=weekly_spendable.spendable_today,
+        left_to_spend_weekly=left_to_spend_weekly,
+        spendable_today=spendable_today,
         days_left_in_week=weekly_spendable.days_left_in_week,
-        on_pace=weekly_spendable.on_pace,
+        on_pace=left_to_spend_weekly >= 0,
         safety_margin=safety_margin,
         safety_margin_weekly=safety_margin_weekly,
         days_remaining_in_month=days_remaining,
