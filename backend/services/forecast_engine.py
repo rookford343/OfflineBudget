@@ -302,6 +302,10 @@ def build_forecast(
         models.PlannedExpense.user_id == user_id,
         models.PlannedExpense.expected_date >= start_date,
         models.PlannedExpense.expected_date <= end_date,
+        # A settled one-off already happened, so the real transaction is in
+        # the ledger and the balance reflects it. Projecting the estimate too
+        # would count the same money twice.
+        models.PlannedExpense.settled_on.is_(None),
     ).all()
     planned_by_date: dict[date, list[models.PlannedExpense]] = {}
     # Card-linked planned expenses don't hit checking on expected_date -- a
