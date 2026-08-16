@@ -76,7 +76,7 @@ export default function Forecast() {
 
   const { data: plannedExpenses = [] } = useQuery({
     queryKey: ["planned-expenses"],
-    queryFn: plannedExpensesApi.list,
+    queryFn: () => plannedExpensesApi.list(false),
   });
 
   const { data: me } = useQuery({
@@ -218,6 +218,22 @@ export default function Forecast() {
     mutationFn: plannedExpensesApi.create,
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["planned-expenses"] }); setShowExpenseForm(false); setExpenseForm({ ...emptyExpense }); },
   });
+  // Settling a one-off closes the prediction against reality. Kept separate
+  // from delete on purpose: deleting loses the estimate, and comparing the
+  // estimate to what actually moved is how the next one gets better.
+  const [settleId, setSettleId] = useState<number | null>(null);
+  const [settleAmount, setSettleAmount] = useState("");
+  const settleMut = useMutation({
+    mutationFn: ({ id, actual }: { id: number; actual: number | null }) =>
+      plannedExpensesApi.settle(id, actual),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["planned-expenses"] });
+      qc.invalidateQueries({ queryKey: ["forecast"] });
+      setSettleId(null);
+      setSettleAmount("");
+    },
+  });
+
   const deleteExpenseMut = useMutation({
     mutationFn: plannedExpensesApi.remove,
     onSuccess: () => qc.invalidateQueries({ queryKey: ["planned-expenses"] }),
@@ -663,22 +679,68 @@ export default function Forecast() {
                     </div>
                   </div>
                 ) : (
-                  <div className="py-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{pe.name}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">
-                        {new Date(pe.expected_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                        {pe.card_id && <> · via {activeCards.find((c: any) => c.id === pe.card_id)?.name ?? "card"}</>}
-                        {pe.notes && <> · {pe.notes}</>}
-                      </p>
+                  <div className="py-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                          {pe.name}
+                          {pe.expected_date < todayStr && (
+                            <span className="ml-2 text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                              date passed
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          {new Date(pe.expected_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          {pe.card_id && <> · via {activeCards.find((c: any) => c.id === pe.card_id)?.name ?? "card"}</>}
+                          {pe.notes && <> · {pe.notes}</>}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className={`font-semibold ${pe.direction === "inflow" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                          {pe.direction === "inflow" ? "+" : "−"}{fmt(pe.amount)}
+                        </span>
+                        <button onClick={() => { setEditExpenseId(pe.id); setEditExpenseForm({ name: pe.name, amount: String(pe.amount), expected_date: pe.expected_date, notes: pe.notes ?? "", account_id: pe.account_id ? String(pe.account_id) : "", card_id: pe.card_id ? String(pe.card_id) : "", direction: pe.direction ?? "outflow" }); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={14} /></button>
+                        <button onClick={() => deleteExpenseMut.mutate(pe.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`font-semibold ${pe.direction === "inflow" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                        {pe.direction === "inflow" ? "+" : "−"}{fmt(pe.amount)}
-                      </span>
-                      <button onClick={() => { setEditExpenseId(pe.id); setEditExpenseForm({ name: pe.name, amount: String(pe.amount), expected_date: pe.expected_date, notes: pe.notes ?? "", account_id: pe.account_id ? String(pe.account_id) : "", card_id: pe.card_id ? String(pe.card_id) : "", direction: pe.direction ?? "outflow" }); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={14} /></button>
-                      <button onClick={() => deleteExpenseMut.mutate(pe.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
-                    </div>
+
+                    {/* Once the date passes, the row stops being a plan and
+                        becomes a question: did it happen, and for how much? */}
+                    {pe.expected_date < todayStr && (
+                      settleId === pe.id ? (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 bg-amber-50 dark:bg-amber-900/15 rounded-md px-3 py-2">
+                          <span className="text-xs text-gray-600 dark:text-gray-300">Actual amount</span>
+                          <input
+                            type="number" step="0.01" autoFocus
+                            className="input py-1 text-sm w-32"
+                            placeholder={String(pe.amount)}
+                            value={settleAmount}
+                            onChange={e => setSettleAmount(e.target.value)}
+                          />
+                          <button
+                            className="btn-primary text-xs px-2 py-1"
+                            disabled={settleMut.isPending}
+                            onClick={() => settleMut.mutate({ id: pe.id, actual: settleAmount ? parseFloat(settleAmount) : parseFloat(pe.amount) })}>
+                            {settleMut.isPending ? "Saving…" : "Confirm"}
+                          </button>
+                          <button
+                            className="btn-secondary text-xs px-2 py-1"
+                            disabled={settleMut.isPending}
+                            title="It never happened — close it out with no amount"
+                            onClick={() => settleMut.mutate({ id: pe.id, actual: null })}>
+                            Didn't happen
+                          </button>
+                          <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => { setSettleId(null); setSettleAmount(""); }}>Cancel</button>
+                        </div>
+                      ) : (
+                        <button
+                          className="mt-2 text-xs text-amber-700 dark:text-amber-400 hover:underline"
+                          onClick={() => { setSettleId(pe.id); setSettleAmount(String(pe.amount)); }}>
+                          Reconcile this →
+                        </button>
+                      )
+                    )}
                   </div>
                 )}
               </div>
