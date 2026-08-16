@@ -442,6 +442,9 @@ class BudgetOverviewRow(BaseModel):
     category_id: int
     category_name: str
     parent_id: Optional[int]
+    # Needed so the Budget page can drop income rows. Without it "Income" and
+    # "Salary / Wages" showed as $10,556.36 budget lines apiece.
+    category_type: str = "expense"
     budgeted: Decimal
     actual_checking: Decimal
     actual_cards: Decimal
