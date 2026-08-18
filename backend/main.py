@@ -30,6 +30,7 @@ from backend.routers import planned_transfers as planned_transfers_router_module
 from backend.routers import verification_flags as verification_flags_router_module
 from backend.routers import settings as settings_router_module
 from backend.routers import merchants as merchants_router_module
+from backend.routers import bill_overrides as bill_overrides_router_module
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,29 @@ def _send_daily_summaries() -> None:
     from backend.services.email_service import send_email_via
     from backend.services.summary_generator import generate_daily_summary, generate_weekly_digest
     from backend.services import scheduler_state, app_settings
+
+    # Sync first, always. The report quotes balances, month-to-date spend and
+    # upcoming bills, so sending it before the day's sync means mailing
+    # yesterday's numbers -- and on a laptop that sleeps, the 5am sync and the
+    # 7am email routinely both land late and in whatever order the sweep
+    # happens to reach them. Ordering the two triggers isn't enough: this
+    # function is also called directly by the sweep and by the Settings
+    # "run now" button, so the guarantee belongs here rather than in the
+    # schedule.
+    #
+    # Skipped when the day's sync already succeeded, so the normal 5am-then-7am
+    # path costs nothing extra.
+    db = SessionLocal()
+    try:
+        if not scheduler_state.succeeded_today(db, "bank_sync"):
+            logger.info("Daily summary: bank sync hasn't succeeded today, syncing first")
+            _run_bank_sync()
+    except Exception as exc:  # noqa: BLE001 -- a failed sync must not block the report
+        # Stale numbers beat no report at all: Dan's household reads this
+        # every morning, and a bank outage should degrade it, not cancel it.
+        logger.error("Daily summary: pre-send bank sync failed, sending anyway: %s", exc)
+    finally:
+        db.close()
 
     db = SessionLocal()
     # Read through app_settings so a change made on the Settings page takes
@@ -264,6 +288,7 @@ app.include_router(planned_transfers_router_module.router)
 app.include_router(verification_flags_router_module.router)
 app.include_router(settings_router_module.router)
 app.include_router(merchants_router_module.router)
+app.include_router(bill_overrides_router_module.router)
 
 
 @app.get("/health", tags=["health"])

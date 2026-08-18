@@ -290,6 +290,17 @@ def build_forecast(
                 if Decimal("0.5") <= ratio <= Decimal("1.1"):
                     ss_paycheck_item_ids.add(item.id)
 
+    # Known statement amounts for specific upcoming occurrences, keyed by
+    # (recurring_item_id, due_date) so a lookup during the day walk is exact.
+    bill_actuals: dict[tuple[int, date], Decimal] = {
+        (o.recurring_item_id, o.due_date): o.actual_amount
+        for o in db.query(models.BillAmountOverride).filter(
+            models.BillAmountOverride.user_id == user_id,
+            models.BillAmountOverride.due_date >= start_date,
+            models.BillAmountOverride.due_date <= end_date,
+        ).all()
+    }
+
     all_active_cards = db.query(models.CreditCard).filter(
         models.CreditCard.user_id == user_id,
         models.CreditCard.is_active == True,
@@ -665,7 +676,16 @@ def build_forecast(
                     if any(abs((d - current).days) <= 3 for d in ri_actual_dates):
                         continue
 
-            base_amount = item.amount + override_map.get(item.id, Decimal("0"))
+            # A known real statement wins over the modelled amount for its own
+            # due date only. Dan's Duke Electric is modelled at $180.00/month
+            # while the bill due 2026-09-08 is $224.31; editing the item would
+            # rewrite every future month to a September-only number and lose
+            # the estimate the forecast needs for October onward.
+            actual_override = bill_actuals.get((item.id, current))
+            if actual_override is not None:
+                base_amount = actual_override
+            else:
+                base_amount = item.amount + override_map.get(item.id, Decimal("0"))
             is_cc = item.type == models.RecurringType.credit_card_payment
 
             # SS paycheck boost: accumulate gross, apply boost once wage base is hit

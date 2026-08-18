@@ -514,6 +514,40 @@ class ForecastScenario(Base):
     overrides: Mapped[list[ScenarioOverride]] = relationship(back_populates="scenario", cascade="all, delete-orphan")
 
 
+class BillAmountOverride(Base):
+    """The real amount of one upcoming occurrence of a recurring bill.
+
+    A RecurringItem carries a single typical amount, which is the right shape
+    for planning but wrong the moment the actual bill arrives: Dan's Duke
+    Electric is modelled at $180.00/month while the statement due 2026-09-08
+    is $224.31. Editing the recurring item itself would be lossy -- it would
+    silently rewrite every future month to a number that is only true for
+    September, and lose the estimate the forecast should fall back to
+    afterwards.
+
+    So the override is keyed to a single due_date and nothing else. The
+    forecast substitutes `actual_amount` on that date and keeps using the
+    item's own amount everywhere else.
+    """
+    __tablename__ = "bill_amount_overrides"
+    __table_args__ = (
+        UniqueConstraint("recurring_item_id", "due_date", name="uq_bill_override_item_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    recurring_item_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("recurring_items.id", ondelete="CASCADE"), nullable=False,
+    )
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    actual_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    recurring_item: Mapped["RecurringItem"] = relationship()
+
+
 class ScenarioOverride(Base):
     __tablename__ = "scenario_overrides"
 
