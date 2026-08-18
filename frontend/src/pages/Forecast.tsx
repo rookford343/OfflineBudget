@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi, dayCheckpointsApi, transactionsApi, categoriesApi, plannedTransfersApi } from "../api";
 import { fmt, today } from "../lib/utils";
 import { Link } from "react-router-dom";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar, ComposedChart } from "recharts";
 import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle, CreditCard, Pencil, ShieldCheck } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import MonthlyAccuracyRow from "../components/MonthlyAccuracyRow";
@@ -35,6 +35,13 @@ export default function Forecast() {
   // money market, a brokerage sweep. Emergency funds included: it's Dan's
   // money and his call, the flag only governs "available savings" reporting.
   const fundingAccounts = accounts.filter((a: any) => a.type !== "checking");
+  // Savings shown as bars behind the checking line: the two are read together
+  // (can I cover this, and what does it cost the cushion?) but live on wildly
+  // different scales, so they share an X axis and not a Y.
+  const savingsAccounts = accounts.filter(
+    (a: any) => a.is_active !== false && (a.type === "savings" || a.type === "money_market"),
+  );
+  const [showSavings, setShowSavings] = useState(true);
   const [accountId, setAccountId] = useState<number | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
   const [forecastYears, setForecastYears] = useState(1);
@@ -72,6 +79,32 @@ export default function Forecast() {
   });
   const quarters = forecastYears === 1 ? singleYearQuarters : multiYearQuarters;
   const isLoading = forecastYears === 1 ? singleLoading : multiLoading;
+
+  // One forecast per savings account, summed. Dan holds Savings plus a Money
+  // Market emergency fund; the emergency flag governs what counts as
+  // *available* savings in reporting, not what he's allowed to look at, so
+  // both are drawn here.
+  const savingsQueries = useQueries({
+    queries: savingsAccounts.map((a: any) => ({
+      queryKey: ["forecast-quarters", a.id, year, forecastYears],
+      queryFn: () => (forecastYears === 1
+        ? forecastApi.quarters(a.id, year)
+        : forecastApi.multiYear(a.id, year, forecastYears)),
+      enabled: showSavings && savingsAccounts.length > 0,
+    })),
+  });
+  // date -> combined savings balance. Every day is kept, not every third:
+  // this is a lookup and the bar series samples it through chartData's own
+  // filter, so extra keys are simply never read.
+  const savingsByDate: Record<string, number> = {};
+  savingsQueries.forEach((q: any) => {
+    (q.data ?? []).forEach((quarter: any) =>
+      (quarter.days ?? []).forEach((d: any) => {
+        savingsByDate[d.date] = (savingsByDate[d.date] ?? 0) + parseFloat(d.projected_balance);
+      })
+    );
+  });
+  const hasSavingsSeries = showSavings && Object.keys(savingsByDate).length > 0;
 
   const { data: scenarios = [] } = useQuery({
     queryKey: ["scenarios"],
@@ -300,10 +333,23 @@ export default function Forecast() {
     );
   }
 
-  const mergedData = chartData.map(d => ({
-    ...d,
-    scenario: scenarioMap[d.date] ?? undefined,
-  }));
+  // One savings bar per month, not one per chart point. The balance line is
+  // sampled every 3rd day, and hanging a bar off each of those put ~124
+  // adjacent bars across a year -- they merged into a solid pale block that
+  // read as a background fill and hid the gridlines behind it. A savings
+  // balance moves on a monthly rhythm anyway, so the first sampled day of
+  // each month carries the bar and the rest leave it undefined (Recharts
+  // simply draws nothing there).
+  const seenMonths = new Set<string>();
+  const mergedData = chartData.map(d => {
+    const month = d.date.slice(0, 7);
+    let savings: number | undefined;
+    if (hasSavingsSeries && !seenMonths.has(month)) {
+      seenMonths.add(month);
+      savings = savingsByDate[d.date];
+    }
+    return { ...d, scenario: scenarioMap[d.date] ?? undefined, savings };
+  });
 
   const hasScenario = scenarioId !== null && Object.keys(scenarioMap).length > 0;
 
@@ -338,7 +384,7 @@ export default function Forecast() {
 
   const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload?.length) {
-      const nameMap: Record<string, string> = { actual: "Actual", projected: "Projected", scenario: "Scenario", baseline: "Balance" };
+      const nameMap: Record<string, string> = { actual: "Actual", projected: "Projected", scenario: "Scenario", baseline: "Balance", savings: "Savings" };
       return (
         <div className="card py-2 px-3 shadow-lg text-sm">
           <p className="text-gray-500 text-xs mb-1">{label}</p>
@@ -493,11 +539,20 @@ export default function Forecast() {
 
       {!isLoading && chartData.length > 0 && (
         <div className="card">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            {chartView === "balance"
-              ? `Balance Over Time — ${year}${forecastYears > 1 ? `–${year + forecastYears - 1}` : ""}`
-              : `Quarterly Net Income/Expense — ${year}${forecastYears > 1 ? `–${year + forecastYears - 1}` : ""}`}
-          </h3>
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+              {chartView === "balance"
+                ? `Balance Over Time — ${year}${forecastYears > 1 ? `–${year + forecastYears - 1}` : ""}`
+                : `Quarterly Net Income/Expense — ${year}${forecastYears > 1 ? `–${year + forecastYears - 1}` : ""}`}
+            </h3>
+            {chartView === "balance" && savingsAccounts.length > 0 && (
+              <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
+                <input type="checkbox" checked={showSavings} onChange={e => setShowSavings(e.target.checked)} />
+                <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: "#0ea5e9", opacity: 0.45 }} />
+                Savings ({savingsAccounts.map((a: any) => a.name).join(" + ")})
+              </label>
+            )}
+          </div>
           <ResponsiveContainer width="100%" height={280}>
             {chartView === "net" ? (
               <BarChart data={netBarData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
@@ -511,7 +566,7 @@ export default function Forecast() {
                 <Legend />
               </BarChart>
             ) : (
-              <AreaChart data={mergedData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+              <ComposedChart data={mergedData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                 <defs>
                   <linearGradient id="forecastActualGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.15} />
@@ -528,11 +583,20 @@ export default function Forecast() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme().grid} />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
-                <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
+                <YAxis yAxisId="left" tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
+                {/* Savings sits on its own axis on purpose. Sharing one would
+                    flatten a $2k checking trough into invisibility against a
+                    $30k savings balance -- the trough is the whole reason to
+                    look at this chart. */}
+                {hasSavingsSeries && (
+                  <YAxis yAxisId="right" orientation="right" tickFormatter={v => `$${(v / 1000).toFixed(0)}k`}
+                    tick={{ fontSize: 11, fill: "#94a3b8" }} axisLine={false} tickLine={false} />
+                )}
                 <Tooltip content={<CustomTooltip />} />
-                <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.5} />
+                <ReferenceLine yAxisId="left" y={0} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.5} />
                 {lowBalanceThreshold != null && lowBalanceThreshold > 0 && (
                   <ReferenceLine
+                    yAxisId="left"
                     y={lowBalanceThreshold}
                     stroke={isDarkMode() ? "#fbbf24" : "#b45309"}
                     strokeWidth={2}
@@ -542,6 +606,7 @@ export default function Forecast() {
                 )}
                 {risk?.action_threshold != null && (
                   <ReferenceLine
+                    yAxisId="left"
                     y={parseFloat(risk.action_threshold)}
                     stroke={isDarkMode() ? "#f87171" : "#b91c1c"}
                     strokeWidth={2}
@@ -549,13 +614,17 @@ export default function Forecast() {
                     label={{ value: "Action threshold", position: "insideTopRight", fontSize: 11, fontWeight: 600, fill: isDarkMode() ? "#f87171" : "#b91c1c" }}
                   />
                 )}
-                <Area type="monotone" dataKey="actual" name="Actual" stroke="#6366f1" strokeWidth={2} fill="url(#forecastActualGradient)" dot={false} connectNulls={false} animationDuration={600} />
-                <Area type="monotone" dataKey="projected" name="Projected" stroke="#6366f1" strokeWidth={2} strokeDasharray="5 3" fill="url(#forecastProjectedGradient)" dot={false} connectNulls={false} animationDuration={600} />
+                {hasSavingsSeries && (
+                  <Bar yAxisId="right" dataKey="savings" name="Savings" fill="#0ea5e9" fillOpacity={0.30}
+                    stroke="#0ea5e9" strokeOpacity={0.55} barSize={22} animationDuration={600} />
+                )}
+                <Area yAxisId="left" type="monotone" dataKey="actual" name="Actual" stroke="#6366f1" strokeWidth={2} fill="url(#forecastActualGradient)" dot={false} connectNulls={false} animationDuration={600} />
+                <Area yAxisId="left" type="monotone" dataKey="projected" name="Projected" stroke="#6366f1" strokeWidth={2} strokeDasharray="5 3" fill="url(#forecastProjectedGradient)" dot={false} connectNulls={false} animationDuration={600} />
                 {hasScenario && (
-                  <Area type="monotone" dataKey="scenario" name="Scenario" stroke="#10b981" strokeWidth={2} fill="url(#forecastScenarioGradient)" dot={false} strokeDasharray="5 3" animationDuration={800} animationEasing="ease-out" />
+                  <Area yAxisId="left" type="monotone" dataKey="scenario" name="Scenario" stroke="#10b981" strokeWidth={2} fill="url(#forecastScenarioGradient)" dot={false} strokeDasharray="5 3" animationDuration={800} animationEasing="ease-out" />
                 )}
                 <Legend />
-              </AreaChart>
+              </ComposedChart>
             )}
           </ResponsiveContainer>
         </div>

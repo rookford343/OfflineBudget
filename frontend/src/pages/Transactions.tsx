@@ -23,6 +23,10 @@ interface UnifiedRow {
   source: string;
   sourceLabel: string;
   externalId: string | null;
+  categoryName: string | null;
+  notes: string | null;
+  recurringName: string | null;
+  isActual: boolean;
 }
 
 function RawDataButton({ externalId }: { externalId: string }) {
@@ -125,7 +129,10 @@ const emptyForm = { account_id: "", category_id: "", date: today(), amount: "", 
 export default function Transactions() {
   const qc = useQueryClient();
   const [showHelp, setShowHelp] = useState(false);
-  const [txnTab, setTxnTab] = useState<TxnTab>("checking");
+  // Defaults to the unified view: the question is almost always "what happened
+  // recently", not "what happened on this one account", and the split tabs
+  // made you check two places to answer it.
+  const [txnTab, setTxnTab] = useState<TxnTab>("all");
   const [start, setStart] = useState(firstOfMonth());
   const [end, setEnd] = useState(today());
   const [showForm, setShowForm] = useState(false);
@@ -169,6 +176,12 @@ export default function Transactions() {
   });
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoriesApi.list });
+  // Always loaded, not reconcile-only: the unified list names the recurring
+  // item a row settles, which is what distinguishes a bill from a purchase.
+  const { data: allRecurring = [] } = useQuery({
+    queryKey: ["recurring", "all"],
+    queryFn: () => recurringApi.list(false),
+  });
   const { data: cards = [] } = useQuery({ queryKey: ["cards"], queryFn: cardsApi.list });
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
 
@@ -195,18 +208,39 @@ export default function Transactions() {
 
   const cardNameMap: Record<number, string> = Object.fromEntries((cards as any[]).map((c: any) => [c.id, c.name]));
   const accountNameMap: Record<number, string> = Object.fromEntries((accounts as any[]).map((a: any) => [a.id, a.name]));
+  // /categories returns a TREE -- six top-level rows with nested children --
+  // so a flat map over the response only knows the parents, and every
+  // transaction filed against a child (which is nearly all of them) rendered
+  // as "Uncategorized". Walk it.
+  const categoryNameMap: Record<number, string> = {};
+  const walkCategories = (list: any[]) => list.forEach((c: any) => {
+    categoryNameMap[c.id] = c.name;
+    if (c.children?.length) walkCategories(c.children);
+  });
+  walkCategories(categories as any[]);
+  const recurringNameMap: Record<number, string> = Object.fromEntries((allRecurring as any[]).map((r: any) => [r.id, r.name]));
 
   const unifiedRows: UnifiedRow[] = txnTab === "all" ? [
     ...txns.map((t: any) => ({
       id: t.id, kind: "checking" as const, date: t.date, description: t.description,
       amount: parseFloat(t.amount), source: t.source, sourceLabel: accountNameMap[t.account_id] ?? "Checking",
       externalId: t.external_id ?? null,
+      categoryName: categoryNameMap[t.category_id] ?? null,
+      notes: t.notes ?? null,
+      // Naming the recurring item a row settles is what turns "another $500.89
+      // debit" into "that's the Rivian payment" without opening anything.
+      recurringName: recurringNameMap[t.recurring_item_id] ?? null,
+      isActual: t.is_actual !== false,
     })),
     ...allCardsQueries.flatMap((q, i) => (q.data ?? []).map((t: any) => ({
       id: t.id, kind: "card" as const, date: t.date, description: t.merchant || t.description || "",
       amount: -parseFloat(t.amount), // flip: card convention is positive=charge, opposite of checking
       source: t.source, sourceLabel: cardNameMap[(cards as any[])[i]?.id] ?? "Card",
       externalId: t.external_id ?? null,
+      categoryName: categoryNameMap[t.category_id] ?? null,
+      notes: t.description && t.merchant && t.description !== t.merchant ? t.description : null,
+      recurringName: null,
+      isActual: true,
     }))),
   ]
     .filter(r => {
@@ -428,6 +462,7 @@ export default function Transactions() {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Category</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Source</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
                     {me?.debug_capture_raw_bank_data && <th className="px-4 py-3 w-8"></th>}
@@ -439,9 +474,31 @@ export default function Transactions() {
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                         {new Date(r.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       </td>
-                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
-                        <div className="truncate flex items-center gap-1.5"><SourceBadge source={r.source} />{r.description}</div>
-                        <span className="text-xs text-gray-400 md:hidden">{r.sourceLabel}</span>
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-sm">
+                        <div className="truncate flex items-center gap-1.5">
+                          <SourceBadge source={r.source} />
+                          {r.description}
+                          {!r.isActual && (
+                            <span className="shrink-0 text-[10px] uppercase tracking-wide px-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500">
+                              pending
+                            </span>
+                          )}
+                        </div>
+                        {/* Everything that doesn't earn a column of its own but
+                            changes what the row means. */}
+                        <div className="flex flex-wrap items-center gap-x-2 text-xs text-gray-400">
+                          <span className="lg:hidden">{r.categoryName ?? "Uncategorized"}</span>
+                          <span className="md:hidden">{r.sourceLabel}</span>
+                          {r.recurringName && (
+                            <span className="text-indigo-500 dark:text-indigo-400">↻ {r.recurringName}</span>
+                          )}
+                          {r.notes && <span className="truncate italic">{r.notes}</span>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 hidden lg:table-cell">
+                        {r.categoryName
+                          ? <span className="text-xs text-gray-600 dark:text-gray-300">{r.categoryName}</span>
+                          : <span className="text-xs text-gray-300 dark:text-gray-600 italic">Uncategorized</span>}
                       </td>
                       <td className="px-4 py-3 text-gray-500 hidden md:table-cell">
                         <span className={`text-xs px-1.5 py-0.5 rounded ${r.kind === "card" ? "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400" : "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400"}`}>
