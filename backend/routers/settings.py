@@ -4,12 +4,15 @@ Admin-only throughout: these are server-wide values, not per-user
 preferences, so a non-admin household member must not be able to read the
 SMTP host or repoint the daily report at a different address.
 """
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, require_admin
 from backend.services import app_settings
 from backend.services.crypto import is_encryption_configured, EncryptionNotConfigured
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -122,6 +125,18 @@ def run_daily_summary_now(
 
     if not app_settings.get_effective(db, "SMTP_HOST"):
         raise HTTPException(status_code=400, detail="SMTP host is not configured")
+
+    # Same guarantee the scheduled send makes: this mails real balances, so it
+    # must not report yesterday's. Gated on the day's sync having succeeded,
+    # so repeated manual runs don't hammer the bank -- only the first of the
+    # day pays for it.
+    from backend.services import scheduler_state
+    if not scheduler_state.succeeded_today(db, "bank_sync"):
+        from backend.main import _run_bank_sync
+        try:
+            _run_bank_sync()
+        except Exception:  # noqa: BLE001 -- stale numbers beat no report
+            logger.exception("Manual report run: pre-send bank sync failed, sending anyway")
 
     if to_self_only:
         recipients = [user.email] if user.email else []

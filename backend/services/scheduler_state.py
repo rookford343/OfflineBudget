@@ -88,3 +88,24 @@ def due_for_retry(db: Session, job_name: str, *, target_hour: int, now: datetime
         return True
     last_success_local = run.last_success_at.replace(tzinfo=timezone.utc).astimezone()
     return last_success_local.date() < now.date()
+
+
+def succeeded_today(db: Session, job_name: str, now: datetime | None = None) -> bool:
+    """True when this job has a successful run dated today, local time.
+
+    Same UTC-to-local conversion trap as due_for_retry: last_success_at is
+    stored UTC-naive, so comparing its raw .date() against a local date is
+    wrong for the whole UTC-offset window each night. Reads fail closed --
+    "not sure" means "hasn't run", which costs one redundant sync rather than
+    sending a report built on stale balances.
+    """
+    now = now or datetime.now()
+    try:
+        run = db.query(models.SchedulerRun).filter_by(job_name=job_name).first()
+    except Exception:
+        logger.warning("scheduler_state read failed for %s", job_name, exc_info=True)
+        return False
+    if not run or not run.last_success_at:
+        return False
+    last_success_local = run.last_success_at.replace(tzinfo=timezone.utc).astimezone()
+    return last_success_local.date() == now.date()
