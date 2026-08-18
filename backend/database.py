@@ -134,6 +134,9 @@ def upgrade_schema():
         )""",
         "ALTER TABLE users ADD COLUMN savings_strategy VARCHAR(32) DEFAULT 'save_monthly'",
         "ALTER TABLE planned_expenses ADD COLUMN settled_on DATE",
+        "ALTER TABLE planned_expenses ADD COLUMN funding_account_id INTEGER REFERENCES accounts(id)",
+        "ALTER TABLE planned_expenses ADD COLUMN funding_amount NUMERIC(14,2)",
+        "ALTER TABLE planned_expenses ADD COLUMN funding_lead_days INTEGER DEFAULT 0",
         "ALTER TABLE planned_expenses ADD COLUMN actual_amount NUMERIC(14,2)",
         """CREATE TABLE IF NOT EXISTS planned_transfers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
