@@ -38,8 +38,13 @@ export default function Forecast() {
   // Savings shown as bars behind the checking line: the two are read together
   // (can I cover this, and what does it cost the cushion?) but live on wildly
   // different scales, so they share an X axis and not a Y.
+  //
+  // Savings-type accounts only. Money market is deliberately excluded --
+  // Dan's is an emergency fund, and folding it in inflated the series by
+  // ~$26k of money he has no intention of spending, which is the same reason
+  // it is already held out of available-savings reporting.
   const savingsAccounts = accounts.filter(
-    (a: any) => a.is_active !== false && (a.type === "savings" || a.type === "money_market"),
+    (a: any) => a.is_active !== false && a.type === "savings",
   );
   const [showSavings, setShowSavings] = useState(true);
   const [accountId, setAccountId] = useState<number | null>(null);
