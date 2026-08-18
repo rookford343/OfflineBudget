@@ -1,16 +1,58 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { recurringApi, accountsApi, categoriesApi, cardsApi } from "../api";
+import { recurringApi, accountsApi, categoriesApi, cardsApi, billOverridesApi } from "../api";
 import { fmt } from "../lib/utils";
-import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X, Sparkles, HelpCircle, CreditCard } from "lucide-react";
+import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
 const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "" };
 
+/** Next occurrence of a monthly item's due day, on or after today.
+ *  Only monthly items get inline actual-amount entry: yearly and quarterly
+ *  bills need a month as well as a day, and monthly utilities are the case
+ *  that actually restates every cycle. */
+function nextMonthlyDue(dayOfMonth: number): string {
+  const now = new Date();
+  const daysIn = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
+  // day_of_month 0 means "last day of the month" everywhere else in the app.
+  const dayFor = (y: number, m: number) => (dayOfMonth === 0 ? daysIn(y, m) : Math.min(dayOfMonth, daysIn(y, m)));
+  let y = now.getFullYear(), m = now.getMonth();
+  if (dayFor(y, m) < now.getDate()) { m += 1; if (m > 11) { m = 0; y += 1; } }
+  const d = dayFor(y, m);
+  return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
 export default function Recurring() {
+  const [billEditId, setBillEditId] = useState<number | null>(null);
+  const [billAmt, setBillAmt] = useState("");
   const qc = useQueryClient();
+
+  // Known statement amounts for upcoming occurrences. Keyed by
+  // "<itemId>|<dueDate>" so a row can find its own without scanning.
+  const { data: overrides = [] } = useQuery<any[]>({
+    queryKey: ["bill-overrides"],
+    queryFn: () => billOverridesApi.list(true),
+  });
+  const overrideByKey: Record<string, any> = {};
+  overrides.forEach((o: any) => { overrideByKey[`${o.recurring_item_id}|${o.due_date}`] = o; });
+
+  const invalidateBills = () => {
+    qc.invalidateQueries({ queryKey: ["bill-overrides"] });
+    // The forecast reads these, so a stale projection would otherwise sit on
+    // screen showing the estimate that was just replaced.
+    qc.invalidateQueries({ queryKey: ["forecast"] });
+    qc.invalidateQueries({ queryKey: ["budget-snapshot"] });
+  };
+  const setBillMut = useMutation({
+    mutationFn: (data: object) => billOverridesApi.upsert(data),
+    onSuccess: () => { invalidateBills(); setBillEditId(null); setBillAmt(""); },
+  });
+  const clearBillMut = useMutation({
+    mutationFn: (id: number) => billOverridesApi.remove(id),
+    onSuccess: invalidateBills,
+  });
   const [showHelp, setShowHelp] = useState(false);
   const { data: items = [] } = useQuery<any[]>({ queryKey: ["recurring"], queryFn: () => recurringApi.list(false) });
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
@@ -76,8 +118,19 @@ export default function Recurring() {
       : isQuarterly
         ? `${MONTHS[(item.month_of_year ?? 1) - 1]} ${dayNoun}, then every 3 months`
         : `${item.day_of_month === 0 ? "Last day" : `Day ${item.day_of_month}`} each month`;
+    // Only monthly expenses paid from checking get inline actual entry --
+    // that's the utility-bill case, where the real statement differs from the
+    // modelled amount every cycle.
+    const canOverride = item.type === "expense" && item.frequency === "monthly" && !item.card_id;
+    const dueDate = canOverride ? nextMonthlyDue(item.day_of_month) : null;
+    const override = dueDate ? overrideByKey[`${item.id}|${dueDate}`] : null;
+    const projected = parseFloat(item.amount || "0");
+    const actual = override ? parseFloat(override.actual_amount) : null;
+    const variance = actual !== null ? actual - projected : 0;
+
     return (
-      <div className="flex items-center justify-between py-2.5 border-b border-gray-50 last:border-0">
+      <div className="py-2.5 border-b border-gray-50 last:border-0">
+      <div className="flex items-center justify-between">
         <div>
           <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name}</p>
           <div className="flex items-center gap-1.5 mt-0.5">
@@ -96,9 +149,48 @@ export default function Recurring() {
             </span>
             {(isYearly || isQuarterly) && <p className="text-xs text-gray-400 tabular-nums">{fmt(perMonth(item))}/mo</p>}
           </div>
+          {canOverride && (
+            <button
+              onClick={() => { setBillEditId(billEditId === item.id ? null : item.id); setBillAmt(actual !== null ? String(actual) : ""); }}
+              className={`btn-ghost p-1 ${override ? "text-indigo-600" : ""}`}
+              title="Enter the actual amount of the next bill">
+              <Receipt size={14} />
+            </button>
+          )}
           <button onClick={() => openEdit(item)} className="btn-ghost p-1"><Pencil size={14} /></button>
           <button onClick={() => setDeleteId(item.id)} className="btn-ghost p-1 text-red-500 hover:bg-red-50"><Trash2 size={14} /></button>
         </div>
+      </div>
+
+      {/* The actual statement, pinned to one due date. The item's own amount
+          stays the estimate every other month falls back to. */}
+      {override && billEditId !== item.id && (
+        <div className="mt-1 flex items-center gap-2 text-xs">
+          <span className="text-indigo-600 dark:text-indigo-400 font-medium">
+            Actual {fmt(actual!)} due {new Date(dueDate! + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+          </span>
+          <span className={variance > 0 ? "text-red-500" : variance < 0 ? "text-emerald-600" : "text-gray-400"}>
+            {variance === 0 ? "as projected" : `${variance > 0 ? "+" : "−"}${fmt(Math.abs(variance))} vs projected ${fmt(projected)}`}
+          </span>
+          <button onClick={() => clearBillMut.mutate(override.id)} className="text-gray-400 hover:text-red-500">clear</button>
+        </div>
+      )}
+
+      {billEditId === item.id && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 bg-indigo-50 dark:bg-indigo-900/15 rounded-md px-3 py-2">
+          <span className="text-xs text-gray-600 dark:text-gray-300">
+            Actual bill due {new Date(dueDate! + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+          </span>
+          <input type="number" step="0.01" autoFocus className="input py-1 text-sm w-28 text-right"
+            placeholder={String(projected)} value={billAmt} onChange={e => setBillAmt(e.target.value)} />
+          <button className="btn-primary text-xs px-2 py-1" disabled={!billAmt || setBillMut.isPending}
+            onClick={() => setBillMut.mutate({ recurring_item_id: item.id, due_date: dueDate, actual_amount: parseFloat(billAmt) })}>
+            {setBillMut.isPending ? "Saving…" : "Save"}
+          </button>
+          <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => setBillEditId(null)}>Cancel</button>
+          <span className="text-xs text-gray-400">projected {fmt(projected)}</span>
+        </div>
+      )}
       </div>
     );
   }

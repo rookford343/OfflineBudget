@@ -62,6 +62,14 @@ export const appSettingsApi = {
   disconnect: (connectionId: number) => api.delete(`/bank-sync/${connectionId}`),
 };
 
+// ── Bill amount overrides ────────────────────────────────────────────────────
+export const billOverridesApi = {
+  list: (upcomingOnly = true) =>
+    api.get("/bill-overrides", { params: { upcoming_only: upcomingOnly } }).then((r) => r.data),
+  upsert: (data: object) => api.post("/bill-overrides", data).then((r) => r.data),
+  remove: (id: number) => api.delete(`/bill-overrides/${id}`),
+};
+
 // ── Categories ────────────────────────────────────────────────────────────────
 export const categoriesApi = {
   list: () => api.get("/categories").then((r) => r.data),

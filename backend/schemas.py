@@ -454,6 +454,24 @@ class BudgetOverviewRow(BaseModel):
     rollover_balance: Decimal = Decimal("0")
 
 
+class BillAmountOverrideCreate(BaseModel):
+    recurring_item_id: int
+    due_date: date
+    actual_amount: Decimal
+    notes: Optional[str] = None
+
+
+class BillAmountOverrideOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    recurring_item_id: int
+    recurring_item_name: str = ""
+    due_date: date
+    actual_amount: Decimal
+    projected_amount: Decimal = Decimal("0")
+    notes: Optional[str] = None
+
+
 class CategoryRolloverUpdate(BaseModel):
     rollover_enabled: bool
 
