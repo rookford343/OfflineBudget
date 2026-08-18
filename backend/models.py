@@ -597,6 +597,24 @@ class PlannedExpense(Base):
         Enum(PlannedDirection), default=PlannedDirection.outflow, nullable=False,
     )
     notes: Mapped[str | None] = mapped_column(Text)
+    # Funding. A large one-off usually isn't paid out of the month's cash
+    # flow -- it's paid from savings -- and modelling the purchase without the
+    # transfer makes checking dive on that day for money that was never
+    # expected to come from there. Recording the funding source HERE, rather
+    # than as a separate PlannedTransfer, is the whole point: the two dates
+    # can't drift apart. Dan moved the R2 purchase from 09-15 to 10-06 and its
+    # standalone $22,000 transfer stayed behind, leaving three weeks of
+    # forecast showing $36,386 of checking that was already spoken for.
+    #
+    # funding_amount is separate from `amount` because the transfer is usually
+    # a round number that doesn't match the purchase to the cent ($22,000 moved
+    # for a $21,000 car). Null means "move exactly the purchase amount".
+    # funding_lead_days shifts the transfer earlier than the purchase, since
+    # money generally has to land before it can be spent.
+    funding_account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
+    funding_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    funding_lead_days: Mapped[int] = mapped_column(Integer, default=0)
+
     # Settlement. A one-off is a PREDICTION, so once its date passes it has
     # either happened (at some real amount, rarely the estimate) or it hasn't.
     # Leaving it in the list forever made the panel an archive of stale
@@ -608,7 +626,8 @@ class PlannedExpense(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="planned_expenses")
-    account: Mapped[Account | None] = relationship()
+    account: Mapped[Account | None] = relationship(foreign_keys=[account_id])
+    funding_account: Mapped[Account | None] = relationship(foreign_keys=[funding_account_id])
     card: Mapped["CreditCard | None"] = relationship()
     category: Mapped[Category | None] = relationship()
 

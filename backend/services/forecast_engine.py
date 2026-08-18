@@ -318,6 +318,12 @@ def build_forecast(
         # would count the same money twice.
         models.PlannedExpense.settled_on.is_(None),
     ).all()
+    # Funding legs derived from the planned expenses above. A purchase funded
+    # from savings implies a transfer INTO the spending account (and out of the
+    # savings account), on a date computed from the purchase rather than stored
+    # beside it -- so moving the purchase moves its funding automatically.
+    funding_by_date: dict[date, list[tuple[models.PlannedExpense, Decimal]]] = {}
+
     planned_by_date: dict[date, list[models.PlannedExpense]] = {}
     # Card-linked planned expenses don't hit checking on expected_date -- a
     # charge doesn't touch checking until the card gets paid off. Routed
@@ -325,6 +331,20 @@ def build_forecast(
     # alongside the recurring CC payoff/estimate injections below.
     card_planned_by_date: dict[date, list[tuple[models.PlannedExpense, models.CreditCard]]] = {}
     for pe in planned:
+        # The funding leg is evaluated before the account filter below, because
+        # it concerns a DIFFERENT account than the purchase: forecasting the
+        # savings account must show the money leaving, and forecasting checking
+        # must show it arriving. Skipping it with the purchase would make the
+        # withdrawal invisible on the savings side.
+        if pe.funding_account_id is not None and pe.direction == models.PlannedDirection.outflow:
+            move = pe.funding_amount if pe.funding_amount is not None else pe.amount
+            fund_date = pe.expected_date - timedelta(days=pe.funding_lead_days or 0)
+            if start_date <= fund_date <= end_date:
+                if account_id == pe.funding_account_id:
+                    funding_by_date.setdefault(fund_date, []).append((pe, -move))
+                elif pe.account_id is None or account_id == pe.account_id:
+                    funding_by_date.setdefault(fund_date, []).append((pe, move))
+
         # Only include planned expenses for this account (or unlinked ones)
         if pe.account_id is not None and pe.account_id != account_id:
             continue
@@ -357,7 +377,14 @@ def build_forecast(
     recurring_cc_card_ids = {item.card_id for item in recurring_items if item.type == models.RecurringType.credit_card_payment}
     cc_payments: dict[date, list[tuple[str, Decimal]]] = {}
     cc_estimates_by_date: dict[date, list[tuple[str, Decimal]]] = {}
-    for card in all_active_cards:
+    # Card bills are paid from checking. CreditCard has no payment-account
+    # link, so without this guard every payoff and estimate was injected into
+    # whichever account was being forecast -- forecasting Dan's savings drew
+    # the Chase payoff and two monthly estimates out of it and ended at
+    # -$18,298.05. Recurring credit_card_payment items are already scoped by
+    # their own account_id and are unaffected.
+    injects_card_bills = account.type == models.AccountType.checking
+    for card in (all_active_cards if injects_card_bills else []):
         if card.id in recurring_cc_card_ids:
             continue  # recurring CC payment item already handles this card
 
@@ -765,6 +792,22 @@ def build_forecast(
                 category_name=actual.category.name if actual.category else None,
                 is_actual=True,
                 transaction_id=actual.id,
+            ))
+
+        # Funding legs first: the money has to arrive before the purchase can
+        # draw on it, and on a same-day transfer the ordering is what keeps
+        # the running balance from dipping through a trough that never
+        # actually happens.
+        for pe, signed_move in funding_by_date.get(current, []):
+            balance += signed_move
+            day_transactions.append(ForecastTransaction(
+                name=(f"Transfer for {pe.name}" if signed_move > 0 else f"Funding {pe.name}"),
+                amount=signed_move,
+                type="income" if signed_move > 0 else "expense",
+                category_name=None,
+                is_actual=False,
+                is_planned=True,
+                is_transfer=True,
             ))
 
         for pe in planned_by_date.get(current, []):

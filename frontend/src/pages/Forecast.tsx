@@ -25,12 +25,16 @@ function chartTheme() {
   };
 }
 
-const emptyExpense = { name: "", amount: "", expected_date: today(), notes: "", account_id: "", card_id: "", direction: "outflow" };
+const emptyExpense = { name: "", amount: "", expected_date: today(), notes: "", account_id: "", card_id: "", direction: "outflow", funding_account_id: "", funding_amount: "", funding_lead_days: "1" };
 
 export default function Forecast() {
   const qc = useQueryClient();
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const checkingAccounts = accounts.filter((a: any) => a.type === "checking");
+  // Anything that isn't the spending account can fund a purchase -- savings,
+  // money market, a brokerage sweep. Emergency funds included: it's Dan's
+  // money and his call, the flag only governs "available savings" reporting.
+  const fundingAccounts = accounts.filter((a: any) => a.type !== "checking");
   const [accountId, setAccountId] = useState<number | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
   const [forecastYears, setForecastYears] = useState(1);
@@ -662,6 +666,35 @@ export default function Forecast() {
                           {activeCards.map((c: any) => <option key={`c${c.id}`} value={`card:${c.id}`}>Card: {c.name}</option>)}
                         </select>
                       </div>
+                        {/* A large purchase usually isn't paid from the month's cash flow.
+                            Recording the source here keeps the transfer welded to the purchase
+                            date, so moving one moves the other. */}
+                        <div className="col-span-2">
+                          <label className="label">Fund from (optional)</label>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <select className="input flex-1 min-w-[10rem]" value={editExpenseForm.funding_account_id}
+                              onChange={e => setEditExpenseForm({ ...editExpenseForm, funding_account_id: e.target.value })}>
+                              <option value="">Paid from normal cash flow</option>
+                              {fundingAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                            </select>
+                            {editExpenseForm.funding_account_id && (
+                              <>
+                                <input type="number" step="0.01" className="input w-32" placeholder="Same as amount"
+                                  value={editExpenseForm.funding_amount} onChange={e => setEditExpenseForm({ ...editExpenseForm, funding_amount: e.target.value })} />
+                                <div className="flex items-center gap-1">
+                                  <input type="number" className="input w-16" value={editExpenseForm.funding_lead_days}
+                                    onChange={e => setEditExpenseForm({ ...editExpenseForm, funding_lead_days: e.target.value })} />
+                                  <span className="text-xs text-gray-500 dark:text-gray-400">days before</span>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                          {editExpenseForm.funding_account_id && (
+                            <p className="text-xs text-gray-400 mt-1">
+                              Transfer moves with the purchase date. Blank amount moves exactly the purchase amount.
+                            </p>
+                          )}
+                        </div>
                       <div className="col-span-2">
                         <label className="label">Notes (optional)</label>
                         <input className="input" value={editExpenseForm.notes} onChange={e => setEditExpenseForm({ ...editExpenseForm, notes: e.target.value })} />
@@ -669,7 +702,7 @@ export default function Forecast() {
                     </div>
                     <div className="flex gap-2">
                       <button
-                        onClick={() => updateExpenseMut.mutate({ id: pe.id, data: { name: editExpenseForm.name, amount: parseFloat(editExpenseForm.amount), expected_date: editExpenseForm.expected_date, notes: editExpenseForm.notes || null, account_id: editExpenseForm.account_id ? parseInt(editExpenseForm.account_id) : null, card_id: editExpenseForm.card_id ? parseInt(editExpenseForm.card_id) : null, direction: editExpenseForm.direction } })}
+                        onClick={() => updateExpenseMut.mutate({ id: pe.id, data: { name: editExpenseForm.name, amount: parseFloat(editExpenseForm.amount), expected_date: editExpenseForm.expected_date, notes: editExpenseForm.notes || null, account_id: editExpenseForm.account_id ? parseInt(editExpenseForm.account_id) : null, card_id: editExpenseForm.card_id ? parseInt(editExpenseForm.card_id) : null, direction: editExpenseForm.direction, funding_account_id: editExpenseForm.funding_account_id ? parseInt(editExpenseForm.funding_account_id) : null, funding_amount: editExpenseForm.funding_amount ? parseFloat(editExpenseForm.funding_amount) : null, funding_lead_days: editExpenseForm.funding_lead_days ? parseInt(editExpenseForm.funding_lead_days) : 0 } })}
                         disabled={!editExpenseForm.name || !editExpenseForm.amount || updateExpenseMut.isPending}
                         className="btn-primary text-sm"
                       >
@@ -693,6 +726,9 @@ export default function Forecast() {
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                           {new Date(pe.expected_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                           {pe.card_id && <> · via {activeCards.find((c: any) => c.id === pe.card_id)?.name ?? "card"}</>}
+                          {pe.funding_account_id && (
+                            <> · funded from {accounts.find((a: any) => a.id === pe.funding_account_id)?.name ?? "savings"}</>
+                          )}
                           {pe.notes && <> · {pe.notes}</>}
                         </p>
                       </div>
@@ -700,7 +736,7 @@ export default function Forecast() {
                         <span className={`font-semibold ${pe.direction === "inflow" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
                           {pe.direction === "inflow" ? "+" : "−"}{fmt(pe.amount)}
                         </span>
-                        <button onClick={() => { setEditExpenseId(pe.id); setEditExpenseForm({ name: pe.name, amount: String(pe.amount), expected_date: pe.expected_date, notes: pe.notes ?? "", account_id: pe.account_id ? String(pe.account_id) : "", card_id: pe.card_id ? String(pe.card_id) : "", direction: pe.direction ?? "outflow" }); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={14} /></button>
+                        <button onClick={() => { setEditExpenseId(pe.id); setEditExpenseForm({ name: pe.name, amount: String(pe.amount), expected_date: pe.expected_date, notes: pe.notes ?? "", account_id: pe.account_id ? String(pe.account_id) : "", card_id: pe.card_id ? String(pe.card_id) : "", direction: pe.direction ?? "outflow", funding_account_id: pe.funding_account_id ? String(pe.funding_account_id) : "", funding_amount: pe.funding_amount ? String(pe.funding_amount) : "", funding_lead_days: String(pe.funding_lead_days ?? 1) }); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={14} /></button>
                         <button onClick={() => deleteExpenseMut.mutate(pe.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
                       </div>
                     </div>
@@ -792,13 +828,42 @@ export default function Forecast() {
                   <p className="text-xs text-gray-400 mt-1">Won't hit checking until this card's next statement is paid off.</p>
                 )}
               </div>
+                {/* A large purchase usually isn't paid from the month's cash flow.
+                    Recording the source here keeps the transfer welded to the purchase
+                    date, so moving one moves the other. */}
+                <div className="col-span-2">
+                  <label className="label">Fund from (optional)</label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select className="input flex-1 min-w-[10rem]" value={expenseForm.funding_account_id}
+                      onChange={e => setExpenseForm({ ...expenseForm, funding_account_id: e.target.value })}>
+                      <option value="">Paid from normal cash flow</option>
+                      {fundingAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                    {expenseForm.funding_account_id && (
+                      <>
+                        <input type="number" step="0.01" className="input w-32" placeholder="Same as amount"
+                          value={expenseForm.funding_amount} onChange={e => setExpenseForm({ ...expenseForm, funding_amount: e.target.value })} />
+                        <div className="flex items-center gap-1">
+                          <input type="number" className="input w-16" value={expenseForm.funding_lead_days}
+                            onChange={e => setExpenseForm({ ...expenseForm, funding_lead_days: e.target.value })} />
+                          <span className="text-xs text-gray-500 dark:text-gray-400">days before</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {expenseForm.funding_account_id && (
+                    <p className="text-xs text-gray-400 mt-1">
+                      Transfer moves with the purchase date. Blank amount moves exactly the purchase amount.
+                    </p>
+                  )}
+                </div>
               <div className="col-span-2">
                 <label className="label">Notes (optional)</label>
                 <input className="input" value={expenseForm.notes} onChange={e => setExpenseForm({ ...expenseForm, notes: e.target.value })} />
               </div>
               <div className="col-span-2 flex gap-2">
                 <button
-                  onClick={() => createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null, account_id: expenseForm.account_id ? parseInt(expenseForm.account_id) : null, card_id: expenseForm.card_id ? parseInt(expenseForm.card_id) : null, direction: expenseForm.direction })}
+                  onClick={() => createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null, account_id: expenseForm.account_id ? parseInt(expenseForm.account_id) : null, card_id: expenseForm.card_id ? parseInt(expenseForm.card_id) : null, direction: expenseForm.direction, funding_account_id: expenseForm.funding_account_id ? parseInt(expenseForm.funding_account_id) : null, funding_amount: expenseForm.funding_amount ? parseFloat(expenseForm.funding_amount) : null, funding_lead_days: expenseForm.funding_lead_days ? parseInt(expenseForm.funding_lead_days) : 0 })}
                   disabled={!expenseForm.name || !expenseForm.amount || createExpenseMut.isPending}
                   className="btn-primary"
                 >

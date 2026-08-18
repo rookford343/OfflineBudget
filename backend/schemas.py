@@ -1050,6 +1050,12 @@ class PlannedExpenseCreate(BaseModel):
     account_id: Optional[int] = None
     card_id: Optional[int] = None
     direction: PlannedDirection = PlannedDirection.outflow
+    # Funding source for a purchase paid out of savings rather than the
+    # month's cash flow. Derived into a transfer by the forecast, so it can
+    # never drift from the purchase date the way a separate record can.
+    funding_account_id: Optional[int] = None
+    funding_amount: Optional[Decimal] = None
+    funding_lead_days: int = 0
 
 
 class PlannedExpenseUpdate(BaseModel):
@@ -1061,6 +1067,9 @@ class PlannedExpenseUpdate(BaseModel):
     account_id: Optional[int] = None
     card_id: Optional[int] = None
     direction: Optional[PlannedDirection] = None
+    funding_account_id: Optional[int] = None
+    funding_amount: Optional[Decimal] = None
+    funding_lead_days: Optional[int] = None
 
 
 class PlannedExpenseOut(BaseModel):
@@ -1074,6 +1083,9 @@ class PlannedExpenseOut(BaseModel):
     account_id: Optional[int]
     card_id: Optional[int] = None
     direction: PlannedDirection
+    funding_account_id: Optional[int] = None
+    funding_amount: Optional[Decimal] = None
+    funding_lead_days: int = 0
     settled_on: Optional[date] = None
     actual_amount: Optional[Decimal] = None
     is_settled: bool = False
