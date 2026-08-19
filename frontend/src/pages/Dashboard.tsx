@@ -238,8 +238,10 @@ export default function Dashboard() {
               )}
             </div>
           )}
+      {/* Spans the row while the band is two-up: wrapping alone into a
+          half-width slot left the other half empty. */}
       {summary && (
-        <div className="card">
+        <div className="card md:col-span-2 2xl:col-span-1">
           <div className="flex items-center gap-2 mb-2">
             <BookOpen size={16} className="text-indigo-500" />
             <h3 className="font-semibold text-gray-900 dark:text-white">
@@ -464,7 +466,7 @@ export default function Dashboard() {
           )}
         </div>
       {accounts.length > 0 && (
-        <div className="card">
+        <div className="card md:col-span-2 2xl:col-span-1">
           <h3 className="font-semibold text-gray-900 mb-4">All Accounts</h3>
           <div className="divide-y divide-gray-100">
             {accounts.map((a: any) => (
