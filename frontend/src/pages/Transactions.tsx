@@ -490,7 +490,7 @@ export default function Transactions() {
                           <span className="lg:hidden">{r.categoryName ?? "Uncategorized"}</span>
                           <span className="md:hidden">{r.sourceLabel}</span>
                           {r.recurringName && (
-                            <span className="text-indigo-500 dark:text-indigo-400">↻ {r.recurringName}</span>
+                            <span className="text-indigo-500 dark:text-indigo-300">↻ {r.recurringName}</span>
                           )}
                           {r.notes && <span className="truncate italic">{r.notes}</span>}
                         </div>

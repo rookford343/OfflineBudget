@@ -19,14 +19,14 @@ function isDarkMode(): boolean {
 function chartTheme() {
   const dark = isDarkMode();
   return {
-    grid:    dark ? "#2c3040" : "#e5e7eb",
+    grid:    dark ? "#3a4051" : "#e5e7eb",
     tick:    dark ? "#8f99a8" : "#6b7280",
     refLine: dark ? "#4a5568" : "#9ca3af",
-    tooltip: dark ? "#1f2330" : "#ffffff",
-    tooltipBorder: dark ? "#2c3040" : "#e5e7eb",
+    tooltip: dark ? "#2a2f3d" : "#ffffff",
+    tooltipBorder: dark ? "#3a4051" : "#e5e7eb",
     tooltipText: dark ? "#c4ccd8" : "#111827",
     tooltipMuted: dark ? "#8f99a8" : "#6b7280",
-    barFill: dark ? "#818cf8" : "#6366f1",
+    barFill: dark ? "#a5b4fc" : "#6366f1",
   };
 }
 
@@ -361,7 +361,7 @@ export default function Spending() {
             onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors ${
               activeTab === tab
-                ? "border-indigo-500 text-indigo-600 dark:text-indigo-400"
+                ? "border-indigo-500 text-indigo-600 dark:text-indigo-300"
                 : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
             }`}
           >
@@ -417,7 +417,7 @@ export default function Spending() {
           )}
 
           {trendBarData.length === 0 && rollingBarData.length === 0 && (
-            <div className="card text-center py-8 text-gray-400 dark:text-[#8a93a3] text-sm">
+            <div className="card text-center py-8 text-gray-400 dark:text-[#949daf] text-sm">
               No transaction data yet. Add transactions to see spending trends.
             </div>
           )}
@@ -590,7 +590,7 @@ export default function Spending() {
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
                           on
                             ? "border-transparent opacity-95 hover:opacity-100"
-                            : "border-gray-200 dark:border-[#2c3040] text-gray-400 dark:text-[#8a93a3] bg-transparent"
+                            : "border-gray-200 dark:border-[#3a4051] text-gray-400 dark:text-[#949daf] bg-transparent"
                         }`}
                         style={on ? { background: cat.color, color: readableOn(cat.color) } : {}}
                       >
@@ -600,7 +600,7 @@ export default function Spending() {
                     );
                   })}
                   {catFilter !== null && (
-                    <button onClick={() => setCatFilter(null)} className="text-xs text-indigo-500 dark:text-indigo-400 hover:underline px-1">All</button>
+                    <button onClick={() => setCatFilter(null)} className="text-xs text-indigo-500 dark:text-indigo-300 hover:underline px-1">All</button>
                   )}
                 </div>
               </div>
@@ -629,7 +629,7 @@ export default function Spending() {
               <div className="flex items-baseline justify-between mb-3">
                 <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8]">Top Merchants</h3>
                 <button onClick={() => setActiveTab("merchants")}
-                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline">
+                  className="text-xs text-indigo-600 dark:text-indigo-300 hover:underline">
                   See all →
                 </button>
               </div>
@@ -666,7 +666,7 @@ export default function Spending() {
               <span className="text-xs text-gray-400 dark:text-[#8f99a8]">{budgetCategories.length} categories</span>
             </div>
             {budgetCategories.length === 0 && (
-              <p className="text-sm text-gray-400 dark:text-[#8a93a3]">No categorized spending in this range.</p>
+              <p className="text-sm text-gray-400 dark:text-[#949daf]">No categorized spending in this range.</p>
             )}
             <div className="space-y-3">
               {budgetCategories.map((cat: any) => {
@@ -682,13 +682,13 @@ export default function Spending() {
                           {cat.category_name}
                         </span>
                         {cat.group && (
-                          <span className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-[#8a93a3] shrink-0">
+                          <span className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-[#949daf] shrink-0">
                             {cat.group}
                           </span>
                         )}
                       </div>
                       <div className="flex items-baseline gap-2 shrink-0 text-sm">
-                        <span className={`font-semibold tabular-nums ${over ? "text-red-600 dark:text-[#cc7070]" : "text-gray-900 dark:text-[#c4ccd8]"}`}>
+                        <span className={`font-semibold tabular-nums ${over ? "text-red-600 dark:text-[#eda2a2]" : "text-gray-900 dark:text-[#c4ccd8]"}`}>
                           {fmt(actual)}
                         </span>
                         <span className="text-xs text-gray-400 dark:text-[#8f99a8] tabular-nums">
@@ -705,8 +705,8 @@ export default function Spending() {
         </>
       )}
 
-      {activeTab === "overview" && isLoading && <div className="text-center py-8 text-gray-400 dark:text-[#8a93a3] text-sm">Loading spending data…</div>}
-      {activeTab === "overview" && !isLoading && !overview && <div className="card text-center py-8 text-gray-400 dark:text-[#8a93a3]">Select a date range to view spending.</div>}
+      {activeTab === "overview" && isLoading && <div className="text-center py-8 text-gray-400 dark:text-[#949daf] text-sm">Loading spending data…</div>}
+      {activeTab === "overview" && !isLoading && !overview && <div className="card text-center py-8 text-gray-400 dark:text-[#949daf]">Select a date range to view spending.</div>}
 
       {activeTab === "merchants" && (
         <div className="space-y-4">
@@ -915,7 +915,7 @@ export default function Spending() {
                       <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
                         {(te.brackets as any[]).map((b: any, i: number) => (
                           <tr key={i}>
-                            <td className="py-1 text-indigo-600 dark:text-indigo-400 font-medium">{(b.rate * 100).toFixed(0)}%</td>
+                            <td className="py-1 text-indigo-600 dark:text-indigo-300 font-medium">{(b.rate * 100).toFixed(0)}%</td>
                             <td className="py-1 text-right tabular-nums text-gray-600 dark:text-gray-400">{fmt(b.income)}</td>
                             <td className="py-1 text-right tabular-nums font-medium">{fmt(b.tax)}</td>
                           </tr>

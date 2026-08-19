@@ -59,7 +59,7 @@ export default function HouseholdTab() {
                     <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{u.display_name}</p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">@{u.username}</p>
                     {linkedTo && (
-                      <p className="text-xs text-indigo-500 dark:text-indigo-400">Linked to {linkedTo.display_name}'s data</p>
+                      <p className="text-xs text-indigo-500 dark:text-indigo-300">Linked to {linkedTo.display_name}'s data</p>
                     )}
                   </div>
                 </div>
