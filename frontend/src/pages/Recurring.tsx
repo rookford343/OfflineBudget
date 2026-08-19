@@ -25,6 +25,11 @@ function nextMonthlyDue(dayOfMonth: number): string {
 }
 
 export default function Recurring() {
+  // Linking a detected descriptor to an item that already tracks that bill,
+  // instead of adding a near-duplicate under the raw bank string.
+  const [linkFor, setLinkFor] = useState<string | null>(null);
+  const [linkItemId, setLinkItemId] = useState("");
+  const [linkResult, setLinkResult] = useState<string | null>(null);
   const [billEditId, setBillEditId] = useState<number | null>(null);
   const [billAmt, setBillAmt] = useState("");
   const qc = useQueryClient();
@@ -45,6 +50,25 @@ export default function Recurring() {
     qc.invalidateQueries({ queryKey: ["forecast"] });
     qc.invalidateQueries({ queryKey: ["budget-snapshot"] });
   };
+  const linkMut = useMutation({
+    mutationFn: ({ itemId, pattern }: { itemId: number; pattern: string }) =>
+      recurringApi.linkPattern(itemId, { pattern }),
+    onSuccess: (r: any) => {
+      const bits = [];
+      if (r.linked_checking) bits.push(`${r.linked_checking} checking`);
+      if (r.linked_card) bits.push(`${r.linked_card} card`);
+      setLinkResult(
+        (bits.length ? `Filed ${bits.join(" + ")} transaction(s). ` : "No past transactions matched. ") +
+        (r.rule_created ? `Future ones will classify as ${r.category_name} automatically.`
+          : r.rule_id ? "A rule for this pattern already existed."
+          : "Add a category to that item to auto-classify future ones."),
+      );
+      qc.invalidateQueries({ queryKey: ["recurring"] });
+      qc.invalidateQueries({ queryKey: ["transactions"] });
+      setLinkFor(null); setLinkItemId("");
+    },
+  });
+
   const setBillMut = useMutation({
     mutationFn: (data: object) => billOverridesApi.upsert(data),
     onSuccess: () => { invalidateBills(); setBillEditId(null); setBillAmt(""); },
@@ -242,7 +266,8 @@ export default function Recurring() {
           </p>
           <div className="space-y-2">
             {visibleSuggestions.map((s: any) => (
-              <div key={s.description} className="flex items-center justify-between py-2 border-b border-gray-50 dark:border-gray-800 last:border-0 gap-3">
+              <div key={s.description} className="py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
+              <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{s.description}</p>
                   <p className="text-xs text-gray-400 dark:text-gray-400 capitalize">{s.frequency} · {s.occurrences} occurrences</p>
@@ -269,6 +294,16 @@ export default function Recurring() {
                   >
                     Add
                   </button>
+                  {/* The common case for a detected descriptor is that the bill
+                      is ALREADY tracked under a friendlier name -- adding it
+                      again makes a near-duplicate. */}
+                  <button
+                    onClick={() => { setLinkFor(linkFor === s.description ? null : s.description); setLinkItemId(""); setLinkResult(null); }}
+                    className="btn-secondary py-1 px-2 text-xs"
+                    title="Attach this to a recurring item you already have"
+                  >
+                    Link
+                  </button>
                   <button
                     onClick={() => {
                       const next = new Set([...dismissedSuggestions, s.description]);
@@ -282,7 +317,37 @@ export default function Recurring() {
                   </button>
                 </div>
               </div>
+
+              {linkFor === s.description && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 bg-indigo-50 dark:bg-indigo-900/15 rounded-md px-3 py-2">
+                  <span className="text-xs text-gray-600 dark:text-gray-300">Link to</span>
+                  <select className="input py-1 text-sm w-56" value={linkItemId}
+                    onChange={e => setLinkItemId(e.target.value)}>
+                    <option value="">Choose an existing item…</option>
+                    {(items as any[])
+                      .filter((i: any) => i.type !== "income")
+                      .map((i: any) => (
+                        <option key={i.id} value={i.id}>
+                          {i.name}{i.card_id ? " (card)" : ""}
+                        </option>
+                      ))}
+                  </select>
+                  <button className="btn-primary text-xs px-2 py-1"
+                    disabled={!linkItemId || linkMut.isPending}
+                    onClick={() => linkMut.mutate({ itemId: Number(linkItemId), pattern: s.description })}>
+                    {linkMut.isPending ? "Linking…" : "Link"}
+                  </button>
+                  <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => setLinkFor(null)}>Cancel</button>
+                  <p className="w-full text-xs text-gray-500 dark:text-gray-400">
+                    Files past matches under that item and adds a rule so future ones classify on arrival.
+                  </p>
+                </div>
+              )}
+              </div>
             ))}
+            {linkResult && (
+              <p className="text-xs text-emerald-600 dark:text-emerald-400 pt-1">{linkResult}</p>
+            )}
           </div>
         </div>
       )}

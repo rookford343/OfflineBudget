@@ -94,3 +94,84 @@ def _assert_account_owned(db: Session, user_id: int, account_id: int) -> None:
         models.Account.user_id == user_id,
     ).first():
         raise HTTPException(status_code=404, detail="Account not found")
+
+
+@router.post("/{item_id}/link-pattern", response_model=schemas.RecurringLinkResult)
+def link_pattern_to_item(
+    item_id: int,
+    body: schemas.RecurringLinkPattern,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Point a detected bank descriptor at a recurring item that already exists.
+
+    A suggestion is only ever "here is a repeating descriptor" -- accepting it
+    created a SECOND recurring item even when the bill was already tracked
+    under a friendlier name, because raw descriptors carry biller IDs that
+    never match what a person typed. Linking instead does the two things that
+    were being done by hand: it files matching transactions under the existing
+    item, and it leaves a rule behind so future ones classify on arrival.
+
+    The rule is only created when the target item has a category, since
+    set_category with no category is a no-op that would look like it worked.
+    """
+    item = _get_or_404(db, user.id, item_id)
+    pattern = body.pattern
+
+    result = schemas.RecurringLinkResult(
+        category_name=item.category.name if item.category_id and item.category else None,
+    )
+
+    if item.category_id:
+        existing = db.query(models.TransactionRule).filter(
+            models.TransactionRule.user_id == user.id,
+            models.TransactionRule.pattern == pattern,
+            models.TransactionRule.category_id == item.category_id,
+        ).first()
+        if existing:
+            result.rule_id = existing.id
+        else:
+            rule = models.TransactionRule(
+                user_id=user.id,
+                name=f"Auto: {item.name}"[:128],
+                field=models.RuleField(body.field),
+                pattern_type=models.RulePatternType(body.pattern_type),
+                pattern=pattern,
+                action=models.RuleAction.set_category,
+                category_id=item.category_id,
+            )
+            db.add(rule)
+            db.flush()
+            result.rule_id = rule.id
+            result.rule_created = True
+
+    if body.backfill:
+        like = f"%{pattern}%"
+        # Only rows not already claimed by a recurring item: re-pointing a
+        # transaction that belongs to a different bill would corrupt that
+        # bill's history rather than fix this one.
+        checking = db.query(models.Transaction).filter(
+            models.Transaction.user_id == user.id,
+            models.Transaction.recurring_item_id.is_(None),
+            models.Transaction.description.ilike(like),
+        ).all()
+        for txn in checking:
+            txn.recurring_item_id = item.id
+            if item.category_id:
+                txn.category_id = item.category_id
+        result.linked_checking = len(checking)
+
+        # Card rows have no recurring_item_id column, so the useful half there
+        # is categorisation.
+        if item.category_id:
+            card_rows = db.query(models.CreditCardTransaction).filter(
+                models.CreditCardTransaction.user_id == user.id,
+                models.CreditCardTransaction.category_id.is_(None),
+                models.CreditCardTransaction.merchant.ilike(like),
+            ).all()
+            for txn in card_rows:
+                txn.category_id = item.category_id
+            result.linked_card = len(card_rows)
+
+    db.commit()
+    return result

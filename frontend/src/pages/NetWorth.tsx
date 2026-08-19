@@ -72,6 +72,19 @@ export default function NetWorth() {
   });
   const deleteLiabilityMut = useMutation({ mutationFn: (id: number) => netWorthApi.removeLiability(id), onSuccess: invalidate });
   const snapshotMut = useMutation({ mutationFn: netWorthApi.snapshot, onSuccess: invalidate });
+  const removeSnapshotMut = useMutation({ mutationFn: netWorthApi.removeSnapshot, onSuccess: invalidate });
+  const [showHistory, setShowHistory] = useState(false);
+
+  // Local date, not toISOString(): that returns the UTC day, so from early
+  // evening onward in a western timezone it names tomorrow. The backend
+  // stamps snapshots with its own local date, so the two disagreed for the
+  // whole UTC-offset window each night and the button never noticed that
+  // today was already captured.
+  const todayIso = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const capturedToday = (history as any[]).some((s: any) => s.snapshot_date === todayIso);
 
   const chartData = (history as any[]).map((s: any) => ({
     date: s.snapshot_date,
@@ -87,14 +100,24 @@ export default function NetWorth() {
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Net Worth <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500">Assets, liabilities, and net worth over time</p>
         </div>
-        <button
-          className="btn btn-primary flex items-center gap-2"
-          onClick={() => snapshotMut.mutate()}
-          disabled={snapshotMut.isPending}
-        >
-          <Camera className="w-4 h-4" />
-          {snapshotMut.isPending ? "Saving…" : "Capture Snapshot"}
-        </button>
+        <div className="text-right">
+          <button
+            className="btn btn-primary flex items-center gap-2"
+            onClick={() => snapshotMut.mutate()}
+            disabled={snapshotMut.isPending}
+          >
+            <Camera className="w-4 h-4" />
+            {snapshotMut.isPending ? "Saving…" : capturedToday ? "Update Today's Snapshot" : "Capture Snapshot"}
+          </button>
+          {/* The button used to give no hint what it recorded or whether it
+              had already been pressed, so it was easy to take several by
+              accident and impossible to tell. */}
+          <p className="text-xs text-gray-500 mt-1.5 max-w-[15rem]">
+            {capturedToday
+              ? "Today is already recorded. Capturing again replaces it."
+              : "Records today's net worth so the chart has history."}
+          </p>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -143,7 +166,49 @@ export default function NetWorth() {
         </div>
       ) : (
         <div className="card text-center py-6 text-gray-400 text-sm">
-          No snapshots yet — click "Capture Snapshot" to start your trend line.
+          No snapshots yet. "Capture Snapshot" records today's figures so this chart has something to plot.
+        </div>
+      )}
+
+      {(history as any[]).length > 0 && (
+        <div className="card">
+          <button
+            className="flex items-center justify-between w-full"
+            onClick={() => setShowHistory(v => !v)}
+          >
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+              Snapshot History
+              <span className="ml-2 text-xs font-normal text-gray-500">{(history as any[]).length}</span>
+            </h3>
+            <span className="text-xs text-gray-500">{showHistory ? "Hide" : "Show"}</span>
+          </button>
+          {showHistory && (
+            <div className="mt-3 divide-y divide-gray-50 dark:divide-gray-800">
+              {[...(history as any[])].reverse().map((s: any) => (
+                <div key={s.id} className="flex items-center justify-between py-2 text-sm">
+                  <span className="text-gray-600 dark:text-gray-300">
+                    {new Date(s.snapshot_date + "T12:00:00").toLocaleDateString("en-US",
+                      { month: "short", day: "numeric", year: "numeric" })}
+                    {s.snapshot_date === todayIso && (
+                      <span className="ml-2 text-[10px] uppercase tracking-wide text-indigo-500">today</span>
+                    )}
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className={`tabular-nums font-medium ${parseFloat(s.net_worth) >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                      {fmt(parseFloat(s.net_worth))}
+                    </span>
+                    <button
+                      onClick={() => removeSnapshotMut.mutate(s.id)}
+                      disabled={removeSnapshotMut.isPending}
+                      className="text-gray-300 hover:text-red-500"
+                      title="Delete this snapshot">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -268,7 +333,7 @@ export default function NetWorth() {
           ))}
         </div>
       </div>
-      {showHelp && <HelpPanel title="Net Worth" body={"Your net worth = assets + account balances − credit card balances − liabilities.\n\nAdd manual assets (investments, real estate, vehicles) and liabilities (mortgage, loans).\n\nClick 'Capture Snapshot' to save today's net worth and build a trend line over time."} onClose={() => setShowHelp(false)} />}
+      {showHelp && <HelpPanel title="Net Worth" body={"Your net worth = assets + account balances − credit card balances − liabilities.\n\nAdd manual assets (investments, real estate, vehicles) and liabilities (mortgage, loans). Those figures are what the app knows right now — editing them changes the current total but not any past snapshot.\n\nA snapshot freezes today's total so the chart has a point to plot. Nothing is recorded automatically, so the trend line only has the dates you captured.\n\nCapturing twice on the same day replaces that day rather than adding a second point, and any snapshot can be deleted from Snapshot History if it was taken with wrong figures."} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }

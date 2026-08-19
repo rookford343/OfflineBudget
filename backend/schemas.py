@@ -472,6 +472,31 @@ class BillAmountOverrideOut(BaseModel):
     notes: Optional[str] = None
 
 
+class RecurringLinkPattern(BaseModel):
+    """Attach a detected bank descriptor to an existing recurring item."""
+    pattern: str
+    field: str = "description"          # description | merchant
+    pattern_type: str = "contains"      # contains | startswith | regex
+    backfill: bool = True
+
+    @field_validator("pattern")
+    @classmethod
+    def _pattern_not_blank(cls, v: str) -> str:
+        # A blank pattern would match every transaction and silently recategorize
+        # the whole ledger on backfill.
+        if not v or not v.strip():
+            raise ValueError("pattern must not be empty")
+        return v.strip()
+
+
+class RecurringLinkResult(BaseModel):
+    rule_id: Optional[int] = None
+    rule_created: bool = False
+    linked_checking: int = 0
+    linked_card: int = 0
+    category_name: Optional[str] = None
+
+
 class CategoryRolloverUpdate(BaseModel):
     rollover_enabled: bool
 

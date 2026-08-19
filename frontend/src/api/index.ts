@@ -84,6 +84,8 @@ export const recurringApi = {
   create: (data: object) => api.post("/recurring", data).then((r) => r.data),
   update: (id: number, data: object) => api.patch(`/recurring/${id}`, data).then((r) => r.data),
   remove: (id: number) => api.delete(`/recurring/${id}`),
+  linkPattern: (itemId: number, data: object) =>
+    api.post(`/recurring/${itemId}/link-pattern`, data).then((r) => r.data),
   suggestions: (minOccurrences = 2) =>
     api.get("/recurring/suggestions", { params: { min_occurrences: minOccurrences } }).then((r) => r.data),
 };
@@ -217,6 +219,7 @@ export const netWorthApi = {
   totals: () => api.get("/net-worth").then((r) => r.data),
   history: () => api.get("/net-worth/history").then((r) => r.data),
   snapshot: () => api.post("/net-worth/snapshot").then((r) => r.data),
+  removeSnapshot: (id: number) => api.delete(`/net-worth/snapshot/${id}`),
   listAssets: () => api.get("/net-worth/assets").then((r) => r.data),
   listLiabilities: () => api.get("/net-worth/liabilities").then((r) => r.data),
   createAsset: (data: object) => api.post("/net-worth/assets", data).then((r) => r.data),
