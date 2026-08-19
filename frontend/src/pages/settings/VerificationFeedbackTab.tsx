@@ -50,7 +50,7 @@ export default function VerificationFeedbackTab() {
               </p>
             )}
             {flag.note && <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{flag.note}</p>}
-            <pre className="text-[10px] text-gray-400 dark:text-gray-500 mt-1 whitespace-pre-wrap break-words">
+            <pre className="text-[10px] text-gray-400 dark:text-gray-400 mt-1 whitespace-pre-wrap break-words">
               {JSON.stringify(observed)}
             </pre>
           </div>

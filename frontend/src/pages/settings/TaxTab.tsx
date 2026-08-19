@@ -88,7 +88,7 @@ export default function TaxTab() {
         </div>
         <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
           <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Itemized Deductions (from tax documents)</p>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">These are added to any transactions marked tax-deductible. If the total exceeds the standard deduction, itemized will be used automatically.</p>
+          <p className="text-xs text-gray-400 dark:text-gray-400 mb-3">These are added to any transactions marked tax-deductible. If the total exceeds the standard deduction, itemized will be used automatically.</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
             <div>
               <label className="label">Mortgage Interest (Form 1098)</label>
@@ -116,7 +116,7 @@ export default function TaxTab() {
           <div className="flex items-center gap-2 mb-1">
             <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Social Security Tracker</p>
           </div>
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-3">Track when you hit the SS wage base to plan for your resulting paycheck increase (~6.2% of gross). The 2026 wage base is $184,500.</p>
+          <p className="text-xs text-gray-400 dark:text-gray-400 mb-3">Track when you hit the SS wage base to plan for your resulting paycheck increase (~6.2% of gross). The 2026 wage base is $184,500.</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl">
             <div>
               <label className="label">Gross Per Paycheck ($)</label>

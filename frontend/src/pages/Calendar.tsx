@@ -213,7 +213,7 @@ export default function Calendar() {
       <div className="card">
         <h3 className="font-semibold text-gray-900 dark:text-white mb-3">Next 30 Days</h3>
         {upcoming.length === 0 ? (
-          <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">No recurring items coming up</p>
+          <p className="text-sm text-gray-400 dark:text-gray-400 text-center py-4">No recurring items coming up</p>
         ) : (
           <div className="space-y-2">
             {upcoming.map((r: any, i: number) => {

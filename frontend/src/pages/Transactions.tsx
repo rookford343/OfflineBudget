@@ -379,7 +379,7 @@ export default function Transactions() {
             {(["all", "checking", "card", "reconcile"] as TxnTab[]).map(t => (
               <button key={t} type="button"
                 onClick={() => setTxnTab(t)}
-                className={`px-3 py-1 text-xs font-medium rounded-md capitalize transition-colors ${txnTab === t ? "bg-white dark:bg-gray-800 shadow-sm text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-400"}`}>
+                className={`px-3 py-1 text-xs font-medium rounded-md capitalize transition-colors ${txnTab === t ? "bg-white dark:bg-gray-800 shadow-sm text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-300"}`}>
                 {t === "all" ? "All" : t === "checking" ? "Checking" : t === "card" ? "Credit Cards" : "Reconcile"}
               </button>
             ))}
@@ -498,7 +498,7 @@ export default function Transactions() {
                       <td className="px-4 py-3 hidden lg:table-cell">
                         {r.categoryName
                           ? <span className="text-xs text-gray-600 dark:text-gray-300">{r.categoryName}</span>
-                          : <span className="text-xs text-gray-300 dark:text-gray-600 italic">Uncategorized</span>}
+                          : <span className="text-xs text-gray-300 dark:text-gray-400 italic">Uncategorized</span>}
                       </td>
                       <td className="px-4 py-3 text-gray-500 hidden md:table-cell">
                         <span className={`text-xs px-1.5 py-0.5 rounded ${r.kind === "card" ? "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400" : "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400"}`}>
@@ -558,7 +558,7 @@ export default function Transactions() {
                         ) : (
                           <button
                             onClick={() => { setEditingNotesId(t.id); setNotesValue(t.notes ?? ""); }}
-                            className={`text-xs truncate block max-w-full text-left ${t.notes ? "text-gray-400 dark:text-gray-500 hover:text-indigo-500" : "text-gray-200 dark:text-gray-700 hover:text-gray-400"}`}
+                            className={`text-xs truncate block max-w-full text-left ${t.notes ? "text-gray-400 dark:text-gray-400 hover:text-indigo-500" : "text-gray-200 dark:text-gray-300 hover:text-gray-400"}`}
                           >
                             {t.notes || "add note…"}
                           </button>

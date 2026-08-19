@@ -245,7 +245,7 @@ export default function Recurring() {
               <div key={s.description} className="flex items-center justify-between py-2 border-b border-gray-50 dark:border-gray-800 last:border-0 gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{s.description}</p>
-                  <p className="text-xs text-gray-400 dark:text-gray-500 capitalize">{s.frequency} · {s.occurrences} occurrences</p>
+                  <p className="text-xs text-gray-400 dark:text-gray-400 capitalize">{s.frequency} · {s.occurrences} occurrences</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className="text-sm font-semibold text-red-600 dark:text-red-400 tabular-nums">
@@ -275,7 +275,7 @@ export default function Recurring() {
                       setDismissedSuggestions(next);
                       try { sessionStorage.setItem("dismissedSuggestions", JSON.stringify([...next])); } catch {}
                     }}
-                    className="text-gray-300 dark:text-gray-600 hover:text-gray-500 dark:hover:text-gray-400"
+                    className="text-gray-300 dark:text-gray-400 hover:text-gray-500 dark:hover:text-gray-400"
                     title="Dismiss"
                   >
                     <X size={14} />

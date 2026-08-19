@@ -36,7 +36,7 @@
   }
   .input {
     @apply w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors bg-white;
-    @apply dark:bg-[#272b38] dark:border-[#363d50] dark:text-[#c4ccd8] dark:placeholder-[#525d70];
+    @apply dark:bg-[#272b38] dark:border-[#363d50] dark:text-[#c4ccd8] dark:placeholder-[#8a93a3];
   }
   .label {
     @apply block text-sm font-medium text-gray-700 mb-1 dark:text-[#9aa3b2];
@@ -47,7 +47,7 @@
   .badge-amber  { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-[#2e2010] dark:text-[#c49a45]; }
   .badge-blue   { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-[#182438] dark:text-[#6090cc]; }
   .stat-card    { @apply card flex flex-col gap-1; }
-  .stat-label   { @apply text-xs font-medium text-gray-500 uppercase tracking-wide dark:text-[#6e7888]; }
+  .stat-label   { @apply text-xs font-medium text-gray-500 uppercase tracking-wide dark:text-[#8f99a8]; }
   .stat-value   { @apply text-2xl font-bold tabular-nums; }
   .nav-link     { @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-[#909aaa] dark:hover:bg-[#272b38] dark:hover:text-[#c4ccd8]; }
   .nav-link-active { @apply nav-link bg-indigo-50 text-indigo-700 hover:bg-indigo-50 hover:text-indigo-700 dark:bg-[#1e2440] dark:text-indigo-400 dark:hover:bg-[#1e2440] dark:hover:text-indigo-400; }
@@ -78,3 +78,56 @@
   .animate-delay-300 { animation-delay: 0.30s; opacity: 0; }
   .animate-delay-400 { animation-delay: 0.40s; opacity: 0; }
 }
+
+/* ── Dark-mode readability floor ──────────────────────────────────────────────
+   183 elements across the app carry a light-mode grey (text-gray-900/700/600/
+   500/400) with no dark: variant beside it, so in dark mode they inherit a
+   colour meant for a white page. Worst case was the Dashboard's CHECKING
+   figure -- near-black on the #1f2330 card and effectively unreadable.
+
+   Patching every call site by hand would be 183 edits and would silently
+   regress the next time someone writes text-gray-900 out of habit, so this is
+   a floor instead: a dark-mode default for each grey.
+
+   The :not([class*="dark:text"]) guard is what keeps it safe. Tailwind emits
+   variant classes under their literal names ("dark:text-gray-100"), so any
+   element that already made a deliberate dark choice matches the attribute
+   substring and is skipped entirely -- this only fills in where nothing was
+   specified. Specificity (0,3,0) clears the bare utility it overrides.
+   ──────────────────────────────────────────────────────────────────────── */
+.dark .text-gray-900:not([class*="dark:text"]) { color: #e6ebf2; }
+.dark .text-gray-800:not([class*="dark:text"]) { color: #d3dae4; }
+.dark .text-gray-700:not([class*="dark:text"]) { color: #c4ccd8; }
+.dark .text-gray-600:not([class*="dark:text"]) { color: #aab4c2; }
+.dark .text-gray-500:not([class*="dark:text"]) { color: #98a2b1; }
+.dark .text-gray-400:not([class*="dark:text"]) { color: #8a93a3; }
+.dark .text-gray-300:not([class*="dark:text"]) { color: #5f6878; }
+
+/* Same problem on surfaces: a white/near-white panel nested inside a dark card
+   (the Household Snapshot's inner tiles use bg-white/60) turns the text on it
+   unreadable regardless of what colour that text is. */
+.dark .bg-white\/60:not([class*="dark:bg"]) { background-color: rgba(255,255,255,0.04); }
+.dark .bg-white\/70:not([class*="dark:bg"]) { background-color: rgba(255,255,255,0.05); }
+.dark .bg-gray-50:not([class*="dark:bg"])    { background-color: #23283a; }
+.dark .bg-gray-100:not([class*="dark:bg"])   { background-color: #242938; }
+
+/* Borders default to near-invisible dark-on-dark otherwise. */
+.dark .border-gray-100:not([class*="dark:border"]) { border-color: #2c3040; }
+.dark .border-gray-200:not([class*="dark:border"]) { border-color: #333a4d; }
+
+/* Semantic colours picked for a white page. Measured against both dark
+   surfaces: indigo-600 lands at 2.49:1 (the wordmark and every "Manage →"
+   link), red-600 at 3.24:1 on the negative amounts that matter most to read.
+   The 400-weight variants clear 4.5:1 while keeping the same hue. */
+.dark .text-indigo-500:not([class*="dark:text"]) { color: #818cf8; }
+.dark .text-indigo-600:not([class*="dark:text"]) { color: #818cf8; }
+.dark .text-indigo-700:not([class*="dark:text"]) { color: #a5b4fc; }
+.dark .text-red-500:not([class*="dark:text"])    { color: #f87171; }
+.dark .text-red-600:not([class*="dark:text"])    { color: #f87171; }
+.dark .text-red-700:not([class*="dark:text"])    { color: #fca5a5; }
+.dark .text-green-600:not([class*="dark:text"])  { color: #4ade80; }
+.dark .text-green-700:not([class*="dark:text"])  { color: #86efac; }
+.dark .text-emerald-600:not([class*="dark:text"]){ color: #4ade80; }
+.dark .text-amber-600:not([class*="dark:text"])  { color: #fbbf24; }
+.dark .text-amber-700:not([class*="dark:text"])  { color: #fcd34d; }
+.dark .text-blue-600:not([class*="dark:text"])   { color: #60a5fa; }
