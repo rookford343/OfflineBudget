@@ -122,9 +122,16 @@ def get_multi_year(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    # One walk across the whole span, sliced per year. Building each year
+    # independently re-derived its opening balance and produced a step between
+    # December and January; a shared walk cannot disagree with itself.
+    span = build_forecast(
+        db, user.id, account_id,
+        date(start_year, 1, 1), date(start_year + years - 1, 12, 31),
+    )
     all_quarters: list[schemas.QuarterSummary] = []
     for y in range(start_year, start_year + years):
-        all_quarters.extend(build_quarters(db, user.id, account_id, y))
+        all_quarters.extend(build_quarters(db, user.id, account_id, y, precomputed_days=span))
     return _attach_quarter_checkpoints(all_quarters, db, user.id, account_id)
 
 

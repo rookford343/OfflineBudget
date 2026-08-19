@@ -533,6 +533,29 @@ def build_forecast(
             Decimal(str(t.amount)) for t in all_actuals if t.date < today
         )
         balance = current_balance - past_sum
+    elif start_date > today:
+        # A window that begins in the future has to carry in everything that
+        # happens between now and then. Without this it opened at TODAY's
+        # balance, so asking for next year silently discarded the remainder of
+        # this one -- next January started richer or poorer than December
+        # ended, and the two years did not join up.
+        #
+        # The bridge starts at the beginning of the CURRENT year, not at
+        # today, so it walks exactly the same path a same-year request walks.
+        # Starting it at today instead made the two disagree on day one: a
+        # window opening in the past re-projects bills whose due date has
+        # passed but which have not posted yet, while a window opening today
+        # anchors to the real bank balance and never sees them. That
+        # difference showed up as a seam between December and January.
+        #
+        # The bridge always starts in the past, so it takes the first branch
+        # above and cannot recurse further.
+        bridge_start = date(today.year, 1, 1)
+        bridge = build_forecast(
+            db, user_id, account_id, bridge_start, start_date - timedelta(days=1),
+            overrides=overrides, apply_buffer_transfers=apply_buffer_transfers,
+        )
+        balance = bridge[-1].projected_balance if bridge else current_balance
     else:
         balance = current_balance
 
@@ -1089,11 +1112,35 @@ def build_quarters(
     account_id: int,
     year: int,
     overrides: list[dict] | None = None,
+    precomputed_days: list[ForecastEntry] | None = None,
 ) -> list[QuarterSummary]:
+    """Quarter summaries for one calendar year.
+
+    `precomputed_days` lets a multi-year caller supply one continuous walk
+    covering every year it wants. Re-walking per year re-derives the opening
+    balance each time, and a fresh window does not reproduce a continuous one
+    exactly -- the SS wage base is one contributor -- which left a visible
+    step between December and January. Sharing a single walk removes the
+    seam by construction rather than by reconciling two paths.
+    """
     # Build the full year in one pass so Q2+ open balances chain from Q1 close.
     full_start = date(year, 1, 1)
     full_end = date(year, 12, 31)
-    all_days = build_forecast(db, user_id, account_id, full_start, full_end, overrides=overrides)
+    if precomputed_days is not None:
+        all_days = [d for d in precomputed_days if full_start <= d.date <= full_end]
+    elif year > date.today().year:
+        # A future year is walked continuously from the start of the current
+        # one, not as an isolated window. Both reach the same December, but
+        # only if they take the same path -- walked in isolation the year
+        # ended ~$750 apart from the same year inside a multi-year view,
+        # so the two screens disagreed about the same date.
+        span = build_forecast(
+            db, user_id, account_id, date(date.today().year, 1, 1), full_end,
+            overrides=overrides,
+        )
+        all_days = [d for d in span if full_start <= d.date <= full_end]
+    else:
+        all_days = build_forecast(db, user_id, account_id, full_start, full_end, overrides=overrides)
     if not all_days:
         return []
 
