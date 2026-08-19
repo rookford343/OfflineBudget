@@ -502,6 +502,15 @@ def available_to_spend(
         elif item.frequency == models.RecurringFrequency.yearly and item.month_of_year == today.month:
             committed_expenses += item.amount
 
+    # "Spent So Far" means spending NOT already represented in Committed Bills,
+    # because the two are subtracted from the same income. Two bugs followed
+    # from ignoring that:
+    #
+    #   1. Rows tied to a recurring item were counted here AND in committed
+    #      expenses above, so every posted bill was deducted twice.
+    #   2. Card charges were not counted at all, only checking. For anyone who
+    #      puts most spending on a card that is the larger half, and it made a
+    #      single week's digest exceed the whole month's figure on this card.
     txns = (
         db.query(models.Transaction)
         .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
@@ -511,6 +520,9 @@ def available_to_spend(
             models.Transaction.date >= first,
             models.Transaction.date <= last,
             models.Transaction.amount < 0,
+            # Already committed above; counting the posted transaction too is
+            # the double-deduction described in (1).
+            models.Transaction.recurring_item_id.is_(None),
             NOT_SAVINGS,
         )
     ).all()
@@ -518,6 +530,23 @@ def available_to_spend(
     # a payoff settles charges already counted on the card side.
     txns = filter_real_spend(db, user.id, txns)
     spent_this_month = sum((abs(t.amount) for t in txns), Decimal("0"))
+
+    card_rows = db.query(models.CreditCardTransaction).filter(
+        models.CreditCardTransaction.user_id == user.id,
+        models.CreditCardTransaction.date >= first,
+        models.CreditCardTransaction.date <= last,
+        models.CreditCardTransaction.amount > 0,
+    ).all()
+    card_spend = sum(
+        (t.amount for t in card_rows if not is_card_payment(t.merchant)), Decimal("0"),
+    )
+    # Card-linked recurring items are inside committed_expenses too, so remove
+    # the ones that have actually fired so far this month -- not the whole
+    # month's worth, or an early-month view would over-credit charges that
+    # haven't happened yet.
+    from backend.services.spendable_pacer import _recurring_card_charges_in_range
+    card_committed_so_far = _recurring_card_charges_in_range(db, user.id, first, today)
+    spent_this_month += max(card_spend - card_committed_so_far, Decimal("0"))
 
     return schemas.AvailableToSpend(
         monthly_income=monthly_income,

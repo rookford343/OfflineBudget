@@ -122,6 +122,12 @@ export default function Dashboard() {
         <p className="text-sm text-gray-500">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
       </div>
 
+      {/* Anything asking for an action goes first. These were sitting below
+          the digest, so a transfer waiting to be scheduled was easy to scroll
+          past on a page whose top half is reference figures. */}
+      {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
+      <PlannedTransferReminder />
+
       {/* Available to Spend + Household Snapshot, side by side */}
       {(ats || snapshot) && (
         <div className="grid md:grid-cols-2 gap-6">
@@ -291,9 +297,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
-      <PlannedTransferReminder />
-      {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
 
       {/* Month in Review */}
       {summary && (
