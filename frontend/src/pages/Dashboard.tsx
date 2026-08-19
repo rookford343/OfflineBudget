@@ -128,9 +128,11 @@ export default function Dashboard() {
       {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
       <PlannedTransferReminder />
 
-      {/* Available to Spend + Household Snapshot, side by side */}
+      {/* Wide screens gain a COLUMN, not width. These panels are label/value
+          lists and short prose, so stretching two of them to 900px only pads
+          them -- the third slot pulls a panel up from below instead. */}
       {(ats || snapshot) && (
-        <div className="grid md:grid-cols-2 gap-6">
+        <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6 items-start">
           {ats && (
             <div className="card bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-100 dark:from-indigo-950/40 dark:to-blue-950/40 dark:border-indigo-900/50">
               <div className="flex items-center gap-2 mb-3">
@@ -236,6 +238,37 @@ export default function Dashboard() {
               )}
             </div>
           )}
+      {summary && (
+        <div className="card">
+          <div className="flex items-center gap-2 mb-2">
+            <BookOpen size={16} className="text-indigo-500" />
+            <h3 className="font-semibold text-gray-900 dark:text-white">
+              Month in Review —{" "}
+              {new Date(summaryYear, summaryMonth - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
+            </h3>
+          </div>
+          <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">{summary.text}</p>
+          {summary.top_category && (
+            <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700 pt-3">
+              <span>Top category: <span className="font-medium text-gray-700 dark:text-gray-300">{summary.top_category}</span></span>
+              {summary.mom_delta_pct != null && (
+                <span>
+                  vs last month:{" "}
+                  <span className={`font-medium ${parseFloat(summary.mom_delta_pct) > 0 ? "text-red-500" : "text-green-500"}`}>
+                    {parseFloat(summary.mom_delta_pct) > 0 ? "+" : ""}{parseFloat(summary.mom_delta_pct).toFixed(1)}%
+                  </span>
+                </span>
+              )}
+              <span>
+                Net cash flow:{" "}
+                <span className={`font-medium ${parseFloat(summary.net_cashflow) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                  {fmt(Math.abs(parseFloat(summary.net_cashflow)))} {parseFloat(summary.net_cashflow) >= 0 ? "surplus" : "deficit"}
+                </span>
+              </span>
+            </div>
+          )}
+        </div>
+      )}
         </div>
       )}
 
@@ -298,39 +331,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Month in Review */}
-      {summary && (
-        <div className="card">
-          <div className="flex items-center gap-2 mb-2">
-            <BookOpen size={16} className="text-indigo-500" />
-            <h3 className="font-semibold text-gray-900 dark:text-white">
-              Month in Review —{" "}
-              {new Date(summaryYear, summaryMonth - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
-            </h3>
-          </div>
-          <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">{summary.text}</p>
-          {summary.top_category && (
-            <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700 pt-3">
-              <span>Top category: <span className="font-medium text-gray-700 dark:text-gray-300">{summary.top_category}</span></span>
-              {summary.mom_delta_pct != null && (
-                <span>
-                  vs last month:{" "}
-                  <span className={`font-medium ${parseFloat(summary.mom_delta_pct) > 0 ? "text-red-500" : "text-green-500"}`}>
-                    {parseFloat(summary.mom_delta_pct) > 0 ? "+" : ""}{parseFloat(summary.mom_delta_pct).toFixed(1)}%
-                  </span>
-                </span>
-              )}
-              <span>
-                Net cash flow:{" "}
-                <span className={`font-medium ${parseFloat(summary.net_cashflow) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                  {fmt(Math.abs(parseFloat(summary.net_cashflow)))} {parseFloat(summary.net_cashflow) >= 0 ? "surplus" : "deficit"}
-                </span>
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Hero stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="stat-card stat-card-accent-indigo animate-fade-slide-up animate-delay-100 col-span-2 sm:col-span-1">
@@ -371,7 +371,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 gap-6">
+      {/* Same idea: a third column rather than two stretched ones, so
+          All Accounts rises out of the tail of the page. */}
+      <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6 items-start">
         {/* Credit cards */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
@@ -461,13 +463,10 @@ export default function Dashboard() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* Accounts */}
       {accounts.length > 0 && (
         <div className="card">
           <h3 className="font-semibold text-gray-900 mb-4">All Accounts</h3>
-          <div className="divide-y divide-gray-100 max-w-md">
+          <div className="divide-y divide-gray-100">
             {accounts.map((a: any) => (
               <div key={a.id} className="flex items-center justify-between gap-4 py-3">
                 <div className="min-w-0">
@@ -485,6 +484,7 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      </div>
 
       {/* Empty state for new users */}
       {accounts.length === 0 && recurring.length === 0 && (
