@@ -34,7 +34,7 @@ export function ProgressRing({
           cx={cx} cy={cy} r={radius}
           fill="none"
           strokeWidth={strokeWidth}
-          className="stroke-gray-200 dark:stroke-[#2c3040]"
+          className="stroke-gray-200 dark:stroke-[#3a4051]"
         />
         <circle
           cx={cx} cy={cy} r={radius}

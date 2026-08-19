@@ -51,7 +51,7 @@ export default function Login() {
                 key={m}
                 onClick={() => setMode(m)}
                 className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                  mode === m ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+                  mode === m ? "bg-white dark:bg-[#3a4256] shadow-sm text-gray-900 dark:text-white" : "text-gray-500"
                 }`}
               >
                 {m === "login" ? "Sign In" : "Create Account"}

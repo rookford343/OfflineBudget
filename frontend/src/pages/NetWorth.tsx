@@ -21,7 +21,7 @@ function isDarkMode(): boolean {
 function chartTheme() {
   const dark = isDarkMode();
   return {
-    grid: dark ? "#2c3040" : "#e5e7eb",
+    grid: dark ? "#3a4051" : "#e5e7eb",
     tick: dark ? "#8f99a8" : "#6b7280",
   };
 }

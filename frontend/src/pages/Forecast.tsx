@@ -17,15 +17,15 @@ function isDarkMode(): boolean {
 function chartTheme() {
   const dark = isDarkMode();
   return {
-    grid:    dark ? "#2c3040" : "#e5e7eb",
+    grid:    dark ? "#3a4051" : "#e5e7eb",
     tick:    dark ? "#8f99a8" : "#6b7280",
-    tooltip: dark ? "#1f2330" : "#ffffff",
-    tooltipBorder: dark ? "#2c3040" : "#e5e7eb",
+    tooltip: dark ? "#2a2f3d" : "#ffffff",
+    tooltipBorder: dark ? "#3a4051" : "#e5e7eb",
     tooltipText: dark ? "#c4ccd8" : "#111827",
     // Recharts paints legend labels in the series colour, so indigo-500 --
     // fine as a stroke -- rendered legend text at 3.5:1 in dark mode. The
     // 400 weight reads at 5.25:1 and is barely different as a line.
-    series:  dark ? "#818cf8" : "#6366f1",
+    series:  dark ? "#a5b4fc" : "#6366f1",
     series2: dark ? "#34d399" : "#10b981",
   };
 }
@@ -456,7 +456,7 @@ export default function Forecast() {
             <ShieldCheck size={18} className="text-indigo-500 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-indigo-900 dark:text-indigo-200 text-sm">Confirm your current balance</p>
-              <p className="text-xs text-indigo-700 dark:text-indigo-400 mt-0.5">
+              <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-0.5">
                 Your account shows <strong>{fmt(activeAccount.current_balance)}</strong>. Does this match your bank right now?
                 Setting today's balance anchors the forecast so projections start from a verified number.
               </p>
@@ -1097,7 +1097,7 @@ export default function Forecast() {
                               </div>
                             ))}
                             {hasCp && (
-                              <div className="text-xs text-indigo-500 dark:text-indigo-400 mt-1">
+                              <div className="text-xs text-indigo-500 dark:text-indigo-300 mt-1">
                                 Balance snapped to {fmt(dayCheckpointMap[d.date])}
                               </div>
                             )}
