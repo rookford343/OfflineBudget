@@ -132,7 +132,7 @@ export default function Dashboard() {
           lists and short prose, so stretching two of them to 900px only pads
           them -- the third slot pulls a panel up from below instead. */}
       {(ats || snapshot) && (
-        <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6 items-start">
+        <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6">
           {ats && (
             <div className="card bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-100 dark:from-indigo-950/40 dark:to-blue-950/40 dark:border-indigo-900/50">
               <div className="flex items-center gap-2 mb-3">
@@ -373,7 +373,7 @@ export default function Dashboard() {
 
       {/* Same idea: a third column rather than two stretched ones, so
           All Accounts rises out of the tail of the page. */}
-      <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6 items-start">
+      <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6">
         {/* Credit cards */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
