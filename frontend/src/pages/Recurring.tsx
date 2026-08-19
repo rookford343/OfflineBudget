@@ -166,7 +166,7 @@ export default function Recurring() {
           stays the estimate every other month falls back to. */}
       {override && billEditId !== item.id && (
         <div className="mt-1 flex items-center gap-2 text-xs">
-          <span className="text-indigo-600 dark:text-indigo-400 font-medium">
+          <span className="text-indigo-600 dark:text-indigo-300 font-medium">
             Actual {fmt(actual!)} due {new Date(dueDate! + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
           </span>
           <span className={variance > 0 ? "text-red-500" : variance < 0 ? "text-emerald-600" : "text-gray-400"}>
@@ -334,7 +334,7 @@ export default function Recurring() {
                 <div className="flex rounded-lg bg-gray-100 p-1">
                   {([["income", "Income"], ["expense", "Expense"], ...(editItem?.type === "credit_card_payment" ? [["credit_card_payment", "CC Payment"]] : [])] as [string, string][]).map(([val, label]) => (
                     <button key={val} type="button" onClick={() => setForm({ ...form, type: val })}
-                      className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${form.type === val ? "bg-white shadow-sm text-gray-900" : "text-gray-500"}`}>
+                      className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors ${form.type === val ? "bg-white dark:bg-[#3a4256] shadow-sm text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-300"}`}>
                       {label}
                     </button>
                   ))}
@@ -363,7 +363,7 @@ export default function Recurring() {
                 <div className="flex rounded-lg bg-gray-100 p-1">
                   {["monthly", "quarterly", "yearly"].map(f => (
                     <button key={f} type="button" onClick={() => setForm({ ...form, frequency: f })}
-                      className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors capitalize ${form.frequency === f ? "bg-white shadow-sm text-gray-900" : "text-gray-500"}`}>
+                      className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors capitalize ${form.frequency === f ? "bg-white dark:bg-[#3a4256] shadow-sm text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-300"}`}>
                       {f}
                     </button>
                   ))}

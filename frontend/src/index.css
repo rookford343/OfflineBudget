@@ -6,7 +6,7 @@
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
     /* Dark: warm-slate, not pure black — reduces eye strain */
-    @apply dark:bg-[#181b22] dark:text-[#c4ccd8];
+    @apply dark:bg-[#21242e] dark:text-[#c4ccd8];
     margin: 0;
   }
   * { box-sizing: border-box; }
@@ -15,7 +15,7 @@
 @layer components {
   .card {
     @apply bg-white rounded-xl shadow-sm border border-gray-100 p-5;
-    @apply dark:bg-[#1f2330] dark:border-[#2c3040];
+    @apply dark:bg-[#2a2f3d] dark:border-[#3a4051];
   }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none cursor-pointer;
@@ -25,33 +25,33 @@
   }
   .btn-secondary {
     @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-indigo-500;
-    @apply dark:bg-[#272b38] dark:text-[#c4ccd8] dark:border-[#363d50] dark:hover:bg-[#2e3342];
+    @apply dark:bg-[#333947] dark:text-[#c4ccd8] dark:border-[#454d61] dark:hover:bg-[#3b4253];
   }
   .btn-danger {
     @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
   }
   .btn-ghost {
     @apply btn text-gray-600 hover:bg-gray-100 focus:ring-gray-400;
-    @apply dark:text-[#909aaa] dark:hover:bg-[#272b38] dark:hover:text-[#c4ccd8];
+    @apply dark:text-[#909aaa] dark:hover:bg-[#333947] dark:hover:text-[#c4ccd8];
   }
   .input {
     @apply w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors bg-white;
-    @apply dark:bg-[#272b38] dark:border-[#363d50] dark:text-[#c4ccd8] dark:placeholder-[#8a93a3];
+    @apply dark:bg-[#333947] dark:border-[#454d61] dark:text-[#c4ccd8] dark:placeholder-[#949daf];
   }
   .label {
     @apply block text-sm font-medium text-gray-700 mb-1 dark:text-[#9aa3b2];
   }
   /* Badges: muted but clearly readable in dark */
   .badge-green  { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-[#1a3328] dark:text-[#68b88e]; }
-  .badge-red    { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-[#321a1a] dark:text-[#cc7070]; }
+  .badge-red    { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-[#321a1a] dark:text-[#eda2a2]; }
   .badge-amber  { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-[#2e2010] dark:text-[#c49a45]; }
   .badge-blue   { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-[#182438] dark:text-[#6090cc]; }
   .stat-card    { @apply card flex flex-col gap-1; }
   .stat-label   { @apply text-xs font-medium text-gray-500 uppercase tracking-wide dark:text-[#8f99a8]; }
   .stat-value   { @apply text-2xl font-bold tabular-nums; }
-  .nav-link     { @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-[#909aaa] dark:hover:bg-[#272b38] dark:hover:text-[#c4ccd8]; }
-  .nav-link-active { @apply nav-link bg-indigo-50 text-indigo-700 hover:bg-indigo-50 hover:text-indigo-700 dark:bg-[#1e2440] dark:text-indigo-400 dark:hover:bg-[#1e2440] dark:hover:text-indigo-400; }
-  .progress-bar  { @apply h-1.5 w-full bg-gray-200 rounded-full overflow-hidden dark:bg-[#2c3040]; }
+  .nav-link     { @apply flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors dark:text-[#909aaa] dark:hover:bg-[#333947] dark:hover:text-[#c4ccd8]; }
+  .nav-link-active { @apply nav-link bg-indigo-50 text-indigo-700 hover:bg-indigo-50 hover:text-indigo-700 dark:bg-[#2b3358] dark:text-indigo-400 dark:hover:bg-[#2b3358] dark:hover:text-indigo-400; }
+  .progress-bar  { @apply h-1.5 w-full bg-gray-200 rounded-full overflow-hidden dark:bg-[#3a4051]; }
   .progress-fill { @apply h-full rounded-full; transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); }
 
   /* Stat card top-border accents */
@@ -83,7 +83,7 @@
    183 elements across the app carry a light-mode grey (text-gray-900/700/600/
    500/400) with no dark: variant beside it, so in dark mode they inherit a
    colour meant for a white page. Worst case was the Dashboard's CHECKING
-   figure -- near-black on the #1f2330 card and effectively unreadable.
+   figure -- near-black on the #2a2f3d card and effectively unreadable.
 
    Patching every call site by hand would be 183 edits and would silently
    regress the next time someone writes text-gray-900 out of habit, so this is
@@ -95,32 +95,32 @@
    substring and is skipped entirely -- this only fills in where nothing was
    specified. Specificity (0,3,0) clears the bare utility it overrides.
    ──────────────────────────────────────────────────────────────────────── */
-.dark .text-gray-900:not([class*="dark:text"]) { color: #e6ebf2; }
-.dark .text-gray-800:not([class*="dark:text"]) { color: #d3dae4; }
-.dark .text-gray-700:not([class*="dark:text"]) { color: #c4ccd8; }
-.dark .text-gray-600:not([class*="dark:text"]) { color: #aab4c2; }
-.dark .text-gray-500:not([class*="dark:text"]) { color: #98a2b1; }
-.dark .text-gray-400:not([class*="dark:text"]) { color: #8a93a3; }
-.dark .text-gray-300:not([class*="dark:text"]) { color: #5f6878; }
+.dark .text-gray-900:not([class*="dark:text"]):not([class*="bg-white"]) { color: #eef2f7; }
+.dark .text-gray-800:not([class*="dark:text"]):not([class*="bg-white"]) { color: #dde3ec; }
+.dark .text-gray-700:not([class*="dark:text"]):not([class*="bg-white"]) { color: #c9d1dd; }
+.dark .text-gray-600:not([class*="dark:text"]):not([class*="bg-white"]) { color: #b0b9c7; }
+.dark .text-gray-500:not([class*="dark:text"]):not([class*="bg-white"]) { color: #9ea8b7; }
+.dark .text-gray-400:not([class*="dark:text"]):not([class*="bg-white"]) { color: #949daf; }
+.dark .text-gray-300:not([class*="dark:text"]):not([class*="bg-white"]) { color: #5f6878; }
 
 /* Same problem on surfaces: a white/near-white panel nested inside a dark card
    (the Household Snapshot's inner tiles use bg-white/60) turns the text on it
    unreadable regardless of what colour that text is. */
 .dark .bg-white\/60:not([class*="dark:bg"]) { background-color: rgba(255,255,255,0.04); }
 .dark .bg-white\/70:not([class*="dark:bg"]) { background-color: rgba(255,255,255,0.05); }
-.dark .bg-gray-50:not([class*="dark:bg"])    { background-color: #23283a; }
-.dark .bg-gray-100:not([class*="dark:bg"])   { background-color: #242938; }
+.dark .bg-gray-50:not([class*="dark:bg"])    { background-color: #31374666; }
+.dark .bg-gray-100:not([class*="dark:bg"])   { background-color: #363d4f; }
 
 /* Borders default to near-invisible dark-on-dark otherwise. */
-.dark .border-gray-100:not([class*="dark:border"]) { border-color: #2c3040; }
-.dark .border-gray-200:not([class*="dark:border"]) { border-color: #333a4d; }
+.dark .border-gray-100:not([class*="dark:border"]) { border-color: #3a4051; }
+.dark .border-gray-200:not([class*="dark:border"]) { border-color: #454d61; }
 
 /* Semantic colours picked for a white page. Measured against both dark
    surfaces: indigo-600 lands at 2.49:1 (the wordmark and every "Manage →"
    link), red-600 at 3.24:1 on the negative amounts that matter most to read.
    The 400-weight variants clear 4.5:1 while keeping the same hue. */
-.dark .text-indigo-500:not([class*="dark:text"]) { color: #818cf8; }
-.dark .text-indigo-600:not([class*="dark:text"]) { color: #818cf8; }
+.dark .text-indigo-500:not([class*="dark:text"]) { color: #a5b4fc; }
+.dark .text-indigo-600:not([class*="dark:text"]) { color: #a5b4fc; }
 .dark .text-indigo-700:not([class*="dark:text"]) { color: #a5b4fc; }
 .dark .text-red-500:not([class*="dark:text"])    { color: #f87171; }
 .dark .text-red-600:not([class*="dark:text"])    { color: #f87171; }

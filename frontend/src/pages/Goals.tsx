@@ -256,7 +256,7 @@ export default function Goals() {
                     {goal.monthly_needed != null && !isComplete && (
                       <div className="flex justify-between text-gray-600 dark:text-gray-400">
                         <span>Needed/mo</span>
-                        <span className="font-medium text-indigo-600 dark:text-indigo-400">{fmt(parseFloat(goal.monthly_needed))}</span>
+                        <span className="font-medium text-indigo-600 dark:text-indigo-300">{fmt(parseFloat(goal.monthly_needed))}</span>
                       </div>
                     )}
                     {goal.months_remaining != null && !isComplete && (

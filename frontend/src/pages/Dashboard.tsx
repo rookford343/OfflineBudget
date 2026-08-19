@@ -245,7 +245,7 @@ export default function Dashboard() {
           <div className="grid md:grid-cols-2 gap-6">
             {weeklyDigest.categories.length > 0 && (
               <div>
-                <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">By Category</p>
+                <p className="text-xs font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">By Category</p>
                 <div className="space-y-1.5 text-sm">
                   {weeklyDigest.categories.slice(0, 5).map((c: any) => {
                     const budget = budgetByCategory.get(c.category_id);
@@ -277,7 +277,7 @@ export default function Dashboard() {
 
             {weeklyDigest.top_merchants.length > 0 && (
               <div>
-                <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">Top Merchants</p>
+                <p className="text-xs font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">Top Merchants</p>
                 <div className="space-y-1.5 text-sm">
                   {weeklyDigest.top_merchants.slice(0, 5).map((m: any) => (
                     <div key={m.name} className="flex justify-between gap-4 px-1.5 py-1 text-gray-600 dark:text-gray-400">

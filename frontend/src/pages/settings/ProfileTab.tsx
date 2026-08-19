@@ -89,7 +89,7 @@ export default function ProfileTab() {
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Your account address, used for password reset. It's also the fallback for the daily
             summary when no recipients are set under{" "}
-            <NavLink to="/settings/notifications" className="text-indigo-600 dark:text-indigo-400 hover:underline">
+            <NavLink to="/settings/notifications" className="text-indigo-600 dark:text-indigo-300 hover:underline">
               Notifications &amp; Email
             </NavLink>, which is where to configure who actually receives it.
           </p>
