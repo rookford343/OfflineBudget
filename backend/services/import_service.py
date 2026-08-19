@@ -375,6 +375,19 @@ def _find_duplicate_card_transaction(
     return _pick_closest(candidates, row.date, lambda c: c.merchant, normalized, consumed)
 
 
+def _bank_linked(db: Session, user_id: int, account_id: int | None) -> bool:
+    """True when a bank connection owns this account's balance."""
+    if account_id is None:
+        return False
+    return db.query(models.BankConnectionAccountLink).join(
+        models.BankConnection,
+        models.BankConnection.id == models.BankConnectionAccountLink.connection_id,
+    ).filter(
+        models.BankConnection.user_id == user_id,
+        models.BankConnectionAccountLink.local_account_id == account_id,
+    ).first() is not None
+
+
 def run_import(
     db: Session,
     user: models.User,
@@ -420,7 +433,13 @@ def run_import(
             db.add(txn)
 
             account = db.get(models.Account, account_id)
-            if account and account.user_id == user.id:
+            if account and account.user_id == user.id and not _bank_linked(db, user.id, account_id):
+                # Only for accounts the app tracks by arithmetic. On a
+                # bank-linked account the synced balance is already current and
+                # authoritative, so adding imported history to it double-counts
+                # every row -- backfilling two years of statements inflated a
+                # savings balance far above the real one, silently, because the
+                # rows themselves were correct.
                 account.current_balance += row.amount
 
             # CC payoff detection: reduce matched card's balance
