@@ -1,6 +1,6 @@
 from datetime import date
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
@@ -113,17 +113,51 @@ def capture_snapshot(db: Session = Depends(get_db), user: models.User = Depends(
     total_liabilities = sum((l.current_balance for l in liabilities), Decimal("0")) + sum((c.current_balance for c in cards), Decimal("0"))
     net_worth = total_assets - total_liabilities
 
-    snapshot = models.NetWorthSnapshot(
-        user_id=user.id,
-        snapshot_date=date.today(),
-        total_assets=total_assets,
-        total_liabilities=total_liabilities,
-        net_worth=net_worth,
-    )
-    db.add(snapshot)
+    # Re-capturing on a day that already has a snapshot REPLACES it rather than
+    # appending a second one. A snapshot is "what I was worth on this date", so
+    # two rows for one date is never a meaningful state -- it just puts a
+    # vertical step in the trend line and doubles the row in history. Correcting
+    # a balance and pressing the button again is the normal way to fix a
+    # mistake, and it should work without a delete-then-recapture dance.
+    today = date.today()
+    snapshot = db.query(models.NetWorthSnapshot).filter(
+        models.NetWorthSnapshot.user_id == user.id,
+        models.NetWorthSnapshot.snapshot_date == today,
+    ).first()
+    if snapshot:
+        snapshot.total_assets = total_assets
+        snapshot.total_liabilities = total_liabilities
+        snapshot.net_worth = net_worth
+    else:
+        snapshot = models.NetWorthSnapshot(
+            user_id=user.id,
+            snapshot_date=today,
+            total_assets=total_assets,
+            total_liabilities=total_liabilities,
+            net_worth=net_worth,
+        )
+        db.add(snapshot)
     db.commit()
     db.refresh(snapshot)
     return snapshot
+
+
+@router.delete("/snapshot/{snapshot_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_snapshot(
+    snapshot_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Remove a snapshot. A wrong one distorts the trend line permanently
+    otherwise -- there was no way to take one back."""
+    snapshot = db.query(models.NetWorthSnapshot).filter(
+        models.NetWorthSnapshot.id == snapshot_id,
+        models.NetWorthSnapshot.user_id == user.id,
+    ).first()
+    if not snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot not found")
+    db.delete(snapshot)
+    db.commit()
 
 
 @router.get("/history", response_model=list[schemas.NetWorthSnapshotOut])
