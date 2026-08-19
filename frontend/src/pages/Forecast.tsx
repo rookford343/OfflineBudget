@@ -18,10 +18,15 @@ function chartTheme() {
   const dark = isDarkMode();
   return {
     grid:    dark ? "#2c3040" : "#e5e7eb",
-    tick:    dark ? "#6e7888" : "#6b7280",
+    tick:    dark ? "#8f99a8" : "#6b7280",
     tooltip: dark ? "#1f2330" : "#ffffff",
     tooltipBorder: dark ? "#2c3040" : "#e5e7eb",
     tooltipText: dark ? "#c4ccd8" : "#111827",
+    // Recharts paints legend labels in the series colour, so indigo-500 --
+    // fine as a stroke -- rendered legend text at 3.5:1 in dark mode. The
+    // 400 weight reads at 5.25:1 and is barely different as a line.
+    series:  dark ? "#818cf8" : "#6366f1",
+    series2: dark ? "#34d399" : "#10b981",
   };
 }
 
@@ -566,7 +571,7 @@ export default function Forecast() {
                 <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
                 <Tooltip formatter={(v: any, name: string) => [fmt(v), name]} />
                 <ReferenceLine y={0} stroke="#ef4444" strokeDasharray="4 4" />
-                <Bar dataKey="income" name="Income" fill="#10b981" />
+                <Bar dataKey="income" name="Income" fill={chartTheme().series2} />
                 <Bar dataKey="expenses" name="Expenses" fill="#ef4444" />
                 <Legend />
               </BarChart>
@@ -623,10 +628,10 @@ export default function Forecast() {
                   <Bar yAxisId="right" dataKey="savings" name="Savings" fill="#0ea5e9" fillOpacity={0.30}
                     stroke="#0ea5e9" strokeOpacity={0.55} barSize={22} animationDuration={600} />
                 )}
-                <Area yAxisId="left" type="monotone" dataKey="actual" name="Actual" stroke="#6366f1" strokeWidth={2} fill="url(#forecastActualGradient)" dot={false} connectNulls={false} animationDuration={600} />
-                <Area yAxisId="left" type="monotone" dataKey="projected" name="Projected" stroke="#6366f1" strokeWidth={2} strokeDasharray="5 3" fill="url(#forecastProjectedGradient)" dot={false} connectNulls={false} animationDuration={600} />
+                <Area yAxisId="left" type="monotone" dataKey="actual" name="Actual" stroke={chartTheme().series} strokeWidth={2} fill="url(#forecastActualGradient)" dot={false} connectNulls={false} animationDuration={600} />
+                <Area yAxisId="left" type="monotone" dataKey="projected" name="Projected" stroke={chartTheme().series} strokeWidth={2} strokeDasharray="5 3" fill="url(#forecastProjectedGradient)" dot={false} connectNulls={false} animationDuration={600} />
                 {hasScenario && (
-                  <Area yAxisId="left" type="monotone" dataKey="scenario" name="Scenario" stroke="#10b981" strokeWidth={2} fill="url(#forecastScenarioGradient)" dot={false} strokeDasharray="5 3" animationDuration={800} animationEasing="ease-out" />
+                  <Area yAxisId="left" type="monotone" dataKey="scenario" name="Scenario" stroke={chartTheme().series2} strokeWidth={2} fill="url(#forecastScenarioGradient)" dot={false} strokeDasharray="5 3" animationDuration={800} animationEasing="ease-out" />
                 )}
                 <Legend />
               </ComposedChart>

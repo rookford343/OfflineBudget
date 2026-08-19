@@ -22,7 +22,7 @@ function chartTheme() {
   const dark = isDarkMode();
   return {
     grid: dark ? "#2c3040" : "#e5e7eb",
-    tick: dark ? "#6e7888" : "#6b7280",
+    tick: dark ? "#8f99a8" : "#6b7280",
   };
 }
 

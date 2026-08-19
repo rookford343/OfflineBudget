@@ -223,7 +223,7 @@ export default function Budget() {
             ) : (
               <>
                 <span className="text-sm tabular-nums text-gray-500 dark:text-gray-400">
-                  {fmt(spent)}<span className="text-gray-300 dark:text-gray-600"> / {fmt(available)}</span>
+                  {fmt(spent)}<span className="text-gray-300 dark:text-gray-400"> / {fmt(available)}</span>
                 </span>
                 <button onClick={() => { setEditId(row.category_id); setEditAmt(row.budgeted); }}
                   className="text-gray-300 hover:text-indigo-500" title="Change budget">
