@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import { ChevronDown, ChevronRight, HelpCircle, Pencil, AlertTriangle, X } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import { sortCategoryList, byName } from "../lib/selectOptions";
 
 function isDarkMode(): boolean {
   return document.documentElement.classList.contains("dark");
@@ -339,7 +340,7 @@ export default function Spending() {
         <div className="flex gap-2 flex-wrap">
           <select className="input w-auto" value={sourceKey} onChange={e => { setSourceKey(e.target.value); setCatFilter(null); }}>
             <option value="all">All Sources</option>
-            {checkingAccounts.map((a: any) => <option key={`account-${a.id}`} value={`account-${a.id}`}>{a.name}</option>)}
+            {byName(checkingAccounts).map((a: any) => <option key={`account-${a.id}`} value={`account-${a.id}`}>{a.name}</option>)}
             {cards.map((c: any) => <option key={`card-${c.id}`} value={`card-${c.id}`}>{c.name}</option>)}
           </select>
           <div className="flex gap-1">

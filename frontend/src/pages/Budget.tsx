@@ -4,6 +4,7 @@ import { budgetApi, categoriesApi } from "../api";
 import { fmt } from "../lib/utils";
 import { Pencil, Check, X, RotateCcw, HelpCircle, ChevronRight, ChevronDown, Plus, Trash2 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import { CategoryOptions } from "../lib/selectOptions";
 
 /**
  * Reworked 2026-08-16 around how Dan actually budgets: a handful of
@@ -321,7 +322,7 @@ export default function Budget() {
               <div className="flex flex-wrap items-center gap-2 mb-3 bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2">
                 <select className="input py-1 text-sm" value={addCat} onChange={e => setAddCat(e.target.value)}>
                   <option value="">Choose a category…</option>
-                  {addable.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <CategoryOptions categories={categories as any[]} type="expense" exclude={budgetedIds} />
                 </select>
                 <input type="number" step="0.01" className="input w-28 py-1 text-sm text-right"
                   placeholder="Amount" value={addAmt} onChange={e => setAddAmt(e.target.value)} />

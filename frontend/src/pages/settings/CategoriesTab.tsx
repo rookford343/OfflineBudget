@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { categoriesApi, budgetApi, rulesApi } from "../../api";
 import { fmt } from "../../lib/utils";
 import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown } from "lucide-react";
+import { sortCategoryList, byName } from "../../lib/selectOptions";
 
 const emptyCat = { name: "", type: "expense", parent_id: "", color: "#6366f1", tax_deductible: false };
 const COLOR_SWATCHES = ["#6366f1", "#22c55e", "#ef4444", "#f59e0b", "#3b82f6", "#8b5cf6", "#ec4899", "#14b8a6"];
@@ -275,7 +276,7 @@ export default function CategoriesTab() {
                   <label className="label">Category</label>
                   <select className="input" value={ruleForm.category_id} onChange={e => setRuleForm({ ...ruleForm, category_id: e.target.value })} required>
                     <option value="">Select…</option>
-                    {categories.flatMap((c: any) => [c, ...(c.children ?? [])]).map((c: any) => (
+                    {sortCategoryList(categories.flatMap((c: any) => [c, ...(c.children ?? [])]), categories as any[]).map((c: any) => (
                       <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
                     ))}
                   </select>

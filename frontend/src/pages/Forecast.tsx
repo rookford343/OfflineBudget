@@ -9,6 +9,7 @@ import HelpPanel from "../components/HelpPanel";
 import MonthlyAccuracyRow from "../components/MonthlyAccuracyRow";
 import { RiskBanner } from "../components/RiskBanner";
 import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
+import { sortCategoryList, byName } from "../lib/selectOptions";
 
 function isDarkMode(): boolean {
   return document.documentElement.classList.contains("dark");
@@ -35,11 +36,11 @@ const emptyExpense = { name: "", amount: "", expected_date: today(), notes: "", 
 export default function Forecast() {
   const qc = useQueryClient();
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
-  const checkingAccounts = accounts.filter((a: any) => a.type === "checking");
+  const checkingAccounts = byName(accounts.filter((a: any) => a.type === "checking"));
   // Anything that isn't the spending account can fund a purchase -- savings,
   // money market, a brokerage sweep. Emergency funds included: it's Dan's
   // money and his call, the flag only governs "available savings" reporting.
-  const fundingAccounts = accounts.filter((a: any) => a.type !== "checking");
+  const fundingAccounts = byName(accounts.filter((a: any) => a.type !== "checking"));
   // Savings shown as bars behind the checking line: the two are read together
   // (can I cover this, and what does it cost the cushion?) but live on wildly
   // different scales, so they share an X axis and not a Y.
@@ -164,7 +165,7 @@ export default function Forecast() {
     dayCheckpointMap[c.date] = parseFloat(c.actual_balance);
   });
 
-  const allCatOptions = (categories as any[]).flatMap((c: any) => [c, ...(c.children ?? [])]);
+  const allCatOptions = sortCategoryList((categories as any[]).flatMap((c: any) => [c, ...(c.children ?? [])]), categories as any[]);
 
   // Balance anchor banner: show when no day checkpoint exists for today and account is new or has never been verified
   const todayIso = today();

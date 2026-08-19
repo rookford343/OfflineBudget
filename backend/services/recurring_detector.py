@@ -27,6 +27,12 @@ def detect_patterns(
             models.Transaction.is_actual == True,
             models.Transaction.amount < 0,
             models.Transaction.date >= cutoff,
+            # Rows already attached to a recurring item are, by definition,
+            # already tracked. The only other filter here matches a normalized
+            # ITEM NAME against a normalized descriptor, which a raw bank string
+            # never satisfies -- so a descriptor kept being suggested forever
+            # even after it had been linked to the item that covers it.
+            models.Transaction.recurring_item_id.is_(None),
         )
         .order_by(models.Transaction.date)
         .all()

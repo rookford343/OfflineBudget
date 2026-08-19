@@ -4,6 +4,8 @@ import { recurringApi, accountsApi, categoriesApi, cardsApi, billOverridesApi } 
 import { fmt } from "../lib/utils";
 import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import { CategoryOptions, AccountOptions, RecurringOptions } from "../lib/selectOptions";
+import { sortCategoryList, byName } from "../lib/selectOptions";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
@@ -65,7 +67,13 @@ export default function Recurring() {
       );
       qc.invalidateQueries({ queryKey: ["recurring"] });
       qc.invalidateQueries({ queryKey: ["transactions"] });
+      // Without this the row stayed on screen even once the backend had
+      // stopped suggesting it -- the list was never refetched.
+      qc.invalidateQueries({ queryKey: ["recurring-suggestions"] });
       setLinkFor(null); setLinkItemId("");
+      // Confirmation, not a permanent banner: the row it referred to is gone
+      // from the list, so leaving the text behind reads as unfinished work.
+      window.setTimeout(() => setLinkResult(null), 6000);
     },
   });
 
@@ -83,7 +91,7 @@ export default function Recurring() {
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoriesApi.list });
   const { data: cards = [] } = useQuery<any[]>({ queryKey: ["cards"], queryFn: cardsApi.list });
   const activeCards = (cards as any[]).filter((c: any) => c.is_active);
-  const allCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]);
+  const allCats = sortCategoryList(categories.flatMap((c: any) => [c, ...(c.children ?? [])]), categories as any[]);
 
   const { data: suggestions = [] } = useQuery<any[]>({
     queryKey: ["recurring-suggestions"],
@@ -324,13 +332,7 @@ export default function Recurring() {
                   <select className="input py-1 text-sm w-56" value={linkItemId}
                     onChange={e => setLinkItemId(e.target.value)}>
                     <option value="">Choose an existing item…</option>
-                    {(items as any[])
-                      .filter((i: any) => i.type !== "income")
-                      .map((i: any) => (
-                        <option key={i.id} value={i.id}>
-                          {i.name}{i.card_id ? " (card)" : ""}
-                        </option>
-                      ))}
+                    <RecurringOptions items={items as any[]} filter={(i: any) => i.type !== "income"} />
                   </select>
                   <button className="btn-primary text-xs px-2 py-1"
                     disabled={!linkItemId || linkMut.isPending}
@@ -451,16 +453,15 @@ export default function Recurring() {
                 <label className="label">{form.type === "income" ? "Account" : "Pay From Account"}</label>
                 <select className="input" value={form.account_id} onChange={e => setForm({ ...form, account_id: e.target.value })} required>
                   <option value="">Select…</option>
-                  {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  <AccountOptions accounts={accounts as any[]} />
                 </select>
               </div>
               <div>
                 <label className="label">Category</label>
                 <select className="input" value={form.category_id} onChange={e => setForm({ ...form, category_id: e.target.value })}>
                   <option value="">None</option>
-                  {allCats.filter((c: any) => c.type === (form.type === "credit_card_payment" ? "expense" : form.type)).map((c: any) => (
-                    <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
-                  ))}
+                  <CategoryOptions categories={categories as any[]}
+                    type={form.type === "credit_card_payment" ? "expense" : form.type} />
                 </select>
               </div>
               <div>
