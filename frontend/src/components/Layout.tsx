@@ -116,7 +116,11 @@ export default function Layout() {
 
       {/* Main content */}
       <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+        {/* Fluid up to a readable ceiling. max-w-6xl (72rem) left most of a
+            wide monitor empty, but an unbounded width stretches table rows and
+            two-column cards until the eye has to travel across the whole
+            display to pair a label with its value. */}
+        <div className="w-full max-w-[120rem] mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <Outlet />
         </div>
       </main>
