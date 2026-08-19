@@ -183,7 +183,7 @@ export default function Dashboard() {
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center justify-center gap-1">
                     Spendable this week
-                    <button onClick={() => setSnapshotHelp("spendable")} className="text-gray-300 hover:text-indigo-500 dark:text-gray-500 dark:hover:text-indigo-400" aria-label="What is Spendable this week?">
+                    <button onClick={() => setSnapshotHelp("spendable")} className="text-gray-300 hover:text-indigo-500 dark:text-gray-400 dark:hover:text-indigo-400" aria-label="What is Spendable this week?">
                       <HelpCircle size={12} />
                     </button>
                   </p>
@@ -204,7 +204,7 @@ export default function Dashboard() {
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center justify-center gap-1">
                     Safety Margin (this week)
-                    <button onClick={() => setSnapshotHelp("margin")} className="text-gray-300 hover:text-indigo-500 dark:text-gray-500 dark:hover:text-indigo-400" aria-label="What is Safety Margin?">
+                    <button onClick={() => setSnapshotHelp("margin")} className="text-gray-300 hover:text-indigo-500 dark:text-gray-400 dark:hover:text-indigo-400" aria-label="What is Safety Margin?">
                       <HelpCircle size={12} />
                     </button>
                   </p>

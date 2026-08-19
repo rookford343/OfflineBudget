@@ -205,7 +205,7 @@ export default function Goals() {
 
       {/* Goals grid */}
       {isLoading ? (
-        <div className="text-center py-8 text-gray-400 dark:text-gray-500 text-sm">Loading goals…</div>
+        <div className="text-center py-8 text-gray-400 dark:text-gray-400 text-sm">Loading goals…</div>
       ) : goals.length === 0 ? (
         <div className="card text-center py-12">
           <Target className="mx-auto text-indigo-300 dark:text-indigo-700 mb-3" size={40} />
@@ -225,10 +225,10 @@ export default function Goals() {
                 <div className="flex items-start justify-between mb-3">
                   <h3 className="font-semibold text-gray-900 dark:text-white leading-tight">{goal.name}</h3>
                   <div className="flex gap-1 shrink-0 ml-2">
-                    <button onClick={() => startEdit(goal)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500">
+                    <button onClick={() => startEdit(goal)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-400">
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => deleteMutation.mutate(goal.id)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 dark:text-gray-500 hover:text-red-500">
+                    <button onClick={() => deleteMutation.mutate(goal.id)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 dark:text-gray-400 hover:text-red-500">
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -266,7 +266,7 @@ export default function Goals() {
                       </div>
                     )}
                     {goal.notes && (
-                      <p className="text-xs text-gray-400 dark:text-gray-500 pt-1">{goal.notes}</p>
+                      <p className="text-xs text-gray-400 dark:text-gray-400 pt-1">{goal.notes}</p>
                     )}
                   </div>
                 </div>

@@ -88,7 +88,7 @@ export function VerificationFlagButton({
         type="button"
         onClick={toggle}
         title="Flag this as wrong"
-        className="text-gray-300 hover:text-red-500 dark:text-gray-600 dark:hover:text-red-400"
+        className="text-gray-300 hover:text-red-500 dark:text-gray-400 dark:hover:text-red-400"
       >
         <Flag size={14} />
       </button>

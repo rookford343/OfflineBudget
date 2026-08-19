@@ -90,7 +90,7 @@ export default function Layout() {
             if (visible.length === 0) return null;
             return (
               <div key={group.key} className="pt-3 first:pt-0">
-                <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">{group.label}</p>
+                <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-400">{group.label}</p>
                 {visible.map(item => (
                   <NavLink key={item.to} to={item.to} className={navLinkClass}>
                     <item.icon size={18} />

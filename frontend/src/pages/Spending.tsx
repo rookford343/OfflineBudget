@@ -20,12 +20,12 @@ function chartTheme() {
   const dark = isDarkMode();
   return {
     grid:    dark ? "#2c3040" : "#e5e7eb",
-    tick:    dark ? "#6e7888" : "#6b7280",
+    tick:    dark ? "#8f99a8" : "#6b7280",
     refLine: dark ? "#4a5568" : "#9ca3af",
     tooltip: dark ? "#1f2330" : "#ffffff",
     tooltipBorder: dark ? "#2c3040" : "#e5e7eb",
     tooltipText: dark ? "#c4ccd8" : "#111827",
-    tooltipMuted: dark ? "#6e7888" : "#6b7280",
+    tooltipMuted: dark ? "#8f99a8" : "#6b7280",
     barFill: dark ? "#818cf8" : "#6366f1",
   };
 }
@@ -221,6 +221,24 @@ export default function Spending() {
     .map((c: any) => ({ name: c.category_name, value: parseFloat(c.actual), color: c.color }));
 
   const ct = chartTheme();
+  // Category colours are user-set and some are pale, so white-on-swatch is a
+  // coin flip -- "Other" (#9ca3af) measured 2.54:1 and amber 3.19:1.
+  //
+  // Compare both candidates and take the better contrast rather than guessing
+  // from a luminance cutoff: a fixed threshold still picked white for both of
+  // those, because mid-tones are the exact case a single cutoff gets wrong.
+  const readableOn = (hex: string): string => {
+    const h = (hex || "#888888").replace("#", "");
+    if (h.length !== 6) return "#ffffff";
+    const lum = (c: string) => {
+      const [r, g, b] = [0, 2, 4].map(i => parseInt(c.slice(i, i + 2), 16) / 255);
+      const f = (v: number) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+      return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+    };
+    const ratio = (a: number, b: number) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    const L = lum(h);
+    return ratio(L, lum("1a1d26")) >= ratio(L, lum("ffffff")) ? "#1a1d26" : "#ffffff";
+  };
 
   function TooltipBox({ label, rows }: { label?: string; rows: { name: string; value: number; color?: string }[] }) {
     return (
@@ -265,7 +283,7 @@ export default function Spending() {
         <Sector cx={cx} cy={cy} innerRadius={innerRadius} outerRadius={outerRadius + 8} startAngle={startAngle} endAngle={endAngle} fill={fill} />
         <text x={cx} y={cy - 10} textAnchor="middle" fill={isDarkMode() ? "#c4ccd8" : "#111827"} fontSize={13} fontWeight={600}>{payload.name}</text>
         <text x={cx} y={cy + 8} textAnchor="middle" fill={isDarkMode() ? "#c4ccd8" : "#111827"} fontSize={12}>{fmt(value)}</text>
-        <text x={cx} y={cy + 24} textAnchor="middle" fill={isDarkMode() ? "#6e7888" : "#6b7280"} fontSize={11}>{pctStr}</text>
+        <text x={cx} y={cy + 24} textAnchor="middle" fill={isDarkMode() ? "#8f99a8" : "#6b7280"} fontSize={11}>{pctStr}</text>
       </g>
     );
   }
@@ -316,7 +334,7 @@ export default function Spending() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900 dark:text-[#c4ccd8] flex items-center gap-1.5">Spending <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
-          <p className="text-sm text-gray-500 dark:text-[#6e7888]">Across checking + all credit cards</p>
+          <p className="text-sm text-gray-500 dark:text-[#8f99a8]">Across checking + all credit cards</p>
         </div>
         <div className="flex gap-2 flex-wrap">
           <select className="input w-auto" value={sourceKey} onChange={e => { setSourceKey(e.target.value); setCatFilter(null); }}>
@@ -399,7 +417,7 @@ export default function Spending() {
           )}
 
           {trendBarData.length === 0 && rollingBarData.length === 0 && (
-            <div className="card text-center py-8 text-gray-400 dark:text-[#525d70] text-sm">
+            <div className="card text-center py-8 text-gray-400 dark:text-[#8a93a3] text-sm">
               No transaction data yet. Add transactions to see spending trends.
             </div>
           )}
@@ -468,7 +486,7 @@ export default function Spending() {
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-gray-400">click a bar for detail</span>
                   {avg > 0 && (
-                    <span className="text-xs text-gray-500 dark:text-[#6e7888]">
+                    <span className="text-xs text-gray-500 dark:text-[#8f99a8]">
                       avg {fmt(avg)}/mo
                     </span>
                   )}
@@ -571,12 +589,12 @@ export default function Spending() {
                         onClick={() => toggleCat(cat.id)}
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
                           on
-                            ? "border-transparent text-white opacity-90 hover:opacity-100"
-                            : "border-gray-200 dark:border-[#2c3040] text-gray-400 dark:text-[#525d70] bg-transparent"
+                            ? "border-transparent opacity-95 hover:opacity-100"
+                            : "border-gray-200 dark:border-[#2c3040] text-gray-400 dark:text-[#8a93a3] bg-transparent"
                         }`}
-                        style={on ? { background: cat.color } : {}}
+                        style={on ? { background: cat.color, color: readableOn(cat.color) } : {}}
                       >
-                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: on ? "rgba(255,255,255,0.6)" : cat.color }} />
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: on ? "currentColor" : cat.color, opacity: on ? 0.55 : 1 }} />
                         {cat.name}
                       </button>
                     );
@@ -645,10 +663,10 @@ export default function Spending() {
           <div className="card">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8]">Spending by Category</h3>
-              <span className="text-xs text-gray-400 dark:text-[#6e7888]">{budgetCategories.length} categories</span>
+              <span className="text-xs text-gray-400 dark:text-[#8f99a8]">{budgetCategories.length} categories</span>
             </div>
             {budgetCategories.length === 0 && (
-              <p className="text-sm text-gray-400 dark:text-[#525d70]">No categorized spending in this range.</p>
+              <p className="text-sm text-gray-400 dark:text-[#8a93a3]">No categorized spending in this range.</p>
             )}
             <div className="space-y-3">
               {budgetCategories.map((cat: any) => {
@@ -664,7 +682,7 @@ export default function Spending() {
                           {cat.category_name}
                         </span>
                         {cat.group && (
-                          <span className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-[#525d70] shrink-0">
+                          <span className="text-[10px] uppercase tracking-wide text-gray-400 dark:text-[#8a93a3] shrink-0">
                             {cat.group}
                           </span>
                         )}
@@ -673,7 +691,7 @@ export default function Spending() {
                         <span className={`font-semibold tabular-nums ${over ? "text-red-600 dark:text-[#cc7070]" : "text-gray-900 dark:text-[#c4ccd8]"}`}>
                           {fmt(actual)}
                         </span>
-                        <span className="text-xs text-gray-400 dark:text-[#6e7888] tabular-nums">
+                        <span className="text-xs text-gray-400 dark:text-[#8f99a8] tabular-nums">
                           {budgeted > 0 ? `of ${fmt(budgeted)}` : "unbudgeted"}
                         </span>
                       </div>
@@ -687,8 +705,8 @@ export default function Spending() {
         </>
       )}
 
-      {activeTab === "overview" && isLoading && <div className="text-center py-8 text-gray-400 dark:text-[#525d70] text-sm">Loading spending data…</div>}
-      {activeTab === "overview" && !isLoading && !overview && <div className="card text-center py-8 text-gray-400 dark:text-[#525d70]">Select a date range to view spending.</div>}
+      {activeTab === "overview" && isLoading && <div className="text-center py-8 text-gray-400 dark:text-[#8a93a3] text-sm">Loading spending data…</div>}
+      {activeTab === "overview" && !isLoading && !overview && <div className="card text-center py-8 text-gray-400 dark:text-[#8a93a3]">Select a date range to view spending.</div>}
 
       {activeTab === "merchants" && (
         <div className="space-y-4">
@@ -710,7 +728,7 @@ export default function Spending() {
             });
             const maxTotal = Math.max(...sorted.map((m: any) => Number(m.total)));
             function SortArrow({ col }: { col: "name" | "count" | "total" }) {
-              if (merchantSortCol !== col) return <span className="ml-1 text-gray-300 dark:text-gray-600">↕</span>;
+              if (merchantSortCol !== col) return <span className="ml-1 text-gray-300 dark:text-gray-400">↕</span>;
               return <span className="ml-1">{merchantSortDir === "asc" ? "↑" : "↓"}</span>;
             }
             return (
