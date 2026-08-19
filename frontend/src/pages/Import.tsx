@@ -5,6 +5,7 @@ import { fmt } from "../lib/utils";
 import { Upload, CheckCircle, AlertCircle, X, ArrowLeftRight, HelpCircle, Repeat, ChevronDown } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import { useNavigate } from "react-router-dom";
+import { sortCategoryList, byName } from "../lib/selectOptions";
 
 type SourceTab = "checking" | "card";
 
@@ -76,8 +77,8 @@ export default function Import() {
   const { data: recurringItems = [] } = useQuery({ queryKey: ["recurring"], queryFn: () => recurringApi.list() });
 
   const checkingAccounts = accounts.filter((a: any) => a.type === "checking");
-  const incomeCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]).filter((c: any) => c.type === "income");
-  const expenseCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]).filter((c: any) => c.type === "expense");
+  const incomeCats = sortCategoryList(categories.flatMap((c: any) => [c, ...(c.children ?? [])]).filter((c: any) => c.type === "income"), categories as any[]);
+  const expenseCats = sortCategoryList(categories.flatMap((c: any) => [c, ...(c.children ?? [])]).filter((c: any) => c.type === "expense"), categories as any[]);
   const allCats = [...incomeCats, ...expenseCats];
   const sources = tab === "checking" ? checkingAccounts : cards;
 

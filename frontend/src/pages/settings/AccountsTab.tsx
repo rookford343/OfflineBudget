@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, cardsApi, bankSyncApi } from "../../api";
 import { fmt, parseServerDateTime } from "../../lib/utils";
 import { Plus, Pencil, Trash2, X, Check, AlertTriangle, Link } from "lucide-react";
+import { sortCategoryList, byName } from "../../lib/selectOptions";
 
 const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", interest_rate: "", notes: "", is_emergency_fund: false };
 
@@ -211,7 +212,7 @@ export default function AccountsTab() {
                   >
                     <option value="">Select account or card…</option>
                     <optgroup label="Accounts">
-                      {accounts.map((acc: any) => <option key={`account:${acc.id}`} value={`account:${acc.id}`}>{acc.name}</option>)}
+                      {byName(accounts).map((acc: any) => <option key={`account:${acc.id}`} value={`account:${acc.id}`}>{acc.name}</option>)}
                     </optgroup>
                     <optgroup label="Credit Cards">
                       {cards.map((c: any) => <option key={`card:${c.id}`} value={`card:${c.id}`}>{c.name}</option>)}

@@ -130,3 +130,35 @@ def test_blank_pattern_is_rejected(db_session):
     user, item, cat = _seed(db_session)
     assert _client(db_session, user).post(
         f"/recurring/{item.id}/link-pattern", json={"pattern": "   "}).status_code == 422
+
+
+def test_a_linked_descriptor_stops_being_suggested(db_session):
+    """The suggestion list filters by normalized ITEM NAME, which a raw bank
+    descriptor never matches, so a linked pattern kept reappearing forever."""
+    from backend.services.recurring_detector import detect_patterns
+
+    user, item, cat = _seed(db_session)
+    before = [s.description for s in detect_patterns(db_session, user.id, min_occurrences=2)]
+    assert any(DESCRIPTOR in d for d in before)
+
+    _client(db_session, user).post(f"/recurring/{item.id}/link-pattern", json={"pattern": DESCRIPTOR})
+
+    after = [s.description for s in detect_patterns(db_session, user.id, min_occurrences=2)]
+    assert not any(DESCRIPTOR in d for d in after)
+
+
+def test_unlinked_descriptors_are_still_suggested(db_session):
+    """The filter must be scoped to linked rows, not suppress detection."""
+    from backend.services.recurring_detector import detect_patterns
+
+    user, item, cat = _seed(db_session)
+    acct = db_session.query(models.Account).filter_by(user_id=user.id).first()
+    for d in (date(2026, 6, 3), date(2026, 7, 3), date(2026, 8, 3)):
+        db_session.add(models.Transaction(user_id=user.id, account_id=acct.id, date=d,
+                                          amount=Decimal("-58.00"), description="GYM MEMBERSHIP 55512",
+                                          is_actual=True))
+    db_session.commit()
+    _client(db_session, user).post(f"/recurring/{item.id}/link-pattern", json={"pattern": DESCRIPTOR})
+
+    after = [s.description for s in detect_patterns(db_session, user.id, min_occurrences=2)]
+    assert any("GYM MEMBERSHIP" in d for d in after)
