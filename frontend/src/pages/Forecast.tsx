@@ -95,6 +95,26 @@ export default function Forecast() {
   // Market emergency fund; the emergency flag governs what counts as
   // *available* savings in reporting, not what he's allowed to look at, so
   // both are drawn here.
+  // Earliest real transaction across the savings accounts. Before that date
+  // the forecast reconstructs history by walking backward from today's
+  // balance, which is accurate only where a full transaction history exists.
+  // On an account synced for balance but not for history, that draws a
+  // confident flat line at today's figure across months when the true balance
+  // was very different -- a large transfer INTO savings makes everything
+  // before it look far too high. Better to plot nothing than to assert that.
+  const savingsHistoryQueries = useQueries({
+    queries: savingsAccounts.map((a: any) => ({
+      queryKey: ["savings-first-txn", a.id],
+      queryFn: () => transactionsApi.list({ account_id: a.id, limit: 500 }),
+      enabled: showSavings && savingsAccounts.length > 0,
+    })),
+  });
+  const savingsHistoryStart = (() => {
+    const dates: string[] = [];
+    savingsHistoryQueries.forEach((q: any) => (q.data ?? []).forEach((x: any) => dates.push(x.date)));
+    return dates.length ? dates.sort()[0] : null;
+  })();
+
   const savingsQueries = useQueries({
     queries: savingsAccounts.map((a: any) => ({
       queryKey: ["forecast-quarters", a.id, year, forecastYears],
@@ -355,7 +375,10 @@ export default function Forecast() {
   const mergedData = chartData.map(d => {
     const month = d.date.slice(0, 7);
     let savings: number | undefined;
-    if (hasSavingsSeries && !seenMonths.has(month)) {
+    // Today onward is a projection from the current balance, which is sound.
+    // Earlier than the first known transaction is not.
+    const plottable = d.date >= todayStr || (savingsHistoryStart != null && d.date >= savingsHistoryStart);
+    if (hasSavingsSeries && plottable && !seenMonths.has(month)) {
       seenMonths.add(month);
       savings = savingsByDate[d.date];
     }
