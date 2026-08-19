@@ -4,7 +4,9 @@ import { transactionsApi, accountsApi, categoriesApi, cardsApi, authApi, reconci
 import { fmt, today, firstOfMonth, quickRange } from "../lib/utils";
 import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check, Upload, Landmark, Code2 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import { CategoryOptions, AccountOptions } from "../lib/selectOptions";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
+import { sortCategoryList, byName } from "../lib/selectOptions";
 
 // A single row shape both checking transactions and card charges normalize
 // into for the "All" tab -- lets one table render a chronological, source-
@@ -264,7 +266,7 @@ export default function Transactions() {
     enabled: txnTab === "reconcile",
   });
 
-  const allCats = categories.flatMap((c: any) => [c, ...(c.children ?? [])]);
+  const allCats = sortCategoryList(categories.flatMap((c: any) => [c, ...(c.children ?? [])]), categories as any[]);
 
   const createMut = useMutation({
     mutationFn: transactionsApi.create,
