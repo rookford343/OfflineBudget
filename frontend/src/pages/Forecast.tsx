@@ -282,9 +282,25 @@ export default function Forecast() {
     4: new Date(year, 11, 31), // Dec 31
   };
 
+  // Every mutation below changes a planned expense that forecast-quarters and
+  // forecast-multi-year read from (forecast_engine.py queries PlannedExpense
+  // live on every request -- there's no backend cache to invalidate). The
+  // planned-expenses list refetches on its own key, but without also
+  // invalidating the two forecast keys, the chart/table silently keeps
+  // showing the pre-change projection until something unrelated happens to
+  // refetch it. Root cause of "I deleted a one-off and the forecast didn't
+  // update" (2026-08-24) -- was missing here, and settleMut was invalidating
+  // a "forecast" key that no query in this app actually uses (dead key, same
+  // symptom by a different path).
   const createExpenseMut = useMutation({
     mutationFn: plannedExpensesApi.create,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["planned-expenses"] }); setShowExpenseForm(false); setExpenseForm({ ...emptyExpense }); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["planned-expenses"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      setShowExpenseForm(false);
+      setExpenseForm({ ...emptyExpense });
+    },
   });
   // Settling a one-off closes the prediction against reality. Kept separate
   // from delete on purpose: deleting loses the estimate, and comparing the
@@ -296,7 +312,8 @@ export default function Forecast() {
       plannedExpensesApi.settle(id, actual),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["planned-expenses"] });
-      qc.invalidateQueries({ queryKey: ["forecast"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
       setSettleId(null);
       setSettleAmount("");
     },
@@ -304,11 +321,20 @@ export default function Forecast() {
 
   const deleteExpenseMut = useMutation({
     mutationFn: plannedExpensesApi.remove,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["planned-expenses"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["planned-expenses"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+    },
   });
   const updateExpenseMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: object }) => plannedExpensesApi.update(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["planned-expenses"] }); setEditExpenseId(null); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["planned-expenses"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      setEditExpenseId(null);
+    },
   });
 
   const { data: scenarioQuarters = [] } = useQuery({
