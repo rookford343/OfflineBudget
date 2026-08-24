@@ -48,8 +48,14 @@ export default function Recurring() {
   const invalidateBills = () => {
     qc.invalidateQueries({ queryKey: ["bill-overrides"] });
     // The forecast reads these, so a stale projection would otherwise sit on
-    // screen showing the estimate that was just replaced.
-    qc.invalidateQueries({ queryKey: ["forecast"] });
+    // screen showing the estimate that was just replaced. Was invalidating a
+    // "forecast" key that matches nothing -- every real forecast query key is
+    // "forecast-quarters"/"forecast-multi-year"/"forecast-risk" (a distinct
+    // string, not a shared array prefix with "forecast"), same dead-key bug
+    // found in Forecast.tsx's settleMut on 2026-08-24.
+    qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+    qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+    qc.invalidateQueries({ queryKey: ["forecast-risk"] });
     qc.invalidateQueries({ queryKey: ["budget-snapshot"] });
   };
   const linkMut = useMutation({
