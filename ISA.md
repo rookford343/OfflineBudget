@@ -1,127 +1,331 @@
 ---
-task: "Phase 1 Tier 3 Visual Polish — SparkLine + Dashboard"
-slug: 20260507-offlinebudget-phase1-tier3
+task: "Securo-Inspired Frontend Uplift — Phase 1"
+slug: 20260820-offlinebudget-securo-frontend-uplift-phase1
 project: OfflineBudget
-effort: E3
+effort: E4
 effort_source: classifier
-phase: complete
-progress: 34/34
+phase: scoping
+progress: 1/29
 mode: interactive
-started: 2026-05-07T00:00:00Z
-updated: 2026-05-07T00:00:00Z
+started: 2026-08-20T00:00:00Z
+updated: 2026-08-24T00:00:00Z
 ---
 
 ## Problem
 
-OfflineBudget Phase 1 Visual Polish Tier 1 and Tier 2 are complete — charts use AreaChart with gradients, ProgressRing and TrendBadge components exist, Goals page uses rings, Spending page uses activeShape, Recurring page has frequency badges and cash flow card. Tier 3 is the remaining gap: the Dashboard stat cards lack stagger animations, TrendBadge is not wired to any Dashboard data, there is no SparkLine component, and the Available to Spend card has no hero gradient treatment.
+OfflineBudget's UI works but reads as functional rather than polished next to
+comparable self-hosted budgeting apps. A competitive scan of Securo
+(usesecuro.com/github.com/securo-finance/securo, AGPL-3.0, full research and
+screenshot-derived notes at `docs/securo-comparison.md`) surfaced concrete,
+reimplementable UI patterns OfflineBudget doesn't currently have: pages that
+fit one viewport height with no scroll, a plain-language pacing sentence on
+the dashboard instead of a chart the user has to interpret, a consistent
+icon-left dropdown/progress-bar treatment, and a grouped rather than flat
+settings menu. Dan wants the frontend uplifted to match before any Phase 2
+feature work (household splitting, investment tracking, etc. — tracked
+separately, out of scope here).
 
 ## Vision
 
-Opening the dashboard feels like a polished financial app — stat cards slide in with stagger timing, a subtle gradient hero card anchors the "Available to Spend" section, and the Net Position card shows a tiny inline sparkline + trend badge that instantly communicates direction without needing to navigate away. The visual hierarchy makes the most important number (available cash) feel prominent.
+Opening OfflineBudget feels as tight as the best self-hosted finance apps in
+its category: the Dashboard fits one screen with no scrolling, a plain-English
+sentence tells you at a glance whether you're on pace or heading for trouble
+this month, budget category rows read at a glance via consistent progress
+bars, and every page — light or dark — feels like one coherent design system
+rather than a page-by-page patchwork. Nothing about the code or assets is
+borrowed; every pattern here is rebuilt in OfflineBudget's own components from
+written observation of a competitor's UI.
 
 ## Out of Scope
 
-New backend endpoints for sparkline data are not included — sparklines consume the existing `/spending/rolling-monthly` endpoint already available in the frontend. This task does not touch any backend Python files. Phase 2 (AI Agent) and Phase 3+ are out of scope. No changes to any existing chart page (Forecast, NetWorth, Spending, Goals, Budget, Recurring).
+Phase 2 feature work — household expense splitting, investment/asset
+portfolio tracking, credit-card billing-cycle auto-grouping, 2FA — is
+explicitly out of scope for this ISA; see `docs/securo-comparison.md` §
+"Phase 2 — Feature work" for that separate future pass. No backend schema
+changes. No new API endpoints beyond what's needed to surface data the
+backend already computes (e.g. the pacing sentence uses existing forecast
+output). No Securo AI-agent-style feature. No Kubernetes/Helm deploy tooling.
+No multi-currency support. Copying Securo's Cash Flow report is explicitly
+rejected as redundant with OfflineBudget's existing Forecast page (Decisions).
 
 ## Constraints
 
-- SparkLine.tsx must be pure SVG — no Recharts, no D3, no charting libraries.
-- TrendBadge wiring uses only data already fetched or fetched via existing API endpoints.
-- All visual changes must work in both dark and light mode.
+- **License boundary (hard constraint):** Securo is AGPL-3.0. No source file,
+  CSS, SVG/icon asset, or image from `github.com/securo-finance/securo` may be
+  copied, adapted-in-place, or vendored into this repo. Every claim below is
+  implemented as an independent OfflineBudget component built from written
+  pattern descriptions in `docs/securo-comparison.md`, never by referencing
+  Securo's actual source.
+- All visual changes must work in both dark and light mode (existing project
+  convention, carried forward from the prior Tier 3 ISA).
 - Zero new TypeScript errors (`npx tsc --noEmit` must pass after changes).
-- Do not modify any file outside `frontend/src/` or create new backend files.
+- Do not modify backend Python files for any claim in this ISA — this is a
+  frontend-only pass. The one exception is if the pacing-sentence claim (F8)
+  needs a new computed field; if so, it must reuse the existing forecast
+  calculation, not introduce new financial logic (that belongs to a separate,
+  reviewed change).
+- Existing "progressive disclosure" philosophy (one headline number, detail
+  one click away) is a design identity to reconcile against, not discard —
+  Securo's denser stat-header pattern must be adapted down, not copied
+  wholesale (see F3).
 
 ## Goal
 
-Create `SparkLine.tsx` (pure SVG, 64px default width), update the Dashboard to import and use TrendBadge + SparkLine on stat cards with stagger animation, apply a hero gradient to the Available to Spend card, wire MoM percentage to TrendBadge on Net Position using `rollingMonthly` data, and verify zero TypeScript errors and correct dark/light mode rendering.
+Ship the nine Phase 1 frontend patterns identified in
+`docs/securo-comparison.md` — chart vocabulary audit, category progress bars,
+a reconciled dashboard stat header, dark/light parity, spacing/density pass,
+nav flattening, fit-to-viewport no-scroll layout, and a plain-language pacing
+sentence — verified via grep/build checks and confirmed license-clean via git
+diff showing no Securo-sourced files, with the Budget config-vs-monitoring
+split left as an open decision for Dan before it becomes a claim.
 
-## Criteria
+## Not yet specified
 
-- [x] ISC-1: `frontend/src/components/SparkLine.tsx` file exists
-- [x] ISC-2: SparkLine accepts `data: number[]` as a required prop (grep interface)
-- [x] ISC-3: SparkLine accepts optional `width` prop defaulting to 64 (grep default)
-- [x] ISC-4: SparkLine accepts optional `height` prop defaulting to 32 (grep default)
-- [x] ISC-5: SparkLine renders an `<svg>` element containing a `<polyline>` or `<path>` (grep)
-- [x] ISC-6: SparkLine renders a gradient fill element (`<defs>` + `<linearGradient>`) (grep)
-- [x] ISC-7: SparkLine renders a final-value dot (`<circle>` at last data point) (grep)
-- [x] ISC-8: SparkLine returns null when `data.length < 2` (grep early-return)
-- [x] ISC-9: SparkLine is exported as a named export `export function SparkLine` (grep)
-- [x] ISC-10: SparkLine uses CSS variable or dark-aware class for stroke color (grep `dark:`)
-- [x] ISC-11: `Dashboard.tsx` imports TrendBadge from `../components/TrendBadge` (grep)
-- [x] ISC-12: `Dashboard.tsx` imports SparkLine from `../components/SparkLine` (grep)
-- [x] ISC-13: `Dashboard.tsx` calls `analyticsApi.rollingMonthly(6)` via useQuery (grep)
-- [x] ISC-14: `Dashboard.tsx` computes `momPct` (current-month vs prior-month spending from rollingMonthly) (grep `momPct`)
-- [x] ISC-15: Net Position stat card renders `<TrendBadge pct={momPct} inverse />` (grep)
-- [x] ISC-16: At least one Dashboard stat card renders `<SparkLine data={sparkData} />` (grep)
-- [x] ISC-17: Dashboard stat card grid div has `animate-fade-slide-up` on each card (grep)
-- [x] ISC-18: Stat cards in the 4-card grid use stagger delay classes (grep `animate-delay-`)
-- [x] ISC-19: Available to Spend card has a gradient background class or inline style (grep `gradient\|from-indigo\|bg-gradient`)
-- [x] ISC-20: Available to Spend gradient is dark-mode-aware (grep `dark:` near gradient)
-- [x] ISC-21: Net Position stat card uses dynamic `stat-card-accent-green` or `stat-card-accent-red` class (grep)
-- [x] ISC-22: Checking stat card uses `stat-card-accent-indigo` or similar fixed accent (grep `stat-card-accent`)
-- [x] ISC-23: `npx tsc --noEmit` exits 0 in the frontend directory (bash)
-- [x] ISC-24: SparkLine TypeScript interface has no `any` types (grep `any` in SparkLine.tsx)
-- [x] ISC-25: `analyticsApi.rollingMonthly` is already defined in `frontend/src/api/index.ts` (grep — no new API method needed)
-- [x] ISC-26: SparkLine has no import from `recharts` or `d3` (grep)
-- [x] ISC-27: Anti: No Python files in `backend/` are modified (git diff --name-only)
-- [x] ISC-28: Anti: No new API endpoint is added to backend (git diff --name-only confirms no backend changes)
-- [x] ISC-29: Anti: `Forecast.tsx`, `NetWorth.tsx`, `Spending.tsx`, `Goals.tsx`, `Budget.tsx` are unchanged (git diff --name-only)
-- [x] ISC-30: Animation delay classes `animate-delay-100` through `animate-delay-400` exist in `index.css` (grep)
-- [x] ISC-31: `progress-fill` in `index.css` retains `cubic-bezier(0.34, 1.56, 0.64, 1)` spring timing (grep)
-- [x] ISC-32: SparkLine color prop defaults to `#6366f1` (indigo, consistent with brand) (grep)
-- [x] ISC-33: SparkLine uses `useId()` or stable unique key for `<linearGradient id>` to prevent multi-instance ID collision (grep `useId`)
-- [x] ISC-34: SparkLine guards against flat data — when min === max, uses a safe fallback Y range (grep `min === max` or epsilon logic)
-
-## Test Strategy
-
-| isc | type | check | threshold | tool |
-|-----|------|-------|-----------|------|
-| ISC-1 | file-exists | `ls frontend/src/components/SparkLine.tsx` | exits 0 | Bash |
-| ISC-2 | grep | `data: number\[\]` in SparkLine.tsx | 1+ match | Grep |
-| ISC-3 | grep | `width = 64` in SparkLine.tsx | 1+ match | Grep |
-| ISC-4 | grep | `height = 32` in SparkLine.tsx | 1+ match | Grep |
-| ISC-5 | grep | `<svg` and `polyline\|path` in SparkLine.tsx | 1+ match each | Grep |
-| ISC-6 | grep | `linearGradient` in SparkLine.tsx | 1+ match | Grep |
-| ISC-7 | grep | `<circle` in SparkLine.tsx | 1+ match | Grep |
-| ISC-8 | grep | `data.length < 2` return null in SparkLine.tsx | 1+ match | Grep |
-| ISC-9 | grep | `export function SparkLine` in SparkLine.tsx | 1+ match | Grep |
-| ISC-10 | grep | `dark:` in SparkLine.tsx | 1+ match | Grep |
-| ISC-11 | grep | `import.*TrendBadge` in Dashboard.tsx | 1+ match | Grep |
-| ISC-12 | grep | `import.*SparkLine` in Dashboard.tsx | 1+ match | Grep |
-| ISC-13 | grep | `rollingMonthly` in Dashboard.tsx | 1+ match | Grep |
-| ISC-14 | grep | `momPct` in Dashboard.tsx | 1+ match | Grep |
-| ISC-15 | grep | `TrendBadge` in Dashboard.tsx JSX | 1+ match | Grep |
-| ISC-16 | grep | `SparkLine` in Dashboard.tsx JSX | 1+ match | Grep |
-| ISC-17 | grep | `animate-fade-slide-up` in stat-card divs in Dashboard.tsx | 1+ match | Grep |
-| ISC-18 | grep | `animate-delay-` in Dashboard.tsx | 2+ match | Grep |
-| ISC-19 | grep | `gradient\|from-indigo\|bg-gradient` in Dashboard.tsx | 1+ match | Grep |
-| ISC-20 | grep | `dark:` near gradient in Dashboard.tsx | 1+ match | Grep |
-| ISC-21 | grep | `stat-card-accent-green\|stat-card-accent-red` in Dashboard.tsx dynamically | 1+ match | Grep |
-| ISC-22 | grep | `stat-card-accent` in Dashboard.tsx | 2+ match | Grep |
-| ISC-23 | build | `cd frontend && npx tsc --noEmit` | exit 0 | Bash |
-| ISC-24 | grep | no `any` in SparkLine.tsx | 0 matches | Grep |
-| ISC-25 | grep | `rollingMonthly` in api/index.ts | 1+ match | Grep |
-| ISC-26 | grep | no `recharts\|d3` in SparkLine.tsx | 0 matches | Grep |
-| ISC-27 | git | `git diff --name-only` no `backend/` paths | 0 backend files | Bash |
-| ISC-28 | git | `git diff --name-only` no Python files | 0 `.py` files | Bash |
-| ISC-29 | git | `git diff --name-only` no Forecast/NetWorth/Spending/Goals/Budget | 0 matches | Bash |
-| ISC-30 | grep | `animate-delay-100` and `animate-delay-400` in index.css | 1+ each | Grep |
-| ISC-31 | grep | `cubic-bezier(0.34, 1.56, 0.64, 1)` in index.css | 1+ match | Grep |
-| ISC-32 | grep | `#6366f1` default in SparkLine.tsx | 1+ match | Grep |
+- fog: Should the Budget page split into a separate "configure limits" table
+  view and a "track spending" progress view (Securo's pattern), or stay
+  merged as OfflineBudget currently has it? Statable but not yet decided —
+  needs Dan's call before it can become an ISC. See
+  `docs/securo-comparison.md` § Budgets (setup) page.
+- fog: Exact hex values, spacing units, and border-radius figures for the
+  visual-uplift claims below are sourced from static screenshot inspection,
+  not a live-rendered pass. A live Interceptor walkthrough of
+  `demo.usesecuro.com` (blocked this session — `INTERCEPTOR_TEST_CONTEXT_ID`
+  not configured on this machine) would sharpen F1/F2/F4/F5 from "directionally
+  right" to "pixel-verified." Not required to start building, but should
+  happen before final polish/close.
+- fog: What specifically about the shipped visual changes didn't match what
+  Dan wanted — he rolled the code back (2026-08-24) without specifying which
+  parts read wrong. Needs a conversation before re-attempting any of
+  F1–F8 (see Decisions).
 
 ## Features
 
-| name | description | satisfies | depends_on | parallelizable |
-|------|-------------|-----------|------------|----------------|
-| SparkLine component | Create pure-SVG SparkLine.tsx with gradient fill, dot, dark mode, guard | ISC-1 through ISC-10, ISC-24, ISC-26, ISC-32 | none | true |
-| Dashboard TrendBadge wiring | Import TrendBadge+SparkLine, add rollingMonthly query, compute momPct, render in Net Position card | ISC-11 through ISC-16, ISC-25 | SparkLine component | false |
-| Dashboard stat card polish | Add stagger animation, stat-card-accent classes, hero gradient to ATS card | ISC-17 through ISC-22, ISC-30 | none | true |
-| TypeScript verification | Confirm zero type errors after all changes | ISC-23 | Dashboard TrendBadge wiring, SparkLine component | false |
-| Regression guard | Confirm backend untouched, other pages untouched, animation CSS intact | ISC-27 through ISC-31 | all above | false |
+### F1 · Chart vocabulary audit
+Why: Securo deliberately restricts itself to stat tiles, progress bars, and
+one dual-line time series — no pies/donuts/treemaps. OfflineBudget already
+has a Sankey (keep it) and other chart types; done means every chart on every
+page has been checked against this restrained bar and anything busier than
+necessary is either simplified or justified.
+
+- [ ] ISC-1: A written audit note (`docs/securo-comparison.md` or a new
+      `docs/chart-audit.md`) lists every chart component currently rendered
+      across `frontend/src/pages/*.tsx` with its chart type, and marks each
+      as keep/simplify/no-change (file-exists + manual content check)
+- [ ] ISC-2: No new chart type is introduced anywhere in this ISA's changes
+      that isn't already one of: stat tile, progress bar, single/dual-line
+      time series, or the existing Sankey (grep diff for new chart imports)
+
+### F2 · Category progress bars
+Why: Budget category rows should read at a glance — spent/of-budgeted amount,
+horizontal bar, color shift on breach — matching the clarity of Securo's
+pattern without copying its code.
+
+- [ ] ISC-3: `frontend/src/pages/Budget.tsx` (or a new
+      `CategoryProgressBar.tsx` component it imports) renders a horizontal
+      progress bar per budget category showing spent-of-limit (grep for a
+      progress-bar element/component in the diff)
+- [ ] ISC-4: The progress bar's fill color changes based on spend ratio —
+      under ~80% one color, 80–100% a warning color, over 100% a breach color
+      (grep for a ratio-based conditional class/style)
+- [ ] ISC-5: Each progress bar row shows "R$X of R$Y"-equivalent subtext
+      (amount spent of amount budgeted) beneath or beside the bar (grep JSX
+      for the spent/limit text pairing)
+- [ ] ISC-6: Component works in both dark and light mode (grep `dark:` near
+      the progress-bar styling)
+
+### F3 · Dashboard stat header (reconciled, not copied)
+Why: Securo leads with 4+ stat tiles; OfflineBudget's identity is one
+headline number with detail a click away. Done means the dashboard gets a
+compact stat row that respects that identity — fewer tiles, headline number
+still visually dominant — rather than importing Securo's density wholesale.
+
+- [ ] ISC-7: `frontend/src/pages/Dashboard.tsx` stat row shows no more than 3
+      stat tiles alongside the existing headline number, not 4+ (manual
+      count against the rendered component / grep count of stat-tile JSX
+      blocks)
+- [ ] ISC-8: The existing headline "Available to Spend"-style number remains
+      visually largest on the page (unchanged font-size class or larger,
+      confirmed by diff not shrinking it)
+- [ ] ISC-9: Anti: the dashboard does not add a Securo-style multi-line
+      "by currency" or "owed to you" sub-breakdown unless Phase 2 splitting
+      work (out of scope here) has shipped first (grep diff for premature
+      cross-feature UI)
+
+### F4 · Dark/light parity
+Why: Both themes should get equal design attention, not dark-as-primary and
+light-as-afterthought.
+
+- [ ] ISC-10: Every component touched by F1–F8 has a `dark:` Tailwind variant
+      (or dark-aware CSS) for every new color/background introduced (grep
+      diff: each new `bg-`/`text-`/`border-` class touched has a paired
+      `dark:` class)
+- [ ] ISC-11: A manual check (screenshot or visual read) confirms no new
+      element is illegible or missing contrast in either theme (manual —
+      logged in Verification, not automatable via grep)
+
+### F5 · Spacing/density pass
+Why: Match Securo's "generous padding, moderate-to-high but well-gutted"
+density — tighten anything currently cramped or overly sparse without
+copying exact values.
+
+- [ ] ISC-12: At least one existing page's card/container padding is measured
+      against the current Tailwind spacing scale and adjusted where it
+      diverges most from a consistent rhythm (grep diff shows updated
+      padding/margin classes on at least one page)
+- [ ] ISC-13: Anti: no page's information density increases to the point that
+      more scrolling is required than before this ISA (manual check against
+      F7)
+
+### F6 · Nav flattening
+Why: Securo's sidebar is flat with most sections one click away. Confirm
+OfflineBudget's nav doesn't bury anything unnecessarily deep.
+
+- [ ] ISC-14: A written nav-depth audit (in Decisions or a short note) lists
+      every top-level and nested route in `frontend/src/components/Layout.tsx`
+      with its click-depth from the sidebar, and flags anything more than one
+      click deep that doesn't need to be (manual audit, logged)
+- [ ] ISC-15: Any route flagged as unnecessarily buried in ISC-14 is promoted
+      to a top-level sidebar item (grep diff of `Layout.tsx` nav array)
+
+### F7 · Fit-to-viewport, no-scroll page layout
+Why: Securo composes pages to fit one screen height (fixed header/tab zone,
+cards sized to fill remaining space) rather than scrolling indefinitely. This
+is a structural layout change, not a spacing tweak.
+
+- [ ] ISC-16: `frontend/src/pages/Dashboard.tsx`'s top-level container uses a
+      height-constrained layout (e.g. `h-screen`/`h-full` + flex/grid with
+      `overflow-hidden` on the outer shell) rather than natural document flow
+      (grep for viewport-height layout classes in the diff)
+- [ ] ISC-17: Any card whose content would overflow its allotted space scrolls
+      internally (`overflow-y-auto` on the card, not the page) rather than
+      pushing the page taller (grep for internal-scroll classes on at least
+      one card)
+- [ ] ISC-18: A manual check at a common viewport size (e.g. 1440×900)
+      confirms the Dashboard requires no vertical page scroll (manual,
+      logged in Verification)
+- [ ] ISC-19: Anti: no page becomes *less* usable on a smaller viewport
+      (e.g. 1280×800) as a result of the height-constrained layout — internal
+      scroll areas must still be reachable (manual check)
+
+### F8 · Plain-language pacing sentence
+Why: Directly matches Dan's long-standing #1 forecast priority — replace a
+chart the user has to eyeball for negative-balance risk with a computed
+sentence. Securo's version ("At this pace, you'll spend R$X by month end") is
+spend-pace framed; OfflineBudget's existing forecast priority is
+balance-negative framed — this claim adapts the *mechanism* (a sentence, not
+a chart), not the exact wording.
+
+- [ ] ISC-20: `frontend/src/pages/Dashboard.tsx` (or the existing forecast
+      summary component) renders a single computed sentence describing
+      projected checking-balance risk this month, sourced from the existing
+      forecast/Safety-Margin calculation already in the backend (grep for the
+      new sentence-rendering JSX)
+- [ ] ISC-21: The sentence updates based on real forecast data — not a static
+      string (grep confirms it interpolates a computed value, e.g. a date or
+      dollar amount from forecast state)
+- [ ] ISC-22: Anti: no new financial calculation logic is introduced in the
+      backend for this claim — the sentence consumes an existing computed
+      value (git diff --name-only shows no new/changed files under
+      `backend/` for this ISC, or if a field is added it's a formatting
+      pass-through of an existing calculation, confirmed in Decisions)
+- [ ] ISC-23: The sentence is visually adjacent to (not replacing) the
+      existing Safety Margin / Spendable-this-week display, since those
+      metrics answer a different question per prior product decisions (manual
+      check against existing Dashboard layout)
+
+### F0 · Cross-cutting
+
+- [ ] ISC-24: `npx tsc --noEmit` exits 0 in `frontend/` after all F1–F8
+      changes (bash)
+- [ ] ISC-25: Anti: no file under `backend/` is modified except as explicitly
+      permitted by F8/ISC-22 (git diff --name-only)
+- [ ] ISC-26: Anti: no file, asset, or string literal copied verbatim from
+      `github.com/securo-finance/securo` appears anywhere in the diff — every
+      new component is original OfflineBudget code (manual review of diff
+      against `docs/securo-comparison.md`'s license note)
+- [ ] ISC-27: Anti: no new dependency on a charting library beyond what
+      `frontend/package.json` already includes is added without an explicit
+      Decisions entry justifying it (grep `package.json` diff)
+- [ ] ISC-28: All claims above render correctly in both dark and light mode
+      (rollup check — see F4/ISC-10, ISC-11)
+- [x] ISC-29: Dan has reviewed this ISA before any implementation work begins
+      (manual — Dan's explicit go-ahead, logged in Decisions)
+
+## Test Strategy
+
+| isc | type | check | threshold | tool | anchors_to |
+|-----|------|-------|-----------|------|------------|
+| ISC-1 | manual | audit note exists and lists all chart components | present | Read | F1 |
+| ISC-2 | grep | new chart-library imports in diff | 0 unexpected | Grep | F1 |
+| ISC-3 | grep | progress-bar element/component in Budget.tsx diff | 1+ match | Grep | F2 |
+| ISC-4 | grep | ratio-based conditional class near progress bar | 1+ match | Grep | F2 |
+| ISC-5 | grep | spent/limit text pairing in JSX | 1+ match | Grep | F2 |
+| ISC-6 | grep | `dark:` near progress-bar styling | 1+ match | Grep | F2 |
+| ISC-7 | manual | count of stat-tile JSX blocks in Dashboard.tsx | ≤3 | Read | F3 |
+| ISC-8 | manual | headline number font-size class unchanged or larger | confirmed | Read | F3 |
+| ISC-9 | grep | Securo-style by-currency/owed-to-you block in diff | 0 matches | Grep | F3 |
+| ISC-10 | grep | `dark:` variant paired with each new color class | 1:1 pairing | Grep | F4 |
+| ISC-11 | manual | visual read in both themes | no contrast issues | Read | F4 |
+| ISC-12 | grep | updated padding/margin classes in diff | 1+ match | Grep | F5 |
+| ISC-13 | manual | scroll-height comparison before/after | not increased | Read | F5 |
+| ISC-14 | manual | nav-depth audit note | present, logged | Read | F6 |
+| ISC-15 | grep | `Layout.tsx` nav array diff | matches ISC-14 flags | Grep | F6 |
+| ISC-16 | grep | viewport-height layout classes in Dashboard.tsx diff | 1+ match | Grep | F7 |
+| ISC-17 | grep | internal-scroll class on at least one card | 1+ match | Grep | F7 |
+| ISC-18 | manual | no page scroll at 1440×900 | confirmed | Read | F7 |
+| ISC-19 | manual | usable at 1280×800 | confirmed | Read | F7 |
+| ISC-20 | grep | new sentence-rendering JSX in Dashboard.tsx | 1+ match | Grep | F8 |
+| ISC-21 | grep | interpolated computed value in sentence | 1+ match | Grep | F8 |
+| ISC-22 | git | `git diff --name-only` backend/ changes | 0 unless justified | Bash | F8 |
+| ISC-23 | manual | sentence placed adjacent to Safety Margin display | confirmed | Read | F8 |
+| ISC-24 | build | `cd frontend && npx tsc --noEmit` | exit 0 | Bash | F0 |
+| ISC-25 | git | `git diff --name-only` backend/ paths | 0 unless F8-justified | Bash | F0 |
+| ISC-26 | manual | diff review against Securo source | no verbatim copies | Read | F0 |
+| ISC-27 | grep | `package.json` diff for new chart deps | 0 unless justified | Grep | F0 |
+| ISC-28 | manual | rollup dark/light check | confirmed | Read | F0 |
+| ISC-29 | manual | Dan's explicit go-ahead | confirmed | Read | F0 |
 
 ## Decisions
 
-- 2026-05-07: Tier 1+2 confirmed complete from codebase scan. Scope narrowed to Tier 3 only.
-- 2026-05-07: SparkLine uses existing `rollingMonthly` endpoint — no new backend needed.
-- 2026-05-07: momPct computed client-side from last two months in rollingMonthly array.
-- 2026-05-07: Project ISA home chosen at `<project>/ISA.md` per v6.2.0 doctrine.
+- 2026-08-20: New task-scoped ISA written at project-ISA home (`ISA.md`),
+  superseding the completed 2026-05-07 Tier 3 Visual Polish ISA per project
+  convention — git history preserves the prior content (`git log -- ISA.md`).
+- 2026-08-20: Scope locked to Phase 1 (frontend/visual) from
+  `docs/securo-comparison.md`'s phased plan. Phase 2 feature work
+  (household splitting, investment tracking, CC billing-cycle grouping, 2FA)
+  deliberately excluded — separate future ISA.
+- 2026-08-20: Securo's Cash Flow report is not adopted — redundant with
+  OfflineBudget's existing day-by-day Forecast page (per
+  `docs/securo-comparison.md` § Real gaps).
+- 2026-08-20: Budget page config-vs-monitoring split left as fog, not a
+  claim — needs Dan's decision before it's scoped (see Not yet specified).
+- 2026-08-20: Phase 8's pacing sentence is scoped to *reuse* existing
+  forecast/Safety-Margin computation, not introduce new financial logic —
+  keeps this ISA frontend-only per Constraints.
+- 2026-08-20: Dan gave explicit go-ahead to build ("I am good to move to
+  build"). ISC-29 checked, `phase` moved to `climbing`.
+- 2026-08-20: Build attempt #1 (Forge) failed clean at startup — codex CLI
+  not installed on this machine, zero writes.
+- 2026-08-20: Build attempt #2 (Engineer) failed at startup — that agent
+  forces worktree isolation by default, which errors because the session
+  root (`~/Programming`) isn't itself a git repo.
+- 2026-08-20: Build attempt #3 (general-purpose agent, no isolation, working
+  directly on `main` per repo convention) completed 24/29 ISCs across 8
+  commits: F6 audit (no change needed), F7 fit-to-viewport Dashboard layout,
+  F3 trimmed stat row, F8 `PacingSentence` component (pure formatting
+  pass-through of `budget-snapshot` fields, zero backend changes), F2
+  `CategoryProgressBar` extracted into Budget.tsx, F1 chart audit (removed
+  dead pie/donut code in Spending.tsx as a byproduct), F4 dark-parity grep
+  audit, F5 padding consistency pass. Remaining 5 ISCs needed live-browser
+  verification, blocked on Interceptor setup.
+- **2026-08-24: Dan reviewed the shipped result and said it "didn't reflect
+  what I wanted" and asked to reverse the visual changes.** All 8 commits
+  from attempt #3 were unpushed and sat cleanly on top of `origin/main`
+  (0 behind, 8 ahead, nothing else landed in between), so
+  `git reset --hard` to the pre-build commit cleanly reverted all code with
+  no side effects on other work. `phase` moved back to `scoping`,
+  `progress` reset to 1/29 (only ISC-29's approval-to-build survives as
+  still-true), and every F1–F8 checkbox reopened. What specifically read
+  wrong was not captured before the revert — logged as fog; needs a
+  conversation before any re-attempt so the next pass doesn't repeat the
+  same miss blind.
