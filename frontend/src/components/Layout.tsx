@@ -2,10 +2,11 @@ import { useState, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clearAuth, getUser } from "../store/auth";
-import { authApi, accountsApi } from "../api";
+import { authApi, accountsApi, transactionsApi } from "../api";
 import QuickStartWizard from "./QuickStartWizard";
-import { LogOut } from "lucide-react";
-import { cx, fmt } from "../lib/utils";
+import { TrendBadge } from "./TrendBadge";
+import { LogOut, Eye, EyeOff } from "lucide-react";
+import { cx, fmt, firstOfMonth } from "../lib/utils";
 import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
 
 export default function Layout() {
@@ -18,9 +19,19 @@ export default function Layout() {
     queryFn: accountsApi.list,
     staleTime: 30_000,
   });
+  // This month's transactions, fetched once and grouped per-account below --
+  // there's no stored per-account balance history, so "% change" is derived
+  // from actual transaction flow (net this-month flow ÷ start-of-month
+  // balance) rather than a number with no real basis behind it.
+  const { data: monthTxns = [] } = useQuery({
+    queryKey: ["transactions", { start: firstOfMonth() }],
+    queryFn: () => transactionsApi.list({ start: firstOfMonth() }),
+    staleTime: 30_000,
+  });
   const [wizardOpen, setWizardOpen] = useState(false);
   const [pinned, setPinned] = useState<string[]>(loadPinnedNav);
   const [accountsExpanded, setAccountsExpanded] = useState(false);
+  const [balancesHidden, setBalancesHidden] = useState(false);
 
   // Latch open once on first load if no accounts exist — don't re-derive from live query
   // so the wizard stays visible after step 1 creates the first account.
@@ -66,9 +77,29 @@ export default function Layout() {
     return cx(isActive ? "nav-link-active" : "nav-link");
   }
 
-  const sortedAccounts = [...(accounts as any[])].sort(
-    (a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name)
-  );
+  // Emergency-fund accounts (Money Market) sort last -- they're not part of
+  // day-to-day spending, so they belong at the bottom of the list, not
+  // wherever alphabetical type ordering happens to land them.
+  const sortedAccounts = [...(accounts as any[])].sort((a, b) => {
+    if (!!a.is_emergency_fund !== !!b.is_emergency_fund) return a.is_emergency_fund ? 1 : -1;
+    return a.type.localeCompare(b.type) || a.name.localeCompare(b.name);
+  });
+
+  // Net flow this month per account, from the transactions query above.
+  const flowByAccount: Record<number, number> = {};
+  (monthTxns as any[]).forEach(t => {
+    flowByAccount[t.account_id] = (flowByAccount[t.account_id] ?? 0) + parseFloat(t.amount);
+  });
+
+  // % change = this month's net flow over the balance before it. Null when
+  // the start-of-month balance is too close to zero for a percentage to be
+  // meaningful (avoids a wild or divide-by-near-zero number).
+  function pctChangeFor(a: any): number | null {
+    const flow = flowByAccount[a.id] ?? 0;
+    const startBalance = parseFloat(a.current_balance) - flow;
+    if (Math.abs(startBalance) < 0.01) return null;
+    return (flow / startBalance) * 100;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -113,28 +144,48 @@ export default function Layout() {
         </nav>
         {sortedAccounts.length > 0 && (
           <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700">
-            <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-400">
-              Accounts
-            </p>
+            <div className="flex items-center justify-between px-2 pb-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-400">
+                Accounts
+              </p>
+              <button
+                onClick={() => setBalancesHidden(h => !h)}
+                className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                title={balancesHidden ? "Show account details" : "Hide account details"}
+                aria-label={balancesHidden ? "Show account details" : "Hide account details"}
+              >
+                {balancesHidden ? <EyeOff size={14} /> : <Eye size={14} />}
+              </button>
+            </div>
             <ul className="space-y-0.5">
-              {(accountsExpanded ? sortedAccounts : sortedAccounts.slice(0, 4)).map((a: any) => (
-                <li key={a.id}>
-                  <NavLink
-                    to={`/accounts/${a.id}`}
-                    className={({ isActive }) =>
-                      cx(
-                        "flex items-center justify-between px-2 py-1.5 rounded-lg text-sm",
-                        isActive ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                      )
-                    }
-                  >
-                    <span className="truncate">{a.name}</span>
-                    <span className={`shrink-0 ml-2 tabular-nums ${parseFloat(a.current_balance) < 0 ? "text-red-500 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
-                      {fmt(a.current_balance)}
-                    </span>
-                  </NavLink>
-                </li>
-              ))}
+              {(accountsExpanded ? sortedAccounts : sortedAccounts.slice(0, 4)).map((a: any) => {
+                const pct = pctChangeFor(a);
+                return (
+                  <li key={a.id}>
+                    <NavLink
+                      to={`/accounts/${a.id}`}
+                      className={({ isActive }) =>
+                        cx(
+                          "flex items-center justify-between px-2 py-1.5 rounded-lg text-sm",
+                          isActive ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                        )
+                      }
+                    >
+                      <span className="truncate">{a.name}</span>
+                      {balancesHidden ? (
+                        <span className="shrink-0 ml-2 text-gray-400 dark:text-gray-500">••••</span>
+                      ) : (
+                        <span className="shrink-0 ml-2 flex items-center gap-1.5">
+                          <span className={`tabular-nums ${parseFloat(a.current_balance) < 0 ? "text-red-500 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+                            {fmt(a.current_balance)}
+                          </span>
+                          {pct !== null && <TrendBadge pct={pct} />}
+                        </span>
+                      )}
+                    </NavLink>
+                  </li>
+                );
+              })}
             </ul>
             {sortedAccounts.length > 4 && (
               <button
