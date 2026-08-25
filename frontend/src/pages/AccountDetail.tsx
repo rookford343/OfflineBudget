@@ -47,7 +47,7 @@ export default function AccountDetail() {
         <div className="card">
           <p className="text-xs uppercase tracking-wide text-gray-400 dark:text-gray-500">{account.type}</p>
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{account.name}</h2>
-          <p className="text-3xl font-bold text-gray-900 dark:text-white mt-2">{fmt(account.current_balance)}</p>
+          <p className={`text-3xl font-bold ${parseFloat(account.current_balance) < 0 ? "text-red-500 dark:text-red-400" : "text-gray-900 dark:text-white"} mt-2`}>{fmt(account.current_balance)}</p>
         </div>
       )}
 
