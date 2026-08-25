@@ -4,6 +4,7 @@ import { budgetApi, categoriesApi } from "../api";
 import { fmt } from "../lib/utils";
 import { Pencil, Check, X, RotateCcw, HelpCircle, ChevronRight, ChevronDown, Plus, Trash2 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import MonthYearPicker from "../components/MonthYearPicker";
 import { CategoryOptions } from "../lib/selectOptions";
 
 /**
@@ -274,12 +275,7 @@ export default function Budget() {
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <select className="input py-1 text-sm" value={month} onChange={e => setMonth(Number(e.target.value))}>
-            {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-          </select>
-          <select className="input py-1 text-sm w-24" value={year} onChange={e => setYear(Number(e.target.value))}>
-            {[year - 1, year, year + 1].map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
+          <MonthYearPicker year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <button onClick={() => applyRolloverMut.mutate()} disabled={applyRolloverMut.isPending}
             className="btn-secondary text-xs px-2 py-1" title="Carry last month's unspent budget forward">
             <RotateCcw size={12} /> Rollover
