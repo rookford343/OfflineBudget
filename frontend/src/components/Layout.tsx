@@ -5,7 +5,7 @@ import { clearAuth, getUser } from "../store/auth";
 import { authApi, accountsApi } from "../api";
 import QuickStartWizard from "./QuickStartWizard";
 import { LogOut } from "lucide-react";
-import { cx } from "../lib/utils";
+import { cx, fmt } from "../lib/utils";
 import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
 
 export default function Layout() {
@@ -20,6 +20,7 @@ export default function Layout() {
   });
   const [wizardOpen, setWizardOpen] = useState(false);
   const [pinned, setPinned] = useState<string[]>(loadPinnedNav);
+  const [accountsExpanded, setAccountsExpanded] = useState(false);
 
   // Latch open once on first load if no accounts exist — don't re-derive from live query
   // so the wizard stays visible after step 1 creates the first account.
@@ -65,6 +66,10 @@ export default function Layout() {
     return cx(isActive ? "nav-link-active" : "nav-link");
   }
 
+  const sortedAccounts = [...(accounts as any[])].sort(
+    (a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name)
+  );
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
@@ -106,6 +111,41 @@ export default function Layout() {
             {SETTINGS_ITEM.label}
           </NavLink>
         </nav>
+        {sortedAccounts.length > 0 && (
+          <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700">
+            <p className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-400">
+              Accounts
+            </p>
+            <ul className="space-y-0.5">
+              {(accountsExpanded ? sortedAccounts : sortedAccounts.slice(0, 4)).map((a: any) => (
+                <li key={a.id}>
+                  <NavLink
+                    to={`/accounts/${a.id}`}
+                    className={({ isActive }) =>
+                      cx(
+                        "flex items-center justify-between px-2 py-1.5 rounded-lg text-sm",
+                        isActive ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                      )
+                    }
+                  >
+                    <span className="truncate">{a.name}</span>
+                    <span className={`shrink-0 ml-2 tabular-nums ${parseFloat(a.current_balance) < 0 ? "text-red-500 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+                      {fmt(a.current_balance)}
+                    </span>
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+            {sortedAccounts.length > 4 && (
+              <button
+                onClick={() => setAccountsExpanded(e => !e)}
+                className="mt-1 px-2 text-xs font-medium text-indigo-600 dark:text-indigo-400"
+              >
+                {accountsExpanded ? "Show less" : `+${sortedAccounts.length - 4} more`}
+              </button>
+            )}
+          </div>
+        )}
         <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700">
           <button onClick={logout} className="nav-link w-full text-red-600 hover:bg-red-50 hover:text-red-700">
             <LogOut size={18} />
