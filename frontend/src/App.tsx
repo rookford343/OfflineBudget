@@ -16,6 +16,7 @@ import Import from "./pages/Import";
 import Calendar from "./pages/Calendar";
 import Goals from "./pages/Goals";
 import NetWorth from "./pages/NetWorth";
+import AccountDetail from "./pages/AccountDetail";
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;
@@ -46,6 +47,7 @@ export default function App() {
           <Route path="spending" element={<Spending />} />
           <Route path="recurring" element={<Recurring />} />
           <Route path="transactions" element={<Transactions />} />
+          <Route path="accounts/:id" element={<AccountDetail />} />
           <Route path="import" element={<Import />} />
           <Route path="budget" element={<Budget />} />
           <Route path="settings/*" element={<Settings />} />
