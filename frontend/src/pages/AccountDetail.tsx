@@ -41,7 +41,7 @@ export default function AccountDetail() {
         <ArrowLeft size={14} /> Back
       </Link>
 
-      {accountLoading && <div className="card text-sm text-gray-400">Loading…</div>}
+      {accountLoading && <div className="card text-sm text-gray-400 dark:text-gray-500">Loading…</div>}
 
       {account && (
         <div className="card">
@@ -53,9 +53,9 @@ export default function AccountDetail() {
 
       <div className="card">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">Recent Transactions</h3>
-        {txnsLoading && <p className="text-sm text-gray-400">Loading…</p>}
+        {txnsLoading && <p className="text-sm text-gray-400 dark:text-gray-500">Loading…</p>}
         {!txnsLoading && transactions.length === 0 && (
-          <p className="text-sm text-gray-400">No transactions for this account yet.</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500">No transactions for this account yet.</p>
         )}
         {!txnsLoading && transactions.length > 0 && (
           <ul className="divide-y divide-gray-100 dark:divide-gray-700">
@@ -65,7 +65,7 @@ export default function AccountDetail() {
                   <p className="text-gray-900 dark:text-gray-100 truncate">{t.description}</p>
                   <p className="text-xs text-gray-400 dark:text-gray-500">{fmtDate(t.date)}</p>
                 </div>
-                <span className={`font-semibold tabular-nums shrink-0 ml-3 ${parseFloat(t.amount) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                <span className={`font-semibold tabular-nums shrink-0 ml-3 ${parseFloat(t.amount) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
                   {parseFloat(t.amount) >= 0 ? "+" : ""}{fmt(t.amount)}
                 </span>
               </li>
