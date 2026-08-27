@@ -388,6 +388,40 @@ def test_the_locked_payoff_is_flagged_and_the_estimate_is_not(db_session):
     assert flags.get("CC Estimate") is False, "an estimated payoff is not locked"
 
 
+def test_balance_due_at_zero_still_carries_forward_real_debt(db_session):
+    """Dan's real case, 2026-08-27: Chase Sapphire's $9,273.76 statement was
+    paid off (balance_due -> 0), but $6,701.18 of real, already-spent debt
+    remains on current_balance -- money already spent, just not yet
+    statemented. The carried-balance derivation's guard required
+    balance_due > 0, so once it dropped to 0 the derivation went silent
+    entirely and the forecast fell back to the flat $5,500/mo estimate --
+    understating the very next payoff by over $1,200, and with it the
+    household's 3-month safety margin (Dan caught this live comparing
+    against his spreadsheet, which still tracks the real remaining debt)."""
+    user = _user(db_session, username="zerobalance")
+    account = _checking(db_session, user, balance="60000.00")
+    _card(db_session, user, name="Chase", statement_day=28, due_day=25,
+          current_balance=Decimal("6701.18"), balance_due=Decimal("0"),
+          next_payment_date=date(2026, 8, 25), monthly_spend_estimate=Decimal("5500.00"))
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 27), date(2026, 11, 30))
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+
+    sept = [amt for d, amt in estimates.items() if d.month == 9]
+    assert sept, "the next cycle must still plan for the real carried debt, not go silent"
+    assert sept == [Decimal("-6701.18")], (
+        f"balance_due at 0 must not silence the carried-balance derivation -- "
+        f"current_balance is real, already-spent debt regardless, got {sept}"
+    )
+
+    later = [amt for d, amt in estimates.items() if d.month >= 10]
+    assert all(a == Decimal("-5500.00") for a in later), (
+        f"cycles beyond the next one, with no carried debt left, fall back "
+        f"to the flat monthly estimate as normal, got {later}"
+    )
+
+
 # --- 7. SS wage-base checkpoint (Dan, 2026-08-14) ------------------------
 
 def _checkpoint_user(db, *, withheld_ytd: str, as_of: date, wage_base: str = "184500.00",

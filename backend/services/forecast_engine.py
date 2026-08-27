@@ -424,10 +424,24 @@ def build_forecast(
         # payment would double it up.
         derived_due: date | None = None
         derived_amount = Decimal("0")
+        # balance_due at 0 is not "nothing owed" -- it means the last
+        # statement is fully paid, but current_balance can still carry real,
+        # already-spent debt that hasn't hit a statement yet (Dan's Chase,
+        # 2026-08-27: balance_due dropped to $0 right after payoff, while
+        # current_balance still carried $6,701.18 of real spend). The
+        # original guard required balance_due > 0, so that money silently
+        # stopped being planned for the moment a card got paid off -- the
+        # forecast fell back to the flat monthly_spend_estimate and
+        # understated the very next payoff. `carried` below already computes
+        # the right number in both cases (it's current_balance minus
+        # whatever's already been billed); only the guard was too narrow.
         if (
             next_payment is not None
-            and card.balance_due and card.balance_due > 0
             and card.current_balance is not None
+            and (
+                (card.balance_due and card.balance_due > 0)
+                or Decimal(str(card.current_balance)) > 0
+            )
         ):
             carried = (
                 Decimal(str(card.current_balance))
