@@ -267,6 +267,42 @@ def test_the_payoff_trough_is_not_the_safety_floor(db_session):
     assert floor > Decimal("1000.00"), "the post-payoff trough must not be the reported floor"
 
 
+def test_a_real_recorded_payoff_is_also_not_the_safety_floor(db_session):
+    """Dan's real case, 2026-08-27: once the payoff moves from a PROJECTED
+    line (is_cc_locked=True, what _floor_scenario above builds) to a REAL
+    actual transaction -- recorded via the Record Payment button, or a bank
+    sync -- it loses the is_cc_locked flag entirely (real actuals never carry
+    it). The floor-skip logic only ever checked is_cc_locked, so a real
+    recorded payoff's dip started counting as the reported floor again --
+    exactly the dip the projected-line skip was built to avoid."""
+    from backend.services.budget_snapshot import _lookahead_minimum
+
+    user = _user(db_session, username="realpayoff")
+    account = _checking(db_session, user, balance="10000.00")
+    _card(db_session, user, name="Chase", statement_day=28, due_day=25,
+          balance_due=Decimal("0"), current_balance=Decimal("1000.00"))
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Paycheck",
+        amount=Decimal("6000.00"), type=models.RecurringType.income,
+        frequency=models.RecurringFrequency.monthly,
+        day_of_month=31, start_date=date(2026, 1, 1),
+    ))
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=account.id, date=date(2026, 8, 25),
+        amount=Decimal("-9000.00"), description="CC Payment: Chase",
+        is_actual=True,
+    ))
+    db_session.commit()
+
+    floor, when = _lookahead_minimum(db_session, user.id, account.id, date(2026, 8, 14))
+
+    assert when is not None
+    assert not (date(2026, 8, 25) <= when <= date(2026, 8, 30)), (
+        f"floor landed at {when}, inside the real payoff's dip it is supposed to skip"
+    )
+    assert floor > Decimal("1000.00"), "the post-payoff trough must not be the reported floor"
+
+
 def test_asking_from_inside_the_dip_gives_the_same_floor(db_session):
     """Asked on the 27th -- two days into the payoff dip -- the answer must
     match asking on the 14th. The lookback that settles the skip state before

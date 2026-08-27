@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry
 from backend.services.forecast_engine import build_forecast
+from backend.services.card_matching import card_matches_description
 from backend.services.spendable_pacer import compute_weekly_spendable
 from backend.services.spending_helpers import category_totals_for_range, merchant_totals
 
@@ -201,10 +202,35 @@ def _lookahead_minimum(
     if not days:
         return Decimal("0"), None
 
+    # A payoff dip is only recognizable via `is_cc_locked` while it's still a
+    # PROJECTED line. Once it becomes a real actual transaction -- recorded
+    # via Record Payment, or bank-synced in -- that flag is never set (real
+    # actuals don't carry it), so the dip silently started counting as the
+    # floor again the moment the payoff actually happened. Dan's real Chase
+    # payoff, 2026-08-27: a real `Transaction` dated today, description
+    # "CC Payment: Chase Sapphire", $9,273.76 -- is_cc_locked=False, floor
+    # landed on it anyway. Recognize a real payoff the same way
+    # `_cc_actual_nearby` already does elsewhere in this codebase: match the
+    # card by name/last-four against the transaction's description, not by a
+    # flag that only exists on projections.
+    active_cards = db.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user_id,
+        models.CreditCard.is_active == True,
+    ).all()
+
+    def _is_payoff_day(day) -> bool:
+        if any(t.is_cc_locked for t in day.transactions):
+            return True
+        return any(
+            t.is_actual and t.amount < 0
+            and any(card_matches_description(card, t.name) for card in active_cards)
+            for t in day.transactions
+        )
+
     in_locked_dip = False
     candidates = []
     for day in days:
-        if any(t.is_cc_locked for t in day.transactions):
+        if _is_payoff_day(day):
             in_locked_dip = True
         if any(t.type == "income" and t.amount > 0 for t in day.transactions):
             in_locked_dip = False
