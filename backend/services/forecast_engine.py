@@ -396,42 +396,13 @@ def build_forecast(
         # monthly will drift like this by design, so roll a past due date
         # forward to the next real one instead of dropping the money.
         next_payment = card.next_payment_date
-        if (
+        payment_is_stale = bool(
             next_payment is not None
             and next_payment < today
             and card.balance_due and card.balance_due > 0
-        ):
+        )
+        if payment_is_stale:
             next_payment = _next_occurrence_on_or_after(card.due_day, max(today, start_date))
-
-        if (
-            next_payment is not None
-            and start_date <= next_payment <= end_date
-            and card.balance_due and card.balance_due > 0
-        ):
-            # balance_due only, NOT + pending_charges -- Dan's real
-            # spreadsheet forecast pays off only the last-statement total on
-            # the due date ("2026 Forecast" row 24: "=L23-9273.76-180.16",
-            # no pending-charges term), and separately counts pending_charges
-            # exactly once via budget_snapshot.py's new_spending_total.
-            # Adding it here too double-counted it: once in this payoff
-            # projection, once again downstream. Confirmed live 2026-08-09.
-            cc_payments.setdefault(next_payment, []).append(
-                (card.name, Decimal(str(card.balance_due)))
-            )
-
-        def _covered_by_real_payment(when: date) -> bool:
-            """Something better than an estimate already lands in this month --
-            either the locked balance_due payoff, or the carried-balance figure
-            derived below. A flat estimate on top of either would charge the
-            same statement twice."""
-            if derived_due is not None and (derived_due.year, derived_due.month) == (when.year, when.month):
-                return True
-            return (
-                next_payment is not None
-                and next_payment.year == when.year
-                and next_payment.month == when.month
-                and bool(card.balance_due and card.balance_due > 0)
-            )
 
         # The cycle right after a locked payoff is not a guess -- most of it is
         # already sitting on the card. Dan derives it exactly this way
@@ -443,6 +414,14 @@ def build_forecast(
         # the statement closes and the cycle is nearly determined. A flat
         # monthly estimate ignores all of that and overstated Dan's 9/25 payoff
         # by roughly $1,900.
+        #
+        # Computed before the stale-payment injection below (not after, as
+        # originally written) because a stale `next_payment_date` rolls
+        # forward using the same `_next_occurrence_on_or_after(due_day, ...)`
+        # math this derives, so the two land on the identical date whenever
+        # the real payoff already happened and is just waiting on bank sync --
+        # need derived_amount in hand before deciding whether the stale
+        # payment would double it up.
         derived_due: date | None = None
         derived_amount = Decimal("0")
         if (
@@ -467,7 +446,76 @@ def build_forecast(
                 cursor += timedelta(days=1)
             derived_amount = carried + upcoming
 
-        if derived_due is not None and start_date <= derived_due <= end_date and derived_amount > 0:
+        # A stale next_payment_date rolled forward lands on the exact date
+        # derived_due just computed above whenever the real payoff already
+        # happened and is only waiting on bank sync to confirm it (both use
+        # `_next_occurrence_on_or_after(due_day, ...)` anchored near `today`).
+        # Injecting the old balance_due there on top of derived_amount would
+        # double-charge the card -- $9,273.76 (the stale, presumably
+        # already-paid balance) plus $6,416.60 (the next cycle's own carried
+        # estimate) on the same day (confirmed live 2026-08-26, crashed the
+        # forecast to -$4,478.25). Trust that the payoff happened and fold the
+        # two into one line rather than dropping either: the carried figure
+        # IS the real, known money (current_balance minus the last statement,
+        # both hard numbers) plus a small subscription projection, so it
+        # belongs on the "CC Payment" / is_cc_locked=True side, not
+        # downgraded to "CC Estimate" just because it merged with the stale
+        # payoff (Dan, 2026-08-26). Only merge when derived_amount is
+        # actually going to cover the money; a card with nothing carried and
+        # no card-linked subscriptions (derived_amount == 0) has nothing
+        # standing in for the stale payment, and dropping it there
+        # resurrects the original "Apple Card invisible" bug this rollover
+        # was written to fix. Same date + a real number to replace it with
+        # is what makes merging it safe.
+        payment_double_counts_derived = bool(
+            payment_is_stale
+            and derived_due is not None
+            and next_payment == derived_due
+            and derived_amount > 0
+        )
+
+        if payment_double_counts_derived:
+            if start_date <= derived_due <= end_date:
+                cc_payments.setdefault(derived_due, []).append((card.name, derived_amount))
+        elif (
+            next_payment is not None
+            and start_date <= next_payment <= end_date
+            and card.balance_due and card.balance_due > 0
+        ):
+            # balance_due only, NOT + pending_charges -- Dan's real
+            # spreadsheet forecast pays off only the last-statement total on
+            # the due date ("2026 Forecast" row 24: "=L23-9273.76-180.16",
+            # no pending-charges term), and separately counts pending_charges
+            # exactly once via budget_snapshot.py's new_spending_total.
+            # Adding it here too double-counted it: once in this payoff
+            # projection, once again downstream. Confirmed live 2026-08-09.
+            cc_payments.setdefault(next_payment, []).append(
+                (card.name, Decimal(str(card.balance_due)))
+            )
+
+        def _covered_by_real_payment(when: date) -> bool:
+            """Something better than an estimate already lands in this month --
+            either the locked balance_due payoff, or the carried-balance figure
+            derived above. A flat estimate on top of either would charge the
+            same statement twice."""
+            if derived_due is not None and (derived_due.year, derived_due.month) == (when.year, when.month):
+                return True
+            return (
+                next_payment is not None
+                and next_payment.year == when.year
+                and next_payment.month == when.month
+                and bool(card.balance_due and card.balance_due > 0)
+            )
+
+        # Already folded into cc_payments above when it merged with the
+        # stale payoff -- injecting it again here would be the exact
+        # double-count this whole block exists to prevent.
+        if (
+            not payment_double_counts_derived
+            and derived_due is not None
+            and start_date <= derived_due <= end_date
+            and derived_amount > 0
+        ):
             cc_estimates_by_date.setdefault(derived_due, []).append((card.name, derived_amount))
 
         if card.monthly_spend_estimate and card.monthly_spend_estimate > 0:
