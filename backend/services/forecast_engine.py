@@ -619,7 +619,21 @@ def build_forecast(
         )
         balance = bridge[-1].projected_balance if bridge else current_balance
     else:
-        balance = current_balance
+        # start_date == today exactly. current_balance is the live bank
+        # balance -- it already reflects anything dated today (a same-day
+        # bank-synced or manually-recorded transaction, e.g. Dan's Chase
+        # payoff, 2026-08-27). The walk's first day re-applies `actuals_today`
+        # below, so without this reversal a same-day actual gets counted
+        # twice: once already baked into current_balance, once again in the
+        # walk. The `start_date < today` branch above already reverses
+        # actuals strictly before today for the same reason -- this mirrors
+        # it for the one day that branch doesn't cover. Reproduced live:
+        # $696.81 - $9,273.76 landed at -$8,576.95 without this.
+        today_actuals_sum = sum(
+            (Decimal(str(t.amount)) for t in all_actuals if t.date == today),
+            Decimal("0"),
+        )
+        balance = current_balance - today_actuals_sum
 
     # Lookup for CC suppression — keyed by the name stored in cc_payments / cc_estimates_by_date
     card_by_name: dict[str, models.CreditCard] = {(c.name or ""): c for c in all_active_cards}

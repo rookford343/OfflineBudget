@@ -15,7 +15,7 @@ purchase:
 Plus the quarterly frequency the sheet needs for Stormwater ("Qtr" in
 Budget!C15), which the app could not express at all.
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 import pytest
 from backend import models
@@ -419,6 +419,35 @@ def test_balance_due_at_zero_still_carries_forward_real_debt(db_session):
     assert all(a == Decimal("-5500.00") for a in later), (
         f"cycles beyond the next one, with no carried debt left, fall back "
         f"to the flat monthly estimate as normal, got {later}"
+    )
+
+
+def test_a_same_day_actual_is_not_double_counted_when_start_date_is_today(db_session):
+    """Dan's real case, 2026-08-27: manually recorded a $9,273.76 card payoff
+    dated today, updating current_balance directly (checking.current_balance
+    -= amount) the same way the Record Payment endpoint does. `/forecast/risk`
+    calls build_forecast with start_date == today exactly. The opening-balance
+    seed's `start_date < today` branch correctly reverses actuals dated before
+    today so the walk can re-apply them once -- but the `start_date == today`
+    branch (`else: balance = current_balance`) skipped that reversal entirely,
+    so a same-day actual got applied twice: once already baked into
+    current_balance, once again when the walk's first day re-applies
+    `actuals_today`. Reproduced exactly: $696.81 - $9,273.76 landed at
+    -$8,576.95, matching what the live risk alert showed."""
+    user = _user(db_session, username="sameday")
+    account = _checking(db_session, user, balance="696.81")
+    today = date.today()
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=account.id, date=today,
+        amount=Decimal("-9273.76"), description="CC Payment: Chase Sapphire",
+        is_actual=True,
+    ))
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=3))
+    assert entries[0].projected_balance == Decimal("696.81"), (
+        f"a same-day actual must be applied exactly once, not baked into the "
+        f"opening balance AND re-applied in the walk, got {entries[0].projected_balance}"
     )
 
 
