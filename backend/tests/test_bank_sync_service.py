@@ -71,6 +71,25 @@ def test_sync_connection_stores_card_balance_as_positive_amount_owed(db_session)
     assert ct.source == models.CardTransactionSource.bank_sync
 
 
+def test_a_bank_sync_clears_a_pending_marker(db_session):
+    """balance_due is never written by bank sync -- only current_balance
+    is -- so the existing balance_due-based auto-clear (Task 3) can never
+    fire from the real sync this feature was built to wait for. The flag
+    must clear here too, on the signal bank sync actually sends."""
+    user, card, connection, link = _make_card_connection(db_session)
+    card.payment_sent_pending_sync = True
+    card.payment_sent_amount = Decimal("500.00")
+    db_session.commit()
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=([], Decimal("-300.00"))):
+        sync_connection(db_session, connection)
+
+    db_session.refresh(card)
+    assert card.payment_sent_pending_sync is False
+    assert card.payment_sent_amount is None
+
+
 def test_sync_connection_imports_transactions_and_updates_balance(db_session):
     user, account, connection, link = _make_connection(db_session)
     txns = [SimpleFinTransaction(id="t1", posted=datetime(2026, 8, 5), amount=Decimal("-52.90"), description="Meijer")]

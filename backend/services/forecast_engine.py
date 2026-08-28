@@ -388,6 +388,17 @@ def build_forecast(
         if card.id in recurring_cc_card_ids:
             continue  # recurring CC payment item already handles this card
 
+        if card.payment_sent_pending_sync:
+            # Already subtracted once at the opening-balance seed (Task 1,
+            # forecast_engine.py's current_balance seed). Every injection
+            # path below this point -- locked payoff, carried-forward
+            # estimate, flat monthly estimate -- would double it, because
+            # marking a card doesn't change next_payment_date or
+            # balance_due, the fields those paths key off. Confirmed live
+            # by the final whole-branch review, 2026-08-28: a $5,000
+            # payment left checking twice without this guard.
+            continue
+
         # A next_payment_date that has gone stale must not swallow the balance.
         # Dan's Apple Card sat at 2026-05-25 with $287.15 due while the forecast
         # ran August: the window check below never matched, so the card was
