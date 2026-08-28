@@ -141,6 +141,8 @@ export const cardsApi = {
   update: (id: number, data: object) => api.patch(`/credit-cards/${id}`, data).then((r) => r.data),
   remove: (id: number) => api.delete(`/credit-cards/${id}`),
   pay: (id: number, data: object) => api.post(`/credit-cards/${id}/payment`, data).then((r) => r.data),
+  markPaymentSent: (id: number) => api.post(`/credit-cards/${id}/mark-payment-sent`).then((r) => r.data),
+  clearPaymentSent: (id: number) => api.post(`/credit-cards/${id}/clear-payment-sent`).then((r) => r.data),
   transactions: (id: number, params?: object) =>
     api.get(`/credit-cards/${id}/transactions`, { params }).then((r) => r.data),
   addTransaction: (id: number, data: object) =>
