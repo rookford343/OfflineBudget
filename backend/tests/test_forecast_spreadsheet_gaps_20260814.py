@@ -340,6 +340,34 @@ def test_unflagged_cards_do_not_affect_the_opening_balance(db_session):
     assert entries[0].projected_balance == Decimal("1000.00")
 
 
+def test_a_pending_marker_suppresses_the_payoff_injection_too(db_session):
+    """The marker's balance-seed subtraction (Task 1) is not the only place
+    this card's payoff could land -- the pre-existing payoff injection
+    further down this same per-card loop still fires whenever
+    next_payment_date sits inside the window, because marking a card
+    doesn't touch next_payment_date or balance_due. Confirmed live (final
+    review, 2026-08-28): a $5,000 payment left checking twice without
+    this guard."""
+    user = _user(db_session, username="pendingsuppress")
+    account = _checking(db_session, user, balance="10000.00")
+    _card(db_session, user, name="Chase", balance_due=Decimal("5000.00"),
+          current_balance=Decimal("5000.00"),
+          next_payment_date=date.today() + timedelta(days=3),
+          payment_sent_pending_sync=True, payment_sent_amount=Decimal("5000.00"))
+    db_session.commit()
+
+    today = date.today()
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=10))
+    payoffs = _named(entries, "CC Payment: Chase")
+    assert not payoffs, (
+        f"a pending-flagged card must not ALSO get the old payoff "
+        f"injection on top of the seed subtraction, got {payoffs}"
+    )
+    assert entries[0].projected_balance == Decimal("5000.00"), (
+        "opening balance still correctly reduced exactly once"
+    )
+
+
 def test_asking_from_inside_the_dip_gives_the_same_floor(db_session):
     """Asked on the 27th -- two days into the payoff dip -- the answer must
     match asking on the 14th. The lookback that settles the skip state before
