@@ -657,8 +657,14 @@ def test_the_cycle_after_the_carried_cycle_uses_fresh_pending_charges(db_session
     """Dan's spreadsheet edit, 2026-08-28: the cycle right after the locked
     payoff's own carried cycle should use live pending-charges data instead
     of jumping straight to the flat monthly estimate, the same way the
-    first carried cycle already does. Fresh and nonzero pending_charges
-    replaces the estimate outright for that one cycle only."""
+    first carried cycle already does. pending_charges legitimately flows
+    into both cycles here, through two different mechanisms: cycle 1 (Sept)
+    picks it up via the pre-existing, unchanged `carried` formula
+    (current_balance + pending_charges - balance_due, no freshness check --
+    by design, not something this feature touches), and cycle 2 (Oct) picks
+    it up via this task's new second-hop logic, which reads pending_charges
+    on its own through the freshness-checked `_fresh_pending_charges`
+    helper. This test pins both."""
     user = _user(db_session, username="secondhop")
     account = _checking(db_session, user, balance="60000.00")
     card = _card(
@@ -675,8 +681,9 @@ def test_the_cycle_after_the_carried_cycle_uses_fresh_pending_charges(db_session
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
     sept = [amt for d, amt in estimates.items() if d.month == 9]
-    assert sept == [Decimal("-1000.00")], (
-        f"first carried cycle unaffected by this feature, got {sept}"
+    assert sept == [Decimal("-3000.00")], (
+        f"first carried cycle already folds in pending_charges via the "
+        f"pre-existing, unchanged carried formula, got {sept}"
     )
     oct_ = [amt for d, amt in estimates.items() if d.month == 10]
     assert oct_ == [Decimal("-2000.00")], (
