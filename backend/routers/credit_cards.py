@@ -51,6 +51,7 @@ def create_card(
     user: models.User = Depends(get_current_user),
 ):
     card = models.CreditCard(user_id=user.id, **body.model_dump())
+    _stamp_pending_charges_freshness(card, Decimal("0"))
     db.add(card)
     db.commit()
     db.refresh(card)
