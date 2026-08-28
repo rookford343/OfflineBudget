@@ -340,6 +340,7 @@ class CreditCard(Base):
     pending_charges: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     payment_sent_pending_sync: Mapped[bool] = mapped_column(Boolean, default=False)
     payment_sent_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    pending_charges_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
