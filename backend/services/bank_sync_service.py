@@ -4,6 +4,7 @@ categorization, and rules apply identically regardless of source."""
 from __future__ import annotations
 import json
 import logging
+from decimal import Decimal
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from backend import models, schemas
@@ -158,6 +159,15 @@ def _sync_link(
                 # 2026-08-28.
                 card.payment_sent_pending_sync = False
                 card.payment_sent_amount = None
+
+            if card.pending_charges and card.pending_charges > 0:
+                # Same reasoning as the payment-sent marker just above:
+                # current_balance now reflects everything the bank knows
+                # as of this sync, so a hand-typed "extra, not-yet-synced"
+                # pending figure is stale the instant fresher real data
+                # lands -- there is nothing left for it to represent.
+                card.pending_charges = Decimal("0")
+                card.pending_charges_updated_at = None
 
     link.last_synced_at = datetime.utcnow()
     db.commit()
