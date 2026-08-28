@@ -102,6 +102,38 @@ def delete_card(
     db.commit()
 
 
+@router.post("/{card_id}/mark-payment-sent", response_model=schemas.CreditCardOut)
+def mark_payment_sent(
+    card_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    card = _get_or_404(db, user.id, card_id)
+    if not card.balance_due or card.balance_due <= 0:
+        raise HTTPException(status_code=400, detail="No balance due to mark as sent")
+    if card.payment_sent_pending_sync:
+        raise HTTPException(status_code=400, detail="Payment already marked as sent")
+    card.payment_sent_pending_sync = True
+    card.payment_sent_amount = card.balance_due
+    db.commit()
+    db.refresh(card)
+    return _enrich(card)
+
+
+@router.post("/{card_id}/clear-payment-sent", response_model=schemas.CreditCardOut)
+def clear_payment_sent(
+    card_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    card = _get_or_404(db, user.id, card_id)
+    card.payment_sent_pending_sync = False
+    card.payment_sent_amount = None
+    db.commit()
+    db.refresh(card)
+    return _enrich(card)
+
+
 @router.post("/{card_id}/payment", response_model=schemas.CreditCardPaymentOut, status_code=status.HTTP_201_CREATED)
 def record_payment(
     card_id: int,
