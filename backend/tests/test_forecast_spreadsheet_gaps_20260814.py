@@ -666,7 +666,7 @@ def test_the_cycle_after_the_carried_cycle_uses_fresh_pending_charges(db_session
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),
         pending_charges_updated_at=datetime.utcnow(),
-        next_payment_date=date(2026, 8, 25),
+        next_payment_date=date.today() + timedelta(days=1),
         monthly_spend_estimate=Decimal("15000.00"),
     )
     db_session.commit()
@@ -699,7 +699,7 @@ def test_zero_pending_charges_skips_the_second_hop(db_session):
         db_session, user, name="Chase", statement_day=28, due_day=25,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("0"),
-        next_payment_date=date(2026, 8, 25),
+        next_payment_date=date.today() + timedelta(days=1),
         monthly_spend_estimate=Decimal("15000.00"),
     )
     db_session.commit()
@@ -723,7 +723,7 @@ def test_stale_pending_charges_skips_the_second_hop(db_session):
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),
         pending_charges_updated_at=datetime.utcnow() - timedelta(days=10),
-        next_payment_date=date(2026, 8, 25),
+        next_payment_date=date.today() + timedelta(days=1),
         monthly_spend_estimate=Decimal("15000.00"),
     )
     db_session.commit()
@@ -748,7 +748,7 @@ def test_pending_charges_with_no_timestamp_skips_the_second_hop(db_session):
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),
         pending_charges_updated_at=None,
-        next_payment_date=date(2026, 8, 25),
+        next_payment_date=date.today() + timedelta(days=1),
         monthly_spend_estimate=Decimal("15000.00"),
     )
     db_session.commit()
