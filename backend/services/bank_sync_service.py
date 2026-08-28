@@ -145,6 +145,20 @@ def _sync_link(
             # utilization_pct divides by credit_limit). Flip the sign.
             card.current_balance = -balance
 
+            if card.payment_sent_pending_sync:
+                # A fresh sync just wrote real, authoritative data --
+                # whatever it now says, the manual marker is stale by
+                # definition. balance_due is never touched by bank sync
+                # (confirmed: only current_balance is), so this is the
+                # actual reconciliation signal, not balance_due changing.
+                # Without this the flag could never clear from a real
+                # sync at all -- only from record_payment or a manual
+                # edit, which is exactly the workaround this feature
+                # exists to replace. Found in final whole-branch review,
+                # 2026-08-28.
+                card.payment_sent_pending_sync = False
+                card.payment_sent_amount = None
+
     link.last_synced_at = datetime.utcnow()
     db.commit()
     return (imported, skipped)
