@@ -2,13 +2,14 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cardsApi, accountsApi } from "../api";
 import { fmt, utilColor, utilBg, today } from "../lib/utils";
-import { Plus, Pencil, Trash2, CreditCard as CardIcon, DollarSign, X, HelpCircle } from "lucide-react";
+import { Plus, Pencil, Trash2, CreditCard as CardIcon, DollarSign, X, HelpCircle, Clock, Send } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
 interface Card {
   id: number; name: string; last_four?: string; credit_limit: string;
   statement_day: number; due_day: number; current_balance: string;
   balance_due: string; next_payment_date?: string; monthly_spend_estimate?: string; pending_charges?: string; is_active: boolean; notes?: string; utilization_pct: number;
+  payment_sent_pending_sync?: boolean; payment_sent_amount?: string;
 }
 
 const emptyCard = { name: "", last_four: "", credit_limit: "", statement_day: "26", due_day: "23", current_balance: "0", balance_due: "0", next_payment_date: "", monthly_spend_estimate: "", pending_charges: "0", notes: "" };
@@ -32,6 +33,24 @@ export default function CreditCards() {
   const updateMut = useMutation({ mutationFn: ({ id, data }: any) => cardsApi.update(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); close(); } });
   const deleteMut = useMutation({ mutationFn: cardsApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); setDeleteId(null); } });
   const payMut = useMutation({ mutationFn: ({ id, data }: any) => cardsApi.pay(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); setPayCard(null); } });
+  const markSentMut = useMutation({
+    mutationFn: cardsApi.markPaymentSent,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["credit-cards"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+    },
+  });
+  const clearSentMut = useMutation({
+    mutationFn: cardsApi.clearPaymentSent,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["credit-cards"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+    },
+  });
 
   function openNew() { setForm({ ...emptyCard }); setEditCard(null); setShowForm(true); }
   function openEdit(c: Card) { setEditCard(c); setForm({ name: c.name, last_four: c.last_four || "", credit_limit: c.credit_limit, statement_day: String(c.statement_day), due_day: String(c.due_day), current_balance: c.current_balance, balance_due: c.balance_due, next_payment_date: c.next_payment_date || "", monthly_spend_estimate: c.monthly_spend_estimate || "", pending_charges: c.pending_charges || "0", notes: c.notes || "" }); setShowForm(true); }
@@ -92,6 +111,23 @@ export default function CreditCards() {
               </div>
               <div className="flex gap-1">
                 <button onClick={() => setPayCard(c)} className="btn-ghost p-1.5" title="Record payment"><DollarSign size={15} /></button>
+                {c.payment_sent_pending_sync ? (
+                  <button
+                    onClick={() => clearSentMut.mutate(c.id)}
+                    className="btn-ghost p-1.5 text-amber-600"
+                    title="Payment sent — awaiting sync (click to undo)"
+                  >
+                    <Clock size={15} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => markSentMut.mutate(c.id)}
+                    className="btn-ghost p-1.5"
+                    title="Mark payment as sent"
+                  >
+                    <Send size={15} />
+                  </button>
+                )}
                 <button onClick={() => openEdit(c)} className="btn-ghost p-1.5"><Pencil size={15} /></button>
                 <button onClick={() => setDeleteId(c.id)} className="btn-ghost p-1.5 text-red-500 hover:bg-red-50"><Trash2 size={15} /></button>
               </div>
