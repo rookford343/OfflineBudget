@@ -696,6 +696,50 @@ def test_the_cycle_after_the_carried_cycle_uses_fresh_pending_charges(db_session
     )
 
 
+def test_second_hop_leaves_a_subscription_driven_cards_projection_alone(db_session):
+    """Restricted to monthly_spend_estimate cards only (controller ruling,
+    final whole-branch review, 2026-08-28): a subscription-driven card (no
+    monthly_spend_estimate -- Dan's Apple Card is exactly this shape) must
+    keep its own subscription-based projection even when it also carries a
+    fresh pending_charges figure and a next_payment_date/balance_due shape
+    that would otherwise activate the second hop. Before this fix, the
+    second hop's suppression logic (_covered_by_real_payment, shared with
+    the subscription-fallback branch below in this same function) would
+    have deleted that month's subscription-based projection and replaced it
+    with the raw pending_charges figure instead of leaving it alone."""
+    user = _user(db_session, username="secondhopsubscription")
+    account = _checking(db_session, user, balance="60000.00")
+    card = _card(
+        db_session, user, name="Apple Card", statement_day=28, due_day=25,
+        current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
+        pending_charges=Decimal("2000.00"),
+        pending_charges_updated_at=datetime.utcnow(),
+        next_payment_date=date.today() + timedelta(days=1),
+        monthly_spend_estimate=None,
+    )
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=account.id, card_id=card.id, name="Apple",
+        amount=Decimal("57.39"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly,
+        day_of_month=5, start_date=date(2026, 1, 1),
+    ))
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 12, 31))
+    estimates = _named(entries, "CC Estimate: Apple Card")
+
+    assert Decimal("-2000.00") not in {amt for _, amt in estimates}, (
+        f"the raw pending_charges figure must never surface on a "
+        f"subscription-driven card (no monthly_spend_estimate) -- second hop "
+        f"must not activate for it at all, got {estimates}"
+    )
+    subscription_hits = [amt for _, amt in estimates if amt == Decimal("-57.39")]
+    assert subscription_hits, (
+        f"the subscription's own projection must still appear, unaffected by "
+        f"pending_charges being set, got {estimates}"
+    )
+
+
 def test_zero_pending_charges_skips_the_second_hop(db_session):
     """No pending charges means no real second-hop signal -- that month
     falls through to the flat estimate exactly as it did before this
@@ -741,6 +785,45 @@ def test_stale_pending_charges_skips_the_second_hop(db_session):
     oct_ = [amt for d, amt in estimates.items() if d.month == 10]
     assert oct_ == [Decimal("-15000.00")], (
         f"stale pending_charges must fall through to the flat estimate, got {oct_}"
+    )
+
+
+def test_the_second_hop_still_works_when_the_first_cycle_used_the_stale_payment_merge(db_session):
+    """Dan's actual live Chase configuration today: next_payment_date has
+    gone genuinely stale (in the past) with balance_due still > 0, so the
+    first cycle is produced by the stale-payment merge path
+    (payment_double_counts_derived in forecast_engine.py), not by the plain
+    derived/carried branch every other second-hop test here exercises.
+    Nothing previously pinned that the second hop still fires correctly on
+    top of that merged payment. Empirically pinned per this file's existing
+    convention -- the merged September amount depends on today's date via
+    _next_occurrence_on_or_after, so it can't be hand-derived without
+    running the code."""
+    user = _user(db_session, username="secondhopstalemerge")
+    account = _checking(db_session, user, balance="60000.00")
+    card = _card(
+        db_session, user, name="Chase", statement_day=28, due_day=25,
+        current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
+        pending_charges=Decimal("2000.00"),
+        pending_charges_updated_at=datetime.utcnow(),
+        next_payment_date=date.today() - timedelta(days=3),  # genuinely stale
+        monthly_spend_estimate=Decimal("15000.00"),
+    )
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 12, 31))
+    payments = dict(_named(entries, "CC Payment: Chase"))
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+
+    sept = [amt for d, amt in payments.items() if d.month == 9]
+    oct_ = [amt for d, amt in estimates.items() if d.month == 10]
+    assert sept == [Decimal("-3000.00")], (
+        f"the merged September payment must include the derived (carried) "
+        f"amount via the stale-payment merge path, got {sept}"
+    )
+    assert oct_ == [Decimal("-2000.00")], (
+        f"the second hop must still fire on top of the merged payment and "
+        f"show the fresh pending_charges amount, got {oct_}"
     )
 
 

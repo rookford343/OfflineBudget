@@ -65,6 +65,40 @@ def test_patching_an_unrelated_field_does_not_stamp_pending_charges(client, db_s
     assert card.pending_charges_updated_at is None
 
 
+def test_creating_a_card_with_pending_charges_stamps_the_freshness_timestamp(client, db_session):
+    """create_card previously never called _stamp_pending_charges_freshness,
+    so a card created with pending_charges > 0 in the request body was
+    permanently treated as stale by the forecast until a later PATCH."""
+    test_client, user, _card = client
+    resp = test_client.post("/credit-cards", json={
+        "name": "Amex",
+        "credit_limit": "15000.00",
+        "statement_day": 10,
+        "due_day": 5,
+        "pending_charges": "134.31",
+    })
+    assert resp.status_code == 201
+    assert resp.json()["pending_charges_updated_at"] is not None
+
+    card = db_session.query(models.CreditCard).filter_by(name="Amex").one()
+    assert card.pending_charges_updated_at is not None
+
+
+def test_creating_a_card_with_no_pending_charges_leaves_the_timestamp_null(client, db_session):
+    test_client, user, _card = client
+    resp = test_client.post("/credit-cards", json={
+        "name": "Discover",
+        "credit_limit": "4000.00",
+        "statement_day": 12,
+        "due_day": 3,
+    })
+    assert resp.status_code == 201
+    assert resp.json()["pending_charges_updated_at"] is None
+
+    card = db_session.query(models.CreditCard).filter_by(name="Discover").one()
+    assert card.pending_charges_updated_at is None
+
+
 def test_repatching_the_same_pending_charges_value_does_not_restamp(client, db_session):
     """Re-sending the same value (a no-op edit) is not a fresh signal --
     only a real change updates the timestamp."""

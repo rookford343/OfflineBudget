@@ -160,12 +160,15 @@ def _sync_link(
                 card.payment_sent_pending_sync = False
                 card.payment_sent_amount = None
 
-            if card.pending_charges and card.pending_charges > 0:
-                # Same reasoning as the payment-sent marker just above:
-                # current_balance now reflects everything the bank knows
-                # as of this sync, so a hand-typed "extra, not-yet-synced"
-                # pending figure is stale the instant fresher real data
-                # lands -- there is nothing left for it to represent.
+            if card.pending_charges and card.pending_charges > 0 and imported > 0:
+                # Dan's call (final whole-branch review, 2026-08-28): only
+                # clear when this sync actually brought in new transactions
+                # for this card -- a balance refresh alone isn't proof the
+                # hand-typed figure is stale, but real posted activity is.
+                # A no-op sync (current_balance unchanged, nothing new
+                # imported) now leaves the pending figure alone, so it keeps
+                # feeding the forecast's second hop and budget_snapshot's
+                # Left to Spend until something real actually supersedes it.
                 card.pending_charges = Decimal("0")
                 card.pending_charges_updated_at = None
 

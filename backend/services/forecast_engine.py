@@ -497,7 +497,16 @@ def build_forecast(
         second_close: date | None = None
         second_due: date | None = None
         second_amount = Decimal("0")
-        if derived_due is not None:
+        if derived_due is not None and card.monthly_spend_estimate and card.monthly_spend_estimate > 0:
+            # Restricted to monthly_spend_estimate cards only (controller
+            # ruling, final whole-branch review, 2026-08-28): on a
+            # subscription-driven card, this hop's suppression logic below
+            # would delete that month's subscription-based projection
+            # instead of supplementing it, since _covered_by_real_payment
+            # is shared with the subscription-fallback branch further down
+            # this function. The spec's scope was always manually-estimated
+            # cards (Dan's Chase); subscription-driven cards (Apple Card)
+            # keep their existing, untouched projection unchanged.
             second_close = _next_occurrence_on_or_after(card.statement_day, derived_due + timedelta(days=1))
             second_due = _next_occurrence_on_or_after(card.due_day, second_close + timedelta(days=1))
             second_amount = _fresh_pending_charges(card, today)

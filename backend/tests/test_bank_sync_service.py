@@ -90,11 +90,13 @@ def test_a_bank_sync_clears_a_pending_marker(db_session):
     assert card.payment_sent_amount is None
 
 
-def test_a_bank_sync_clears_stale_pending_charges(db_session):
-    """current_balance from a real sync is fresher and more authoritative
-    than a hand-typed pending-charges guess -- the guess is stale the
-    moment real data arrives, the same reasoning already applied to the
-    payment-sent marker above."""
+def test_a_bank_sync_with_no_new_transactions_keeps_pending_charges(db_session):
+    """Dan's call (final whole-branch review, 2026-08-28): a bank sync only
+    clears the hand-typed pending_charges figure when it actually imported
+    new transactions for this card -- not merely because current_balance was
+    refreshed. A no-op sync (no new activity found) must leave the
+    hand-typed figure alone so it keeps feeding the forecast/Left-to-Spend
+    until something real actually supersedes it."""
     user, card, connection, link = _make_card_connection(db_session)
     card.pending_charges = Decimal("134.31")
     card.pending_charges_updated_at = datetime(2026, 8, 27, 9, 0, 0)
@@ -102,6 +104,26 @@ def test_a_bank_sync_clears_stale_pending_charges(db_session):
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
          patch("backend.services.bank_sync_service.fetch_transactions", return_value=([], Decimal("-300.00"))):
+        sync_connection(db_session, connection)
+
+    db_session.refresh(card)
+    assert card.pending_charges == Decimal("134.31")
+    assert card.pending_charges_updated_at is not None
+
+
+def test_a_bank_sync_with_new_transactions_clears_pending_charges(db_session):
+    """The flip side: when a sync DOES import new transactions for this
+    card, the hand-typed pending_charges figure has real data superseding
+    it and must clear, same as before this ruling."""
+    user, card, connection, link = _make_card_connection(db_session)
+    card.pending_charges = Decimal("134.31")
+    card.pending_charges_updated_at = datetime(2026, 8, 27, 9, 0, 0)
+    db_session.commit()
+
+    txns = [SimpleFinTransaction(id="c1", posted=datetime(2026, 8, 5), amount=Decimal("-52.90"), description="Meijer")]
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("-300.00"))):
         sync_connection(db_session, connection)
 
     db_session.refresh(card)
