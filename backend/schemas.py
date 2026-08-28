@@ -567,6 +567,8 @@ class CreditCardOut(BaseModel):
     notes: Optional[str]
     utilization_pct: float = 0.0
     updated_at: datetime
+    payment_sent_pending_sync: bool = False
+    payment_sent_amount: Optional[Decimal] = None
 
 
 class CreditCardPaymentCreate(BaseModel):

@@ -303,6 +303,43 @@ def test_a_real_recorded_payoff_is_also_not_the_safety_floor(db_session):
     assert floor > Decimal("1000.00"), "the post-payoff trough must not be the reported floor"
 
 
+def test_pending_payment_marker_reduces_opening_balance(db_session):
+    """A card flagged payment_sent_pending_sync=True subtracts its snapshot
+    amount from checking's opening balance immediately -- before any real
+    sync has confirmed the payment happened. This is what a Record Payment
+    workaround used to do by creating a real (and sometimes duplicate)
+    Transaction; the marker gets the same immediate effect without one."""
+    user = _user(db_session, username="pendingmarker")
+    account = _checking(db_session, user, balance="1000.00")
+    _card(db_session, user, name="Chase", balance_due=Decimal("500.00"),
+          current_balance=Decimal("500.00"),
+          payment_sent_pending_sync=True, payment_sent_amount=Decimal("500.00"))
+    db_session.commit()
+
+    today = date.today()
+    entries = build_forecast(db_session, user.id, account.id, today, today)
+    assert entries[0].projected_balance == Decimal("500.00"), (
+        f"opening balance must be reduced by the pending amount, got "
+        f"{entries[0].projected_balance}"
+    )
+
+
+def test_unflagged_cards_do_not_affect_the_opening_balance(db_session):
+    """Regression guard: a card with payment_sent_pending_sync left at its
+    default (False) must not touch the opening balance at all -- this is
+    what every existing card in every other test in this file already
+    assumes."""
+    user = _user(db_session, username="notpending")
+    account = _checking(db_session, user, balance="1000.00")
+    _card(db_session, user, name="Chase", balance_due=Decimal("500.00"),
+          current_balance=Decimal("500.00"))
+    db_session.commit()
+
+    today = date.today()
+    entries = build_forecast(db_session, user.id, account.id, today, today)
+    assert entries[0].projected_balance == Decimal("1000.00")
+
+
 def test_asking_from_inside_the_dip_gives_the_same_floor(db_session):
     """Asked on the 27th -- two days into the payoff dip -- the answer must
     match asking on the 14th. The lookback that settles the skip state before
