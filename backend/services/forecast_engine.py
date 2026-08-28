@@ -58,6 +58,20 @@ def _card_payoff_date_for_charge(card: "models.CreditCard", charge_date: date) -
     return _next_occurrence_on_or_after(card.due_day, close_date + timedelta(days=1))
 
 
+def _fresh_pending_charges(card: "models.CreditCard", today: date) -> Decimal:
+    """pending_charges is a hand-typed, point-in-time figure -- trustworthy
+    right after Dan enters it, increasingly not as days pass without a real
+    sync confirming it. A stale or absent timestamp is treated the same as
+    nothing pending at all, never silently carried forward."""
+    if not card.pending_charges or card.pending_charges <= 0:
+        return Decimal("0")
+    if card.pending_charges_updated_at is None:
+        return Decimal("0")
+    if (today - card.pending_charges_updated_at.date()).days > 7:
+        return Decimal("0")
+    return Decimal(str(card.pending_charges))
+
+
 def _card_subscription_charges(
     items: list["models.RecurringItem"], start_date: date, end_date: date,
 ) -> dict[date, Decimal]:
@@ -471,6 +485,23 @@ def build_forecast(
                 cursor += timedelta(days=1)
             derived_amount = carried + upcoming
 
+        # Second hop: the cycle right after the one just derived above.
+        # There is no "carried" real balance signal for it yet -- that
+        # window has not started accruing real spend as of today -- but a
+        # fresh pending_charges figure (Dan's own hand-tracked read of what
+        # is already posting toward it, per his spreadsheet, 2026-08-28) is
+        # still better than jumping straight to the flat monthly estimate.
+        # Only one hop: cycles beyond this one have no real signal at all
+        # and keep the flat estimate, matching Dan's own unedited
+        # spreadsheet cells for every month past this one.
+        second_close: date | None = None
+        second_due: date | None = None
+        second_amount = Decimal("0")
+        if derived_due is not None:
+            second_close = _next_occurrence_on_or_after(card.statement_day, derived_due + timedelta(days=1))
+            second_due = _next_occurrence_on_or_after(card.due_day, second_close + timedelta(days=1))
+            second_amount = _fresh_pending_charges(card, today)
+
         # A stale next_payment_date rolled forward lands on the exact date
         # derived_due just computed above whenever the real payoff already
         # happened and is only waiting on bank sync to confirm it (both use
@@ -525,6 +556,8 @@ def build_forecast(
             same statement twice."""
             if derived_due is not None and (derived_due.year, derived_due.month) == (when.year, when.month):
                 return True
+            if second_due is not None and second_amount > 0 and (second_due.year, second_due.month) == (when.year, when.month):
+                return True
             return (
                 next_payment is not None
                 and next_payment.year == when.year
@@ -542,6 +575,13 @@ def build_forecast(
             and derived_amount > 0
         ):
             cc_estimates_by_date.setdefault(derived_due, []).append((card.name, derived_amount))
+
+        if (
+            second_due is not None
+            and start_date <= second_due <= end_date
+            and second_amount > 0
+        ):
+            cc_estimates_by_date.setdefault(second_due, []).append((card.name, second_amount))
 
         if card.monthly_spend_estimate and card.monthly_spend_estimate > 0:
             # A manually-set estimate wins: it is Dan's own read on a card he

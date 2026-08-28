@@ -15,7 +15,7 @@ purchase:
 Plus the quarterly frequency the sheet needs for Stormwater ("Qtr" in
 Budget!C15), which the app could not express at all.
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 import pytest
 from backend import models
@@ -649,3 +649,114 @@ def test_no_checkpoint_falls_back_to_legacy_bonus_ytd(db_session):
     checks = _named(build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 6, 30)), "Paycheck")
 
     assert checks[2][1] == NET + FULL_BOOST, "legacy reconstruction is unchanged when no checkpoint is set"
+
+
+# --- Second-hop carry-forward, seeded by fresh pending_charges ------------
+
+def test_the_cycle_after_the_carried_cycle_uses_fresh_pending_charges(db_session):
+    """Dan's spreadsheet edit, 2026-08-28: the cycle right after the locked
+    payoff's own carried cycle should use live pending-charges data instead
+    of jumping straight to the flat monthly estimate, the same way the
+    first carried cycle already does. Fresh and nonzero pending_charges
+    replaces the estimate outright for that one cycle only."""
+    user = _user(db_session, username="secondhop")
+    account = _checking(db_session, user, balance="60000.00")
+    card = _card(
+        db_session, user, name="Chase", statement_day=28, due_day=25,
+        current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
+        pending_charges=Decimal("2000.00"),
+        pending_charges_updated_at=datetime.utcnow(),
+        next_payment_date=date(2026, 8, 25),
+        monthly_spend_estimate=Decimal("15000.00"),
+    )
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 12, 31))
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+
+    sept = [amt for d, amt in estimates.items() if d.month == 9]
+    assert sept == [Decimal("-1000.00")], (
+        f"first carried cycle unaffected by this feature, got {sept}"
+    )
+    oct_ = [amt for d, amt in estimates.items() if d.month == 10]
+    assert oct_ == [Decimal("-2000.00")], (
+        f"second hop must use fresh pending_charges instead of the flat estimate, got {oct_}"
+    )
+    later = [amt for d, amt in estimates.items() if d.month >= 11]
+    assert later, "cycles beyond the second hop must still be projected"
+    assert all(a == Decimal("-15000.00") for a in later), (
+        f"cycles beyond the second hop keep the flat estimate, got {later}"
+    )
+
+
+def test_zero_pending_charges_skips_the_second_hop(db_session):
+    """No pending charges means no real second-hop signal -- that month
+    falls through to the flat estimate exactly as it did before this
+    feature existed."""
+    user = _user(db_session, username="secondhopzero")
+    account = _checking(db_session, user, balance="60000.00")
+    _card(
+        db_session, user, name="Chase", statement_day=28, due_day=25,
+        current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
+        pending_charges=Decimal("0"),
+        next_payment_date=date(2026, 8, 25),
+        monthly_spend_estimate=Decimal("15000.00"),
+    )
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 11, 30))
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+
+    oct_ = [amt for d, amt in estimates.items() if d.month == 10]
+    assert oct_ == [Decimal("-15000.00")], (
+        f"zero pending_charges must fall through to the flat estimate, got {oct_}"
+    )
+
+
+def test_stale_pending_charges_skips_the_second_hop(db_session):
+    """A pending-charges figure older than 7 days is not trusted -- it
+    falls through to the flat estimate the same as a zero value."""
+    user = _user(db_session, username="secondhopstale")
+    account = _checking(db_session, user, balance="60000.00")
+    _card(
+        db_session, user, name="Chase", statement_day=28, due_day=25,
+        current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
+        pending_charges=Decimal("2000.00"),
+        pending_charges_updated_at=datetime.utcnow() - timedelta(days=10),
+        next_payment_date=date(2026, 8, 25),
+        monthly_spend_estimate=Decimal("15000.00"),
+    )
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 11, 30))
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+
+    oct_ = [amt for d, amt in estimates.items() if d.month == 10]
+    assert oct_ == [Decimal("-15000.00")], (
+        f"stale pending_charges must fall through to the flat estimate, got {oct_}"
+    )
+
+
+def test_pending_charges_with_no_timestamp_skips_the_second_hop(db_session):
+    """A nonzero pending_charges with no recorded timestamp (a pre-existing
+    row from before this feature shipped, or one a sync just cleared) is
+    treated as already stale rather than silently trusted."""
+    user = _user(db_session, username="secondhopnostamp")
+    account = _checking(db_session, user, balance="60000.00")
+    _card(
+        db_session, user, name="Chase", statement_day=28, due_day=25,
+        current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
+        pending_charges=Decimal("2000.00"),
+        pending_charges_updated_at=None,
+        next_payment_date=date(2026, 8, 25),
+        monthly_spend_estimate=Decimal("15000.00"),
+    )
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 11, 30))
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+
+    oct_ = [amt for d, amt in estimates.items() if d.month == 10]
+    assert oct_ == [Decimal("-15000.00")], (
+        f"a nonzero value with no timestamp must fall through to the flat estimate, got {oct_}"
+    )
