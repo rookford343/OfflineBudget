@@ -10,6 +10,15 @@ from backend.dependencies import get_db, get_current_user
 router = APIRouter(prefix="/credit-cards", tags=["credit-cards"])
 
 
+def _clear_pending_if_balance_due_changed(card: models.CreditCard, previous_balance_due: Decimal) -> None:
+    """A changed balance_due can only mean fresher data arrived -- whatever
+    the new value now is, it makes the manual payment_sent_amount snapshot
+    stale. No exact-amount agreement required, unlike transaction dedup."""
+    if card.payment_sent_pending_sync and card.balance_due != previous_balance_due:
+        card.payment_sent_pending_sync = False
+        card.payment_sent_amount = None
+
+
 @router.get("", response_model=list[schemas.CreditCardOut])
 def list_cards(
     db: Session = Depends(get_db),
@@ -84,8 +93,10 @@ def update_card(
     user: models.User = Depends(get_current_user),
 ):
     card = _get_or_404(db, user.id, card_id)
+    previous_balance_due = Decimal(str(card.balance_due))
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(card, field, value)
+    _clear_pending_if_balance_due_changed(card, previous_balance_due)
     db.commit()
     db.refresh(card)
     return _enrich(card)
@@ -159,6 +170,7 @@ def record_payment(
     checking.current_balance -= body.amount
     # Reduce card balance_due
     card.balance_due = max(Decimal("0"), Decimal(str(card.balance_due)) - body.amount)
+    _clear_pending_if_balance_due_changed(card, Decimal(str(card.balance_due)) + body.amount)
     # Record as a checking Transaction so it appears in the transaction list
     txn = models.Transaction(
         user_id=user.id,
