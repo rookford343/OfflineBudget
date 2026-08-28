@@ -1,5 +1,5 @@
 from calendar import monthrange
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -17,6 +17,19 @@ def _clear_pending_if_balance_due_changed(card: models.CreditCard, previous_bala
     if card.payment_sent_pending_sync and card.balance_due != previous_balance_due:
         card.payment_sent_pending_sync = False
         card.payment_sent_amount = None
+
+
+def _stamp_pending_charges_freshness(card: models.CreditCard, previous_pending_charges: Decimal) -> None:
+    """A real change to pending_charges is a fresh, hand-entered signal --
+    stamp when it happened so the forecast can later decide how much to
+    trust it. Setting it back to 0 means nothing is pending anymore, so
+    there is nothing to date."""
+    if card.pending_charges == previous_pending_charges:
+        return
+    if card.pending_charges and card.pending_charges > 0:
+        card.pending_charges_updated_at = datetime.utcnow()
+    else:
+        card.pending_charges_updated_at = None
 
 
 @router.get("", response_model=list[schemas.CreditCardOut])
@@ -94,9 +107,11 @@ def update_card(
 ):
     card = _get_or_404(db, user.id, card_id)
     previous_balance_due = Decimal(str(card.balance_due))
+    previous_pending_charges = Decimal(str(card.pending_charges))
     for field, value in body.model_dump(exclude_none=True).items():
         setattr(card, field, value)
     _clear_pending_if_balance_due_changed(card, previous_balance_due)
+    _stamp_pending_charges_freshness(card, previous_pending_charges)
     db.commit()
     db.refresh(card)
     return _enrich(card)
