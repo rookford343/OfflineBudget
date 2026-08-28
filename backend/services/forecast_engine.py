@@ -590,6 +590,14 @@ def build_forecast(
     # current_balance = opening_balance + sum(all actuals from start_date to yesterday),
     # so opening_balance = current_balance - sum(past actuals).
     current_balance = Decimal(str(account.current_balance))
+    if account.type == models.AccountType.checking:
+        pending_sent = db.query(models.CreditCard).filter(
+            models.CreditCard.user_id == user_id,
+            models.CreditCard.is_active == True,
+            models.CreditCard.payment_sent_pending_sync == True,
+        ).all()
+        for card in pending_sent:
+            current_balance -= Decimal(str(card.payment_sent_amount or 0))
     if start_date < today:
         past_sum = sum(
             Decimal(str(t.amount)) for t in all_actuals if t.date < today

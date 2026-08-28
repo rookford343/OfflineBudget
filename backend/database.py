@@ -178,6 +178,8 @@ def upgrade_schema():
         # Debug-only raw bank-sync payload capture -- see BankSyncRawSnapshot.
         "ALTER TABLE users ADD COLUMN debug_capture_raw_bank_data BOOLEAN DEFAULT 0",
         "ALTER TABLE categories ADD COLUMN is_discretionary BOOLEAN DEFAULT 0",
+        "ALTER TABLE credit_cards ADD COLUMN payment_sent_pending_sync BOOLEAN DEFAULT 0",
+        "ALTER TABLE credit_cards ADD COLUMN payment_sent_amount NUMERIC(14,2)",
         # SchedulerRun, BankSyncRawSnapshot and AppSetting are brand-new
         # tables, created automatically by create_tables()'s
         # Base.metadata.create_all -- no ALTER TABLE needed for them.
