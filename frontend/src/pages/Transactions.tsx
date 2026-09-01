@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { transactionsApi, accountsApi, categoriesApi, cardsApi, authApi, reconciliationApi, exportsApi, dayCheckpointsApi, recurringApi } from "../api";
 import { fmt, today, firstOfMonth, quickRange } from "../lib/utils";
-import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check, Upload, Landmark, Code2 } from "lucide-react";
+import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check, Upload, Landmark, Code2, Tag } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import { CategoryOptions, AccountOptions } from "../lib/selectOptions";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
@@ -854,29 +854,42 @@ export default function Transactions() {
             </div>
             <form onSubmit={submit} className="space-y-3">
               <div>
-                <label className="label">Account</label>
-                <select className="input" value={form.account_id} onChange={e => setForm({ ...form, account_id: e.target.value })} required>
-                  <option value="">Select…</option>
-                  {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+                <label className="label">Description</label>
+                <input autoFocus className="input" placeholder="Duke Energy bill" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} required />
               </div>
-              <div><label className="label">Date</label><input type="date" className="input" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required /></div>
-              <div><label className="label">Description</label><input className="input" placeholder="Duke Energy bill" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} required /></div>
-              <div>
-                <label className="label">Amount (negative = expense)</label>
-                <input type="number" step="0.01" className="input" placeholder="-180.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="label">Date</label><input type="date" className="input" value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} required /></div>
+                <div>
+                  <label className="label">Amount (negative = expense)</label>
+                  <input type="number" step="0.01" className="input" placeholder="-180.00" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required />
+                </div>
               </div>
-              <div>
-                <label className="label">Category</label>
-                <select className="input" value={form.category_id} onChange={e => setForm({ ...form, category_id: e.target.value })}>
-                  <option value="">None</option>
-                  {allCats.map((c: any) => <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>)}
-                </select>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Account</label>
+                  <div className="relative">
+                    <Landmark size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <select className="input pl-8" value={form.account_id} onChange={e => setForm({ ...form, account_id: e.target.value })} required>
+                      <option value="">Select…</option>
+                      {accounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label className="label">Category</label>
+                  <div className="relative">
+                    <Tag size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                    <select className="input pl-8" value={form.category_id} onChange={e => setForm({ ...form, category_id: e.target.value })}>
+                      <option value="">None</option>
+                      {allCats.map((c: any) => <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>)}
+                    </select>
+                  </div>
+                </div>
               </div>
               <div><label className="label">Notes</label><input className="input" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
               <div className="flex gap-3 pt-2">
-                <button type="submit" className="btn-primary flex-1">Add Transaction</button>
                 <button type="button" onClick={() => setShowForm(false)} className="btn-secondary flex-1">Cancel</button>
+                <button type="submit" className="btn-primary flex-1">Add Transaction</button>
               </div>
             </form>
           </div>
