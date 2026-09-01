@@ -341,6 +341,17 @@ class CreditCard(Base):
     payment_sent_pending_sync: Mapped[bool] = mapped_column(Boolean, default=False)
     payment_sent_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     pending_charges_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # When we last had a reason to trust current_balance: either SimpleFIN's
+    # own "balance-date" from a card-side sync, or the date of a checking-side
+    # payment we matched to this card (import_service.py's payoff detection).
+    # Bank aggregators sync checking transactions faster than they sync a
+    # card issuer's own balance, so a card-side sync can report a balance
+    # that's days stale relative to a payment checking already confirmed.
+    # bank_sync_service.py refuses to regress this value with an older one --
+    # see its _sync_link. NULL means "no freshness signal yet", which keeps
+    # legacy behavior (always trust the synced balance) for cards that
+    # predate this column or whose aggregator omits balance-date entirely.
+    balance_as_of: Mapped[datetime | None] = mapped_column(DateTime)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
