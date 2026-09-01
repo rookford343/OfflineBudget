@@ -85,10 +85,17 @@ def fetch_accounts(access_url: str, timeout: float = 15.0) -> list[SimpleFinAcco
 
 def fetch_transactions(
     access_url: str, account_id: str, since: datetime, timeout: float = 15.0,
-) -> tuple[list[SimpleFinTransaction], Decimal]:
+) -> tuple[list[SimpleFinTransaction], Decimal, datetime | None]:
     """Fetch transactions for one account posted after `since`. Returns
-    (transactions, current_balance) -- SimpleFIN returns the account's live
-    balance alongside its transactions in the same response."""
+    (transactions, current_balance, balance_date) -- SimpleFIN returns the
+    account's live balance alongside its transactions in the same response.
+
+    balance_date is SimpleFIN's own "balance-date" field: when the returned
+    balance was actually true at the institution, which can lag real-world
+    posting by days (a payment leaves checking immediately but a card
+    issuer's own balance can take days to reflect it). None when the
+    aggregator/institution doesn't supply it -- callers fall back to
+    trusting the balance unconditionally, the pre-existing behavior."""
     params = {"account": account_id, "start-date": int(since.timestamp())}
     data = _get(access_url, params=params, timeout=timeout)
     accounts = data.get("accounts", [])
@@ -99,6 +106,14 @@ def fetch_transactions(
         balance = Decimal(str(account["balance"]))
     except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
         raise SimpleFinError(f"SimpleFIN returned a malformed account record: {exc}") from exc
+
+    balance_date: datetime | None = None
+    raw_balance_date = account.get("balance-date")
+    if raw_balance_date is not None:
+        try:
+            balance_date = datetime.fromtimestamp(raw_balance_date)
+        except (TypeError, ValueError, OSError):
+            balance_date = None  # malformed balance-date shouldn't fail the whole sync
 
     txns = []
     for t in account.get("transactions", []):
@@ -112,7 +127,7 @@ def fetch_transactions(
             ))
         except (KeyError, TypeError, ValueError, InvalidOperation, OSError) as exc:
             raise SimpleFinError(f"SimpleFIN returned a malformed transaction record: {exc}") from exc
-    return txns, balance
+    return txns, balance, balance_date
 
 
 def _get(access_url: str, params: dict, timeout: float) -> dict:
