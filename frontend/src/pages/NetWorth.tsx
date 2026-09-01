@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { netWorthApi } from "../api";
-import { fmt } from "../lib/utils";
+import { fmt, cx } from "../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -91,10 +91,31 @@ export default function NetWorth() {
   })();
   const capturedToday = (history as any[]).some((s: any) => s.snapshot_date === todayIso);
 
-  const chartData = (history as any[]).map((s: any) => ({
+  const allChartData = (history as any[]).map((s: any) => ({
     date: s.snapshot_date,
     netWorth: parseFloat(s.net_worth),
   }));
+
+  // Client-side only -- history is already fetched in full, so a range filter
+  // here is a display concern, not a new query. Matches Securo's paired
+  // range-control pattern; the granularity dimension (D/W/M/Y rollup) isn't
+  // included -- that's real aggregation logic, not a display filter, and
+  // wasn't worth building for a chart that's mostly daily/weekly snapshots.
+  const RANGES = [
+    { key: "6m", label: "6M", days: 182 },
+    { key: "1y", label: "1Y", days: 365 },
+    { key: "2y", label: "2Y", days: 730 },
+    { key: "all", label: "All", days: null as number | null },
+  ];
+  const [range, setRange] = useState("1y");
+  const chartData = (() => {
+    const active = RANGES.find(r => r.key === range);
+    if (!active || active.days == null) return allChartData;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - active.days);
+    const cutoffIso = cutoff.toISOString().slice(0, 10);
+    return allChartData.filter(d => d.date >= cutoffIso);
+  })();
 
   const nw = totals?.net_worth != null ? parseFloat(totals.net_worth) : null;
 
@@ -129,30 +150,48 @@ export default function NetWorth() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="card text-center">
           <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Manual Assets</p>
-          <p className="text-lg font-bold text-emerald-600">{totals ? fmt(parseFloat(totals.total_assets)) : "—"}</p>
+          <p className="text-lg font-bold text-emerald-600">{totals ? maskIfHidden(balancesHidden, fmt(parseFloat(totals.total_assets))) : "—"}</p>
         </div>
         <div className="card text-center">
           <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Account Balances</p>
-          <p className="text-lg font-bold text-emerald-600">{totals ? fmt(parseFloat(totals.account_balances)) : "—"}</p>
+          <p className="text-lg font-bold text-emerald-600">{totals ? maskIfHidden(balancesHidden, fmt(parseFloat(totals.account_balances))) : "—"}</p>
         </div>
         <div className="card text-center">
           <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Liabilities</p>
           <p className="text-lg font-bold text-red-500">
-            {totals ? fmt(parseFloat(totals.card_balances) + parseFloat(totals.total_liabilities)) : "—"}
+            {totals ? maskIfHidden(balancesHidden, fmt(parseFloat(totals.card_balances) + parseFloat(totals.total_liabilities))) : "—"}
           </p>
         </div>
         <div className="card text-center">
           <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Net Worth</p>
           <p className={`text-2xl font-bold ${nw != null && nw >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-            {nw != null ? fmt(nw) : "—"}
+            {nw != null ? maskIfHidden(balancesHidden, fmt(nw)) : "—"}
           </p>
         </div>
       </div>
 
       {/* Trend Chart */}
-      {chartData.length > 0 ? (
+      {allChartData.length > 0 ? (
         <div className="card">
-          <h3 className="font-semibold text-gray-900 mb-4">Net Worth Over Time</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold text-gray-900">Net Worth Over Time</h3>
+            <div className="flex gap-1 bg-gray-100 dark:bg-gray-700/50 rounded-lg p-0.5">
+              {RANGES.map(r => (
+                <button
+                  key={r.key}
+                  onClick={() => setRange(r.key)}
+                  className={cx(
+                    "px-2.5 py-1 text-xs font-medium rounded-md",
+                    range === r.key
+                      ? "bg-white dark:bg-gray-600 text-indigo-600 dark:text-indigo-300 shadow-sm"
+                      : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                  )}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
               <defs>
@@ -272,7 +311,7 @@ export default function NetWorth() {
                 <span className="ml-2 text-xs text-gray-400">{a.asset_type}</span>
               </div>
               <div className="flex items-center gap-3">
-                <span className="font-semibold text-emerald-600">{fmt(parseFloat(a.current_value))}</span>
+                <span className="font-semibold text-emerald-600">{maskIfHidden(balancesHidden, fmt(parseFloat(a.current_value)))}</span>
                 <button onClick={() => { setEditingAsset(a); setShowAssetForm(false); }} className="text-gray-400 hover:text-indigo-600"><Pencil className="w-4 h-4" /></button>
                 <button onClick={() => setDeleteAsset(a)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
               </div>
