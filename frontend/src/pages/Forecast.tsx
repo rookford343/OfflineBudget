@@ -6,6 +6,7 @@ import { Link } from "react-router-dom";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar, ComposedChart } from "recharts";
 import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle, CreditCard, Pencil, ShieldCheck } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import MonthlyAccuracyRow from "../components/MonthlyAccuracyRow";
 import { RiskBanner } from "../components/RiskBanner";
 import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
@@ -64,6 +65,7 @@ export default function Forecast() {
   const [expenseForm, setExpenseForm] = useState({ ...emptyExpense });
   const [editExpenseId, setEditExpenseId] = useState<number | null>(null);
   const [editExpenseForm, setEditExpenseForm] = useState({ ...emptyExpense });
+  const [deleteExpense, setDeleteExpense] = useState<any | null>(null);
   const [dayCheckpoint, setDayCheckpoint] = useState<{ date: string; value: string } | null>(null);
   const [addTxnDate, setAddTxnDate] = useState<string | null>(null);
   const [addTxnForm, setAddTxnForm] = useState({ description: "", amount: "", category_id: "" });
@@ -325,6 +327,7 @@ export default function Forecast() {
       qc.invalidateQueries({ queryKey: ["planned-expenses"] });
       qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
       qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      setDeleteExpense(null);
     },
   });
   const updateExpenseMut = useMutation({
@@ -866,7 +869,7 @@ export default function Forecast() {
                           {pe.direction === "inflow" ? "+" : "−"}{fmt(pe.amount)}
                         </span>
                         <button onClick={() => { setEditExpenseId(pe.id); setEditExpenseForm({ name: pe.name, amount: String(pe.amount), expected_date: pe.expected_date, notes: pe.notes ?? "", account_id: pe.account_id ? String(pe.account_id) : "", card_id: pe.card_id ? String(pe.card_id) : "", direction: pe.direction ?? "outflow", funding_account_id: pe.funding_account_id ? String(pe.funding_account_id) : "", funding_amount: pe.funding_amount ? String(pe.funding_amount) : "", funding_lead_days: String(pe.funding_lead_days ?? 1) }); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={14} /></button>
-                        <button onClick={() => deleteExpenseMut.mutate(pe.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                        <button onClick={() => setDeleteExpense(pe)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
                       </div>
                     </div>
 
@@ -1273,6 +1276,17 @@ export default function Forecast() {
       )}
 
       {showHelp && <HelpPanel title="Forecast" body={"Day-by-day cash flow projection based on your recurring income and bills.\n\nSelect an account and year to see the balance line. Q1–Q4 summaries show open/close balances and net cash flow.\n\nScenarios let you model 'what if I cut dining by $200/month?' with a second line chart trace.\n\nPlanned Expenses are one-off future costs (vacation, down payment) injected into the forecast balance.\n\nWeekend bills are automatically shifted to the preceding Friday."} onClose={() => setShowHelp(false)} />}
+      <ConfirmDialog
+        open={!!deleteExpense}
+        onOpenChange={(open) => !open && setDeleteExpense(null)}
+        icon={Trash2}
+        title="Delete this planned expense?"
+        description={`"${deleteExpense?.name}" will be permanently removed from your forecast.`}
+        confirmLabel="Delete"
+        confirmingLabel="Deleting…"
+        isPending={deleteExpenseMut.isPending}
+        onConfirm={() => deleteExpense && deleteExpenseMut.mutate(deleteExpense.id)}
+      />
     </div>
   );
 }

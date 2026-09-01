@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { plannedTransfersApi, accountsApi } from "../api";
 import { fmt } from "../lib/utils";
 import { Landmark, Check, Trash2, Pencil, X } from "lucide-react";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 function formatDate(iso: string): string {
   return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" });
@@ -21,6 +22,7 @@ export function PlannedTransferReminder() {
   const [editAmount, setEditAmount] = useState("");
   const [editDate, setEditDate] = useState("");
   const [editFromId, setEditFromId] = useState("");
+  const [deleteTransfer, setDeleteTransfer] = useState<any | null>(null);
 
   const markScheduledMut = useMutation({
     mutationFn: plannedTransfersApi.markScheduled,
@@ -45,6 +47,7 @@ export function PlannedTransferReminder() {
       qc.invalidateQueries({ queryKey: ["forecast-risk"] });
       qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
       qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      setDeleteTransfer(null);
     },
   });
 
@@ -101,13 +104,24 @@ export function PlannedTransferReminder() {
                 </button>
               )}
               <button onClick={() => startEdit(t)} className="btn-ghost p-1.5"><Pencil size={14} /></button>
-              <button onClick={() => removeMut.mutate(t.id)} className="btn-ghost p-1.5 text-red-400 hover:bg-red-50">
+              <button onClick={() => setDeleteTransfer(t)} className="btn-ghost p-1.5 text-red-400 hover:bg-red-50">
                 <Trash2 size={14} />
               </button>
             </div>
           )}
         </div>
       ))}
+      <ConfirmDialog
+        open={!!deleteTransfer}
+        onOpenChange={(open) => !open && setDeleteTransfer(null)}
+        icon={Trash2}
+        title="Remove this planned transfer?"
+        description={`This removes the planned move of ${deleteTransfer ? fmt(parseFloat(deleteTransfer.amount)) : ""} from your reminders.`}
+        confirmLabel="Remove"
+        confirmingLabel="Removing…"
+        isPending={removeMut.isPending}
+        onConfirm={() => deleteTransfer && removeMut.mutate(deleteTransfer.id)}
+      />
     </div>
   );
 }
