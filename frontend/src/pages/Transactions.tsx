@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { transactionsApi, accountsApi, categoriesApi, cardsApi, authApi, reconciliationApi, exportsApi, dayCheckpointsApi, recurringApi } from "../api";
-import { fmt, today, firstOfMonth, quickRange } from "../lib/utils";
+import { fmt, today, firstOfMonth } from "../lib/utils";
 import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check, Upload, Landmark, Code2, Tag } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import DateRangePicker from "../components/DateRangePicker";
 import { CategoryOptions, AccountOptions } from "../lib/selectOptions";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
 import { sortCategoryList, byName } from "../lib/selectOptions";
@@ -391,16 +392,9 @@ export default function Transactions() {
               {cards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
-          {txnTab !== "reconcile" && <>
-            <div className="flex gap-1">
-              {([["Mo", "month"], ["3 Mo", "3months"], ["YTD", "ytd"], ["Last Yr", "lastyear"]] as const).map(([label, p]) => (
-                <button key={p} type="button" className="px-2 py-1 text-xs rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-400" onClick={() => { const r = quickRange(p); setStart(r.start); setEnd(r.end); }}>{label}</button>
-              ))}
-            </div>
-            <input type="date" className="input w-auto" value={start} onChange={e => setStart(e.target.value)} />
-            <span className="self-center text-gray-400">→</span>
-            <input type="date" className="input w-auto" value={end} onChange={e => setEnd(e.target.value)} />
-          </>}
+          {txnTab !== "reconcile" && (
+            <DateRangePicker start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e); }} />
+          )}
           {txnTab === "checking" && (
             <>
               <button
