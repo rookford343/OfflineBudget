@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { authApi, bankSyncApi } from "../../api";
-import { getTheme, setTheme } from "../../store/theme";
+import { useIsDarkMode, toggleTheme } from "../../store/theme";
 import { isParallelOpsEnabled, setParallelOpsEnabled } from "../../store/parallelOps";
 import { useBalancesHidden, toggleBalancesHidden } from "../../store/balanceVisibility";
 import { Moon, Sun, Wand2, Flag, Bug, Clock, EyeOff } from "lucide-react";
@@ -9,8 +9,7 @@ import { PINNABLE_ITEMS, loadPinnedNav, PINNED_STORAGE_KEY } from "../../lib/nav
 import { parseServerDateTime } from "../../lib/utils";
 
 export default function PreferencesTab() {
-  const [dark, setDark] = useState(getTheme() === "dark");
-  function toggleDark() { const next = !dark; setDark(next); setTheme(next); }
+  const dark = useIsDarkMode();
 
   const balancesHidden = useBalancesHidden();
 
@@ -67,7 +66,7 @@ export default function PreferencesTab() {
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Dark Mode</span>
         </div>
         <button
-          onClick={toggleDark}
+          onClick={toggleTheme}
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${dark ? "bg-indigo-600" : "bg-gray-200"}`}
         >
           <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${dark ? "translate-x-6" : "translate-x-1"}`} />
