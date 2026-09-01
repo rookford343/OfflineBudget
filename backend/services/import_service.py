@@ -442,14 +442,32 @@ def run_import(
                 # rows themselves were correct.
                 account.current_balance += row.amount
 
-            # CC payoff detection: reduce matched card's balance
-            if row.is_transfer:
+            # CC payoff detection: reduce matched card's balance. Fires on a
+            # manually-tagged transfer OR any bank_sync-sourced row -- a real
+            # bank's autopay/payment description ("CHASE CREDIT CRD AUTOPAY")
+            # is deterministic, machine-generated text, so requiring Dan to
+            # hand-tag a transaction_rule as is_transfer for every card before
+            # this ever fires was the actual bug: no such rule existed, so a
+            # card's current_balance sat stale until its OWN (slower) bank
+            # sync eventually caught up -- days during which the forecast
+            # planned to pay off debt that checking had already paid off.
+            # Confirmed live 2026-09-01: Chase Sapphire sat at $7,146.36 six
+            # days after a $9,098.94 autopay because is_transfer stayed False.
+            if row.is_transfer or source == models.TransactionSource.bank_sync:
                 for card in db.query(models.CreditCard).filter_by(user_id=user.id).all():
                     if card_matches_description(card, row.description):
                         card.current_balance = max(
                             Decimal("0"),
                             Decimal(str(card.current_balance)) - abs(Decimal(str(row.amount)))
                         )
+                        # A real, dated fact ("this much debt was confirmed
+                        # paid as of row.date") outranks a same-or-later sync
+                        # of the card's OWN feed if that feed is still
+                        # reporting a balance from before this date -- see
+                        # bank_sync_service.py's staleness guard.
+                        as_of = datetime.combine(row.date, datetime.min.time())
+                        if card.balance_as_of is None or as_of > card.balance_as_of:
+                            card.balance_as_of = as_of
                         break
 
             imported += 1

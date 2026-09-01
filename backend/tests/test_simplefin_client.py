@@ -66,13 +66,50 @@ def test_fetch_transactions_returns_txns_and_balance():
         }]
     }
     with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
-        txns, balance = fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+        txns, balance, balance_date = fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
 
     assert balance == Decimal("980.44")
+    assert balance_date is None  # no balance-date in the response
     assert len(txns) == 2
     assert txns[0].amount == Decimal("-52.90")
     assert txns[0].description == "MEIJER #123"
     assert txns[1].description == "ACME CORP PAYROLL"  # falls back to payee when description missing
+
+
+def test_fetch_transactions_parses_balance_date():
+    """SimpleFIN's balance-date tells us when the returned balance was
+    actually true at the institution -- can lag real-world posting by days,
+    which is the root cause of stale credit-card balances after a payment.
+    See backend/tests/test_bank_sync_service.py for how this is used."""
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {
+        "accounts": [{
+            "id": "acc-1", "balance": "980.44", "balance-date": 1723276800,
+            "transactions": [],
+        }]
+    }
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        txns, balance, balance_date = fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+
+    assert balance_date == datetime.fromtimestamp(1723276800)
+
+
+def test_fetch_transactions_tolerates_malformed_balance_date():
+    """A garbage balance-date must not fail the whole sync -- it just falls
+    back to None, same as when the field is absent entirely."""
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = lambda: None
+    mock_resp.json.return_value = {
+        "accounts": [{
+            "id": "acc-1", "balance": "980.44", "balance-date": "not-a-timestamp",
+            "transactions": [],
+        }]
+    }
+    with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
+        txns, balance, balance_date = fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+
+    assert balance_date is None
 
 
 def test_fetch_transactions_raises_when_account_missing():

@@ -181,6 +181,9 @@ def upgrade_schema():
         "ALTER TABLE credit_cards ADD COLUMN payment_sent_pending_sync BOOLEAN DEFAULT 0",
         "ALTER TABLE credit_cards ADD COLUMN payment_sent_amount NUMERIC(14,2)",
         "ALTER TABLE credit_cards ADD COLUMN pending_charges_updated_at DATETIME",
+        # Bank-sync staleness guard for credit-card balances -- see
+        # CreditCard.balance_as_of in models.py for the full rationale.
+        "ALTER TABLE credit_cards ADD COLUMN balance_as_of DATETIME",
         # SchedulerRun, BankSyncRawSnapshot and AppSetting are brand-new
         # tables, created automatically by create_tables()'s
         # Base.metadata.create_all -- no ALTER TABLE needed for them.

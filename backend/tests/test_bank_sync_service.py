@@ -59,7 +59,7 @@ def test_sync_connection_stores_card_balance_as_positive_amount_owed(db_session)
     txns = [SimpleFinTransaction(id="c1", posted=datetime(2026, 8, 5), amount=Decimal("-52.90"), description="Meijer")]
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("-500.00"))):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("-500.00"), None)):
         sync_connection(db_session, connection)
 
     db_session.refresh(card)
@@ -69,6 +69,56 @@ def test_sync_connection_stores_card_balance_as_positive_amount_owed(db_session)
     ct = db_session.query(models.CreditCardTransaction).filter_by(card_id=card.id).one()
     assert ct.merchant == "Meijer"
     assert ct.source == models.CardTransactionSource.bank_sync
+
+
+def test_card_sync_refuses_to_regress_balance_older_than_known_payoff(db_session):
+    """Real-world regression (2026-09-01): Chase's own SimpleFIN feed still
+    reported a pre-payment balance six days after a $9,098.94 autopay that
+    the checking side already confirmed. A card-side sync whose balance-date
+    is OLDER than what we already know (card.balance_as_of, stamped by
+    import_service.py's payoff detection) must not overwrite current_balance
+    with that stale number."""
+    user, card, connection, link = _make_card_connection(db_session)
+    card.current_balance = Decimal("706.75")  # already corrected by a matched checking payment
+    card.balance_as_of = datetime(2026, 8, 26)
+    db_session.commit()
+
+    # No new card transactions this run -- isolates the assertion to the
+    # whole-balance overwrite guard, not run_import's separate per-charge
+    # accounting (which legitimately adjusts current_balance for any real
+    # new transaction regardless of this guard).
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch(
+             "backend.services.bank_sync_service.fetch_transactions",
+             return_value=([], Decimal("-7146.36"), datetime(2026, 8, 20)),  # stale: older than balance_as_of
+         ):
+        sync_connection(db_session, connection)
+
+    db_session.refresh(card)
+    assert card.current_balance == Decimal("706.75")  # unchanged, the stale number was refused
+    assert card.balance_as_of == datetime(2026, 8, 26)  # not regressed either
+
+
+def test_card_sync_applies_balance_once_its_own_feed_catches_up(db_session):
+    """The flip side: once the card's own balance-date advances past what we
+    already knew, its number is authoritative again and applies normally."""
+    user, card, connection, link = _make_card_connection(db_session)
+    card.current_balance = Decimal("706.75")
+    card.balance_as_of = datetime(2026, 8, 26)
+    db_session.commit()
+
+    txns = [SimpleFinTransaction(id="c1", posted=datetime(2026, 8, 28), amount=Decimal("-52.90"), description="Meijer")]
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch(
+             "backend.services.bank_sync_service.fetch_transactions",
+             return_value=(txns, Decimal("-759.65"), datetime(2026, 8, 28)),  # caught up: newer than balance_as_of
+         ):
+        sync_connection(db_session, connection)
+
+    db_session.refresh(card)
+    assert card.current_balance == Decimal("759.65")
+    assert card.balance_as_of == datetime(2026, 8, 28)
 
 
 def test_a_bank_sync_clears_a_pending_marker(db_session):
@@ -82,7 +132,7 @@ def test_a_bank_sync_clears_a_pending_marker(db_session):
     db_session.commit()
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=([], Decimal("-300.00"))):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=([], Decimal("-300.00"), None)):
         sync_connection(db_session, connection)
 
     db_session.refresh(card)
@@ -103,7 +153,7 @@ def test_a_bank_sync_with_no_new_transactions_keeps_pending_charges(db_session):
     db_session.commit()
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=([], Decimal("-300.00"))):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=([], Decimal("-300.00"), None)):
         sync_connection(db_session, connection)
 
     db_session.refresh(card)
@@ -123,7 +173,7 @@ def test_a_bank_sync_with_new_transactions_clears_pending_charges(db_session):
     txns = [SimpleFinTransaction(id="c1", posted=datetime(2026, 8, 5), amount=Decimal("-52.90"), description="Meijer")]
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("-300.00"))):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("-300.00"), None)):
         sync_connection(db_session, connection)
 
     db_session.refresh(card)
@@ -136,7 +186,7 @@ def test_sync_connection_imports_transactions_and_updates_balance(db_session):
     txns = [SimpleFinTransaction(id="t1", posted=datetime(2026, 8, 5), amount=Decimal("-52.90"), description="Meijer")]
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("47.10"))):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("47.10"), None)):
         imported_count, skipped_count = sync_connection(db_session, connection)
 
     assert (imported_count, skipped_count) == (1, 0)
@@ -159,7 +209,7 @@ def test_sync_connection_dedupes_on_rerun(db_session):
     txns = [SimpleFinTransaction(id="t1", posted=datetime(2026, 8, 5), amount=Decimal("-52.90"), description="Meijer")]
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("47.10"))):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("47.10"), None)):
         sync_connection(db_session, connection)
         second_run = sync_connection(db_session, connection)  # re-run, overlapping window re-fetches the same txn
 
@@ -183,7 +233,7 @@ def test_sync_connection_isolates_per_account_failure(db_session):
     def fake_fetch(access_url, account_id, since):
         if account_id == "acc-1":
             raise SimpleFinError("bank unreachable")
-        return [SimpleFinTransaction(id="t2", posted=datetime(2026, 8, 5), amount=Decimal("500.00"), description="Transfer")], Decimal("500.00")
+        return [SimpleFinTransaction(id="t2", posted=datetime(2026, 8, 5), amount=Decimal("500.00"), description="Transfer")], Decimal("500.00"), None
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
          patch("backend.services.bank_sync_service.fetch_transactions", side_effect=fake_fetch):
@@ -231,7 +281,7 @@ def test_sync_all_retries_errored_connection_and_restores_active(db_session):
     txns = [SimpleFinTransaction(id="t9", posted=datetime(2026, 8, 5), amount=Decimal("25.00"), description="Deposit")]
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("125.00"))) as mock_fetch:
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("125.00"), None)) as mock_fetch:
         sync_all(db_session)
 
     mock_fetch.assert_called_once()
@@ -254,7 +304,7 @@ def test_sync_keeps_distinct_same_day_transactions_with_different_ids(db_session
     ]
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("91.00"))):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("91.00"), None)):
         sync_connection(db_session, connection)
 
     imported = db_session.query(models.Transaction).filter_by(account_id=account.id).all()
@@ -271,7 +321,7 @@ def test_sync_dedupes_same_external_id_across_overlap_window(db_session):
     second = [SimpleFinTransaction(id="sf-1", posted=datetime(2026, 8, 5), amount=Decimal("-52.90"), description="MEIJER #123")]
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", side_effect=[(first, Decimal("47.10")), (second, Decimal("47.10"))]):
+         patch("backend.services.bank_sync_service.fetch_transactions", side_effect=[(first, Decimal("47.10"), None), (second, Decimal("47.10"), None)]):
         sync_connection(db_session, connection)
         sync_connection(db_session, connection)
 
@@ -295,7 +345,7 @@ def test_sync_does_not_reimport_legacy_rows_lacking_external_id(db_session):
 
     txns = [SimpleFinTransaction(id="sf-1", posted=datetime(2026, 8, 5), amount=Decimal("-52.90"), description="Meijer")]
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("47.10"))):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("47.10"), None)):
         sync_connection(db_session, connection)
 
     imported = db_session.query(models.Transaction).filter_by(account_id=account.id).all()
@@ -311,7 +361,7 @@ def test_sync_keeps_distinct_same_day_card_transactions(db_session):
     ]
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("-9.00"))):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("-9.00"), None)):
         sync_connection(db_session, connection)
 
     cts = db_session.query(models.CreditCardTransaction).filter_by(card_id=card.id).all()
@@ -405,7 +455,7 @@ def test_sync_connection_isolates_unexpected_error_per_link(db_session):
     def fake_fetch(access_url, account_id, since):
         if account_id == "acc-1":
             raise RuntimeError("unexpected boom")
-        return [SimpleFinTransaction(id="t2", posted=datetime(2026, 8, 5), amount=Decimal("500.00"), description="Transfer")], Decimal("500.00")
+        return [SimpleFinTransaction(id="t2", posted=datetime(2026, 8, 5), amount=Decimal("500.00"), description="Transfer")], Decimal("500.00"), None
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
          patch("backend.services.bank_sync_service.fetch_transactions", side_effect=fake_fetch):
@@ -434,7 +484,7 @@ def test_sync_all_isolates_decrypt_failure_per_connection(db_session):
         return "https://access.url"
 
     with patch("backend.services.bank_sync_service.decrypt", side_effect=fake_decrypt), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("10.00"))):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("10.00"), None)):
         sync_all(db_session)
 
     db_session.refresh(connection1)
