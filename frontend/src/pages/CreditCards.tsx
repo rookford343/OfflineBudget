@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cardsApi, accountsApi } from "../api";
 import { fmt, utilColor, utilBg, today } from "../lib/utils";
+import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { Plus, Pencil, Trash2, CreditCard as CardIcon, DollarSign, X, HelpCircle, Clock, Send } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 
@@ -17,6 +18,7 @@ const emptyPayment = { checking_account_id: "", date: today(), amount: "", notes
 
 export default function CreditCards() {
   const qc = useQueryClient();
+  const balancesHidden = useBalancesHidden();
   const [showHelp, setShowHelp] = useState(false);
   const { data: cards = [], isLoading } = useQuery({ queryKey: ["credit-cards"], queryFn: cardsApi.list });
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
@@ -107,7 +109,7 @@ export default function CreditCards() {
             <div className="flex justify-between items-start mb-3">
               <div>
                 <p className="font-bold text-gray-900">{c.name}</p>
-                {c.last_four && <p className="text-xs text-gray-400">•••• {c.last_four}</p>}
+                {c.last_four && <p className="text-xs text-gray-400">{balancesHidden ? "•••• ••••" : `•••• ${c.last_four}`}</p>}
               </div>
               <div className="flex gap-1">
                 <button onClick={() => setPayCard(c)} className="btn-ghost p-1.5" title="Record payment"><DollarSign size={15} /></button>
@@ -136,15 +138,15 @@ export default function CreditCards() {
             <div className="space-y-2 mb-3">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Balance</span>
-                <span className={`font-bold tabular-nums ${utilColor(c.utilization_pct)}`}>{fmt(c.current_balance)}</span>
+                <span className={`font-bold tabular-nums ${utilColor(c.utilization_pct)}`}>{maskIfHidden(balancesHidden, fmt(c.current_balance))}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Amount Due</span>
-                <span className={`font-semibold tabular-nums ${parseFloat(c.balance_due) > 0 ? "text-red-600" : "text-gray-400"}`}>{fmt(c.balance_due)}</span>
+                <span className={`font-semibold tabular-nums ${parseFloat(c.balance_due) > 0 ? "text-red-600" : "text-gray-400"}`}>{maskIfHidden(balancesHidden, fmt(c.balance_due))}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Limit</span>
-                <span className="text-gray-600 tabular-nums">{fmt(c.credit_limit)}</span>
+                <span className="text-gray-600 tabular-nums">{maskIfHidden(balancesHidden, fmt(c.credit_limit))}</span>
               </div>
             </div>
 
@@ -164,7 +166,7 @@ export default function CreditCards() {
             </div>
             {c.next_payment_date && parseFloat(c.balance_due) > 0 && (
               <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-                Pay {fmt(c.balance_due)} by {new Date(c.next_payment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                Pay {maskIfHidden(balancesHidden, fmt(c.balance_due))} by {new Date(c.next_payment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
               </div>
             )}
           </div>

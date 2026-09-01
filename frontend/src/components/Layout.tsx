@@ -8,7 +8,7 @@ import { TrendBadge } from "./TrendBadge";
 import { LogOut, Eye, EyeOff } from "lucide-react";
 import { cx, fmt, firstOfMonth } from "../lib/utils";
 import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
-import { getBalancesHidden, setBalancesHidden as persistBalancesHidden } from "../store/balanceVisibility";
+import { useBalancesHidden, toggleBalancesHidden } from "../store/balanceVisibility";
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -32,7 +32,7 @@ export default function Layout() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [pinned, setPinned] = useState<string[]>(loadPinnedNav);
   const [accountsExpanded, setAccountsExpanded] = useState(false);
-  const [balancesHidden, setBalancesHidden] = useState(getBalancesHidden);
+  const balancesHidden = useBalancesHidden();
 
   // Latch open once on first load if no accounts exist — don't re-derive from live query
   // so the wizard stays visible after step 1 creates the first account.
@@ -53,14 +53,6 @@ export default function Layout() {
     const handler = () => setPinned(loadPinnedNav());
     window.addEventListener("nav-order-changed", handler);
     return () => window.removeEventListener("nav-order-changed", handler);
-  }, []);
-
-  // Allow Settings' Preferences tab to toggle balance visibility and have
-  // the sidebar's own eye icon reflect it immediately, without a reload.
-  useEffect(() => {
-    const handler = () => setBalancesHidden(getBalancesHidden());
-    window.addEventListener("balances-hidden-changed", handler);
-    return () => window.removeEventListener("balances-hidden-changed", handler);
   }, []);
 
   const showWizard = wizardOpen;
@@ -115,7 +107,17 @@ export default function Layout() {
       {/* Sidebar */}
       <aside className="hidden md:flex w-60 flex-col bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 shrink-0">
         <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
-          <h1 className="text-lg font-bold text-indigo-600">OfflineBudget</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-lg font-bold text-indigo-600">OfflineBudget</h1>
+            <button
+              onClick={toggleBalancesHidden}
+              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+              title={balancesHidden ? "Show account balances" : "Hide account balances"}
+              aria-label={balancesHidden ? "Show account balances" : "Hide account balances"}
+            >
+              {balancesHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{me?.display_name ?? user?.display_name}</p>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
@@ -157,14 +159,6 @@ export default function Layout() {
               <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-400">
                 Accounts
               </p>
-              <button
-                onClick={() => setBalancesHidden(h => { persistBalancesHidden(!h); return !h; })}
-                className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-                title={balancesHidden ? "Show account details" : "Hide account details"}
-                aria-label={balancesHidden ? "Show account details" : "Hide account details"}
-              >
-                {balancesHidden ? <EyeOff size={14} /> : <Eye size={14} />}
-              </button>
             </div>
             <ul className="space-y-0.5">
               {(accountsExpanded ? sortedAccounts : sortedAccounts.slice(0, 4)).map((a: any) => {

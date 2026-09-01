@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { netWorthApi } from "../api";
 import { fmt } from "../lib/utils";
+import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -32,6 +33,7 @@ const emptyLiability = { name: "", liability_type: LIABILITY_TYPES[0], current_b
 
 export default function NetWorth() {
   const qc = useQueryClient();
+  const balancesHidden = useBalancesHidden();
   const [showHelp, setShowHelp] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [editingLiability, setEditingLiability] = useState<Liability | null>(null);
@@ -325,7 +327,7 @@ export default function NetWorth() {
                 <span className="ml-2 text-xs text-gray-400">{l.liability_type}</span>
               </div>
               <div className="flex items-center gap-3">
-                <span className="font-semibold text-red-500">{fmt(parseFloat(l.current_balance))}</span>
+                <span className="font-semibold text-red-500">{maskIfHidden(balancesHidden, fmt(parseFloat(l.current_balance)))}</span>
                 <button onClick={() => { setEditingLiability(l); setShowLiabilityForm(false); }} className="text-gray-400 hover:text-indigo-600"><Pencil className="w-4 h-4" /></button>
                 <button onClick={() => deleteLiabilityMut.mutate(l.id)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
               </div>
