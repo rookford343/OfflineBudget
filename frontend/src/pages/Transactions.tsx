@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
-import { transactionsApi, accountsApi, categoriesApi, cardsApi, authApi, reconciliationApi, exportsApi, dayCheckpointsApi, recurringApi } from "../api";
+import { transactionsApi, accountsApi, categoriesApi, cardsApi, authApi, reconciliationApi, exportsApi, dayCheckpointsApi, recurringApi, forecastApi } from "../api";
 import { fmt, today, firstOfMonth } from "../lib/utils";
 import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check, Upload, Landmark, Code2, Tag } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
@@ -83,7 +83,23 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-type TxnTab = "all" | "checking" | "card" | "reconcile";
+type TxnTab = "all" | "checking" | "card" | "pending" | "reconcile";
+
+// One not-yet-actual line item from the forecast walk, flattened out of its
+// day for display -- name/amount/type already computed by
+// forecast_engine.py's day-by-day walk, which schedules bills and income on
+// the date they're SUPPOSED to happen rather than waiting on bank sync to
+// confirm them (the whole point: Dan's spreadsheet stays a stable,
+// predictable point-in-time view except where the underlying bill itself is
+// genuinely variable -- credit card payments and utilities like Duke).
+interface PendingRow {
+  date: string;
+  name: string;
+  amount: number;
+  type: string;
+  categoryName: string | null;
+  isCcPayment: boolean;
+}
 
 interface CategoryCellProps {
   txnId: number;
@@ -290,6 +306,31 @@ export default function Transactions() {
     })
     .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id) : [];
 
+  // Pending tab: the primary checking account's forecast walk through the
+  // end of THIS month, filtered to entries that haven't posted yet. Once a
+  // real transaction arrives, forecast_engine.py's own actual/recurring
+  // suppression removes the matching projected entry -- no separate dedup
+  // needed here, it just stops showing up.
+  const primaryCheckingId = (accounts as any[]).filter((a: any) => a.type === "checking")[0]?.id ?? null;
+  const pendingEnd = (() => {
+    const now = new Date();
+    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}-${String(last.getDate()).padStart(2, "0")}`;
+  })();
+  const { data: pendingForecast = [], isLoading: pendingLoading } = useQuery<any[]>({
+    queryKey: ["pending-forecast", primaryCheckingId, pendingEnd],
+    queryFn: () => forecastApi.range(primaryCheckingId, today(), pendingEnd),
+    enabled: txnTab === "pending" && !!primaryCheckingId,
+  });
+  const pendingRows: PendingRow[] = pendingForecast.flatMap((day: any) =>
+    (day.transactions ?? [])
+      .filter((t: any) => !t.is_actual)
+      .map((t: any) => ({
+        date: day.date, name: t.name, amount: parseFloat(t.amount),
+        type: t.type, categoryName: t.category_name ?? null, isCcPayment: !!t.is_cc_payment,
+      }))
+  ).sort((a, b) => a.date.localeCompare(b.date));
+
   const activeReconcileAccountId = reconcileAccountId ?? ((accounts as any[]).filter((a: any) => a.type === "checking")[0]?.id ?? null);
   const { data: reconcileData, isLoading: reconcileLoading } = useQuery({
     queryKey: ["reconcile", activeReconcileAccountId, reconcileYear, reconcileMonth],
@@ -395,7 +436,7 @@ export default function Transactions() {
 
   const accountMap = Object.fromEntries(accounts.map((a: any) => [a.id, a.name]));
   const catMap = Object.fromEntries(allCats.map((c: any) => [c.id, c.name]));
-  const loading = txnTab === "checking" ? isLoading : txnTab === "all" ? (isLoading || allCardsLoading) : cardLoading;
+  const loading = txnTab === "checking" ? isLoading : txnTab === "all" ? (isLoading || allCardsLoading) : txnTab === "pending" ? pendingLoading : cardLoading;
 
   return (
     <div className="space-y-6">
@@ -408,17 +449,19 @@ export default function Transactions() {
                 ? `${txns.length} transaction${txns.length !== 1 ? "s" : ""}`
                 : txnTab === "all"
                   ? `${unifiedRows.length} transaction${unifiedRows.length !== 1 ? "s" : ""} across ${1 + (cards as any[]).length} account${(cards as any[]).length !== 0 ? "s" : ""}`
-                  : `${cardTxns.length} card charge${cardTxns.length !== 1 ? "s" : ""}`}
+                  : txnTab === "pending"
+                    ? `${pendingRows.length} not yet posted, through ${pendingEnd}`
+                    : `${cardTxns.length} card charge${cardTxns.length !== 1 ? "s" : ""}`}
             </p>
           )}
         </div>
         <div className="flex gap-2 flex-wrap">
           <div className="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
-            {(["all", "checking", "card", "reconcile"] as TxnTab[]).map(t => (
+            {(["all", "checking", "card", "pending", "reconcile"] as TxnTab[]).map(t => (
               <button key={t} type="button"
                 onClick={() => setTxnTab(t)}
                 className={`px-3 py-1 text-xs font-medium rounded-md capitalize transition-colors ${txnTab === t ? "bg-white dark:bg-gray-800 shadow-sm text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-300"}`}>
-                {t === "all" ? "All" : t === "checking" ? "Checking" : t === "card" ? "Credit Cards" : "Reconcile"}
+                {t === "all" ? "All" : t === "checking" ? "Checking" : t === "card" ? "Credit Cards" : t === "pending" ? "Pending" : "Reconcile"}
               </button>
             ))}
           </div>
@@ -427,7 +470,7 @@ export default function Transactions() {
               {cards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
-          {txnTab !== "reconcile" && (
+          {txnTab !== "reconcile" && txnTab !== "pending" && (
             <DateRangePicker start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e); }} />
           )}
           {txnTab === "all" && (
@@ -580,6 +623,51 @@ export default function Transactions() {
                           {r.externalId && <RawDataButton externalId={r.externalId} />}
                         </td>
                       )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
+
+        {/* Pending: the primary checking account's forecast walk through
+            month-end, filtered to not-yet-actual entries -- bills and income
+            scheduled on the date they're supposed to happen, not waiting on
+            bank sync to confirm them. Read-only: nothing here is a real
+            transaction, so no edit/delete affordances. */}
+        {txnTab === "pending" && !loading && (
+          <>
+            {pendingRows.length === 0 && <p className="text-sm text-gray-400 text-center py-8">Nothing pending through {pendingEnd}.</p>}
+            {pendingRows.length > 0 && (
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-700">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Category</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                  {pendingRows.map((r, i) => (
+                    <tr key={`${r.date}-${i}`} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                        {new Date(r.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </td>
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-sm">
+                        <div className="truncate flex items-center gap-1.5">
+                          {r.name}
+                          <span className="shrink-0 text-[10px] uppercase tracking-wide px-1 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
+                            pending
+                          </span>
+                        </div>
+                        <div className="lg:hidden text-xs text-gray-400">{r.categoryName ?? (r.isCcPayment ? "Credit Card Payment" : "")}</div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 hidden lg:table-cell">{r.categoryName ?? (r.isCcPayment ? "Credit Card Payment" : "—")}</td>
+                      <td className={`px-4 py-3 text-right font-medium tabular-nums ${r.amount >= 0 ? "text-green-600" : "text-gray-900 dark:text-gray-100"}`}>
+                        {r.amount >= 0 ? "+" : ""}{fmt(r.amount)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
