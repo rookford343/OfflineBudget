@@ -6,8 +6,9 @@ import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
-import { PlusCircle, Pencil, Trash2, Camera, HelpCircle } from "lucide-react";
+import { PlusCircle, Pencil, Trash2, Camera, HelpCircle, Loader2 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 type Asset = { id: number; name: string; asset_type: string; current_value: string; as_of_date: string };
 type Liability = { id: number; name: string; liability_type: string; current_balance: string; as_of_date: string };
@@ -41,6 +42,8 @@ export default function NetWorth() {
   const [liabilityForm, setLiabilityForm] = useState(emptyLiability);
   const [showAssetForm, setShowAssetForm] = useState(false);
   const [showLiabilityForm, setShowLiabilityForm] = useState(false);
+  const [deleteAsset, setDeleteAsset] = useState<Asset | null>(null);
+  const [deleteLiability, setDeleteLiability] = useState<Liability | null>(null);
 
   const { data: totals } = useQuery({ queryKey: ["net-worth-totals"], queryFn: netWorthApi.totals });
   const { data: history = [] } = useQuery({ queryKey: ["net-worth-history"], queryFn: netWorthApi.history });
@@ -62,7 +65,7 @@ export default function NetWorth() {
     mutationFn: ({ id, d }: { id: number; d: object }) => netWorthApi.updateAsset(id, d),
     onSuccess: () => { invalidate(); setEditingAsset(null); },
   });
-  const deleteAssetMut = useMutation({ mutationFn: (id: number) => netWorthApi.removeAsset(id), onSuccess: invalidate });
+  const deleteAssetMut = useMutation({ mutationFn: (id: number) => netWorthApi.removeAsset(id), onSuccess: () => { invalidate(); setDeleteAsset(null); } });
 
   const createLiabilityMut = useMutation({
     mutationFn: (d: object) => netWorthApi.createLiability(d),
@@ -72,7 +75,7 @@ export default function NetWorth() {
     mutationFn: ({ id, d }: { id: number; d: object }) => netWorthApi.updateLiability(id, d),
     onSuccess: () => { invalidate(); setEditingLiability(null); },
   });
-  const deleteLiabilityMut = useMutation({ mutationFn: (id: number) => netWorthApi.removeLiability(id), onSuccess: invalidate });
+  const deleteLiabilityMut = useMutation({ mutationFn: (id: number) => netWorthApi.removeLiability(id), onSuccess: () => { invalidate(); setDeleteLiability(null); } });
   const snapshotMut = useMutation({ mutationFn: netWorthApi.snapshot, onSuccess: invalidate });
   const removeSnapshotMut = useMutation({ mutationFn: netWorthApi.removeSnapshot, onSuccess: invalidate });
   const [showHistory, setShowHistory] = useState(false);
@@ -202,9 +205,12 @@ export default function NetWorth() {
                     <button
                       onClick={() => removeSnapshotMut.mutate(s.id)}
                       disabled={removeSnapshotMut.isPending}
-                      className="text-gray-300 hover:text-red-500"
-                      title="Delete this snapshot">
-                      <Trash2 size={14} />
+                      className="text-gray-300 hover:text-red-500 disabled:opacity-50"
+                      title="Delete this snapshot"
+                      aria-label="Delete this snapshot">
+                      {removeSnapshotMut.isPending && removeSnapshotMut.variables === s.id
+                        ? <Loader2 size={14} className="animate-spin" />
+                        : <Trash2 size={14} />}
                     </button>
                   </div>
                 </div>
@@ -268,7 +274,7 @@ export default function NetWorth() {
               <div className="flex items-center gap-3">
                 <span className="font-semibold text-emerald-600">{fmt(parseFloat(a.current_value))}</span>
                 <button onClick={() => { setEditingAsset(a); setShowAssetForm(false); }} className="text-gray-400 hover:text-indigo-600"><Pencil className="w-4 h-4" /></button>
-                <button onClick={() => deleteAssetMut.mutate(a.id)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                <button onClick={() => setDeleteAsset(a)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
               </div>
             </div>
           ))}
@@ -329,13 +335,35 @@ export default function NetWorth() {
               <div className="flex items-center gap-3">
                 <span className="font-semibold text-red-500">{maskIfHidden(balancesHidden, fmt(parseFloat(l.current_balance)))}</span>
                 <button onClick={() => { setEditingLiability(l); setShowLiabilityForm(false); }} className="text-gray-400 hover:text-indigo-600"><Pencil className="w-4 h-4" /></button>
-                <button onClick={() => deleteLiabilityMut.mutate(l.id)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
+                <button onClick={() => setDeleteLiability(l)} className="text-gray-400 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
               </div>
             </div>
           ))}
         </div>
       </div>
       {showHelp && <HelpPanel title="Net Worth" body={"Your net worth = assets + account balances − credit card balances − liabilities.\n\nAdd manual assets (investments, real estate, vehicles) and liabilities (mortgage, loans). Those figures are what the app knows right now — editing them changes the current total but not any past snapshot.\n\nA snapshot freezes today's total so the chart has a point to plot. Nothing is recorded automatically, so the trend line only has the dates you captured.\n\nCapturing twice on the same day replaces that day rather than adding a second point, and any snapshot can be deleted from Snapshot History if it was taken with wrong figures."} onClose={() => setShowHelp(false)} />}
+      <ConfirmDialog
+        open={!!deleteAsset}
+        onOpenChange={(open) => !open && setDeleteAsset(null)}
+        icon={Trash2}
+        title="Delete this asset?"
+        description={`"${deleteAsset?.name}" will be permanently removed from your net worth.`}
+        confirmLabel="Delete"
+        confirmingLabel="Deleting…"
+        isPending={deleteAssetMut.isPending}
+        onConfirm={() => deleteAssetMut.mutate(deleteAsset!.id)}
+      />
+      <ConfirmDialog
+        open={!!deleteLiability}
+        onOpenChange={(open) => !open && setDeleteLiability(null)}
+        icon={Trash2}
+        title="Delete this liability?"
+        description={`"${deleteLiability?.name}" will be permanently removed from your net worth.`}
+        confirmLabel="Delete"
+        confirmingLabel="Deleting…"
+        isPending={deleteLiabilityMut.isPending}
+        onConfirm={() => deleteLiabilityMut.mutate(deleteLiability!.id)}
+      />
     </div>
   );
 }

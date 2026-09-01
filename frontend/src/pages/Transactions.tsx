@@ -756,7 +756,7 @@ export default function Transactions() {
                                     description: item.name,
                                     is_actual: true,
                                   })}
-                                >Confirm</button>
+                                >{addRecurringTxnMut.isPending ? "Adding…" : "Confirm"}</button>
                                 <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => setAddForRecurringId(null)}>Cancel</button>
                               </div>
                             ) : (

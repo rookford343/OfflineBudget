@@ -204,7 +204,7 @@ export default function MonthlyAccuracyRow({ accountId, year, month }: Props) {
                           disabled={!linkRecurringId || linkTxnMut.isPending}
                           onClick={() => linkTxnMut.mutate({ txnId: t.transaction_id, recurringItemId: parseInt(linkRecurringId) })}
                           className="btn-primary text-xs px-2 py-0.5"
-                        >Link</button>
+                        >{linkTxnMut.isPending ? "Linking…" : "Link"}</button>
                         <button onClick={() => setLinkingTxnId(null)} className="btn-secondary text-xs px-2 py-0.5">Cancel</button>
                       </div>
                     )}

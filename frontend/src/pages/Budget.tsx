@@ -278,7 +278,7 @@ export default function Budget() {
           <MonthYearPicker year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
           <button onClick={() => applyRolloverMut.mutate()} disabled={applyRolloverMut.isPending}
             className="btn-secondary text-xs px-2 py-1" title="Carry last month's unspent budget forward">
-            <RotateCcw size={12} /> Rollover
+            <RotateCcw size={12} /> {applyRolloverMut.isPending ? "Rolling over…" : "Rollover"}
           </button>
         </div>
       </div>
@@ -355,7 +355,7 @@ export default function Budget() {
                       <button className="btn-secondary text-xs px-2 py-0.5"
                         disabled={upsertMut.isPending}
                         onClick={() => saveEdit(r.category_id, r.actual_total)}>
-                        Budget this
+                        {upsertMut.isPending ? "Saving…" : "Budget this"}
                       </button>
                     </div>
                   </div>

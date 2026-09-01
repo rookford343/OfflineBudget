@@ -5,6 +5,7 @@ import { fmt } from "../lib/utils";
 import { Plus, Pencil, Trash2, Target, HelpCircle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import { ProgressRing } from "../components/ProgressRing";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -39,6 +40,7 @@ export default function Goals() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState<GoalFormData>(EMPTY_FORM);
+  const [deleteGoal, setDeleteGoal] = useState<any | null>(null);
 
   const { data: goals = [], isLoading } = useQuery<any[]>({
     queryKey: ["goals"],
@@ -62,7 +64,7 @@ export default function Goals() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => goalsApi.remove(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["goals"] }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["goals"] }); setDeleteGoal(null); },
   });
 
   function resetForm() {
@@ -228,7 +230,7 @@ export default function Goals() {
                     <button onClick={() => startEdit(goal)} className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-400">
                       <Pencil size={14} />
                     </button>
-                    <button onClick={() => deleteMutation.mutate(goal.id)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 dark:text-gray-400 hover:text-red-500">
+                    <button onClick={() => setDeleteGoal(goal)} className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 dark:text-gray-400 hover:text-red-500">
                       <Trash2 size={14} />
                     </button>
                   </div>
@@ -276,6 +278,17 @@ export default function Goals() {
         </div>
       )}
       {showHelp && <HelpPanel title="Savings Goals" body={"Track progress toward named financial targets.\n\nEach goal shows a progress bar, current vs. target amount, and projected completion date.\n\nUse the monthly contribution needed field to plan how much to set aside each month."} onClose={() => setShowHelp(false)} />}
+      <ConfirmDialog
+        open={!!deleteGoal}
+        onOpenChange={(open) => !open && setDeleteGoal(null)}
+        icon={Trash2}
+        title="Delete this goal?"
+        description={`"${deleteGoal?.name}" and its progress history will be permanently removed.`}
+        confirmLabel="Delete"
+        confirmingLabel="Deleting…"
+        isPending={deleteMutation.isPending}
+        onConfirm={() => deleteMutation.mutate(deleteGoal.id)}
+      />
     </div>
   );
 }

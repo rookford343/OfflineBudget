@@ -4,6 +4,7 @@ import { accountsApi, cardsApi, bankSyncApi } from "../../api";
 import { fmt, parseServerDateTime } from "../../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../../store/balanceVisibility";
 import { Plus, Pencil, Trash2, X, Check, AlertTriangle, Link } from "lucide-react";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { sortCategoryList, byName } from "../../lib/selectOptions";
 
 const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", interest_rate: "", notes: "", is_emergency_fund: false };
@@ -51,7 +52,10 @@ export default function AccountsTab() {
   });
   const disconnectMut = useMutation({
     mutationFn: bankSyncApi.disconnect,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["bank-connections"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bank-connections"] });
+      setDeleteConnection(null);
+    },
   });
 
   function submitLink(simplefinAccountId: string, simplefinAccountName: string, connectionId: number) {
@@ -73,6 +77,7 @@ export default function AccountsTab() {
   const [editAcc, setEditAcc] = useState<any | null>(null);
   const [accForm, setAccForm] = useState({ ...emptyAccount });
   const [deleteAccId, setDeleteAccId] = useState<number | null>(null);
+  const [deleteConnection, setDeleteConnection] = useState<any | null>(null);
   const [editBalId, setEditBalId] = useState<number | null>(null);
   const [newBal, setNewBal] = useState("");
   const createAccMut = useMutation({ mutationFn: accountsApi.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["accounts"] }); setShowAccForm(false); } });
@@ -186,7 +191,7 @@ export default function AccountsTab() {
                   >
                     {loadAccountsMut.isPending && loadAccountsMut.variables === conn.id ? "Loading…" : "Map more accounts"}
                   </button>
-                  <button onClick={() => disconnectMut.mutate(conn.id)} className="btn-ghost p-1.5 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
+                  <button onClick={() => setDeleteConnection(conn)} className="btn-ghost p-1.5 text-red-400 hover:bg-red-50"><Trash2 size={14} /></button>
                 </div>
               </div>
               {conn.links.length > 0 && (
@@ -313,6 +318,17 @@ export default function AccountsTab() {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={!!deleteConnection}
+        onOpenChange={(open) => !open && setDeleteConnection(null)}
+        icon={Trash2}
+        title="Disconnect this bank connection?"
+        description={`This stops automatic syncing for ${deleteConnection?.links?.length ? deleteConnection.links.map((l: any) => l.simplefin_account_name).join(", ") : `connection #${deleteConnection?.id}`}. Past imported transactions are not affected, but you'll need to reconnect to sync again.`}
+        confirmLabel="Disconnect"
+        confirmingLabel="Disconnecting…"
+        isPending={disconnectMut.isPending}
+        onConfirm={() => deleteConnection && disconnectMut.mutate(deleteConnection.id)}
+      />
     </div>
   );
 }
