@@ -25,6 +25,11 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const balancesHidden = useBalancesHidden();
   const [showHelp, setShowHelp] = useState(false);
+  // Backend already returns the digest's top categories highest-first --
+  // this just re-orders that same top-5 set alphabetically on request,
+  // matching Securo's "Highest first" sort control. Doesn't re-select which
+  // 5 categories show, only how they're listed.
+  const [categorySortAlpha, setCategorySortAlpha] = useState(false);
   const [snapshotHelp, setSnapshotHelp] = useState<"spendable" | "margin" | null>(null);
   const [editingPending, setEditingPending] = useState<number | null>(null);
   const [pendingValue, setPendingValue] = useState("");
@@ -288,9 +293,20 @@ export default function Dashboard() {
           <div className="grid md:grid-cols-2 gap-6">
             {weeklyDigest.categories.length > 0 && (
               <div>
-                <p className="text-xs font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">By Category</p>
+                <div className="flex items-center justify-between mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">
+                  <p className="text-xs font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wider">By Category</p>
+                  <button
+                    onClick={() => setCategorySortAlpha(v => !v)}
+                    className="text-[11px] font-medium text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-300"
+                  >
+                    {categorySortAlpha ? "A–Z" : "Highest first"}
+                  </button>
+                </div>
                 <div className="space-y-1.5 text-sm">
-                  {weeklyDigest.categories.slice(0, 5).map((c: any) => {
+                  {(categorySortAlpha
+                    ? [...weeklyDigest.categories.slice(0, 5)].sort((a: any, b: any) => a.category_name.localeCompare(b.category_name))
+                    : weeklyDigest.categories.slice(0, 5)
+                  ).map((c: any) => {
                     const budget = budgetByCategory.get(c.category_id);
                     const budgeted = budget ? parseFloat(budget.budgeted) : 0;
                     const actual = budget ? parseFloat(budget.actual_total) : 0;
