@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { accountsApi, cardsApi, recurringApi, analyticsApi, budgetApi } from "../api";
-import { fmt, utilColor, utilBg } from "../lib/utils";
+import { accountsApi, cardsApi, recurringApi, analyticsApi, budgetApi, forecastApi } from "../api";
+import { fmt, utilColor, utilBg, firstOfMonth, today } from "../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
-import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle } from "lucide-react";
+import { useIsDarkMode } from "../store/theme";
+import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle, TrendingUp } from "lucide-react";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import HelpPanel from "../components/HelpPanel";
 import { TrendBadge } from "../components/TrendBadge";
 import { SparkLine } from "../components/SparkLine";
@@ -69,6 +71,21 @@ export default function Dashboard() {
     queryFn: () => analyticsApi.weeklyDigest(primaryChecking.id),
     enabled: !!primaryChecking,
   });
+  // Reuses the same day-by-day forecast walk everything else on this app
+  // is built on (backend/services/forecast_engine.py) rather than
+  // re-deriving a running balance from raw transactions on the frontend --
+  // that engine has had five hard-won correctness fixes this session, and
+  // duplicating its math here would duplicate its bug surface too. For a
+  // month-to-date range, every entry through today is a real actual
+  // balance, not a projection.
+  const monthStart = firstOfMonth();
+  const todayStr = today();
+  const { data: balanceFlow = [] } = useQuery<any[]>({
+    queryKey: ["dashboard-balance-flow", primaryChecking?.id, monthStart, todayStr],
+    queryFn: () => forecastApi.get(primaryChecking.id, monthStart, todayStr),
+    enabled: !!primaryChecking,
+  });
+  const isDark = useIsDarkMode();
   const { data: snapshot } = useQuery<any>({
     queryKey: ["budget-snapshot", primaryChecking?.id],
     queryFn: () => analyticsApi.budgetSnapshot(primaryChecking.id),
@@ -280,6 +297,54 @@ export default function Dashboard() {
       )}
         </div>
       )}
+
+      {balanceFlow.length > 1 && (() => {
+        const first = parseFloat(balanceFlow[0].projected_balance);
+        const last = parseFloat(balanceFlow[balanceFlow.length - 1].projected_balance);
+        const delta = last - first;
+        const chartData = balanceFlow.map((e: any) => ({
+          date: e.date,
+          balance: parseFloat(e.projected_balance),
+        }));
+        const lineColor = isDark ? "#a5b4fc" : "#6366f1";
+        return (
+          <div className="card">
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><TrendingUp size={16} className="text-indigo-500" /> Balance Flow</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {new Date(monthStart + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  {" → "}
+                  {new Date(todayStr + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                </p>
+              </div>
+              <span className={`text-xl font-bold tabular-nums ${delta >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                {maskIfHidden(balancesHidden, `${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta))}`)}
+              </span>
+            </div>
+            <ResponsiveContainer width="100%" height={200}>
+              <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+                <defs>
+                  <linearGradient id="balanceFlowGradient" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={lineColor} stopOpacity={0.18} />
+                    <stop offset="95%" stopColor={lineColor} stopOpacity={0.01} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#3a4051" : "#e5e7eb"} />
+                <XAxis dataKey="date" tick={{ fontSize: 11, fill: isDark ? "#8f99a8" : "#6b7280" }} tickFormatter={(d: string) => new Date(d + "T12:00:00").getDate().toString()} />
+                <YAxis tick={{ fontSize: 11, fill: isDark ? "#8f99a8" : "#6b7280" }} tickFormatter={(v: number) => balancesHidden ? "•••" : fmt(v)} width={balancesHidden ? 40 : 70} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: isDark ? "#2a2f3d" : "#ffffff", border: `1px solid ${isDark ? "#3a4051" : "#e5e7eb"}`, borderRadius: 8, fontSize: 12 }}
+                  labelStyle={{ color: isDark ? "#c4ccd8" : "#111827" }}
+                  formatter={(v: number) => [maskIfHidden(balancesHidden, fmt(v)), "Balance"]}
+                  labelFormatter={(d: string) => new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                />
+                <Area type="monotone" dataKey="balance" stroke={lineColor} strokeWidth={2} fill="url(#balanceFlowGradient)" dot={false} animationDuration={700} animationEasing="ease-out" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        );
+      })()}
 
       {weeklyDigest && (
         <div className="card">
