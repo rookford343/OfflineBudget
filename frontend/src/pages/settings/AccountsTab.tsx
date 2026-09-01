@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, cardsApi, bankSyncApi } from "../../api";
 import { fmt, parseServerDateTime } from "../../lib/utils";
+import { useBalancesHidden, maskIfHidden } from "../../store/balanceVisibility";
 import { Plus, Pencil, Trash2, X, Check, AlertTriangle, Link } from "lucide-react";
 import { sortCategoryList, byName } from "../../lib/selectOptions";
 
@@ -9,6 +10,7 @@ const emptyAccount = { name: "", type: "checking", current_balance: "0", low_bal
 
 export default function AccountsTab() {
   const qc = useQueryClient();
+  const balancesHidden = useBalancesHidden();
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   // Credit cards are linkable sync targets too -- the mapping dropdown below
   // offers them alongside checking accounts.
@@ -130,7 +132,7 @@ export default function AccountsTab() {
                   </div>
                 ) : (
                   <button onClick={() => { setEditBalId(a.id); setNewBal(a.current_balance); }} className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums hover:text-indigo-600 transition-colors" title="Click to correct balance">
-                    {fmt(a.current_balance)}
+                    {maskIfHidden(balancesHidden, fmt(a.current_balance))}
                   </button>
                 )}
                 <button onClick={() => openEditAcc(a)} className="btn-ghost p-1.5"><Pencil size={14} /></button>

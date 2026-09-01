@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { accountsApi, cardsApi, recurringApi, analyticsApi, budgetApi } from "../api";
 import { fmt, utilColor, utilBg } from "../lib/utils";
+import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import { TrendBadge } from "../components/TrendBadge";
@@ -22,6 +23,7 @@ Key sections:
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const balancesHidden = useBalancesHidden();
   const [showHelp, setShowHelp] = useState(false);
   const [snapshotHelp, setSnapshotHelp] = useState<"spendable" | "margin" | null>(null);
   const [editingPending, setEditingPending] = useState<number | null>(null);
@@ -339,7 +341,7 @@ export default function Dashboard() {
           <span className="stat-label">Checking</span>
           <span className={`stat-value ${totalChecking >= 0 ? "text-gray-900" : "text-red-600"}`}>
             {anyBelowThreshold && <AlertTriangle size={18} className="text-amber-500 inline mr-1" />}
-            {fmt(totalChecking)}
+            {maskIfHidden(balancesHidden, fmt(totalChecking))}
           </span>
           {nextPaycheck && (
             <span className="text-xs text-gray-500">
@@ -350,20 +352,20 @@ export default function Dashboard() {
 
         <div className="stat-card stat-card-accent-amber animate-fade-slide-up animate-delay-200">
           <span className="stat-label">Credit Card Balance</span>
-          <span className="stat-value text-amber-600">{fmt(totalCards)}</span>
+          <span className="stat-value text-amber-600">{maskIfHidden(balancesHidden, fmt(totalCards))}</span>
         </div>
 
         <div className="stat-card stat-card-accent-red animate-fade-slide-up animate-delay-300">
           <span className="stat-label">Amount Due</span>
           <span className={`stat-value ${totalCardsDue > 0 ? "text-red-600" : "text-gray-900"}`}>
-            {fmt(totalCardsDue)}
+            {maskIfHidden(balancesHidden, fmt(totalCardsDue))}
           </span>
         </div>
 
         <div className={`stat-card animate-fade-slide-up animate-delay-400 ${totalChecking - totalCardsDue >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
           <span className="stat-label">Net Position</span>
           <span className={`stat-value ${totalChecking - totalCardsDue >= 0 ? "text-green-600" : "text-red-600"}`}>
-            {fmt(totalChecking - totalCardsDue)}
+            {maskIfHidden(balancesHidden, fmt(totalChecking - totalCardsDue))}
           </span>
           <span className="text-xs text-gray-500">checking minus due</span>
           <div className="flex items-center justify-between mt-1">
@@ -391,7 +393,7 @@ export default function Dashboard() {
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{c.name}</p>
                     <p className="text-xs text-gray-500">
-                      {c.last_four && `••• ${c.last_four} · `}Due day {c.due_day}
+                      {c.last_four && `••• ${maskIfHidden(balancesHidden, c.last_four)} · `}Due day {c.due_day}
                     </p>
                     <div className="mt-1 w-32">
                       <div className="progress-bar">
@@ -425,8 +427,8 @@ export default function Dashboard() {
                     </div>
                   </div>
                   <div className="text-right shrink-0 ml-4">
-                    <p className={`text-sm font-bold tabular-nums ${utilColor(c.utilization_pct)}`}>{fmt(c.current_balance)}</p>
-                    <p className="text-xs text-gray-500">{c.utilization_pct}% of {fmt(c.credit_limit)}</p>
+                    <p className={`text-sm font-bold tabular-nums ${utilColor(c.utilization_pct)}`}>{maskIfHidden(balancesHidden, fmt(c.current_balance))}</p>
+                    <p className="text-xs text-gray-500">{c.utilization_pct}% of {maskIfHidden(balancesHidden, fmt(c.credit_limit))}</p>
                   </div>
                 </div>
               ))}
@@ -479,7 +481,7 @@ export default function Dashboard() {
                   {a.low_balance_threshold != null && parseFloat(a.current_balance) < parseFloat(a.low_balance_threshold) && (
                     <AlertTriangle size={14} className="text-amber-500 inline mr-1" />
                   )}
-                  {fmt(a.current_balance)}
+                  {maskIfHidden(balancesHidden, fmt(a.current_balance))}
                 </span>
               </div>
             ))}
