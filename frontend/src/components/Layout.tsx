@@ -5,7 +5,8 @@ import { clearAuth, getUser } from "../store/auth";
 import { authApi, accountsApi, transactionsApi } from "../api";
 import QuickStartWizard from "./QuickStartWizard";
 import { TrendBadge } from "./TrendBadge";
-import { LogOut, Eye, EyeOff, Moon, Sun, ChevronDown } from "lucide-react";
+import { LogOut, Eye, EyeOff, Moon, Sun, ChevronDown, ChevronsUpDown, Settings as SettingsIcon, KeyRound } from "lucide-react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { cx, fmt, firstOfMonth } from "../lib/utils";
 import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
 import { useBalancesHidden, toggleBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
@@ -220,15 +221,46 @@ export default function Layout() {
             </ul>
           </div>
         )}
-        <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
-          <div className="px-2 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-700/40">
-            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{me?.display_name ?? user?.display_name}</p>
-            {me?.email && <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{me.email}</p>}
-          </div>
-          <button onClick={logout} className="nav-link w-full text-red-600 hover:bg-red-50 hover:text-red-700">
-            <LogOut size={18} />
-            Sign out
-          </button>
+        <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700">
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <button className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-700/40 hover:bg-gray-100 dark:hover:bg-gray-700/70 text-left">
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{me?.display_name ?? user?.display_name}</span>
+                  {me?.email && <span className="block text-xs text-gray-400 dark:text-gray-500 truncate">{me.email}</span>}
+                </span>
+                <ChevronsUpDown size={14} className="shrink-0 ml-2 text-gray-400 dark:text-gray-500" />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                side="top"
+                align="start"
+                sideOffset={6}
+                className="w-52 rounded-xl bg-white dark:bg-[#2a2f3d] border border-gray-100 dark:border-[#3a4051] shadow-lg py-1.5 z-50"
+              >
+                <DropdownMenu.Item asChild>
+                  <button onClick={() => navigate("/settings")} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 outline-none">
+                    <SettingsIcon size={15} className="text-gray-400" />
+                    Settings
+                  </button>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item asChild>
+                  <button onClick={() => navigate("/settings/profile")} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 outline-none">
+                    <KeyRound size={15} className="text-gray-400" />
+                    Change Password
+                  </button>
+                </DropdownMenu.Item>
+                <DropdownMenu.Separator className="my-1.5 border-t border-gray-100 dark:border-gray-700" />
+                <DropdownMenu.Item asChild>
+                  <button onClick={logout} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 outline-none">
+                    <LogOut size={15} />
+                    Sign out
+                  </button>
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
         </div>
       </aside>
 
