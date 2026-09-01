@@ -3,13 +3,22 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { authApi, bankSyncApi } from "../../api";
 import { getTheme, setTheme } from "../../store/theme";
 import { isParallelOpsEnabled, setParallelOpsEnabled } from "../../store/parallelOps";
-import { Moon, Sun, Wand2, Flag, Bug, Clock } from "lucide-react";
+import { getBalancesHidden, setBalancesHidden } from "../../store/balanceVisibility";
+import { Moon, Sun, Wand2, Flag, Bug, Clock, EyeOff } from "lucide-react";
 import { PINNABLE_ITEMS, loadPinnedNav, PINNED_STORAGE_KEY } from "../../lib/navItems";
 import { parseServerDateTime } from "../../lib/utils";
 
 export default function PreferencesTab() {
   const [dark, setDark] = useState(getTheme() === "dark");
   function toggleDark() { const next = !dark; setDark(next); setTheme(next); }
+
+  const [balancesHidden, setBalancesHiddenState] = useState(getBalancesHidden());
+  function toggleBalancesHidden() {
+    const next = !balancesHidden;
+    setBalancesHiddenState(next);
+    setBalancesHidden(next);
+    window.dispatchEvent(new CustomEvent("balances-hidden-changed"));
+  }
 
   const [parallelOps, setParallelOpsState] = useState(isParallelOpsEnabled());
   function toggleParallelOps() {
@@ -68,6 +77,21 @@ export default function PreferencesTab() {
           className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${dark ? "bg-indigo-600" : "bg-gray-200"}`}
         >
           <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${dark ? "translate-x-6" : "translate-x-1"}`} />
+        </button>
+      </div>
+      <div className="flex items-center justify-between py-2 border-t border-gray-100 dark:border-gray-700">
+        <div className="flex items-center gap-3">
+          <EyeOff size={16} className="text-gray-400" />
+          <div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Hide Sidebar Balances</span>
+            <p className="text-xs text-gray-400">Hide account balances in the sidebar by default. Toggle any time with the eye icon there.</p>
+          </div>
+        </div>
+        <button
+          onClick={toggleBalancesHidden}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ${balancesHidden ? "bg-indigo-600" : "bg-gray-200"}`}
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${balancesHidden ? "translate-x-6" : "translate-x-1"}`} />
         </button>
       </div>
       <div className="flex items-center justify-between py-2 border-t border-gray-100 dark:border-gray-700">
