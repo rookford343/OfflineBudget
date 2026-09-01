@@ -82,7 +82,7 @@ export default function Dashboard() {
   const todayStr = today();
   const { data: balanceFlow = [] } = useQuery<any[]>({
     queryKey: ["dashboard-balance-flow", primaryChecking?.id, monthStart, todayStr],
-    queryFn: () => forecastApi.get(primaryChecking.id, monthStart, todayStr),
+    queryFn: () => forecastApi.range(primaryChecking.id, monthStart, todayStr),
     enabled: !!primaryChecking,
   });
   const isDark = useIsDarkMode();

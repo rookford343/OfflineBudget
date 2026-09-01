@@ -5,6 +5,7 @@ import { fmt, today, firstOfMonth } from "../lib/utils";
 import { Plus, Trash2, X, HelpCircle, CheckCircle2, AlertCircle, Download, Link2, Check, Upload, Landmark, Code2, Tag } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import DateRangePicker from "../components/DateRangePicker";
+import TransactionsCalendar from "../components/TransactionsCalendar";
 import { CategoryOptions, AccountOptions } from "../lib/selectOptions";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
 import { sortCategoryList, byName } from "../lib/selectOptions";
@@ -136,6 +137,7 @@ export default function Transactions() {
   // recently", not "what happened on this one account", and the split tabs
   // made you check two places to answer it.
   const [txnTab, setTxnTab] = useState<TxnTab>("all");
+  const [checkingView, setCheckingView] = useState<"list" | "calendar">("list");
   const [start, setStart] = useState(firstOfMonth());
   const [end, setEnd] = useState(today());
   // Column visibility for the "All" tab's table only -- Category/Source are
@@ -457,6 +459,15 @@ export default function Transactions() {
           )}
           {txnTab === "checking" && (
             <>
+              <div className="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
+                {(["list", "calendar"] as const).map(v => (
+                  <button key={v} type="button"
+                    onClick={() => setCheckingView(v)}
+                    className={`px-3 py-1 text-xs font-medium rounded-md capitalize transition-colors ${checkingView === v ? "bg-white dark:bg-gray-800 shadow-sm text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-300"}`}>
+                    {v}
+                  </button>
+                ))}
+              </div>
               <button
                 onClick={() => exportsApi.downloadTransactions({ start, end }).then(blob => downloadBlob(blob, "transactions.csv"))}
                 className="btn-secondary text-sm"
@@ -577,8 +588,19 @@ export default function Transactions() {
           </>
         )}
 
+        {/* Checking calendar view -- own month navigation, independent of
+            the List view's date-range picker (a calendar grid only makes
+            sense for one month at a time). Scoped to the first checking
+            account, matching the Dashboard's Balance Flow card. */}
+        {txnTab === "checking" && checkingView === "calendar" && (() => {
+          const primaryChecking = (accounts as any[]).filter((a: any) => a.type === "checking")[0];
+          return primaryChecking
+            ? <TransactionsCalendar accountId={primaryChecking.id} accountName={primaryChecking.name} />
+            : <p className="text-sm text-gray-400 text-center py-8">No checking account yet.</p>;
+        })()}
+
         {/* Checking transactions */}
-        {txnTab === "checking" && !loading && (
+        {txnTab === "checking" && checkingView === "list" && !loading && (
           <>
             {txns.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No transactions in this period</p>}
             {txns.length > 0 && (
