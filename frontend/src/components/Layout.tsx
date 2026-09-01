@@ -8,6 +8,7 @@ import { TrendBadge } from "./TrendBadge";
 import { LogOut, Eye, EyeOff } from "lucide-react";
 import { cx, fmt, firstOfMonth } from "../lib/utils";
 import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
+import { getBalancesHidden, setBalancesHidden as persistBalancesHidden } from "../store/balanceVisibility";
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -31,7 +32,7 @@ export default function Layout() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [pinned, setPinned] = useState<string[]>(loadPinnedNav);
   const [accountsExpanded, setAccountsExpanded] = useState(false);
-  const [balancesHidden, setBalancesHidden] = useState(false);
+  const [balancesHidden, setBalancesHidden] = useState(getBalancesHidden);
 
   // Latch open once on first load if no accounts exist — don't re-derive from live query
   // so the wizard stays visible after step 1 creates the first account.
@@ -52,6 +53,14 @@ export default function Layout() {
     const handler = () => setPinned(loadPinnedNav());
     window.addEventListener("nav-order-changed", handler);
     return () => window.removeEventListener("nav-order-changed", handler);
+  }, []);
+
+  // Allow Settings' Preferences tab to toggle balance visibility and have
+  // the sidebar's own eye icon reflect it immediately, without a reload.
+  useEffect(() => {
+    const handler = () => setBalancesHidden(getBalancesHidden());
+    window.addEventListener("balances-hidden-changed", handler);
+    return () => window.removeEventListener("balances-hidden-changed", handler);
   }, []);
 
   const showWizard = wizardOpen;
@@ -149,7 +158,7 @@ export default function Layout() {
                 Accounts
               </p>
               <button
-                onClick={() => setBalancesHidden(h => !h)}
+                onClick={() => setBalancesHidden(h => { persistBalancesHidden(!h); return !h; })}
                 className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
                 title={balancesHidden ? "Show account details" : "Hide account details"}
                 aria-label={balancesHidden ? "Show account details" : "Hide account details"}
