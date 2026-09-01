@@ -138,6 +138,39 @@ export default function Transactions() {
   const [txnTab, setTxnTab] = useState<TxnTab>("all");
   const [start, setStart] = useState(firstOfMonth());
   const [end, setEnd] = useState(today());
+  // Column visibility for the "All" tab's table only -- Category/Source are
+  // the two columns that already have a responsive mobile fallback (folded
+  // into the description line below `lg`/`md`). This toggle is desktop-only
+  // and additive: it never touches the existing `lg:hidden`/`md:hidden`
+  // fallback spans, which stay governed purely by breakpoint as before, so
+  // hiding a column here can't strand its content on narrow screens.
+  const [visibleCols, setVisibleCols] = useState(() => {
+    try {
+      const saved = localStorage.getItem("budget_txn_columns");
+      return saved ? JSON.parse(saved) : { category: true, source: true };
+    } catch {
+      return { category: true, source: true };
+    }
+  });
+  const [columnsMenuOpen, setColumnsMenuOpen] = useState(false);
+  const columnsMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!columnsMenuOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (columnsMenuRef.current && !columnsMenuRef.current.contains(e.target as Node)) {
+        setColumnsMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [columnsMenuOpen]);
+  function toggleCol(col: "category" | "source") {
+    setVisibleCols((v: typeof visibleCols) => {
+      const next = { ...v, [col]: !v[col] };
+      localStorage.setItem("budget_txn_columns", JSON.stringify(next));
+      return next;
+    });
+  }
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ ...emptyForm });
   const [deleteId, setDeleteId] = useState<number | null>(null);
@@ -395,6 +428,33 @@ export default function Transactions() {
           {txnTab !== "reconcile" && (
             <DateRangePicker start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e); }} />
           )}
+          {txnTab === "all" && (
+            <div ref={columnsMenuRef} className="relative">
+              <button
+                onClick={() => setColumnsMenuOpen(o => !o)}
+                className="btn-secondary text-sm flex items-center gap-1.5"
+              >
+                <Code2 size={15} /> Columns
+              </button>
+              {columnsMenuOpen && (
+                <div className="absolute top-full mt-2 right-0 z-20 w-48 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#2a2f3d] shadow-lg py-2">
+                  <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">Columns</p>
+                  {[["Date", true, null], ["Description", true, null], ["Category", visibleCols.category, "category"], ["Source", visibleCols.source, "source"]].map(([label, checked, key]: any) => (
+                    <label key={label} className={`flex items-center gap-2 px-3 py-1.5 text-sm ${key ? "cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50" : "opacity-50"}`}>
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 rounded accent-indigo-600"
+                        checked={checked}
+                        disabled={!key}
+                        onChange={() => key && toggleCol(key)}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {txnTab === "checking" && (
             <>
               <button
@@ -458,8 +518,8 @@ export default function Transactions() {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Category</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Source</th>
+                    <th className={`px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase ${visibleCols.category ? "hidden lg:table-cell" : "hidden"}`}>Category</th>
+                    <th className={`px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase ${visibleCols.source ? "hidden md:table-cell" : "hidden"}`}>Source</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
                     {me?.debug_capture_raw_bank_data && <th className="px-4 py-3 w-8"></th>}
                   </tr>
@@ -491,12 +551,12 @@ export default function Transactions() {
                           {r.notes && <span className="truncate italic">{r.notes}</span>}
                         </div>
                       </td>
-                      <td className="px-4 py-3 hidden lg:table-cell">
+                      <td className={`px-4 py-3 ${visibleCols.category ? "hidden lg:table-cell" : "hidden"}`}>
                         {r.categoryName
                           ? <span className="text-xs text-gray-600 dark:text-gray-300">{r.categoryName}</span>
                           : <span className="text-xs text-gray-300 dark:text-gray-400 italic">Uncategorized</span>}
                       </td>
-                      <td className="px-4 py-3 text-gray-500 hidden md:table-cell">
+                      <td className={`px-4 py-3 text-gray-500 ${visibleCols.source ? "hidden md:table-cell" : "hidden"}`}>
                         <span className={`text-xs px-1.5 py-0.5 rounded ${r.kind === "card" ? "bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400" : "bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400"}`}>
                           {r.sourceLabel}
                         </span>
