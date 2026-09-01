@@ -3,7 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { authApi, bankSyncApi } from "../../api";
 import { getTheme, setTheme } from "../../store/theme";
 import { isParallelOpsEnabled, setParallelOpsEnabled } from "../../store/parallelOps";
-import { getBalancesHidden, setBalancesHidden } from "../../store/balanceVisibility";
+import { useBalancesHidden, toggleBalancesHidden } from "../../store/balanceVisibility";
 import { Moon, Sun, Wand2, Flag, Bug, Clock, EyeOff } from "lucide-react";
 import { PINNABLE_ITEMS, loadPinnedNav, PINNED_STORAGE_KEY } from "../../lib/navItems";
 import { parseServerDateTime } from "../../lib/utils";
@@ -12,13 +12,7 @@ export default function PreferencesTab() {
   const [dark, setDark] = useState(getTheme() === "dark");
   function toggleDark() { const next = !dark; setDark(next); setTheme(next); }
 
-  const [balancesHidden, setBalancesHiddenState] = useState(getBalancesHidden());
-  function toggleBalancesHidden() {
-    const next = !balancesHidden;
-    setBalancesHiddenState(next);
-    setBalancesHidden(next);
-    window.dispatchEvent(new CustomEvent("balances-hidden-changed"));
-  }
+  const balancesHidden = useBalancesHidden();
 
   const [parallelOps, setParallelOpsState] = useState(isParallelOpsEnabled());
   function toggleParallelOps() {
@@ -83,8 +77,8 @@ export default function PreferencesTab() {
         <div className="flex items-center gap-3">
           <EyeOff size={16} className="text-gray-400" />
           <div>
-            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Hide Sidebar Balances</span>
-            <p className="text-xs text-gray-400">Hide account balances in the sidebar by default. Toggle any time with the eye icon there.</p>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Hide Account Balances</span>
+            <p className="text-xs text-gray-400">Hide account and card balances everywhere in the app by default. Toggle any time with the eye icon next to the logo.</p>
           </div>
         </div>
         <button
