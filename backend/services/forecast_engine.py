@@ -17,6 +17,18 @@ from backend import models
 from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
 from backend.services.card_matching import card_matches_description
 
+# How many days before "today" a scheduled recurring item can still be
+# missing its actual and get folded into today's opening balance anyway,
+# rather than silently vanishing from the forecast until bank sync catches
+# up. Bank aggregators lag real-world posting by days -- observed live
+# 2026-09-01: a $6,504.06 paycheck scheduled Aug 31 sat unconfirmed for a
+# full day past "today" with the forecast never accounting for it, because
+# the day-walk below never visits a date before start_date. Matches the
+# frontend Pending list's own lookback window (Transactions.tsx,
+# PENDING_LOOKBACK_DAYS) for the same reason: a card issuer's balance feed
+# lagged up to ~6 days earlier this same session.
+_UNCONFIRMED_LOOKBACK_DAYS = 7
+
 
 def _last_day_of_month(d: date) -> int:
     return monthrange(d.year, d.month)[1]
@@ -701,7 +713,33 @@ def build_forecast(
             (Decimal(str(t.amount)) for t in all_actuals if t.date == today),
             Decimal("0"),
         )
-        balance = current_balance - today_actuals_sum
+
+        # current_balance only knows what the bank has actually posted. A
+        # recurring item due in the last _UNCONFIRMED_LOOKBACK_DAYS is
+        # invisible here otherwise: the day-walk below never visits a date
+        # before start_date (today), so a paycheck or bill that's scheduled
+        # but still unconfirmed by bank sync just silently vanishes from the
+        # forecast instead of landing on the date it's supposed to -- Dan's
+        # correction, 2026-09-01: "keep forecasting as if transactions are
+        # happening as when they say they are happening", not waiting on
+        # sync. Bridging through a short recent window (same established
+        # pattern as the start_date > today branch above, just with a bounded
+        # lookback instead of back to January -- this runs on every
+        # start=today call, the common case, so it has to stay cheap) lets
+        # the existing day-walk's own actual-vs-projected suppression do the
+        # work: when everything in the window is already confirmed, the
+        # bridge's ending balance reduces to exactly current_balance (each
+        # actual gets reversed out of the seed then re-applied walking
+        # forward, net zero); when something recent is still unconfirmed, its
+        # projected amount gets added in instead, exactly once, without
+        # touching how any OTHER start_date behaves.
+        lookback_start = today - timedelta(days=_UNCONFIRMED_LOOKBACK_DAYS)
+        bridge = build_forecast(
+            db, user_id, account_id, lookback_start, today - timedelta(days=1),
+            overrides=overrides, apply_buffer_transfers=apply_buffer_transfers,
+        )
+        bridged_balance = bridge[-1].projected_balance if bridge else current_balance
+        balance = bridged_balance - today_actuals_sum
 
     # Lookup for CC suppression — keyed by the name stored in cc_payments / cc_estimates_by_date
     card_by_name: dict[str, models.CreditCard] = {(c.name or ""): c for c in all_active_cards}
