@@ -303,7 +303,7 @@ export default function NetWorth() {
         {pageAssets.length === 0 && !showAssetForm && (
           <p className="text-sm text-gray-400 text-center py-4">No assets yet.</p>
         )}
-        <div className="space-y-2">
+        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
           {pageAssets.map((a) => (
             <div key={a.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
               <div>
@@ -364,7 +364,7 @@ export default function NetWorth() {
         {pageLiabilities.length === 0 && !showLiabilityForm && (
           <p className="text-sm text-gray-400 text-center py-4">No liabilities yet.</p>
         )}
-        <div className="space-y-2">
+        <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
           {pageLiabilities.map((l) => (
             <div key={l.id} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
               <div>
