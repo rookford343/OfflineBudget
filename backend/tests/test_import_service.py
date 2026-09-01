@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from backend import models, schemas
 from backend.services.import_service import run_import
@@ -61,6 +61,33 @@ def test_checking_autopay_reduces_matching_card_balance(db_session):
     run_import(db_session, user, rows, account_id=checking.id, card_id=None)
 
     assert card.current_balance == Decimal("0.00")  # 100.00 - 11312.54, floored at 0
+
+
+def test_bank_sync_autopay_reduces_matching_card_balance_without_manual_tag(db_session):
+    """Real-world regression (2026-09-01): a bank's autopay description is
+    deterministic, machine-generated text -- it should never require Dan to
+    hand-configure a transaction_rule tagging it is_transfer before the
+    matching card's balance gets corrected. Any bank_sync-sourced row must
+    trigger the same correction is_transfer=True already does, with no rule
+    involved."""
+    user, card = _make_user_and_card(db_session)
+    card.name = "Chase Sapphire"
+    checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("5000.00"))
+    db_session.add(checking)
+    db_session.flush()
+
+    rows = [schemas.ImportConfirmRow(
+        date=date(2026, 8, 26), description="CHASE CREDIT CRD AUTOPAY PPD ID: 4760039224",
+        amount=Decimal("-11312.54"),  # is_transfer left at its False default -- no rule tagged it
+    )]
+
+    run_import(
+        db_session, user, rows, account_id=checking.id, card_id=None,
+        source=models.TransactionSource.bank_sync,
+    )
+
+    assert card.current_balance == Decimal("0.00")  # 100.00 - 11312.54, floored at 0
+    assert card.balance_as_of == datetime(2026, 8, 26, 0, 0)
 
 
 def test_dedupes_across_whitespace_formatting_difference(db_session):

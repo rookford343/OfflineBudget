@@ -94,7 +94,7 @@ def _sync_link(
         if link.last_synced_at
         else datetime.utcnow() - timedelta(days=_INITIAL_LOOKBACK_DAYS)
     )
-    txns, balance = fetch_transactions(access_url, link.simplefin_account_id, since)
+    txns, balance, balance_date = fetch_transactions(access_url, link.simplefin_account_id, since)
 
     if user.debug_capture_raw_bank_data and txns:
         _capture_raw_snapshots(db, user.id, txns)
@@ -140,25 +140,44 @@ def _sync_link(
     elif link.local_credit_card_id:
         card = db.get(models.CreditCard, link.local_credit_card_id)
         if card:
-            # SimpleFIN reports a card's liability as a NEGATIVE balance, but
-            # CreditCard.current_balance is a positive amount owed everywhere
-            # else in this codebase (import_service subtracts signed amounts,
-            # utilization_pct divides by credit_limit). Flip the sign.
-            card.current_balance = -balance
+            # A card issuer's own balance feed can lag real-world posting by
+            # days -- a payment leaves checking (and gets picked up there)
+            # long before the card issuer's own balance reflects it. When
+            # import_service.py's payoff detection already confirmed newer,
+            # dated debt-paid evidence from the checking side (balance_as_of),
+            # a card-side sync with an OLDER or absent balance-date is not
+            # allowed to regress that -- it would silently resurrect debt
+            # checking already proved was paid. No signal on either side
+            # (both None) keeps the pre-existing behavior: always trust it.
+            # Confirmed live 2026-09-01: Chase Sapphire's own feed was still
+            # reporting a pre-payment balance six days after the payment.
+            stale = (
+                balance_date is not None
+                and card.balance_as_of is not None
+                and balance_date < card.balance_as_of
+            )
+            if not stale:
+                # SimpleFIN reports a card's liability as a NEGATIVE balance, but
+                # CreditCard.current_balance is a positive amount owed everywhere
+                # else in this codebase (import_service subtracts signed amounts,
+                # utilization_pct divides by credit_limit). Flip the sign.
+                card.current_balance = -balance
+                if balance_date is not None:
+                    card.balance_as_of = balance_date
 
-            if card.payment_sent_pending_sync:
-                # A fresh sync just wrote real, authoritative data --
-                # whatever it now says, the manual marker is stale by
-                # definition. balance_due is never touched by bank sync
-                # (confirmed: only current_balance is), so this is the
-                # actual reconciliation signal, not balance_due changing.
-                # Without this the flag could never clear from a real
-                # sync at all -- only from record_payment or a manual
-                # edit, which is exactly the workaround this feature
-                # exists to replace. Found in final whole-branch review,
-                # 2026-08-28.
-                card.payment_sent_pending_sync = False
-                card.payment_sent_amount = None
+                if card.payment_sent_pending_sync:
+                    # A fresh sync just wrote real, authoritative data --
+                    # whatever it now says, the manual marker is stale by
+                    # definition. balance_due is never touched by bank sync
+                    # (confirmed: only current_balance is), so this is the
+                    # actual reconciliation signal, not balance_due changing.
+                    # Without this the flag could never clear from a real
+                    # sync at all -- only from record_payment or a manual
+                    # edit, which is exactly the workaround this feature
+                    # exists to replace. Found in final whole-branch review,
+                    # 2026-08-28.
+                    card.payment_sent_pending_sync = False
+                    card.payment_sent_amount = None
 
             if card.pending_charges and card.pending_charges > 0 and imported > 0:
                 # Dan's call (final whole-branch review, 2026-08-28): only
