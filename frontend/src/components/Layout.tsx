@@ -5,10 +5,10 @@ import { clearAuth, getUser } from "../store/auth";
 import { authApi, accountsApi, transactionsApi } from "../api";
 import QuickStartWizard from "./QuickStartWizard";
 import { TrendBadge } from "./TrendBadge";
-import { LogOut, Eye, EyeOff, Moon, Sun } from "lucide-react";
+import { LogOut, Eye, EyeOff, Moon, Sun, ChevronDown } from "lucide-react";
 import { cx, fmt, firstOfMonth } from "../lib/utils";
 import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
-import { useBalancesHidden, toggleBalancesHidden } from "../store/balanceVisibility";
+import { useBalancesHidden, toggleBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { useIsDarkMode, toggleTheme } from "../store/theme";
 
 export default function Layout() {
@@ -87,6 +87,7 @@ export default function Layout() {
     if (!!a.is_emergency_fund !== !!b.is_emergency_fund) return a.is_emergency_fund ? 1 : -1;
     return a.type.localeCompare(b.type) || a.name.localeCompare(b.name);
   });
+  const totalAccountBalance = sortedAccounts.reduce((sum, a: any) => sum + parseFloat(a.current_balance), 0);
 
   // Net flow this month per account, from the transactions query above.
   const flowByAccount: Record<number, number> = {};
@@ -130,7 +131,6 @@ export default function Layout() {
               </button>
             </div>
           </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{me?.display_name ?? user?.display_name}</p>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           <NavLink to={DASHBOARD_ITEM.to} className={navLinkClass}>
@@ -167,10 +167,23 @@ export default function Layout() {
         </nav>
         {sortedAccounts.length > 0 && (
           <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between px-2 pb-1">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-400">
+            <div className="flex items-center justify-between px-2 pb-1 gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-400 shrink-0">
                 Accounts
               </p>
+              <span className="text-xs font-semibold tabular-nums text-gray-500 dark:text-gray-400 truncate">
+                {maskIfHidden(balancesHidden, fmt(totalAccountBalance))}
+              </span>
+              {sortedAccounts.length > 4 && (
+                <button
+                  onClick={() => setAccountsExpanded(e => !e)}
+                  className="shrink-0 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                  title={accountsExpanded ? "Show fewer accounts" : "Show all accounts"}
+                  aria-label={accountsExpanded ? "Show fewer accounts" : "Show all accounts"}
+                >
+                  <ChevronDown size={14} className={cx("transition-transform", accountsExpanded && "rotate-180")} />
+                </button>
+              )}
             </div>
             <ul className="space-y-0.5">
               {(accountsExpanded ? sortedAccounts : sortedAccounts.slice(0, 4)).map((a: any) => {
@@ -186,33 +199,32 @@ export default function Layout() {
                         )
                       }
                     >
-                      <span className="truncate">{a.name}</span>
+                      <div className="min-w-0">
+                        <p className="truncate">{a.name}</p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500 capitalize">{a.type.replace("_", " ")}</p>
+                      </div>
                       {balancesHidden ? (
                         <span className="shrink-0 ml-2 text-gray-400 dark:text-gray-500">••••</span>
                       ) : (
-                        <span className="shrink-0 ml-2 flex items-center gap-1.5">
+                        <div className="shrink-0 ml-2 flex flex-col items-end gap-0.5">
                           <span className={`tabular-nums ${parseFloat(a.current_balance) < 0 ? "text-red-500 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
                             {fmt(a.current_balance)}
                           </span>
                           {pct !== null && <TrendBadge pct={pct} />}
-                        </span>
+                        </div>
                       )}
                     </NavLink>
                   </li>
                 );
               })}
             </ul>
-            {sortedAccounts.length > 4 && (
-              <button
-                onClick={() => setAccountsExpanded(e => !e)}
-                className="mt-1 px-2 text-xs font-medium text-indigo-600 dark:text-indigo-400"
-              >
-                {accountsExpanded ? "Show less" : `+${sortedAccounts.length - 4} more`}
-              </button>
-            )}
           </div>
         )}
-        <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700">
+        <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700 space-y-2">
+          <div className="px-2 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-700/40">
+            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{me?.display_name ?? user?.display_name}</p>
+            {me?.email && <p className="text-xs text-gray-400 dark:text-gray-500 truncate">{me.email}</p>}
+          </div>
           <button onClick={logout} className="nav-link w-full text-red-600 hover:bg-red-50 hover:text-red-700">
             <LogOut size={18} />
             Sign out
