@@ -5,10 +5,11 @@ import { clearAuth, getUser } from "../store/auth";
 import { authApi, accountsApi, transactionsApi } from "../api";
 import QuickStartWizard from "./QuickStartWizard";
 import { TrendBadge } from "./TrendBadge";
-import { LogOut, Eye, EyeOff } from "lucide-react";
+import { LogOut, Eye, EyeOff, Moon, Sun } from "lucide-react";
 import { cx, fmt, firstOfMonth } from "../lib/utils";
 import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
 import { useBalancesHidden, toggleBalancesHidden } from "../store/balanceVisibility";
+import { useIsDarkMode, toggleTheme } from "../store/theme";
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -33,6 +34,7 @@ export default function Layout() {
   const [pinned, setPinned] = useState<string[]>(loadPinnedNav);
   const [accountsExpanded, setAccountsExpanded] = useState(false);
   const balancesHidden = useBalancesHidden();
+  const isDark = useIsDarkMode();
 
   // Latch open once on first load if no accounts exist — don't re-derive from live query
   // so the wizard stays visible after step 1 creates the first account.
@@ -109,14 +111,24 @@ export default function Layout() {
         <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-bold text-indigo-600">OfflineBudget</h1>
-            <button
-              onClick={toggleBalancesHidden}
-              className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
-              title={balancesHidden ? "Show account balances" : "Hide account balances"}
-              aria-label={balancesHidden ? "Show account balances" : "Hide account balances"}
-            >
-              {balancesHidden ? <EyeOff size={16} /> : <Eye size={16} />}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleTheme}
+                className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                title={isDark ? "Switch to light mode" : "Switch to dark mode"}
+                aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
+              >
+                {isDark ? <Moon size={16} /> : <Sun size={16} />}
+              </button>
+              <button
+                onClick={toggleBalancesHidden}
+                className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                title={balancesHidden ? "Show account balances" : "Hide account balances"}
+                aria-label={balancesHidden ? "Show account balances" : "Hide account balances"}
+              >
+                {balancesHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
           </div>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{me?.display_name ?? user?.display_name}</p>
         </div>
