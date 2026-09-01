@@ -5,7 +5,7 @@ import { clearAuth, getUser } from "../store/auth";
 import { authApi, accountsApi, transactionsApi } from "../api";
 import QuickStartWizard from "./QuickStartWizard";
 import { TrendBadge } from "./TrendBadge";
-import { LogOut, Eye, EyeOff, Moon, Sun, ChevronDown, ChevronsUpDown, Settings as SettingsIcon, KeyRound } from "lucide-react";
+import { LogOut, Eye, EyeOff, Moon, Sun, ChevronDown, ChevronsUpDown, KeyRound } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { cx, fmt, firstOfMonth } from "../lib/utils";
 import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
@@ -239,12 +239,6 @@ export default function Layout() {
                 sideOffset={6}
                 className="w-52 rounded-xl bg-white dark:bg-[#2a2f3d] border border-gray-100 dark:border-[#3a4051] shadow-lg py-1.5 z-50"
               >
-                <DropdownMenu.Item asChild>
-                  <button onClick={() => navigate("/settings")} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 outline-none">
-                    <SettingsIcon size={15} className="text-gray-400" />
-                    Settings
-                  </button>
-                </DropdownMenu.Item>
                 <DropdownMenu.Item asChild>
                   <button onClick={() => navigate("/settings/profile")} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 outline-none">
                     <KeyRound size={15} className="text-gray-400" />
