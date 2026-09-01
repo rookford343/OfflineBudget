@@ -403,7 +403,7 @@ export default function Dashboard() {
           {cards.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">No credit cards added yet</p>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
               {cards.map((c: any) => (
                 <div key={c.id} className="flex items-center justify-between">
                   <div className="min-w-0">
@@ -461,7 +461,7 @@ export default function Dashboard() {
           {upcoming.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">No recurring bills set up</p>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
               {upcoming.slice(0, 8).map((r: any) => {
                 const daysUntil = Math.ceil((r.next_date.getTime() - todayDate.getTime()) / 86400000);
                 return (
@@ -486,7 +486,7 @@ export default function Dashboard() {
       {accounts.length > 0 && (
         <div className="card md:col-span-2 2xl:col-span-1">
           <h3 className="font-semibold text-gray-900 mb-4">All Accounts</h3>
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-gray-100 max-h-80 overflow-y-auto pr-1">
             {accounts.map((a: any) => (
               <div key={a.id} className="flex items-center justify-between gap-4 py-3">
                 <div className="min-w-0">
