@@ -83,7 +83,17 @@ function downloadBlob(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
-type TxnTab = "all" | "checking" | "card" | "pending" | "reconcile";
+type TxnTab = "all" | "checking" | "card" | "reconcile";
+
+// How far back a scheduled bill/income can be and still count as "pending
+// bank sync" rather than plain forecast. This is bounded on purpose: a bill
+// dated today or a few days ago that hasn't posted yet is plausibly just
+// waiting on sync lag (real, observed lag this session: up to ~6 days for a
+// card's own balance feed). Anything further out hasn't happened in the real
+// world yet -- it's a projection, not something "waiting for a sync", so it
+// stays out of this list entirely (Dan's correction, 2026-09-01: a 24-day-out
+// forecast line showing up as "pending" was the bug, not a labeling choice).
+const PENDING_LOOKBACK_DAYS = 7;
 
 // One not-yet-actual line item from the forecast walk, flattened out of its
 // day for display -- name/amount/type already computed by
@@ -274,6 +284,33 @@ export default function Transactions() {
   walkCategories(categories as any[]);
   const recurringNameMap: Record<number, string> = Object.fromEntries((allRecurring as any[]).map((r: any) => [r.id, r.name]));
 
+  // Pending: the primary checking account's forecast walk over a short
+  // trailing window, filtered to entries that haven't posted yet. Once a
+  // real transaction arrives, forecast_engine.py's own actual/recurring
+  // suppression removes the matching projected entry -- no separate dedup
+  // needed here, it just stops showing up. Loaded whenever any of the tabs
+  // that display it are active (all/checking/card), not gated to one tab --
+  // shown inline within whichever tab is selected rather than its own tab.
+  const primaryCheckingId = (accounts as any[]).filter((a: any) => a.type === "checking")[0]?.id ?? null;
+  const pendingStart = (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - PENDING_LOOKBACK_DAYS);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const { data: pendingForecast = [] } = useQuery<any[]>({
+    queryKey: ["pending-forecast", primaryCheckingId, pendingStart],
+    queryFn: () => forecastApi.range(primaryCheckingId, pendingStart, today()),
+    enabled: (txnTab === "all" || txnTab === "checking" || txnTab === "card") && !!primaryCheckingId,
+  });
+  const pendingRows: PendingRow[] = pendingForecast.flatMap((day: any) =>
+    (day.transactions ?? [])
+      .filter((t: any) => !t.is_actual)
+      .map((t: any) => ({
+        date: day.date, name: t.name, amount: parseFloat(t.amount),
+        type: t.type, categoryName: t.category_name ?? null, isCcPayment: !!t.is_cc_payment,
+      }))
+  ).sort((a, b) => a.date.localeCompare(b.date));
+
   const unifiedRows: UnifiedRow[] = txnTab === "all" ? [
     ...txns.map((t: any) => ({
       id: t.id, kind: "checking" as const, date: t.date, description: t.description,
@@ -285,6 +322,17 @@ export default function Transactions() {
       // debit" into "that's the Rivian payment" without opening anything.
       recurringName: recurringNameMap[t.recurring_item_id] ?? null,
       isActual: t.is_actual !== false,
+    })),
+    // Pending forecast items merged in, sharing the same read-only row shape
+    // and "pending" badge the isActual===false branch already renders.
+    // Synthetic negative ids (never collide with real transaction ids) since
+    // these have no database row.
+    ...pendingRows.map((p, i) => ({
+      id: -(i + 1), kind: "checking" as const, date: p.date, description: p.name,
+      amount: p.amount, source: "forecast", sourceLabel: accountNameMap[primaryCheckingId] ?? "Checking",
+      externalId: null,
+      categoryName: p.categoryName ?? (p.isCcPayment ? "Credit Card Payment" : null),
+      notes: null, recurringName: null, isActual: false,
     })),
     ...allCardsQueries.flatMap((q, i) => (q.data ?? []).map((t: any) => ({
       id: t.id, kind: "card" as const, date: t.date, description: t.merchant || t.description || "",
@@ -305,31 +353,6 @@ export default function Transactions() {
       return true;
     })
     .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id) : [];
-
-  // Pending tab: the primary checking account's forecast walk through the
-  // end of THIS month, filtered to entries that haven't posted yet. Once a
-  // real transaction arrives, forecast_engine.py's own actual/recurring
-  // suppression removes the matching projected entry -- no separate dedup
-  // needed here, it just stops showing up.
-  const primaryCheckingId = (accounts as any[]).filter((a: any) => a.type === "checking")[0]?.id ?? null;
-  const pendingEnd = (() => {
-    const now = new Date();
-    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    return `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, "0")}-${String(last.getDate()).padStart(2, "0")}`;
-  })();
-  const { data: pendingForecast = [], isLoading: pendingLoading } = useQuery<any[]>({
-    queryKey: ["pending-forecast", primaryCheckingId, pendingEnd],
-    queryFn: () => forecastApi.range(primaryCheckingId, today(), pendingEnd),
-    enabled: txnTab === "pending" && !!primaryCheckingId,
-  });
-  const pendingRows: PendingRow[] = pendingForecast.flatMap((day: any) =>
-    (day.transactions ?? [])
-      .filter((t: any) => !t.is_actual)
-      .map((t: any) => ({
-        date: day.date, name: t.name, amount: parseFloat(t.amount),
-        type: t.type, categoryName: t.category_name ?? null, isCcPayment: !!t.is_cc_payment,
-      }))
-  ).sort((a, b) => a.date.localeCompare(b.date));
 
   const activeReconcileAccountId = reconcileAccountId ?? ((accounts as any[]).filter((a: any) => a.type === "checking")[0]?.id ?? null);
   const { data: reconcileData, isLoading: reconcileLoading } = useQuery({
@@ -436,7 +459,7 @@ export default function Transactions() {
 
   const accountMap = Object.fromEntries(accounts.map((a: any) => [a.id, a.name]));
   const catMap = Object.fromEntries(allCats.map((c: any) => [c.id, c.name]));
-  const loading = txnTab === "checking" ? isLoading : txnTab === "all" ? (isLoading || allCardsLoading) : txnTab === "pending" ? pendingLoading : cardLoading;
+  const loading = txnTab === "checking" ? isLoading : txnTab === "all" ? (isLoading || allCardsLoading) : cardLoading;
 
   return (
     <div className="space-y-6">
@@ -446,22 +469,20 @@ export default function Transactions() {
           {txnTab !== "reconcile" && (
             <p className="text-sm text-gray-500 dark:text-gray-400">
               {txnTab === "checking"
-                ? `${txns.length} transaction${txns.length !== 1 ? "s" : ""}`
+                ? `${txns.length} transaction${txns.length !== 1 ? "s" : ""}${pendingRows.length ? ` (${pendingRows.length} pending)` : ""}`
                 : txnTab === "all"
-                  ? `${unifiedRows.length} transaction${unifiedRows.length !== 1 ? "s" : ""} across ${1 + (cards as any[]).length} account${(cards as any[]).length !== 0 ? "s" : ""}`
-                  : txnTab === "pending"
-                    ? `${pendingRows.length} not yet posted, through ${pendingEnd}`
-                    : `${cardTxns.length} card charge${cardTxns.length !== 1 ? "s" : ""}`}
+                  ? `${unifiedRows.length} transaction${unifiedRows.length !== 1 ? "s" : ""} across ${1 + (cards as any[]).length} account${(cards as any[]).length !== 0 ? "s" : ""}${pendingRows.length ? ` (${pendingRows.length} pending)` : ""}`
+                  : `${cardTxns.length} card charge${cardTxns.length !== 1 ? "s" : ""}`}
             </p>
           )}
         </div>
         <div className="flex gap-2 flex-wrap">
           <div className="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
-            {(["all", "checking", "card", "pending", "reconcile"] as TxnTab[]).map(t => (
+            {(["all", "checking", "card", "reconcile"] as TxnTab[]).map(t => (
               <button key={t} type="button"
                 onClick={() => setTxnTab(t)}
                 className={`px-3 py-1 text-xs font-medium rounded-md capitalize transition-colors ${txnTab === t ? "bg-white dark:bg-gray-800 shadow-sm text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-300"}`}>
-                {t === "all" ? "All" : t === "checking" ? "Checking" : t === "card" ? "Credit Cards" : t === "pending" ? "Pending" : "Reconcile"}
+                {t === "all" ? "All" : t === "checking" ? "Checking" : t === "card" ? "Credit Cards" : "Reconcile"}
               </button>
             ))}
           </div>
@@ -470,7 +491,7 @@ export default function Transactions() {
               {cards.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           )}
-          {txnTab !== "reconcile" && txnTab !== "pending" && (
+          {txnTab !== "reconcile" && (
             <DateRangePicker start={start} end={end} onChange={(s, e) => { setStart(s); setEnd(e); }} />
           )}
           {txnTab === "all" && (
@@ -631,51 +652,6 @@ export default function Transactions() {
           </>
         )}
 
-        {/* Pending: the primary checking account's forecast walk through
-            month-end, filtered to not-yet-actual entries -- bills and income
-            scheduled on the date they're supposed to happen, not waiting on
-            bank sync to confirm them. Read-only: nothing here is a real
-            transaction, so no edit/delete affordances. */}
-        {txnTab === "pending" && !loading && (
-          <>
-            {pendingRows.length === 0 && <p className="text-sm text-gray-400 text-center py-8">Nothing pending through {pendingEnd}.</p>}
-            {pendingRows.length > 0 && (
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-700">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Description</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">Category</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                  {pendingRows.map((r, i) => (
-                    <tr key={`${r.date}-${i}`} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
-                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                        {new Date(r.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                      </td>
-                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-sm">
-                        <div className="truncate flex items-center gap-1.5">
-                          {r.name}
-                          <span className="shrink-0 text-[10px] uppercase tracking-wide px-1 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
-                            pending
-                          </span>
-                        </div>
-                        <div className="lg:hidden text-xs text-gray-400">{r.categoryName ?? (r.isCcPayment ? "Credit Card Payment" : "")}</div>
-                      </td>
-                      <td className="px-4 py-3 text-gray-500 hidden lg:table-cell">{r.categoryName ?? (r.isCcPayment ? "Credit Card Payment" : "—")}</td>
-                      <td className={`px-4 py-3 text-right font-medium tabular-nums ${r.amount >= 0 ? "text-green-600" : "text-gray-900 dark:text-gray-100"}`}>
-                        {r.amount >= 0 ? "+" : ""}{fmt(r.amount)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </>
-        )}
-
         {/* Checking calendar view -- own month navigation, independent of
             the List view's date-range picker (a calendar grid only makes
             sense for one month at a time). Scoped to the first checking
@@ -690,8 +666,8 @@ export default function Transactions() {
         {/* Checking transactions */}
         {txnTab === "checking" && checkingView === "list" && !loading && (
           <>
-            {txns.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No transactions in this period</p>}
-            {txns.length > 0 && (
+            {txns.length === 0 && pendingRows.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No transactions in this period</p>}
+            {(txns.length > 0 || pendingRows.length > 0) && (
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-700">
                   <tr>
@@ -704,51 +680,78 @@ export default function Transactions() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                  {txns.map((t: any) => (
-                    <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                  {/* Pending items merged in and sorted alongside the real
+                      rows, newest first -- same convention as the All tab.
+                      Read-only: no notes/category-edit/delete, since there's
+                      no database row behind them. */}
+                  {[
+                    ...txns.map((t: any) => ({ kind: "actual" as const, date: t.date, t })),
+                    ...pendingRows.map((p, i) => ({ kind: "pending" as const, date: p.date, p, key: `pending-${i}` })),
+                  ]
+                    .sort((a, b) => b.date.localeCompare(a.date))
+                    .map(row => row.kind === "actual" ? (
+                    <tr key={row.t.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
-                        {new Date(t.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        {new Date(row.t.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       </td>
                       <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
-                        <div className="truncate flex items-center gap-1.5"><SourceBadge source={t.source} />{t.description}</div>
-                        {editingNotesId === t.id ? (
+                        <div className="truncate flex items-center gap-1.5"><SourceBadge source={row.t.source} />{row.t.description}</div>
+                        {editingNotesId === row.t.id ? (
                           <input
                             autoFocus
                             className="input py-0.5 text-xs mt-0.5 w-full"
                             value={notesValue}
                             onChange={e => setNotesValue(e.target.value)}
-                            onBlur={() => updateNotesMut.mutate({ id: t.id, notes: notesValue || null })}
-                            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); updateNotesMut.mutate({ id: t.id, notes: notesValue || null }); } if (e.key === "Escape") setEditingNotesId(null); }}
+                            onBlur={() => updateNotesMut.mutate({ id: row.t.id, notes: notesValue || null })}
+                            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); updateNotesMut.mutate({ id: row.t.id, notes: notesValue || null }); } if (e.key === "Escape") setEditingNotesId(null); }}
                             placeholder="Add note…"
                           />
                         ) : (
                           <button
-                            onClick={() => { setEditingNotesId(t.id); setNotesValue(t.notes ?? ""); }}
-                            className={`text-xs truncate block max-w-full text-left ${t.notes ? "text-gray-400 dark:text-gray-400 hover:text-indigo-500" : "text-gray-200 dark:text-gray-300 hover:text-gray-400"}`}
+                            onClick={() => { setEditingNotesId(row.t.id); setNotesValue(row.t.notes ?? ""); }}
+                            className={`text-xs truncate block max-w-full text-left ${row.t.notes ? "text-gray-400 dark:text-gray-400 hover:text-indigo-500" : "text-gray-200 dark:text-gray-300 hover:text-gray-400"}`}
                           >
-                            {t.notes || "add note…"}
+                            {row.t.notes || "add note…"}
                           </button>
                         )}
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
-                        <CategoryCell txnId={t.id} catId={t.category_id} onSave={catId => handleCatChange(t.id, catId)} editingCatId={editingCatId} setEditingCatId={setEditingCatId} allCats={allCats} catMap={catMap} />
+                        <CategoryCell txnId={row.t.id} catId={row.t.category_id} onSave={catId => handleCatChange(row.t.id, catId)} editingCatId={editingCatId} setEditingCatId={setEditingCatId} allCats={allCats} catMap={catMap} />
                       </td>
-                      <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{accountMap[t.account_id] ?? "—"}</td>
-                      <td className={`px-4 py-3 text-right font-semibold tabular-nums ${parseFloat(t.amount) >= 0 ? "text-green-600" : "text-red-600"}`}>
-                        {parseFloat(t.amount) >= 0 ? "+" : ""}{fmt(t.amount)}
+                      <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{accountMap[row.t.account_id] ?? "—"}</td>
+                      <td className={`px-4 py-3 text-right font-semibold tabular-nums ${parseFloat(row.t.amount) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {parseFloat(row.t.amount) >= 0 ? "+" : ""}{fmt(row.t.amount)}
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           <VerificationFlagButton
                             feature="transactions"
                             referenceType="transaction"
-                            referenceId={t.id}
-                            observed={{ date: t.date, amount: t.amount, description: t.description, category: t.category_id ? catMap[t.category_id] ?? null : null, category_id: t.category_id }}
+                            referenceId={row.t.id}
+                            observed={{ date: row.t.date, amount: row.t.amount, description: row.t.description, category: row.t.category_id ? catMap[row.t.category_id] ?? null : null, category_id: row.t.category_id }}
                             expectedFields={[{ key: "amount", label: "Amount" }]}
                           />
-                          <button onClick={() => setDeleteId(t.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
+                          <button onClick={() => setDeleteId(row.t.id)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
                         </div>
                       </td>
+                    </tr>
+                  ) : (
+                    <tr key={row.key} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                        {new Date(row.p.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </td>
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
+                        <div className="truncate flex items-center gap-1.5">
+                          {row.p.name}
+                          <span className="shrink-0 text-[10px] uppercase tracking-wide px-1 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">pending</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">{row.p.categoryName ?? (row.p.isCcPayment ? "Credit Card Payment" : "—")}</td>
+                      <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{accountMap[primaryCheckingId] ?? "—"}</td>
+                      <td className={`px-4 py-3 text-right font-semibold tabular-nums ${row.p.amount >= 0 ? "text-green-600" : "text-red-600"}`}>
+                        {row.p.amount >= 0 ? "+" : ""}{fmt(row.p.amount)}
+                      </td>
+                      <td className="px-4 py-3"></td>
                     </tr>
                   ))}
                 </tbody>
@@ -758,11 +761,20 @@ export default function Transactions() {
         )}
 
         {/* Card transactions */}
-        {txnTab === "card" && !loading && (
+        {txnTab === "card" && !loading && (() => {
+          const activeCard = (cards as any[]).find((c: any) => c.id === activeCardId);
+          // Only the checking-side CC payment/estimate lines that name this
+          // specific card (forecast_engine.py's "CC Payment: {name}" /
+          // "CC Estimate: {name}") -- per-charge card forecasting doesn't
+          // exist, only the aggregate payoff/estimate hitting checking.
+          const cardPendingRows = activeCard
+            ? pendingRows.filter(p => p.isCcPayment && (p.name === `CC Payment: ${activeCard.name}` || p.name === `CC Estimate: ${activeCard.name}`))
+            : [];
+          return (
           <>
             {cards.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No credit cards configured</p>}
-            {cards.length > 0 && cardTxns.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No card transactions in this period</p>}
-            {cardTxns.length > 0 && (
+            {cards.length > 0 && cardTxns.length === 0 && cardPendingRows.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No card transactions in this period</p>}
+            {(cardTxns.length > 0 || cardPendingRows.length > 0) && (
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-700">
                   <tr>
@@ -774,6 +786,22 @@ export default function Transactions() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
+                  {cardPendingRows.map((p, i) => (
+                    <tr key={`pending-${i}`} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                        {new Date(p.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </td>
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
+                        <div className="truncate flex items-center gap-1.5">
+                          {p.name}
+                          <span className="shrink-0 text-[10px] uppercase tracking-wide px-1 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">pending</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">Credit Card Payment</td>
+                      <td className="px-4 py-3 text-right font-semibold tabular-nums text-red-600">{fmt(Math.abs(p.amount))}</td>
+                      <td className="px-4 py-3"></td>
+                    </tr>
+                  ))}
                   {cardTxns.map((t: any) => (
                     <tr key={t.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
@@ -803,7 +831,8 @@ export default function Transactions() {
               </table>
             )}
           </>
-        )}
+          );
+        })()}
       </div>}
 
       {/* Reconcile tab */}
