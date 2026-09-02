@@ -512,23 +512,34 @@ def build_forecast(
             # flat-estimate fallback elsewhere in this function fills the
             # now-unclaimed 9/25 slot with a generic guess instead, which is
             # the number that was actually distorting budget_snapshot.py's
-            # Left to Spend / Safety Margin. This isn't specific to
-            # balance_due == 0 -- bank sync never touches balance_due at all
-            # (it's a field Dan updates by hand), so a card with an OLDER,
-            # still-outstanding balance_due hits the identical forward-search
-            # skip once its own statement_day has recently passed.
+            # Left to Spend / Safety Margin.
             #
-            # Recognizing a just-passed close (within
-            # _UNCONFIRMED_LOOKBACK_DAYS) fixes that without touching the
-            # normal case: well before the next close, this reduces to the
-            # exact same forward search as before -- Dan's own worked example
-            # (2026-08-14, asked on the 14th with a 28th statement_day) still
-            # finds the 28th of THAT month, not a stale one from further
-            # back, because 17 days separate the 14th from July's close.
+            # Only recognized when balance_due == 0, though -- NOT unconditionally
+            # (a first version of this fix was; regression found live
+            # 2026-09-02, hours after Dan hand-entered a real, current,
+            # non-stale balance_due of $6,945 due 9/25). balance_due == 0
+            # means "nothing billed for the recent close yet", which is
+            # exactly the gap this fix exists for. balance_due > 0 means a
+            # real bill for that close ALREADY EXISTS -- Dan's $6,945 IS the
+            # money from the 8/28 close, injected separately below via
+            # next_payment. Recognizing the same close here too made the
+            # carried estimate ($1,292.27 of spend that will belong to the
+            # FOLLOWING cycle, not this one) land on the SAME 9/25 date as
+            # that real payment: $6,945 and $1,292.27 both charged on 9/25,
+            # double-counting the $1,292.27 slice. With balance_due > 0 the
+            # forward search below is what's wanted -- it correctly skips to
+            # the NEXT unbilled close (9/28, due 10/25), where that new
+            # spend actually belongs. Dan's own worked example (2026-08-14,
+            # asked on the 14th with a 28th statement_day) still finds the
+            # 28th of THAT month either way, because 17 days separate the
+            # 14th from July's close -- outside the lookback regardless.
             anchor = max(today, start_date)
-            recent_close = _most_recent_occurrence_on_or_before(card.statement_day, anchor)
-            if (anchor - recent_close).days <= _UNCONFIRMED_LOOKBACK_DAYS:
-                next_close = recent_close
+            if not (card.balance_due and card.balance_due > 0):
+                recent_close = _most_recent_occurrence_on_or_before(card.statement_day, anchor)
+                if (anchor - recent_close).days <= _UNCONFIRMED_LOOKBACK_DAYS:
+                    next_close = recent_close
+                else:
+                    next_close = _next_occurrence_on_or_after(card.statement_day, anchor)
             else:
                 next_close = _next_occurrence_on_or_after(card.statement_day, anchor)
             derived_due = _next_occurrence_on_or_after(card.due_day, next_close + timedelta(days=1))
