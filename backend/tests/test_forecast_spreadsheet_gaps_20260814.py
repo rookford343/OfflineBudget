@@ -53,6 +53,39 @@ def _named(entries, name):
     ]
 
 
+class _RelativeCardCycles:
+    """statement_day/due_day plus the three cycle due-dates that follow,
+    all relative to date.today() -- generalizes this file's original
+    "asked on 2026-08-14, statement closes the 28th, due the 25th" scenarios
+    (the file is literally date-stamped to that day) to any today, so a
+    test built on this doesn't rot the next time wall-clock time passes the
+    date it happened to be written on. Cycle 1 lands ~2 weeks out (mirrors
+    the original 8/14-to-8/28 gap), cycles 2 and 3 follow at roughly
+    one-month intervals -- same relationship, just anchored to today
+    instead of a hardcoded month.
+
+    statement_day is close_date's day-of-month; due_day is derived FROM a
+    concrete date (close_date + 3 days) rather than picked independently,
+    the same technique test_the_cycle_after_a_locked_payoff_uses_the_carried_balance
+    already uses -- _next_occurrence_on_or_after(due_day, close+1) then
+    reliably lands on exactly that date regardless of which numbers close_date
+    and due_date happen to carry across a month boundary."""
+
+    def __init__(self, today: date):
+        self.close_date = today + timedelta(days=14)
+        self.statement_day = self.close_date.day
+        self.cycle1_due = self.close_date + timedelta(days=3)
+        self.due_day = self.cycle1_due.day
+        # Computed with the real function forecast_engine.py itself uses for
+        # this, not approximated with a fixed day offset -- a fixed offset
+        # drifts by a day or two across months of different lengths, and
+        # this only needs to be exactly right, not independently derived.
+        self.cycle2_close = _next_occurrence_on_or_after(self.statement_day, self.cycle1_due + timedelta(days=1))
+        self.cycle2_due = _next_occurrence_on_or_after(self.due_day, self.cycle2_close + timedelta(days=1))
+        self.cycle3_close = _next_occurrence_on_or_after(self.statement_day, self.cycle2_due + timedelta(days=1))
+        self.cycle3_due = _next_occurrence_on_or_after(self.due_day, self.cycle3_close + timedelta(days=1))
+
+
 # --- 1. SS wage-base crossing --------------------------------------------
 
 def test_crossing_paycheck_gets_only_the_boost_it_earned(db_session):
@@ -436,14 +469,24 @@ def test_an_estimated_payoff_can_still_be_the_floor(db_session):
     """Only the LOCKED payoff is excluded. A later cycle's estimate is still
     in flux and still responsive to what Dan spends, so it is exactly the
     event he needs the floor to show -- his sheet keeps the 9/25 payment
-    ($4,041.32) inside the B25 range while excluding the 8/25 locked one."""
+    ($4,041.32) inside the B25 range while excluding the 8/25 locked one.
+
+    Dates relative to date.today() -- the hardcoded next_payment_date this
+    test used to carry (2026-08-25) went stale relative to itself once
+    wall-clock time passed it: what was meant to be "a locked payment
+    still ahead of today" (payment_is_stale == False, the code path this
+    test actually means to exercise) silently became "a locked payment
+    rolled forward from a stale date" (payment_is_stale == True) instead,
+    a DIFFERENT path this file tests separately elsewhere."""
     from backend.services.budget_snapshot import _lookahead_minimum
 
+    today = date.today()
+    cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="influx")
     account = _checking(db_session, user, balance="20000.00")
-    card = _card(db_session, user, name="Chase", statement_day=28, due_day=25,
+    card = _card(db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
                  balance_due=Decimal("1000.00"), current_balance=Decimal("1000.00"),
-                 next_payment_date=date(2026, 8, 25),
+                 next_payment_date=cycles.cycle1_due,
                  monthly_spend_estimate=Decimal("15000.00"))
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Paycheck",
@@ -453,9 +496,9 @@ def test_an_estimated_payoff_can_still_be_the_floor(db_session):
     ))
     db_session.commit()
 
-    _, when = _lookahead_minimum(db_session, user.id, account.id, date(2026, 8, 14))
+    _, when = _lookahead_minimum(db_session, user.id, account.id, today)
 
-    assert when is not None and when.month >= 9, (
+    assert when is not None and when >= today, (
         f"an estimated payoff must remain eligible as the floor; got {when}"
     )
 
@@ -781,32 +824,37 @@ def test_the_cycle_after_the_carried_cycle_uses_fresh_pending_charges(db_session
     by design, not something this feature touches), and cycle 2 (Oct) picks
     it up via this task's new second-hop logic, which reads pending_charges
     on its own through the freshness-checked `_fresh_pending_charges`
-    helper. This test pins both."""
+    helper. This test pins both.
+
+    Dates relative to date.today() rather than hardcoded 2026-08/09/10/11
+    month numbers -- see _RelativeCardCycles."""
+    today = date.today()
+    cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="secondhop")
     account = _checking(db_session, user, balance="60000.00")
     card = _card(
-        db_session, user, name="Chase", statement_day=28, due_day=25,
+        db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),
         pending_charges_updated_at=datetime.utcnow(),
-        next_payment_date=date.today() + timedelta(days=1),
+        next_payment_date=today + timedelta(days=1),
         monthly_spend_estimate=Decimal("15000.00"),
     )
     db_session.commit()
 
-    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 12, 31))
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=150))
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
-    sept = [amt for d, amt in estimates.items() if d.month == 9]
-    assert sept == [Decimal("-3000.00")], (
+    cycle1 = [amt for d, amt in estimates.items() if d == cycles.cycle1_due]
+    assert cycle1 == [Decimal("-3000.00")], (
         f"first carried cycle already folds in pending_charges via the "
-        f"pre-existing, unchanged carried formula, got {sept}"
+        f"pre-existing, unchanged carried formula, got {cycle1}"
     )
-    oct_ = [amt for d, amt in estimates.items() if d.month == 10]
-    assert oct_ == [Decimal("-2000.00")], (
-        f"second hop must use fresh pending_charges instead of the flat estimate, got {oct_}"
+    cycle2 = [amt for d, amt in estimates.items() if d == cycles.cycle2_due]
+    assert cycle2 == [Decimal("-2000.00")], (
+        f"second hop must use fresh pending_charges instead of the flat estimate, got {cycle2}"
     )
-    later = [amt for d, amt in estimates.items() if d.month >= 11]
+    later = [amt for d, amt in estimates.items() if d >= cycles.cycle3_due]
     assert later, "cycles beyond the second hop must still be projected"
     assert all(a == Decimal("-15000.00") for a in later), (
         f"cycles beyond the second hop keep the flat estimate, got {later}"
@@ -860,48 +908,53 @@ def test_second_hop_leaves_a_subscription_driven_cards_projection_alone(db_sessi
 def test_zero_pending_charges_skips_the_second_hop(db_session):
     """No pending charges means no real second-hop signal -- that month
     falls through to the flat estimate exactly as it did before this
-    feature existed."""
+    feature existed. Dates relative to date.today() -- see _RelativeCardCycles."""
+    today = date.today()
+    cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="secondhopzero")
     account = _checking(db_session, user, balance="60000.00")
     _card(
-        db_session, user, name="Chase", statement_day=28, due_day=25,
+        db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("0"),
-        next_payment_date=date.today() + timedelta(days=1),
+        next_payment_date=today + timedelta(days=1),
         monthly_spend_estimate=Decimal("15000.00"),
     )
     db_session.commit()
 
-    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 11, 30))
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=120))
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
-    oct_ = [amt for d, amt in estimates.items() if d.month == 10]
-    assert oct_ == [Decimal("-15000.00")], (
-        f"zero pending_charges must fall through to the flat estimate, got {oct_}"
+    cycle2 = [amt for d, amt in estimates.items() if d == cycles.cycle2_due]
+    assert cycle2 == [Decimal("-15000.00")], (
+        f"zero pending_charges must fall through to the flat estimate, got {cycle2}"
     )
 
 
 def test_stale_pending_charges_skips_the_second_hop(db_session):
     """A pending-charges figure older than 7 days is not trusted -- it
-    falls through to the flat estimate the same as a zero value."""
+    falls through to the flat estimate the same as a zero value. Dates
+    relative to date.today() -- see _RelativeCardCycles."""
+    today = date.today()
+    cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="secondhopstale")
     account = _checking(db_session, user, balance="60000.00")
     _card(
-        db_session, user, name="Chase", statement_day=28, due_day=25,
+        db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),
         pending_charges_updated_at=datetime.utcnow() - timedelta(days=10),
-        next_payment_date=date.today() + timedelta(days=1),
+        next_payment_date=today + timedelta(days=1),
         monthly_spend_estimate=Decimal("15000.00"),
     )
     db_session.commit()
 
-    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 11, 30))
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=120))
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
-    oct_ = [amt for d, amt in estimates.items() if d.month == 10]
-    assert oct_ == [Decimal("-15000.00")], (
-        f"stale pending_charges must fall through to the flat estimate, got {oct_}"
+    cycle2 = [amt for d, amt in estimates.items() if d == cycles.cycle2_due]
+    assert cycle2 == [Decimal("-15000.00")], (
+        f"stale pending_charges must fall through to the flat estimate, got {cycle2}"
     )
 
 
@@ -913,57 +966,65 @@ def test_the_second_hop_still_works_when_the_first_cycle_used_the_stale_payment_
     derived/carried branch every other second-hop test here exercises.
     Nothing previously pinned that the second hop still fires correctly on
     top of that merged payment. Empirically pinned per this file's existing
-    convention -- the merged September amount depends on today's date via
+    convention -- the merged amount depends on today's date via
     _next_occurrence_on_or_after, so it can't be hand-derived without
-    running the code."""
+    running the code. Dates relative to date.today() -- see
+    _RelativeCardCycles; next_payment_date stays a small NEGATIVE offset
+    from today (genuinely stale) rather than using cycles.cycle1_due, since
+    staleness is the one thing this specific test deliberately exercises."""
+    today = date.today()
+    cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="secondhopstalemerge")
     account = _checking(db_session, user, balance="60000.00")
     card = _card(
-        db_session, user, name="Chase", statement_day=28, due_day=25,
+        db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),
         pending_charges_updated_at=datetime.utcnow(),
-        next_payment_date=date.today() - timedelta(days=3),  # genuinely stale
+        next_payment_date=today - timedelta(days=3),  # genuinely stale
         monthly_spend_estimate=Decimal("15000.00"),
     )
     db_session.commit()
 
-    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 12, 31))
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=150))
     payments = dict(_named(entries, "CC Payment: Chase"))
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
-    sept = [amt for d, amt in payments.items() if d.month == 9]
-    oct_ = [amt for d, amt in estimates.items() if d.month == 10]
-    assert sept == [Decimal("-3000.00")], (
-        f"the merged September payment must include the derived (carried) "
-        f"amount via the stale-payment merge path, got {sept}"
+    cycle1 = [amt for d, amt in payments.items() if d == cycles.cycle1_due]
+    cycle2 = [amt for d, amt in estimates.items() if d == cycles.cycle2_due]
+    assert cycle1 == [Decimal("-3000.00")], (
+        f"the merged cycle-1 payment must include the derived (carried) "
+        f"amount via the stale-payment merge path, got {cycle1}"
     )
-    assert oct_ == [Decimal("-2000.00")], (
+    assert cycle2 == [Decimal("-2000.00")], (
         f"the second hop must still fire on top of the merged payment and "
-        f"show the fresh pending_charges amount, got {oct_}"
+        f"show the fresh pending_charges amount, got {cycle2}"
     )
 
 
 def test_pending_charges_with_no_timestamp_skips_the_second_hop(db_session):
     """A nonzero pending_charges with no recorded timestamp (a pre-existing
     row from before this feature shipped, or one a sync just cleared) is
-    treated as already stale rather than silently trusted."""
+    treated as already stale rather than silently trusted. Dates relative
+    to date.today() -- see _RelativeCardCycles."""
+    today = date.today()
+    cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="secondhopnostamp")
     account = _checking(db_session, user, balance="60000.00")
     _card(
-        db_session, user, name="Chase", statement_day=28, due_day=25,
+        db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),
         pending_charges_updated_at=None,
-        next_payment_date=date.today() + timedelta(days=1),
+        next_payment_date=today + timedelta(days=1),
         monthly_spend_estimate=Decimal("15000.00"),
     )
     db_session.commit()
 
-    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 11, 30))
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=120))
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
-    oct_ = [amt for d, amt in estimates.items() if d.month == 10]
-    assert oct_ == [Decimal("-15000.00")], (
-        f"a nonzero value with no timestamp must fall through to the flat estimate, got {oct_}"
+    cycle2 = [amt for d, amt in estimates.items() if d == cycles.cycle2_due]
+    assert cycle2 == [Decimal("-15000.00")], (
+        f"a nonzero value with no timestamp must fall through to the flat estimate, got {cycle2}"
     )
