@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 import pytest
 from backend import models
-from backend.services.forecast_engine import build_forecast
+from backend.services.forecast_engine import build_forecast, _next_occurrence_on_or_after
 
 
 GROSS = Decimal("8602.76")
@@ -442,32 +442,126 @@ def test_the_cycle_after_a_locked_payoff_uses_the_carried_balance(db_session):
     spending he has made but not been billed for, so the next cycle is mostly
     known. $4,000 balance with $3,000 due leaves $1,000 carried, plus a $100
     subscription posting before the statement closes -- $1,100, not the
-    $15,000 flat estimate. Later cycles keep the flat estimate."""
+    $15,000 flat estimate. Later cycles keep the flat estimate.
+
+    Dates relative to date.today() rather than hardcoded 2026-08 values --
+    hardcoded dates rotted here once wall-clock time moved past them
+    (2026-09-02: next_payment_date's staleness rollforward started firing
+    when it hadn't originally, folding this scenario into a different,
+    still-correct "CC Payment" merge instead of "CC Estimate" and breaking
+    this test for a reason unrelated to what it actually checks -- see
+    _UNCONFIRMED_LOOKBACK_DAYS in forecast_engine.py for the real bug this
+    exposed). The close sits a comfortable 14 days out and next_payment_date
+    stays in the future (not stale), matching this test's original relationship
+    to "today" and keeping it valid no matter which day it actually runs."""
+    today = date.today()
+    close_date = today + timedelta(days=14)
+    sub_date = today + timedelta(days=6)
+    due_day = (close_date + timedelta(days=3)).day
     user = _user(db_session, username="carried")
     account = _checking(db_session, user, balance="60000.00")
-    card = _card(db_session, user, name="Chase", statement_day=28, due_day=25,
+    card = _card(db_session, user, name="Chase", statement_day=close_date.day, due_day=due_day,
                  current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
-                 pending_charges=Decimal("0"), next_payment_date=date(2026, 8, 25),
+                 pending_charges=Decimal("0"),
+                 # Comfortably in the future (never stale) regardless of how
+                 # statement_day/due_day land, so this scenario never crosses
+                 # into the separate "stale next_payment merges with the
+                 # carried estimate" path -- that's covered by its own test.
+                 next_payment_date=today + timedelta(days=200),
                  monthly_spend_estimate=Decimal("15000.00"))
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, card_id=card.id, name="Sub",
         amount=Decimal("100.00"), type=models.RecurringType.expense,
         frequency=models.RecurringFrequency.monthly,
-        day_of_month=20, start_date=date(2026, 1, 1),
+        day_of_month=sub_date.day, start_date=date(2026, 1, 1),
     ))
     db_session.commit()
 
-    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 11, 30))
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=120))
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
-    sept = [amt for d, amt in estimates.items() if d.month == 9]
-    assert sept == [Decimal("-1100.00")], (
-        f"the cycle after the locked payoff must be carried + upcoming subs, got {sept}"
+    next_cycle = [amt for d, amt in estimates.items() if close_date <= d < close_date + timedelta(days=32)]
+    assert next_cycle == [Decimal("-1100.00")], (
+        f"the cycle after the locked payoff must be carried + upcoming subs, got {next_cycle}"
     )
-    later = [amt for d, amt in estimates.items() if d.month >= 10]
+    later = [amt for d, amt in estimates.items() if d >= close_date + timedelta(days=32)]
     assert later, "later cycles must still be projected"
     assert all(a == Decimal("-15000.00") for a in later), (
         f"cycles beyond the next one keep the flat estimate, got {later}"
+    )
+
+
+# --- 4. A statement close that already passed but hasn't billed yet -------
+
+def test_a_just_passed_close_still_carries_the_right_due_date(db_session):
+    """Real bug, 2026-09-02: Dan's Chase Sapphire closed 5 days before "today"
+    (bank sync never touches balance_due -- see bank_sync_service.py -- so it
+    was still 0, looking identical to "fully paid, next close is still
+    ahead"). Forward-searching for "the next close" from today skipped right
+    past the one 5 days ago, deriving a payoff a whole cycle late (October
+    instead of the real September) -- and left a separate flat-estimate
+    fallback to fill the now-unclaimed near due date with a generic guess
+    instead of the accurate carried figure. That flat guess is what was
+    actually distorting budget_snapshot.py's Left to Spend / Safety Margin.
+
+    Diffed against Dan's real numbers after the fix (Chase current_balance
+    $7,326.17, balance_due $0): the carried estimate landed on the real
+    due date instead of the following month."""
+    today = date.today()
+    close_date = today - timedelta(days=5)  # within _UNCONFIRMED_LOOKBACK_DAYS (7)
+    user = _user(db_session, username="justclosed")
+    account = _checking(db_session, user, balance="60000.00")
+    _card(db_session, user, name="Chase", statement_day=close_date.day, due_day=25,
+          current_balance=Decimal("7326.17"), balance_due=Decimal("0"),
+          pending_charges=Decimal("0"), monthly_spend_estimate=Decimal("5500.00"),
+          # Non-None is what matters here (the carried-balance derivation
+          # requires it to run at all) -- its actual value is inert since
+          # balance_due is 0, so it can never trigger the separate stale-
+          # rollforward merge path (that needs balance_due > 0).
+          next_payment_date=close_date)
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=90))
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+
+    near_due = _next_occurrence_on_or_after(25, close_date + timedelta(days=1))
+    assert estimates.get(near_due) == Decimal("-7326.17"), (
+        f"a close 5 days ago must still carry the real balance to its real "
+        f"due date, got {estimates}"
+    )
+    # The old bug's signature: a second, later date carrying the generic
+    # flat estimate instead, because the carried figure landed a cycle too
+    # far out and left this slot for the fallback to fill.
+    a_month_later = near_due + timedelta(days=25)
+    stray_flat_guess = [d for d in estimates if near_due < d <= a_month_later]
+    assert not stray_flat_guess, (
+        f"no flat-estimate fallback should fire between now and the real due "
+        f"date -- found one at {stray_flat_guess}, the exact symptom Dan saw"
+    )
+
+
+def test_a_close_beyond_the_lookback_window_still_searches_forward(db_session):
+    """The other side of the same fix: a close far enough in the past (well
+    past _UNCONFIRMED_LOOKBACK_DAYS) is not "just happened, unsynced" -- it's
+    long since resolved, and forward search for the next real close is
+    correct, same as the untouched normal case."""
+    today = date.today()
+    close_date = today - timedelta(days=20)  # well beyond the 7-day lookback
+    user = _user(db_session, username="staleclose")
+    account = _checking(db_session, user, balance="60000.00")
+    _card(db_session, user, name="Chase", statement_day=close_date.day, due_day=25,
+          current_balance=Decimal("500.00"), balance_due=Decimal("0"),
+          pending_charges=Decimal("0"), monthly_spend_estimate=Decimal("5500.00"),
+          next_payment_date=close_date)
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=90))
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+
+    stale_due = _next_occurrence_on_or_after(25, close_date + timedelta(days=1))
+    assert estimates.get(stale_due) != Decimal("-500.00"), (
+        "a close 20 days gone must not be treated as 'just happened' -- "
+        "the small carried balance must not land on its due date"
     )
 
 

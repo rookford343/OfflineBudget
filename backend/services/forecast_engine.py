@@ -49,6 +49,21 @@ def _next_occurrence_on_or_after(day_of_month: int, after: date) -> date:
     return date(year, month, day2)
 
 
+def _most_recent_occurrence_on_or_before(day_of_month: int, before: date) -> date:
+    """The last date on/before `before` whose day-of-month is `day_of_month`.
+    Mirrors _next_occurrence_on_or_after's short-month clamping, searching
+    backward instead of forward."""
+    last_day = _last_day_of_month(before)
+    day = min(day_of_month, last_day) if day_of_month > 0 else last_day
+    candidate = date(before.year, before.month, day)
+    if candidate <= before:
+        return candidate
+    year, month = (before.year, before.month - 1) if before.month > 1 else (before.year - 1, 12)
+    last_day2 = monthrange(year, month)[1]
+    day2 = min(day_of_month, last_day2) if day_of_month > 0 else last_day2
+    return date(year, month, day2)
+
+
 def _card_payoff_date_for_charge(card: "models.CreditCard", charge_date: date) -> date:
     """When a charge made on `charge_date` actually leaves checking: the due
     date of the FIRST statement that closes on or after the charge -- not
@@ -486,7 +501,36 @@ def build_forecast(
                 - Decimal(str(card.balance_due))
             )
             carried = max(carried, Decimal("0"))
-            next_close = _next_occurrence_on_or_after(card.statement_day, max(today, start_date))
+            # Forward-searching for "the next close" from today skips right
+            # past a close that happened only a few days ago -- current_balance
+            # already carries that cycle's real spend the moment it closes,
+            # but the forward search finds the FOLLOWING month's close
+            # instead, deriving a payoff one whole cycle late. Confirmed live
+            # 2026-09-02: Chase's real close was 8/28 (5 days before today),
+            # forward search found 9/28 instead, deriving a payoff due 10/25
+            # -- not the real 9/25 Dan already knew from his bank. A separate
+            # flat-estimate fallback elsewhere in this function fills the
+            # now-unclaimed 9/25 slot with a generic guess instead, which is
+            # the number that was actually distorting budget_snapshot.py's
+            # Left to Spend / Safety Margin. This isn't specific to
+            # balance_due == 0 -- bank sync never touches balance_due at all
+            # (it's a field Dan updates by hand), so a card with an OLDER,
+            # still-outstanding balance_due hits the identical forward-search
+            # skip once its own statement_day has recently passed.
+            #
+            # Recognizing a just-passed close (within
+            # _UNCONFIRMED_LOOKBACK_DAYS) fixes that without touching the
+            # normal case: well before the next close, this reduces to the
+            # exact same forward search as before -- Dan's own worked example
+            # (2026-08-14, asked on the 14th with a 28th statement_day) still
+            # finds the 28th of THAT month, not a stale one from further
+            # back, because 17 days separate the 14th from July's close.
+            anchor = max(today, start_date)
+            recent_close = _most_recent_occurrence_on_or_before(card.statement_day, anchor)
+            if (anchor - recent_close).days <= _UNCONFIRMED_LOOKBACK_DAYS:
+                next_close = recent_close
+            else:
+                next_close = _next_occurrence_on_or_after(card.statement_day, anchor)
             derived_due = _next_occurrence_on_or_after(card.due_day, next_close + timedelta(days=1))
             upcoming = Decimal("0")
             cursor = max(today, start_date) + timedelta(days=1)
