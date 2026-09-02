@@ -369,17 +369,40 @@ def test_a_pending_marker_suppresses_the_payoff_injection_too(db_session):
 
 
 def test_asking_from_inside_the_dip_gives_the_same_floor(db_session):
-    """Asked on the 27th -- two days into the payoff dip -- the answer must
-    match asking on the 14th. The lookback that settles the skip state before
-    `as_of` is what makes this hold."""
+    """Asked two days into the payoff dip, the answer must match asking well
+    before it starts. The lookback that settles the skip state before
+    `as_of` is what makes this hold.
+
+    Dates relative to date.today() rather than hardcoded 2026-08 values --
+    hardcoded dates rotted here once wall-clock time passed them (see
+    _UNCONFIRMED_LOOKBACK_DAYS in forecast_engine.py, 2026-09-02). Not
+    reusing _floor_scenario: its next_payment_date is a fixed 2026-08-25,
+    which is a different rot risk (other tests share it) -- built inline
+    here with a payoff date safely in the future of REAL wall-clock today
+    so next_payment_date is never stale regardless of which day this runs."""
     from backend.services.budget_snapshot import _lookahead_minimum
 
-    user, account = _floor_scenario(db_session, payoff_day=25, paycheck_day=31)
-    _, early = _lookahead_minimum(db_session, user.id, account.id, date(2026, 8, 14))
-    _, inside = _lookahead_minimum(db_session, user.id, account.id, date(2026, 8, 27))
+    today = date.today()
+    payoff_date = today + timedelta(days=30)
+    paycheck_date = payoff_date + timedelta(days=6)
+    user = _user(db_session, username="insidedip")
+    account = _checking(db_session, user, balance="10000.00")
+    _card(db_session, user, name="Chase", statement_day=payoff_date.day, due_day=payoff_date.day,
+          balance_due=Decimal("9000.00"), current_balance=Decimal("9000.00"),
+          next_payment_date=payoff_date)
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Paycheck",
+        amount=Decimal("6000.00"), type=models.RecurringType.income,
+        frequency=models.RecurringFrequency.monthly,
+        day_of_month=paycheck_date.day, start_date=date(2026, 1, 1),
+    ))
+    db_session.commit()
+
+    _, early = _lookahead_minimum(db_session, user.id, account.id, today)
+    _, inside = _lookahead_minimum(db_session, user.id, account.id, payoff_date + timedelta(days=2))
 
     assert inside is not None
-    assert not (date(2026, 8, 25) <= inside <= date(2026, 8, 30)), (
+    assert not (payoff_date <= inside <= paycheck_date - timedelta(days=1)), (
         "asking from inside the dip must not report a day inside the dip"
     )
     assert early is not None
