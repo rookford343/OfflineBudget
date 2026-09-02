@@ -32,6 +32,18 @@ def _stamp_pending_charges_freshness(card: models.CreditCard, previous_pending_c
         card.pending_charges_updated_at = None
 
 
+def _stamp_balance_due_freshness(card: models.CreditCard, previous_balance_due: Decimal) -> None:
+    """balance_due is manual-entry-only -- bank sync never touches it (see
+    bank_sync_service.py) -- so unlike current_balance it has no freshness
+    signal of its own. Confirmed live 2026-09-02: it sat stale at $0 for
+    the better part of a week, silently distorting Left to Spend / Safety
+    Margin with nothing surfacing that staleness until the numbers were
+    diffed against Dan's spreadsheet by hand. Stamp on any real change so
+    the Credit Cards page can show "as of X days ago" instead."""
+    if card.balance_due != previous_balance_due:
+        card.balance_due_updated_at = datetime.utcnow()
+
+
 @router.get("", response_model=list[schemas.CreditCardOut])
 def list_cards(
     db: Session = Depends(get_db),
@@ -52,6 +64,7 @@ def create_card(
 ):
     card = models.CreditCard(user_id=user.id, **body.model_dump())
     _stamp_pending_charges_freshness(card, Decimal("0"))
+    _stamp_balance_due_freshness(card, Decimal("0"))
     db.add(card)
     db.commit()
     db.refresh(card)
@@ -113,6 +126,7 @@ def update_card(
         setattr(card, field, value)
     _clear_pending_if_balance_due_changed(card, previous_balance_due)
     _stamp_pending_charges_freshness(card, previous_pending_charges)
+    _stamp_balance_due_freshness(card, previous_balance_due)
     db.commit()
     db.refresh(card)
     return _enrich(card)

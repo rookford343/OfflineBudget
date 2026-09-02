@@ -341,6 +341,16 @@ class CreditCard(Base):
     payment_sent_pending_sync: Mapped[bool] = mapped_column(Boolean, default=False)
     payment_sent_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     pending_charges_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # When Dan last hand-confirmed balance_due itself. Unlike current_balance
+    # (bank-synced, staleness tracked via balance_as_of below), balance_due
+    # is manual-entry-only -- bank_sync_service.py never touches it -- so it
+    # has no freshness signal of its own at all otherwise. Confirmed live
+    # 2026-09-02: it sat at $0 (stale from a prior cycle) for the better
+    # part of a week, silently distorting Left to Spend / Safety Margin,
+    # with nothing surfacing that staleness until the numbers were diffed
+    # against Dan's spreadsheet by hand. Stamped by routers/credit_cards.py
+    # on any real change, same pattern as pending_charges_updated_at.
+    balance_due_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
     # When we last had a reason to trust current_balance: either SimpleFIN's
     # own "balance-date" from a card-side sync, or the date of a checking-side
     # payment we matched to this card (import_service.py's payoff detection).

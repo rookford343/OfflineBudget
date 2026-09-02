@@ -3,13 +3,28 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { cardsApi, accountsApi } from "../api";
 import { fmt, utilColor, utilBg, today } from "../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
-import { Plus, Pencil, Trash2, CreditCard as CardIcon, DollarSign, X, HelpCircle, Clock, Send } from "lucide-react";
+import { Plus, Pencil, Trash2, CreditCard as CardIcon, DollarSign, X, HelpCircle, Clock, Send, AlertTriangle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+
+// balance_due is manual-entry-only -- bank sync never touches it (see
+// backend/services/bank_sync_service.py) -- so it has no freshness signal
+// of its own beyond this timestamp. Confirmed live 2026-09-02: it sat
+// stale at $0 for the better part of a week, silently distorting Left to
+// Spend / Safety Margin with nothing surfacing that staleness until the
+// numbers were diffed against a spreadsheet by hand. A week is the same
+// rough order of magnitude as the real bank-sync lag seen this session,
+// past which a number this consequential deserves a visible nudge rather
+// than silent trust.
+const STALE_AFTER_DAYS = 7;
+function daysAgo(iso: string): number {
+  return Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24));
+}
 
 interface Card {
   id: number; name: string; last_four?: string; credit_limit: string;
   statement_day: number; due_day: number; current_balance: string;
   balance_due: string; next_payment_date?: string; monthly_spend_estimate?: string; pending_charges?: string; is_active: boolean; notes?: string; utilization_pct: number;
+  balance_due_updated_at?: string | null;
   payment_sent_pending_sync?: boolean; payment_sent_amount?: string;
 }
 
@@ -144,6 +159,21 @@ export default function CreditCards() {
                 <span className="text-gray-500">Amount Due</span>
                 <span className={`font-semibold tabular-nums ${parseFloat(c.balance_due) > 0 ? "text-red-600" : "text-gray-400"}`}>{maskIfHidden(balancesHidden, fmt(c.balance_due))}</span>
               </div>
+              {parseFloat(c.balance_due) > 0 && (
+                c.balance_due_updated_at ? (
+                  daysAgo(c.balance_due_updated_at) >= STALE_AFTER_DAYS && (
+                    <div className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 justify-end" title="Bank sync never updates this field -- confirm it's still accurate">
+                      <AlertTriangle size={11} className="shrink-0" />
+                      Confirmed {daysAgo(c.balance_due_updated_at)} days ago
+                    </div>
+                  )
+                ) : (
+                  <div className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400 justify-end" title="Bank sync never updates this field -- confirm it's still accurate">
+                    <AlertTriangle size={11} className="shrink-0" />
+                    Never confirmed
+                  </div>
+                )
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Limit</span>
                 <span className="text-gray-600 tabular-nums">{maskIfHidden(balancesHidden, fmt(c.credit_limit))}</span>
