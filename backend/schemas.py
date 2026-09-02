@@ -570,6 +570,7 @@ class CreditCardOut(BaseModel):
     payment_sent_pending_sync: bool = False
     payment_sent_amount: Optional[Decimal] = None
     pending_charges_updated_at: Optional[datetime] = None
+    balance_due_updated_at: Optional[datetime] = None
 
 
 class CreditCardPaymentCreate(BaseModel):

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Blocks a push if the backend test suite doesn't pass.
+#
+# Catches regressions before they leave the machine -- the forecast_engine.py
+# date-anchoring bug (2026-09-02) silently distorted Left to Spend/Safety
+# Margin for the better part of a week with nothing to catch it, because the
+# regression tests that would have caught it didn't exist yet AND nothing
+# forced the suite to run before code shipped. This is the second half of
+# that fix: the tests alone don't help if nobody has to run them.
+repo_root=$(git rev-parse --show-toplevel) || exit 1
+echo "Running backend test suite before push..."
+cd "$repo_root/backend" || exit 1
+if ! python3 -m pytest -q; then
+  echo "" >&2
+  echo "BLOCKED: backend tests are failing. Fix them, or push with --no-verify if you're sure." >&2
+  exit 1
+fi
+exit 0
