@@ -162,7 +162,7 @@ def test_due_for_retry_compares_the_stored_utc_timestamp_against_local_date():
 
 # --- The sweep actually runs (2026-08-15) --------------------------------
 
-def test_scheduler_sweep_runs_without_raising(monkeypatch):
+def test_scheduler_sweep_runs_without_raising(monkeypatch, db_session):
     """Regression: _scheduler_sweep called app_settings.get_effective but its
     local import block only pulled in scheduler_state, so every 20-minute
     tick died with NameError: name 'app_settings' is not defined -- silently,
@@ -172,8 +172,19 @@ def test_scheduler_sweep_runs_without_raising(monkeypatch):
     covered individually, which is exactly how a missing import in the glue
     survives a green suite. This calls the real function with the real
     imports.
-    """
+
+    _scheduler_sweep opens its own DB session via `SessionLocal()` (a real,
+    file-backed engine pointed at settings.DATABASE_URL) rather than taking
+    one as an argument -- the ordinary pattern for a background job, but it
+    means this test previously hit sqlite3.OperationalError: unable to open
+    database file whenever pytest's cwd wasn't the one DATABASE_URL's
+    relative path resolves against. Patching backend.database.SessionLocal
+    to hand back the test's own in-memory db_session keeps this isolated
+    from cwd (and from ever touching the real database) the same way every
+    other test in this suite already is."""
     import backend.main as main_module
+
+    monkeypatch.setattr("backend.database.SessionLocal", lambda: db_session)
 
     calls = []
     monkeypatch.setattr(main_module, "_run_bank_sync", lambda: calls.append("bank_sync"))
