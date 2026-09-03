@@ -96,3 +96,61 @@ def test_discretionary_checking_still_counts(db_session):
     db_session.commit()
 
     assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("63.00")
+
+
+# --- pending_charges: real spend that hasn't itemized yet (2026-09-02) ----
+
+def test_fresh_pending_charges_count_toward_spent_this_month(db_session):
+    """Real case, 2026-09-02: Chase showed $0.00 Spent So Far the same day
+    Dan confirmed $593.43 of real new spend, because that spend hadn't
+    itemized into credit_card_transactions yet -- every other place in the
+    app answering "how much has really been spent" (budget_snapshot.py's
+    new_spending_total, forecast_engine.py's carried balance) already reads
+    pending_charges; this endpoint didn't."""
+    from datetime import datetime
+    user, acct, card = _seed(db_session)
+    card.pending_charges = Decimal("593.43")
+    card.pending_charges_updated_at = datetime.utcnow()
+    db_session.commit()
+
+    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("593.43")
+
+
+def test_pending_charges_add_on_top_of_itemized_card_spend(db_session):
+    """The two are additive, not overlapping -- pending_charges is
+    specifically the NOT-yet-itemized portion, by the same convention
+    _fresh_pending_charges relies on elsewhere."""
+    from datetime import datetime
+    user, acct, card = _seed(db_session)
+    db_session.add(models.CreditCardTransaction(
+        card_id=card.id, user_id=user.id, date=_mid_month(),
+        amount=Decimal("250.00"), merchant="Some Shop"))
+    card.pending_charges = Decimal("100.00")
+    card.pending_charges_updated_at = datetime.utcnow()
+    db_session.commit()
+
+    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("350.00")
+
+
+def test_stale_pending_charges_do_not_count(db_session):
+    """Not trusted once too old to still reflect reality -- same 7-day
+    freshness window _fresh_pending_charges already enforces elsewhere."""
+    from datetime import datetime, timedelta
+    user, acct, card = _seed(db_session)
+    card.pending_charges = Decimal("593.43")
+    card.pending_charges_updated_at = datetime.utcnow() - timedelta(days=10)
+    db_session.commit()
+
+    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("0")
+
+
+def test_pending_charges_with_no_timestamp_do_not_count(db_session):
+    """A nonzero value with no recorded timestamp is treated as already
+    stale rather than silently trusted -- matches _fresh_pending_charges'
+    own behavior for this exact case."""
+    user, acct, card = _seed(db_session)
+    card.pending_charges = Decimal("593.43")
+    card.pending_charges_updated_at = None
+    db_session.commit()
+
+    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("0")
