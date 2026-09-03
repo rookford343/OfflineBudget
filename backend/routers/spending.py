@@ -548,6 +548,28 @@ def available_to_spend(
     card_committed_so_far = _recurring_card_charges_in_range(db, user.id, first, today)
     spent_this_month += max(card_spend - card_committed_so_far, Decimal("0"))
 
+    # pending_charges is Dan's own hand-tracked read of real, already-made
+    # card spend that hasn't itemized into credit_card_transactions yet --
+    # bank sync (and CSV import) only produce itemized rows once a charge
+    # actually posts, which can lag the real purchase by days. Every OTHER
+    # place in this app that answers "how much has really been spent"
+    # (budget_snapshot.py's new_spending_total, forecast_engine.py's carried
+    # balance) already folds this in; this endpoint didn't, so a real,
+    # already-confirmed charge Dan knows about (2026-09-02: $593.43 on
+    # Chase, current_balance already reflects it) stayed invisible here,
+    # showing "Spent So Far: $0.00" the same day it happened. Not double-
+    # counted against card_spend above: pending_charges is specifically the
+    # portion NOT YET itemized, by the same convention _fresh_pending_charges
+    # and the carried-balance formula already rely on elsewhere. Freshness-
+    # checked the same way (stale or unstamped reads as zero), so a forgotten
+    # figure doesn't silently linger here either.
+    from backend.services.forecast_engine import _fresh_pending_charges
+    active_cards = db.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user.id,
+        models.CreditCard.is_active == True,
+    ).all()
+    spent_this_month += sum((_fresh_pending_charges(c, today) for c in active_cards), Decimal("0"))
+
     return schemas.AvailableToSpend(
         monthly_income=monthly_income,
         committed_expenses=committed_expenses,
