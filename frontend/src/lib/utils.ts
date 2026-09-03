@@ -54,7 +54,17 @@ export function utilBg(pct: number): string {
 }
 
 export function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  // NOT new Date().toISOString().slice(0, 10) -- that's UTC, and this app's
+  // dates are all local-calendar-day concepts (a bill "due the 25th",
+  // "today" in the header). US Eastern is UTC-4/-5, so any time after
+  // ~8pm local already reads as tomorrow in UTC -- confirmed live
+  // 2026-09-02 20:14 EDT: this returned "2026-09-03" while the page's own
+  // header showed "Wednesday, September 2, 2026", pulling the Balance Flow
+  // chart's month-to-date query one day past the real end of data and
+  // mislabeling its "same day last month" footer by a day. Mirrors
+  // firstOfMonth()'s existing local-component approach just below.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 export function firstOfMonth(): string {
