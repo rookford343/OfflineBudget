@@ -6,7 +6,7 @@ import { fmt, utilColor, utilBg, firstOfMonth, today } from "../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { useIsDarkMode } from "../store/theme";
 import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle, TrendingUp } from "lucide-react";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import HelpPanel from "../components/HelpPanel";
 import { TrendBadge } from "../components/TrendBadge";
 import { SparkLine } from "../components/SparkLine";
@@ -85,6 +85,26 @@ export default function Dashboard() {
     queryFn: () => forecastApi.range(primaryChecking.id, monthStart, todayStr),
     enabled: !!primaryChecking,
   });
+  // Last month's FULL range (not just up to today's day-of-month) -- shown
+  // as a reference line the whole way across, so the chart has something to
+  // compare against on day 1 of a new month instead of rendering nothing
+  // (the old guard, balanceFlow.length > 1, meant the card was invisible on
+  // the 1st -- see commit 0bed663's comment). Dan's own reference for this
+  // (2026-09-02): a dashboard chart overlaying the current month's live
+  // line against last month's completed one, keyed by day-of-month rather
+  // than calendar date so the two lines compare apples to apples.
+  const lastMonthRange = (() => {
+    const d = new Date();
+    const lastMonthEnd = new Date(d.getFullYear(), d.getMonth(), 0); // day 0 of this month = last day of prior month
+    const lastMonthStart = new Date(lastMonthEnd.getFullYear(), lastMonthEnd.getMonth(), 1);
+    const iso = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+    return { start: iso(lastMonthStart), end: iso(lastMonthEnd) };
+  })();
+  const { data: lastMonthFlow = [] } = useQuery<any[]>({
+    queryKey: ["dashboard-balance-flow-prior", primaryChecking?.id, lastMonthRange.start, lastMonthRange.end],
+    queryFn: () => forecastApi.range(primaryChecking.id, lastMonthRange.start, lastMonthRange.end),
+    enabled: !!primaryChecking,
+  });
   const isDark = useIsDarkMode();
   const { data: snapshot } = useQuery<any>({
     queryKey: ["budget-snapshot", primaryChecking?.id],
@@ -101,7 +121,6 @@ export default function Dashboard() {
   const anyBelowThreshold = checkingAccounts.some((a: any) =>
     a.low_balance_threshold != null && parseFloat(a.current_balance) < parseFloat(a.low_balance_threshold)
   );
-  const totalCards = cards.reduce((s: number, c: any) => s + parseFloat(c.current_balance), 0);
   const totalCardsDue = cards.reduce((s: number, c: any) => s + parseFloat(c.balance_due), 0);
 
   // Upcoming bills in next 30 days
@@ -117,16 +136,6 @@ export default function Dashboard() {
     .filter((r) => (r.next_date.getTime() - todayDate.getTime()) / 86400000 <= 30)
     .sort((a, b) => a.next_date.getTime() - b.next_date.getTime());
 
-  // Next paycheck
-  const nextPaycheck = recurring
-    .filter((r) => r.type === "income")
-    .map((r: any) => {
-      const dom = r.day_of_month === 0 ? new Date(todayDate.getFullYear(), todayDate.getMonth() + 1, 0).getDate() : r.day_of_month;
-      const next = new Date(todayDate.getFullYear(), todayDate.getMonth(), dom);
-      if (next <= todayDate) next.setMonth(next.getMonth() + 1);
-      return { ...r, next_date: next };
-    })
-    .sort((a, b) => a.next_date.getTime() - b.next_date.getTime())[0];
 
   // Sparkline + month-over-month % for the Net Position card.
   const rolling = [...rollingRaw].sort((a, b) => a.month.localeCompare(b.month));
@@ -298,29 +307,55 @@ export default function Dashboard() {
         </div>
       )}
 
-      {balanceFlow.length > 1 && (() => {
-        const first = parseFloat(balanceFlow[0].projected_balance);
-        const last = parseFloat(balanceFlow[balanceFlow.length - 1].projected_balance);
-        const delta = last - first;
-        const chartData = balanceFlow.map((e: any) => ({
-          date: e.date,
-          balance: parseFloat(e.projected_balance),
-        }));
+      {(balanceFlow.length > 0 || lastMonthFlow.length > 0) && (() => {
+        // Keyed by day-of-month, not calendar date, so this month's
+        // still-building line and last month's completed one compare on
+        // the same X position (Dan's reference, 2026-09-02) rather than
+        // needing two different date ranges lined up by hand.
+        const byDay = new Map<number, { day: number; thisMonth?: number; lastMonth?: number }>();
+        for (const e of lastMonthFlow) {
+          const day = parseInt(e.date.slice(-2), 10);
+          byDay.set(day, { day, lastMonth: parseFloat(e.projected_balance) });
+        }
+        for (const e of balanceFlow) {
+          const day = parseInt(e.date.slice(-2), 10);
+          const row = byDay.get(day) ?? { day };
+          row.thisMonth = parseFloat(e.projected_balance);
+          byDay.set(day, row);
+        }
+        const chartData = [...byDay.values()].sort((a, b) => a.day - b.day);
+
+        const first = balanceFlow.length ? parseFloat(balanceFlow[0].projected_balance) : null;
+        const last = balanceFlow.length ? parseFloat(balanceFlow[balanceFlow.length - 1].projected_balance) : null;
+        const delta = first != null && last != null ? last - first : null;
+
+        const lastMonthName = new Date(lastMonthRange.start + "T12:00:00").toLocaleDateString("en-US", { month: "long" });
+        const thisMonthName = new Date(monthStart + "T12:00:00").toLocaleDateString("en-US", { month: "long" });
+        const todayDay = parseInt(todayStr.slice(-2), 10);
+        const sameDayLastMonth = lastMonthFlow.find((e: any) => parseInt(e.date.slice(-2), 10) === todayDay);
+        const sameDayPct = sameDayLastMonth && last != null
+          ? (() => {
+              const priorVal = parseFloat(sameDayLastMonth.projected_balance);
+              return priorVal === 0 ? null : ((last - priorVal) / Math.abs(priorVal)) * 100;
+            })()
+          : null;
+
         const lineColor = isDark ? "#a5b4fc" : "#6366f1";
+        const priorLineColor = isDark ? "#5b6577" : "#9ca3af";
         return (
           <div className="card">
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><TrendingUp size={16} className="text-indigo-500" /> Balance Flow</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {new Date(monthStart + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                  {" → "}
-                  {new Date(todayStr + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  {thisMonthName} so far, vs. all of {lastMonthName}
                 </p>
               </div>
-              <span className={`text-xl font-bold tabular-nums ${delta >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                {maskIfHidden(balancesHidden, `${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta))}`)}
-              </span>
+              {delta != null && (
+                <span className={`text-xl font-bold tabular-nums ${delta >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
+                  {maskIfHidden(balancesHidden, `${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta))}`)}
+                </span>
+              )}
             </div>
             <ResponsiveContainer width="100%" height={200}>
               <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
@@ -331,17 +366,24 @@ export default function Dashboard() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#3a4051" : "#e5e7eb"} />
-                <XAxis dataKey="date" tick={{ fontSize: 11, fill: isDark ? "#8f99a8" : "#6b7280" }} tickFormatter={(d: string) => new Date(d + "T12:00:00").getDate().toString()} />
-                <YAxis tick={{ fontSize: 11, fill: isDark ? "#8f99a8" : "#6b7280" }} tickFormatter={(v: number) => balancesHidden ? "•••" : fmt(v)} width={balancesHidden ? 40 : 70} />
+                <XAxis dataKey="day" tick={{ fontSize: 11, fill: isDark ? "#8f99a8" : "#6b7280" }} />
+                <YAxis tick={{ fontSize: 11, fill: isDark ? "#8f99a8" : "#6b7280" }} tickFormatter={(v: number) => balancesHidden ? "•••" : fmt(v)} width={balancesHidden ? 40 : 70} domain={["auto", "auto"]} />
                 <Tooltip
                   contentStyle={{ backgroundColor: isDark ? "#2a2f3d" : "#ffffff", border: `1px solid ${isDark ? "#3a4051" : "#e5e7eb"}`, borderRadius: 8, fontSize: 12 }}
                   labelStyle={{ color: isDark ? "#c4ccd8" : "#111827" }}
-                  formatter={(v: number) => [maskIfHidden(balancesHidden, fmt(v)), "Balance"]}
-                  labelFormatter={(d: string) => new Date(d + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                  formatter={(v: number, name: string) => [maskIfHidden(balancesHidden, fmt(v)), name === "thisMonth" ? thisMonthName : lastMonthName]}
+                  labelFormatter={(d: number) => `Day ${d}`}
                 />
-                <Area type="monotone" dataKey="balance" stroke={lineColor} strokeWidth={2} fill="url(#balanceFlowGradient)" dot={false} animationDuration={700} animationEasing="ease-out" />
+                <Area type="monotone" dataKey="thisMonth" stroke={lineColor} strokeWidth={2} fill="url(#balanceFlowGradient)" dot={false} connectNulls animationDuration={700} animationEasing="ease-out" />
+                <Line type="monotone" dataKey="lastMonth" stroke={priorLineColor} strokeWidth={1.5} strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer>
+            {sameDayLastMonth && sameDayPct != null && (
+              <p className="text-xs text-gray-400 mt-2">
+                In {lastMonthName} on day {todayDay}: {maskIfHidden(balancesHidden, fmt(parseFloat(sameDayLastMonth.projected_balance)))}
+                {" "}({sameDayPct >= 0 ? "+" : ""}{sameDayPct.toFixed(1)}%)
+              </p>
+            )}
           </div>
         );
       })()}
@@ -416,36 +458,17 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Hero stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="stat-card stat-card-accent-indigo animate-fade-slide-up animate-delay-100 col-span-2 sm:col-span-1">
-          <span className="stat-label">Checking</span>
-          <span className={`stat-value ${totalChecking >= 0 ? "text-gray-900" : "text-red-600"}`}>
-            {anyBelowThreshold && <AlertTriangle size={18} className="text-amber-500 inline mr-1" />}
-            {maskIfHidden(balancesHidden, fmt(totalChecking))}
-          </span>
-          {nextPaycheck && (
-            <span className="text-xs text-gray-500">
-              Next paycheck: {nextPaycheck.next_date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            </span>
-          )}
-        </div>
-
-        <div className="stat-card stat-card-accent-amber animate-fade-slide-up animate-delay-200">
-          <span className="stat-label">Credit Card Balance</span>
-          <span className="stat-value text-amber-600">{maskIfHidden(balancesHidden, fmt(totalCards))}</span>
-        </div>
-
-        <div className="stat-card stat-card-accent-red animate-fade-slide-up animate-delay-300">
-          <span className="stat-label">Amount Due</span>
-          <span className={`stat-value ${totalCardsDue > 0 ? "text-red-600" : "text-gray-900"}`}>
-            {maskIfHidden(balancesHidden, fmt(totalCardsDue))}
-          </span>
-        </div>
-
-        <div className={`stat-card animate-fade-slide-up animate-delay-400 ${totalChecking - totalCardsDue >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
+      {/* Checking / Credit Card Balance / Amount Due dropped (Dan,
+          2026-09-02): all three already live on the sidebar accounts list
+          and the Credit Cards page respectively, and the 4-up grid was
+          overflowing off-screen. Net Position is the one figure not shown
+          as a single number anywhere else, so it stays -- narrowed to its
+          own width instead of stretching a now-empty row. */}
+      <div className="max-w-xs">
+        <div className={`stat-card animate-fade-slide-up animate-delay-100 ${totalChecking - totalCardsDue >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
           <span className="stat-label">Net Position</span>
           <span className={`stat-value ${totalChecking - totalCardsDue >= 0 ? "text-green-600" : "text-red-600"}`}>
+            {anyBelowThreshold && <AlertTriangle size={18} className="text-amber-500 inline mr-1" />}
             {maskIfHidden(balancesHidden, fmt(totalChecking - totalCardsDue))}
           </span>
           <span className="text-xs text-gray-500">checking minus due</span>
