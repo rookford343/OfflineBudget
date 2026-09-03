@@ -330,6 +330,15 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Balance Flow and Weekly Digest paired into one row at 2xl (Dan,
+          2026-09-02) -- same breakpoint as the hero row above, so this
+          split only kicks in once there's the same room already proven
+          comfortable there. Weekly Digest keeps its own internal
+          Category/Merchants split (md:grid-cols-2) regardless of how
+          narrow its half of this row gets, since Tailwind breakpoints are
+          viewport-width based, not container-based -- 2xl leaves enough
+          room that this doesn't feel cramped. */}
+      <div className="grid 2xl:grid-cols-2 gap-6">
       {(balanceFlow.length > 0 || lastMonthFlow.length > 0) && (() => {
         // Keyed by day-of-month, not calendar date, so this month's
         // still-building line and last month's completed one compare on
@@ -480,7 +489,7 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
+      </div>
 
       {/* Same idea: a third column rather than two stretched ones, so
           All Accounts rises out of the tail of the page. */}
