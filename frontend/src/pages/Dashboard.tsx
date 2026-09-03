@@ -163,9 +163,13 @@ export default function Dashboard() {
 
       {/* Wide screens gain a COLUMN, not width. These panels are label/value
           lists and short prose, so stretching two of them to 900px only pads
-          them -- the third slot pulls a panel up from below instead. */}
+          them -- the third slot pulls a panel up from below instead.
+          At the widest breakpoint, Net Position joins as a 4th, narrower
+          bookend alongside Available to Spend (Dan, 2026-09-02) -- both are
+          compact label/value lists, so both get less width than Household
+          Snapshot and Month in Review, which actually need the room. */}
       {(ats || snapshot) && (
-        <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6">
+        <div className="grid md:grid-cols-2 2xl:grid-cols-[0.85fr_1.15fr_1.15fr_0.85fr] gap-6">
           {ats && (
             <div className="card bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-100 dark:from-indigo-950/40 dark:to-blue-950/40 dark:border-indigo-900/50">
               <div className="flex items-center gap-2 mb-3">
@@ -175,7 +179,7 @@ export default function Dashboard() {
                   {new Date().toLocaleDateString("en-US", { month: "long" })}
                 </h3>
               </div>
-              <div className="space-y-1 text-sm max-w-xs">
+              <div className="space-y-1 text-sm">
                 <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
                   <span>Monthly Income</span>
                   <span className="tabular-nums text-green-600 dark:text-green-400 font-medium">{fmt(parseFloat(ats.monthly_income))}</span>
@@ -304,6 +308,25 @@ export default function Dashboard() {
           )}
         </div>
       )}
+
+      {/* Checking / Credit Card Balance / Amount Due dropped (Dan,
+          2026-09-02): all three already live on the sidebar accounts list
+          and the Credit Cards page respectively, and the 4-up grid was
+          overflowing off-screen. Net Position is the one figure not shown
+          as a single number anywhere else, so it stays -- as the narrow
+          bookend on the far right of this row rather than its own. */}
+      <div className={`stat-card animate-fade-slide-up animate-delay-100 ${totalChecking - totalCardsDue >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
+        <span className="stat-label">Net Position</span>
+        <span className={`stat-value ${totalChecking - totalCardsDue >= 0 ? "text-green-600" : "text-red-600"}`}>
+          {anyBelowThreshold && <AlertTriangle size={18} className="text-amber-500 inline mr-1" />}
+          {maskIfHidden(balancesHidden, fmt(totalChecking - totalCardsDue))}
+        </span>
+        <span className="text-xs text-gray-500">checking minus due</span>
+        <div className="flex items-center justify-between mt-1">
+          <TrendBadge pct={momPct} inverse />
+          <SparkLine data={sparkData} color={totalChecking - totalCardsDue >= 0 ? "#22c55e" : "#ef4444"} />
+        </div>
+      </div>
         </div>
       )}
 
@@ -458,26 +481,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Checking / Credit Card Balance / Amount Due dropped (Dan,
-          2026-09-02): all three already live on the sidebar accounts list
-          and the Credit Cards page respectively, and the 4-up grid was
-          overflowing off-screen. Net Position is the one figure not shown
-          as a single number anywhere else, so it stays -- narrowed to its
-          own width instead of stretching a now-empty row. */}
-      <div className="max-w-xs">
-        <div className={`stat-card animate-fade-slide-up animate-delay-100 ${totalChecking - totalCardsDue >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
-          <span className="stat-label">Net Position</span>
-          <span className={`stat-value ${totalChecking - totalCardsDue >= 0 ? "text-green-600" : "text-red-600"}`}>
-            {anyBelowThreshold && <AlertTriangle size={18} className="text-amber-500 inline mr-1" />}
-            {maskIfHidden(balancesHidden, fmt(totalChecking - totalCardsDue))}
-          </span>
-          <span className="text-xs text-gray-500">checking minus due</span>
-          <div className="flex items-center justify-between mt-1">
-            <TrendBadge pct={momPct} inverse />
-            <SparkLine data={sparkData} color={totalChecking - totalCardsDue >= 0 ? "#22c55e" : "#ef4444"} />
-          </div>
-        </div>
-      </div>
 
       {/* Same idea: a third column rather than two stretched ones, so
           All Accounts rises out of the tail of the page. */}
