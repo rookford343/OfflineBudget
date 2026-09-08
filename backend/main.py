@@ -113,9 +113,24 @@ def _send_daily_summaries() -> None:
         # come from REPORT_RECIPIENTS instead, so a user with a blank account
         # email can still have a report going to their household. The
         # per-user recipient check below is what decides whether to send.
+        #
+        # get_recipients() returns the SAME global REPORT_RECIPIENTS list for
+        # every active user -- it isn't scoped per-user at all (see its own
+        # docstring: "who in the household wants to read this", a shared
+        # list, not per-user routing). So a second active User row, however
+        # it got there, resolves to the identical inbox and sends a second,
+        # independently-generated report to it. Real incident, 2026-09-08:
+        # two stray test-fixture users left active in the production
+        # database from an earlier debugging session sent Dan two extra,
+        # garbage-data copies of his real morning report. Tracking who this
+        # run has already emailed and skipping already-served recipients on
+        # later users closes that off regardless of how a second active user
+        # arises, without changing the one-report-per-recipient contract for
+        # the common case of exactly one real household account.
+        sent_to: set[str] = set()
         users = db.query(models.User).filter(models.User.is_active == True).all()
         for user in users:
-            recipients = app_settings.get_recipients(db, user)
+            recipients = [r for r in app_settings.get_recipients(db, user) if r not in sent_to]
             if not recipients:
                 continue
             accounts = db.query(models.Account).filter(
@@ -136,6 +151,11 @@ def _send_daily_summaries() -> None:
                     subject += " + Weekly Digest"
                 for recipient in recipients:
                     ok, err = send_email_via(db, recipient, subject, html_body, text_body)
+                    # Marked whether or not the send succeeded: the goal is
+                    # "at most one attempt per recipient per run", not just
+                    # "at most one success" -- a later user's report is no
+                    # more likely to succeed for the same broken address.
+                    sent_to.add(recipient)
                     if not ok:
                         last_error = f"{recipient}: {err}"
             except Exception as exc:
