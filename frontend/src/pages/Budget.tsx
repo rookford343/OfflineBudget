@@ -43,9 +43,19 @@ interface RowShape {
   category_type?: string;
 }
 
+type BudgetTab = "track" | "set";
+
 export default function Budget() {
   const now = new Date();
   const [showHelp, setShowHelp] = useState(false);
+  // Split into Track (monitoring: progress bars, spend-vs-budget, read-only)
+  // and Set (config: add/edit/delete a line, rollover) tabs (Dan, 2026-09-08,
+  // per docs/securo-comparison.md's flagged principle: "configuration
+  // screens show the number you set; monitoring screens show the number
+  // relative to reality" -- this page used to conflate both in one view.
+  // Defaults to Track since checking progress is the more frequent visit;
+  // Set is the deliberate, occasional switch.
+  const [tab, setTab] = useState<BudgetTab>("track");
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [editId, setEditId] = useState<number | null>(null);
@@ -192,13 +202,62 @@ export default function Budget() {
     );
   }
 
-  function BudgetRow({ row }: { row: RowShape }) {
+  // Set Budgets (config): the amount you set, editable, plus rollover and
+  // delete. No spent figure, no progress bar -- that's Track's job.
+  function ConfigRow({ row }: { row: RowShape }) {
+    const alloc = allocByCat[row.category_id];
+    return (
+      <div className="flex items-center justify-between gap-3 py-2.5 border-b border-gray-50 dark:border-gray-800 last:border-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="truncate font-medium text-gray-900 dark:text-white">{row.category_name}</span>
+          {row.rollover_enabled && parseFloat(row.rollover_balance || "0") > 0 && (
+            <span className="shrink-0 text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+              +{fmt(parseFloat(row.rollover_balance || "0"))} rolled over
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
+            <input type="checkbox" checked={!!row.rollover_enabled}
+              onChange={e => rolloverToggleMut.mutate({ id: row.category_id, enabled: e.target.checked })} />
+            Rollover
+          </label>
+          {editId === row.category_id ? (
+            <div className="flex items-center gap-1">
+              <input type="number" step="0.01" className="input w-24 py-0.5 text-right text-sm"
+                value={editAmt} onChange={e => setEditAmt(e.target.value)} autoFocus />
+              <button onClick={() => saveEdit(row.category_id, editAmt)} className="text-emerald-600"><Check size={14} /></button>
+              <button onClick={() => setEditId(null)} className="text-gray-400"><X size={14} /></button>
+            </div>
+          ) : (
+            <>
+              <span className="text-sm tabular-nums text-gray-700 dark:text-gray-300 w-24 text-right">{fmt(row.budgeted)}</span>
+              <button onClick={() => { setEditId(row.category_id); setEditAmt(row.budgeted); }}
+                className="text-gray-300 hover:text-indigo-500" title="Change budget">
+                <Pencil size={12} />
+              </button>
+              {alloc && (
+                <button onClick={() => deleteMut.mutate(alloc.id)}
+                  className="text-gray-300 hover:text-red-500" title="Remove this budget line">
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Track Budgets (monitoring): the amount you set relative to reality --
+  // progress bar, spent/available, merchant breakdown. Read-only: no edit,
+  // delete, or rollover control here, that's Set's job.
+  function MonitorRow({ row }: { row: RowShape }) {
     const available = availableOf(row);
     const spent = parseFloat(row.actual_total || "0");
     const left = available - spent;
     const pct = available > 0 ? (spent / available) * 100 : 0;
     const isOpen = expanded.has(row.category_id);
-    const alloc = allocByCat[row.category_id];
 
     return (
       <div className="py-3 border-b border-gray-50 dark:border-gray-800 last:border-0">
@@ -214,32 +273,9 @@ export default function Budget() {
               </span>
             )}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            {editId === row.category_id ? (
-              <div className="flex items-center gap-1">
-                <input type="number" step="0.01" className="input w-24 py-0.5 text-right text-sm"
-                  value={editAmt} onChange={e => setEditAmt(e.target.value)} autoFocus />
-                <button onClick={() => saveEdit(row.category_id, editAmt)} className="text-emerald-600"><Check size={14} /></button>
-                <button onClick={() => setEditId(null)} className="text-gray-400"><X size={14} /></button>
-              </div>
-            ) : (
-              <>
-                <span className="text-sm tabular-nums text-gray-500 dark:text-gray-400">
-                  {fmt(spent)}<span className="text-gray-300 dark:text-gray-400"> / {fmt(available)}</span>
-                </span>
-                <button onClick={() => { setEditId(row.category_id); setEditAmt(row.budgeted); }}
-                  className="text-gray-300 hover:text-indigo-500" title="Change budget">
-                  <Pencil size={12} />
-                </button>
-                {alloc && (
-                  <button onClick={() => deleteMut.mutate(alloc.id)}
-                    className="text-gray-300 hover:text-red-500" title="Remove this budget line">
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </>
-            )}
-          </div>
+          <span className="text-sm tabular-nums text-gray-500 dark:text-gray-400 shrink-0">
+            {fmt(spent)}<span className="text-gray-300 dark:text-gray-400"> / {fmt(available)}</span>
+          </span>
         </div>
 
         <div className="flex items-center gap-3">
@@ -254,11 +290,6 @@ export default function Budget() {
         {isOpen && (
           <div className="mt-2">
             <Breakdown categoryId={row.category_id} />
-            <label className="flex items-center gap-2 pl-6 pt-1 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
-              <input type="checkbox" checked={!!row.rollover_enabled}
-                onChange={e => rolloverToggleMut.mutate({ id: row.category_id, enabled: e.target.checked })} />
-              Roll unspent budget into next month
-            </label>
           </div>
         )}
       </div>
@@ -275,17 +306,24 @@ export default function Budget() {
           </button>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex rounded-lg bg-gray-100 dark:bg-gray-700 p-1">
+            {(["track", "set"] as BudgetTab[]).map(t => (
+              <button key={t} type="button"
+                onClick={() => setTab(t)}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${tab === t ? "bg-white dark:bg-gray-800 shadow-sm text-gray-900 dark:text-gray-100" : "text-gray-500 dark:text-gray-300"}`}>
+                {t === "track" ? "Track Budgets" : "Set Budgets"}
+              </button>
+            ))}
+          </div>
           <MonthYearPicker year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
-          <button onClick={() => applyRolloverMut.mutate()} disabled={applyRolloverMut.isPending}
-            className="btn-secondary text-xs px-2 py-1" title="Carry last month's unspent budget forward">
-            <RotateCcw size={12} /> {applyRolloverMut.isPending ? "Rolling over…" : "Rollover"}
-          </button>
         </div>
       </div>
 
       {isLoading && <div className="card text-sm text-gray-400">Loading…</div>}
 
-      {!isLoading && (
+      {/* Track Budgets: the number you set relative to reality -- progress
+          bars, spend-vs-budget, merchant breakdown. Read-only. */}
+      {!isLoading && tab === "track" && (
         <>
           <div className="card bg-gradient-to-br from-indigo-50 to-white dark:from-indigo-950/30 dark:to-transparent">
             <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -304,14 +342,39 @@ export default function Budget() {
           </div>
 
           <div className="card">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Budget lines</h3>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+              Expand any line to see what made it up. Switch to Set Budgets to add, edit, or remove a line.
+            </p>
+            {budgetRows.length === 0 && (
+              <p className="text-sm text-gray-400 py-4 text-center">
+                No budget lines yet. Switch to Set Budgets to add one.
+              </p>
+            )}
+            {budgetRows.map(r => <MonitorRow key={r.category_id} row={r} />)}
+          </div>
+        </>
+      )}
+
+      {/* Set Budgets: the number you set. No progress bars, no spent
+          figures -- that's Track's job. */}
+      {!isLoading && tab === "set" && (
+        <>
+          <div className="card">
             <div className="flex items-center justify-between mb-1">
               <h3 className="font-semibold text-gray-900 dark:text-white">Budget lines</h3>
-              <button onClick={() => setAdding(v => !v)} className="btn-secondary text-xs px-2 py-1">
-                <Plus size={12} /> Add
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => applyRolloverMut.mutate()} disabled={applyRolloverMut.isPending}
+                  className="btn-secondary text-xs px-2 py-1" title="Carry last month's unspent budget forward">
+                  <RotateCcw size={12} /> {applyRolloverMut.isPending ? "Rolling over…" : "Rollover"}
+                </button>
+                <button onClick={() => setAdding(v => !v)} className="btn-secondary text-xs px-2 py-1">
+                  <Plus size={12} /> Add
+                </button>
+              </div>
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-              A few broad lines are easier to hit than many small ones. Expand any line to see what made it up.
+              A few broad lines are easier to hit than many small ones.
             </p>
 
             {adding && (
@@ -335,7 +398,7 @@ export default function Budget() {
                 No budget lines yet. Add one, or start from what you already spend below.
               </p>
             )}
-            {budgetRows.map(r => <BudgetRow key={r.category_id} row={r} />)}
+            {budgetRows.map(r => <ConfigRow key={r.category_id} row={r} />)}
           </div>
 
           {unbudgeted.length > 0 && (
@@ -370,10 +433,10 @@ export default function Budget() {
         <HelpPanel
           title="Budget"
           body={
+            "Track Budgets shows the amount you set relative to what you actually spent -- progress bars, spent/left, and the merchants behind each line. Set Budgets is where you add, edit, or remove a line, and turn rollover on or off -- no progress bars there, just the numbers you're setting.\n\n" +
             "Set a few broad budget lines rather than many small ones — a single Subscriptions budget is easier to hit than a limit per service.\n\n" +
-            "Expand any line to see the merchants that made it up this month.\n\n" +
             "Budgets are saved as 'every month' by default, so a new month never starts unbudgeted. Removing a line is different from setting it to zero: zero means spend nothing here, while removing it means the category simply isn't budgeted.\n\n" +
-            "'Spending with no budget' shows where money went that no line covers, so you can budget it at what you actually spend."
+            "'Spending with no budget' (on Set Budgets) shows where money went that no line covers, so you can budget it at what you actually spend."
           }
           onClose={() => setShowHelp(false)}
         />
