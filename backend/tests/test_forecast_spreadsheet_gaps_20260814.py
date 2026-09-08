@@ -659,24 +659,27 @@ def test_balance_due_at_zero_still_carries_forward_real_debt(db_session):
     understating the very next payoff by over $1,200, and with it the
     household's 3-month safety margin (Dan caught this live comparing
     against his spreadsheet, which still tracks the real remaining debt)."""
+    today = date.today()
+    cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="zerobalance")
     account = _checking(db_session, user, balance="60000.00")
-    _card(db_session, user, name="Chase", statement_day=28, due_day=25,
+    _card(db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
           current_balance=Decimal("6701.18"), balance_due=Decimal("0"),
-          next_payment_date=date(2026, 8, 25), monthly_spend_estimate=Decimal("5500.00"))
+          next_payment_date=cycles.cycle1_due, monthly_spend_estimate=Decimal("5500.00"))
     db_session.commit()
 
-    entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 27), date(2026, 11, 30))
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=150))
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
-    sept = [amt for d, amt in estimates.items() if d.month == 9]
-    assert sept, "the next cycle must still plan for the real carried debt, not go silent"
-    assert sept == [Decimal("-6701.18")], (
+    cycle1 = [amt for d, amt in estimates.items() if d == cycles.cycle1_due]
+    assert cycle1, "the next cycle must still plan for the real carried debt, not go silent"
+    assert cycle1 == [Decimal("-6701.18")], (
         f"balance_due at 0 must not silence the carried-balance derivation -- "
-        f"current_balance is real, already-spent debt regardless, got {sept}"
+        f"current_balance is real, already-spent debt regardless, got {cycle1}"
     )
 
-    later = [amt for d, amt in estimates.items() if d.month >= 10]
+    later = [amt for d, amt in estimates.items() if d >= cycles.cycle2_due]
+    assert later, "later cycles must still be projected"
     assert all(a == Decimal("-5500.00") for a in later), (
         f"cycles beyond the next one, with no carried debt left, fall back "
         f"to the flat monthly estimate as normal, got {later}"
