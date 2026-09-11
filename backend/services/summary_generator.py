@@ -2,6 +2,7 @@ import calendar
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from collections import defaultdict
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import MonthlySummary, WeeklyDigest, ForecastRisk
@@ -14,6 +15,20 @@ _STALE_SYNC_HOURS = 24
 
 def _fmt(v: Decimal) -> str:
     return f"${v:,.2f}"
+
+
+def _last_txn_dates(db: Session, id_col, date_col, ids: list[int]) -> dict[int, date]:
+    """Most recent transaction date per id, keyed off actual transaction rows
+    rather than a bank-sync timestamp -- this way a manually-imported account
+    gets the same freshness signal as a SimpleFIN-linked one."""
+    if not ids:
+        return {}
+    rows = db.query(id_col, func.max(date_col)).filter(id_col.in_(ids)).group_by(id_col).all()
+    return dict(rows)
+
+
+def _last_txn_label(d: date | None) -> str:
+    return f"last txn {d.strftime('%b %-d')}" if d else "no transactions yet"
 
 
 # ── Daily email summary ───────────────────────────────────────────────────────
@@ -165,8 +180,11 @@ def generate_daily_summary(
         f"</div>"
     ) if stale_connections else ""
 
+    acct_last_txn = _last_txn_dates(db, models.Transaction.account_id, models.Transaction.date, [a.id for a in accounts])
+
     acct_rows = "".join(
-        f"<tr><td style='padding:6px 12px 6px 0;color:#374151'>{a.name}</td>"
+        f"<tr><td style='padding:6px 12px 6px 0;color:#374151'>{a.name}"
+        f"<br><span style='color:#9ca3af;font-size:11px;font-weight:400'>{_last_txn_label(acct_last_txn.get(a.id))}</span></td>"
         f"<td style='padding:6px 0;text-align:right'><b style='color:#111827'>{fmt(a.current_balance)}</b></td></tr>"
         for a in accounts
     ) or "<tr><td style='color:#9ca3af'>No checking accounts</td></tr>"
@@ -196,6 +214,7 @@ def generate_daily_summary(
     # here means the email and the app can never quietly disagree about a
     # card's numbers the way two independent computations eventually would.
     snap_cards_by_id = {c.id: c for c in snap.cards} if snap is not None else {}
+    card_last_txn = _last_txn_dates(db, models.CreditCardTransaction.card_id, models.CreditCardTransaction.date, [c.id for c in cards])
 
     def _card_row(c: models.CreditCard) -> str:
         sc = snap_cards_by_id.get(c.id)
@@ -210,7 +229,8 @@ def generate_daily_summary(
             days_out = (c.due_day - today.day) % calendar.monthrange(today.year, today.month)[1]
             due_in = "due today" if days_out == 0 else f"due in {days_out}d"
         return (
-            f"<tr><td style='padding:6px 12px 6px 0;color:#374151'>{c.name}</td>"
+            f"<tr><td style='padding:6px 12px 6px 0;color:#374151'>{c.name}"
+            f"<br><span style='color:#9ca3af;font-size:11px;font-weight:400'>{_last_txn_label(card_last_txn.get(c.id))}</span></td>"
             f"<td style='padding:6px 0;text-align:right'><b style='color:#111827'>{fmt(c.current_balance)}</b>{pending_html}</td>"
             f"<td style='padding:6px 0 6px 12px;text-align:right;white-space:nowrap;font-size:12px'>"
             f"<span style='color:{util_color}'>{util:.0f}% used</span>"
@@ -313,14 +333,17 @@ def generate_daily_summary(
 </div>
 </body></html>"""
 
-    acct_text = "\n".join(f"  {a.name}: {fmt(a.current_balance)}" for a in accounts) or "  No checking accounts"
+    acct_text = "\n".join(
+        f"  {a.name}: {fmt(a.current_balance)} ({_last_txn_label(acct_last_txn.get(a.id))})" for a in accounts
+    ) or "  No checking accounts"
     upcoming_text = "\n".join(
         f"  {_day_label(d):<10} {r.name}: {'+' if r.type == models.RecurringType.income else '-'}{fmt(r.amount)}"
         for r, d in upcoming
     ) or "  None in the next 7 days"
     card_text = "\n".join(
         f"  {c.name}: {fmt(c.current_balance)} "
-        f"({(snap_cards_by_id.get(c.id).utilization_pct if snap_cards_by_id.get(c.id) else 0):.0f}% used, due day {c.due_day})"
+        f"({(snap_cards_by_id.get(c.id).utilization_pct if snap_cards_by_id.get(c.id) else 0):.0f}% used, due day {c.due_day}, "
+        f"{_last_txn_label(card_last_txn.get(c.id))})"
         for c in cards
     ) or "  No credit cards"
 
