@@ -254,6 +254,67 @@ def test_checking_dedupes_sync_posted_a_day_after_the_csv_date(db_session):
     assert db_session.query(models.Transaction).filter_by(account_id=account.id).count() == 1
 
 
+def test_card_same_external_id_twice_in_one_sync_batch_imports_once(db_session):
+    """Real incident, 2026-09-12: a single sync call's SimpleFIN response
+    carried the same transaction id twice (MAGBAK STOR, $84.53), and both
+    landed as separate CreditCardTransaction rows -- the session runs with
+    autoflush=False (database.py), so _find_duplicate_card_transaction's
+    lookup-by-external_id doesn't see the first row's still-unflushed insert
+    when checking the second row in the SAME batch. Cross-sync duplicates
+    (a later call, after the first has committed) were already caught; this
+    is the within-batch gap.
+
+    db_session (conftest.py) defaults to autoflush=True, unlike production's
+    SessionLocal -- forced off here so the dedup query sees exactly what a
+    real sync session sees: the first row's insert still just staged, not
+    flushed. Without this the test passes against the same code that fails
+    live, because autoflush papers over the gap this reproduces."""
+    user, card = _make_user_and_card(db_session)
+    db_session.autoflush = False
+    rows = [
+        schemas.ImportConfirmRow(
+            date=date(2026, 9, 10), amount=Decimal("-84.53"),
+            description="MAGBAK STOR", external_id="TRN-1a145a46",
+        ),
+        schemas.ImportConfirmRow(
+            date=date(2026, 9, 10), amount=Decimal("-84.53"),
+            description="MAGBAK STOR", external_id="TRN-1a145a46",
+        ),
+    ]
+    result = run_import(db_session, user, rows, account_id=None, card_id=card.id)
+
+    assert result.imported == 1
+    assert result.skipped_duplicates == 1
+    assert db_session.query(models.CreditCardTransaction).filter_by(card_id=card.id).count() == 1
+
+
+def test_checking_same_external_id_twice_in_one_sync_batch_imports_once(db_session):
+    """Checking-side twin of the card fix -- same autoflush=False gap."""
+    user = models.User(username="chk2", hashed_password="x", display_name="Chk2")
+    db_session.add(user)
+    db_session.flush()
+    account = models.Account(user_id=user.id, name="Checking", type=models.AccountType.checking)
+    db_session.add(account)
+    db_session.flush()
+    db_session.autoflush = False  # matches production SessionLocal -- see the card test above
+
+    rows = [
+        schemas.ImportConfirmRow(
+            date=date(2026, 9, 10), amount=Decimal("-84.53"),
+            description="MAGBAK STOR", external_id="TRN-1a145a46",
+        ),
+        schemas.ImportConfirmRow(
+            date=date(2026, 9, 10), amount=Decimal("-84.53"),
+            description="MAGBAK STOR", external_id="TRN-1a145a46",
+        ),
+    ]
+    result = run_import(db_session, user, rows, account_id=account.id, card_id=None)
+
+    assert result.imported == 1
+    assert result.skipped_duplicates == 1
+    assert db_session.query(models.Transaction).filter_by(account_id=account.id).count() == 1
+
+
 def test_a_synced_charge_and_its_refund_net_to_zero_discretionary_spend(db_session):
     """End-to-end regression, reproducing the real Ozwell scenario from a
     SimpleFIN-style sync: a $25 charge (negative row.amount) and its $25

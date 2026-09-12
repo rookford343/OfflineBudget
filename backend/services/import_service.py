@@ -405,8 +405,21 @@ def run_import(
     # two incoming rows can never both dedupe against the same stored one --
     # see _pick_closest.
     consumed: set[int] = set()
+    # External ids already inserted earlier in THIS batch. The dedup queries
+    # below only see committed/flushed rows, and this session runs with
+    # autoflush=False (database.py) -- so when SimpleFIN hands back the same
+    # transaction twice in one sync call (real incident, 2026-09-12: MAGBAK
+    # STOR $84.53 landed as two separate CreditCardTransaction rows), the
+    # second row's query doesn't see the first row's still-unflushed insert
+    # and both get created. Cross-sync duplicates (a later call, after the
+    # first has committed) were already caught by the DB query; this closes
+    # the within-batch gap.
+    seen_external_ids: set[str] = set()
 
     for row in rows:
+        if row.external_id and row.external_id in seen_external_ids:
+            skipped += 1
+            continue
         if account_id:
             dup = _find_duplicate_transaction(db, user.id, account_id, row, consumed)
             if dup:
@@ -470,6 +483,8 @@ def run_import(
                             card.balance_as_of = as_of
                         break
 
+            if row.external_id:
+                seen_external_ids.add(row.external_id)
             imported += 1
 
         elif card_id:
@@ -506,6 +521,8 @@ def run_import(
                 # positive (decrease it) -- subtracting the signed amount handles both.
                 card.current_balance -= row.amount
 
+            if row.external_id:
+                seen_external_ids.add(row.external_id)
             imported += 1
 
     db.commit()
