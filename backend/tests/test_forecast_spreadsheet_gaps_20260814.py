@@ -412,12 +412,24 @@ def test_asking_from_inside_the_dip_gives_the_same_floor(db_session):
     reusing _floor_scenario: its next_payment_date is a fixed 2026-08-25,
     which is a different rot risk (other tests share it) -- built inline
     here with a payoff date safely in the future of REAL wall-clock today
-    so next_payment_date is never stale regardless of which day this runs."""
+    so next_payment_date is never stale regardless of which day this runs.
+
+    paycheck_date is run through the same Fri-pull-forward rule
+    build_forecast applies to any recurring item whose day_of_month lands on
+    a Saturday/Sunday (forecast_engine.py's weekend handling around its main
+    day-walking loop) -- otherwise this test itself rots every time
+    `today + 30 + 6` happens to fall on a weekend: the real paycheck posts
+    a day or two earlier than the raw day_of_month, so the dip's true last
+    excluded day moves with it. Found 2026-09-11, when the raw date landed
+    on a Saturday and the boundary assertion below failed on the recovery
+    day (real payday) itself, mistaking it for still being inside the dip."""
     from backend.services.budget_snapshot import _lookahead_minimum
+    from backend.services.forecast_engine import _adjust_for_weekend
 
     today = date.today()
     payoff_date = today + timedelta(days=30)
-    paycheck_date = payoff_date + timedelta(days=6)
+    raw_paycheck_date = payoff_date + timedelta(days=6)
+    paycheck_date = _adjust_for_weekend(raw_paycheck_date)
     user = _user(db_session, username="insidedip")
     account = _checking(db_session, user, balance="10000.00")
     _card(db_session, user, name="Chase", statement_day=payoff_date.day, due_day=payoff_date.day,
@@ -427,7 +439,7 @@ def test_asking_from_inside_the_dip_gives_the_same_floor(db_session):
         user_id=user.id, account_id=account.id, name="Paycheck",
         amount=Decimal("6000.00"), type=models.RecurringType.income,
         frequency=models.RecurringFrequency.monthly,
-        day_of_month=paycheck_date.day, start_date=date(2026, 1, 1),
+        day_of_month=raw_paycheck_date.day, start_date=date(2026, 1, 1),
     ))
     db_session.commit()
 

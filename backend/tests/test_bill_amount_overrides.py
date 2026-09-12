@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from backend import models
 from backend.dependencies import get_db, get_current_user
 from backend.routers import bill_overrides as bill_overrides_router_module
-from backend.services.forecast_engine import build_forecast
+from backend.services.forecast_engine import build_forecast, _next_occurrence_on_or_after
 
 
 def _client(db_session, user):
@@ -32,6 +32,18 @@ def _seed(db, day=8, amount="180.00"):
     return user, acct, item
 
 
+def _next_due(day: int = 8) -> date:
+    """The next occurrence of day-of-month `day` strictly after today, so an
+    override due date is always in the future regardless of which real day
+    this test happens to run on -- same technique as _RelativeCardCycles in
+    test_forecast_spreadsheet_gaps_20260814.py. A hardcoded 2026-09-08 rotted
+    here once wall-clock time passed it: build_forecast(..., date.today(),
+    ...) starts its window at today, so a due date already in the past never
+    appears in it, and GET /bill-overrides's default upcoming_only filter
+    drops it too."""
+    return _next_occurrence_on_or_after(day, date.today() + timedelta(days=1))
+
+
 def _amount_on(db, user, acct, target: date, name: str):
     rows = build_forecast(db, user.id, acct.id, date.today(), target + timedelta(days=1))
     for r in rows:
@@ -44,10 +56,10 @@ def _amount_on(db, user, acct, target: date, name: str):
 
 
 def test_override_replaces_the_projected_amount_on_its_own_date(db_session):
-    """Dan's real case: Duke Electric modelled at $180.00/month, the statement
-    due 2026-09-08 is $224.31."""
+    """Dan's real case: Duke Electric modelled at $180.00/month, a statement
+    due one month came in at $224.31."""
     user, acct, item = _seed(db_session)
-    due = date(2026, 9, 8)
+    due = _next_due()
     db_session.add(models.BillAmountOverride(
         user_id=user.id, recurring_item_id=item.id,
         due_date=due, actual_amount=Decimal("224.31")))
@@ -74,7 +86,7 @@ def test_upsert_restates_rather_than_conflicting(db_session):
     not require delete-then-recreate."""
     user, acct, item = _seed(db_session)
     c = _client(db_session, user)
-    payload = {"recurring_item_id": item.id, "due_date": "2026-09-08", "actual_amount": "224.31"}
+    payload = {"recurring_item_id": item.id, "due_date": _next_due().isoformat(), "actual_amount": "224.31"}
 
     first = c.post("/bill-overrides", json=payload)
     assert first.status_code == 201
@@ -102,9 +114,9 @@ def test_response_carries_the_projection_for_comparison(db_session):
 def test_deleting_an_override_restores_the_projection(db_session):
     user, acct, item = _seed(db_session)
     c = _client(db_session, user)
-    due = date(2026, 9, 8)
+    due = _next_due()
     created = c.post("/bill-overrides", json={
-        "recurring_item_id": item.id, "due_date": "2026-09-08", "actual_amount": "224.31"}).json()
+        "recurring_item_id": item.id, "due_date": due.isoformat(), "actual_amount": "224.31"}).json()
     assert _amount_on(db_session, user, acct, due, "Duke Electric") == Decimal("-224.31")
 
     assert c.delete(f"/bill-overrides/{created['id']}").status_code == 204
