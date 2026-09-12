@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from backend import models
 from backend.dependencies import get_db, get_current_user
 from backend.routers import bill_overrides as bill_overrides_router_module
-from backend.services.forecast_engine import build_forecast, _next_occurrence_on_or_after
+from backend.services.forecast_engine import build_forecast, _next_occurrence_on_or_after, _adjust_for_weekend
 
 
 def _client(db_session, user):
@@ -40,8 +40,15 @@ def _next_due(day: int = 8) -> date:
     here once wall-clock time passed it: build_forecast(..., date.today(),
     ...) starts its window at today, so a due date already in the past never
     appears in it, and GET /bill-overrides's default upcoming_only filter
-    drops it too."""
-    return _next_occurrence_on_or_after(day, date.today() + timedelta(days=1))
+    drops it too.
+
+    Also run through _adjust_for_weekend: build_forecast pulls a recurring
+    item's occurrence forward to the preceding Friday when the raw
+    day-of-month lands on a Saturday/Sunday, so an override/lookup date that
+    skipped this would silently miss the day the projection actually posts
+    on -- caught the same day as the first fix, one raw day-of-8 candidate
+    later happening to land on a Sunday."""
+    return _adjust_for_weekend(_next_occurrence_on_or_after(day, date.today() + timedelta(days=1)))
 
 
 def _amount_on(db, user, acct, target: date, name: str):
@@ -70,14 +77,21 @@ def test_override_replaces_the_projected_amount_on_its_own_date(db_session):
 
 def test_other_months_keep_the_modelled_amount(db_session):
     """The override must not become the new normal -- overwriting the item
-    itself would rewrite every future month to a September-only figure."""
+    itself would rewrite every future month to a single-occurrence figure."""
     user, acct, item = _seed(db_session)
+    # Chained off the RAW (pre-weekend-adjustment) date, not `due` itself --
+    # if the first occurrence had been pulled back a day or two, resuming
+    # the search from its adjusted date could still land inside the same
+    # month instead of rolling over to the next one.
+    raw_due = _next_occurrence_on_or_after(8, date.today() + timedelta(days=1))
+    due = _adjust_for_weekend(raw_due)
+    next_month = _adjust_for_weekend(_next_occurrence_on_or_after(8, raw_due + timedelta(days=1)))
     db_session.add(models.BillAmountOverride(
         user_id=user.id, recurring_item_id=item.id,
-        due_date=date(2026, 9, 8), actual_amount=Decimal("224.31")))
+        due_date=due, actual_amount=Decimal("224.31")))
     db_session.commit()
 
-    assert _amount_on(db_session, user, acct, date(2026, 10, 8), "Duke Electric") == Decimal("-180.00")
+    assert _amount_on(db_session, user, acct, next_month, "Duke Electric") == Decimal("-180.00")
     assert item.amount == Decimal("180.00")
 
 
@@ -104,7 +118,7 @@ def test_response_carries_the_projection_for_comparison(db_session):
     user, acct, item = _seed(db_session)
     c = _client(db_session, user)
     r = c.post("/bill-overrides", json={
-        "recurring_item_id": item.id, "due_date": "2026-09-08", "actual_amount": "224.31"}).json()
+        "recurring_item_id": item.id, "due_date": _next_due().isoformat(), "actual_amount": "224.31"}).json()
 
     assert Decimal(r["projected_amount"]) == Decimal("180.00")
     assert Decimal(r["actual_amount"]) == Decimal("224.31")
@@ -129,7 +143,7 @@ def test_cannot_override_another_users_bill(db_session):
     db_session.add(other); db_session.commit()
 
     r = _client(db_session, other).post("/bill-overrides", json={
-        "recurring_item_id": item.id, "due_date": "2026-09-08", "actual_amount": "1.00"})
+        "recurring_item_id": item.id, "due_date": _next_due().isoformat(), "actual_amount": "1.00"})
     assert r.status_code == 404
 
 
