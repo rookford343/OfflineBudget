@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from decimal import Decimal
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.crypto import decrypt
@@ -137,6 +137,33 @@ def _sync_link(
         account = db.get(models.Account, link.local_account_id)
         if account:
             account.current_balance = balance
+            if account.type == models.AccountType.checking:
+                # Anchor the forecast to today's real posted balance on every
+                # sync, not just once a month via the Monthly Accuracy row's
+                # manual "Set actual close" -- forecast_engine.py's day-walk
+                # resets its running balance to whatever ForecastDayCheckpoint
+                # says for a given date, so a fresh one daily is what keeps
+                # drift from compounding for weeks between manual checks.
+                # Only checking accounts feed the forecast walk at all, so a
+                # checkpoint on a savings/money-market link would be inert.
+                # balance_date is SimpleFIN's own as-of date for the balance
+                # (can lag the sync run by a day); fall back to today only
+                # when it's missing.
+                checkpoint_date = balance_date.date() if balance_date else date.today()
+                cp = db.query(models.ForecastDayCheckpoint).filter(
+                    models.ForecastDayCheckpoint.user_id == user.id,
+                    models.ForecastDayCheckpoint.account_id == account.id,
+                    models.ForecastDayCheckpoint.date == checkpoint_date,
+                ).first()
+                if cp:
+                    cp.actual_balance = balance
+                    cp.note = "Auto (bank sync)"
+                else:
+                    db.add(models.ForecastDayCheckpoint(
+                        user_id=user.id, account_id=account.id,
+                        date=checkpoint_date, actual_balance=balance,
+                        note="Auto (bank sync)",
+                    ))
     elif link.local_credit_card_id:
         card = db.get(models.CreditCard, link.local_credit_card_id)
         if card:
