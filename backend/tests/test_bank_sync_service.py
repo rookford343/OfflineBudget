@@ -494,3 +494,89 @@ def test_sync_all_isolates_decrypt_failure_per_connection(db_session):
     assert connection1.last_error == "key mismatch"
     assert connection2.status == models.BankConnectionStatus.active
     assert account2.current_balance == Decimal("10.00")  # second connection still synced
+
+
+# ── Daily forecast auto-anchor ────────────────────────────────────────────────
+
+def test_checking_sync_creates_a_forecast_day_checkpoint_for_today(db_session):
+    """A checking sync should anchor the forecast to the real posted balance
+    daily, not just once a month via the Monthly Accuracy row's manual
+    'Set actual close' -- the forecast's own day-walk resets to whatever
+    ForecastDayCheckpoint says (forecast_engine.py), so keeping one fresh
+    every day is what keeps drift from compounding for weeks."""
+    user, account, connection, link = _make_connection(db_session)
+    txns = [SimpleFinTransaction(id="t1", posted=datetime(2026, 8, 5), amount=Decimal("-52.90"), description="Meijer")]
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("47.10"), None)):
+        sync_connection(db_session, connection)
+
+    cp = db_session.query(models.ForecastDayCheckpoint).filter_by(account_id=account.id).one()
+    assert cp.date == date.today()
+    assert cp.actual_balance == Decimal("47.10")
+    assert cp.note and "sync" in cp.note.lower()
+
+
+def test_checking_sync_anchors_to_simplefins_balance_date_when_present(db_session):
+    """SimpleFIN's own balance-date can lag the sync run by a day or two --
+    anchoring to whatever day the bank actually valued the balance is more
+    correct than always stamping 'today'."""
+    user, account, connection, link = _make_connection(db_session)
+    txns: list = []
+    balance_date = datetime(2026, 8, 4, 23, 0)
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("100.00"), balance_date)):
+        sync_connection(db_session, connection)
+
+    cp = db_session.query(models.ForecastDayCheckpoint).filter_by(account_id=account.id).one()
+    assert cp.date == date(2026, 8, 4)
+
+
+def test_checking_sync_updates_same_day_checkpoint_instead_of_duplicating(db_session):
+    """A second sync the same day (e.g. a manual 'Sync Now' click after the
+    scheduled one) must update the existing checkpoint with the freshest
+    balance, not create a second row -- ForecastDayCheckpoint is unique on
+    (user, account, date), and forecast_engine.py's day_checkpoint_map keys
+    off date, so a duplicate would just silently lose one of the two."""
+    user, account, connection, link = _make_connection(db_session)
+    txns: list = []
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("47.10"), None)):
+        sync_connection(db_session, connection)
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("52.00"), None)):
+        sync_connection(db_session, connection)
+
+    checkpoints = db_session.query(models.ForecastDayCheckpoint).filter_by(account_id=account.id).all()
+    assert len(checkpoints) == 1
+    assert checkpoints[0].actual_balance == Decimal("52.00")
+
+
+def test_savings_account_sync_does_not_get_a_forecast_day_checkpoint(db_session):
+    """Only checking accounts feed the forecast walk (generate_daily_summary
+    filters to AccountType.checking, and build_forecast/_lookahead_minimum
+    operate on one specific checking account_id) -- a checkpoint on a
+    savings or money-market account would just be inert clutter."""
+    user = models.User(username="saver", hashed_password="x", display_name="Saver")
+    db_session.add(user)
+    db_session.flush()
+    savings = models.Account(user_id=user.id, name="Savings", type=models.AccountType.savings, current_balance=Decimal("5000.00"))
+    db_session.add(savings)
+    db_session.flush()
+    connection = models.BankConnection(user_id=user.id, access_url_encrypted="ciphertext")
+    db_session.add(connection)
+    db_session.flush()
+    link = models.BankConnectionAccountLink(
+        connection_id=connection.id, simplefin_account_id="sav-1",
+        simplefin_account_name="Savings", local_account_id=savings.id,
+    )
+    db_session.add(link)
+    db_session.commit()
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=([], Decimal("5100.00"), None)):
+        sync_connection(db_session, connection)
+
+    assert db_session.query(models.ForecastDayCheckpoint).filter_by(account_id=savings.id).count() == 0
