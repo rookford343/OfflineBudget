@@ -743,10 +743,10 @@ def _months_in_range(start: date, end: date) -> list[int]:
     return list(months)
 
 
-@router.get("/sankey/{year}/{month}", response_model=schemas.SankeyResponse)
+@router.get("/sankey", response_model=schemas.SankeyResponse)
 def spending_sankey(
-    year: int,
-    month: int,
+    year: int = Query(...),
+    month: int = Query(...),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
@@ -793,6 +793,28 @@ def spending_sankey(
         cat_name = t.category.name if t.category else "Uncategorized"
         if t.amount > 0:
             expense_totals[cat_name] = expense_totals.get(cat_name, Decimal("0")) + t.amount
+
+    # More than _MAX_STACK_CATEGORIES distinct expense categories makes the
+    # diagram unreadable -- collapse the tail into "Other", same pattern the
+    # stacked monthly-by-category chart already uses. "Uncategorized" is
+    # diagnostic (it's the signal Dan needs to notice he should categorize
+    # more), so it's exempt from collapsing regardless of its size.
+    ranked_expenses = sorted(
+        (kv for kv in expense_totals.items() if kv[0] != "Uncategorized"),
+        key=lambda kv: kv[1], reverse=True,
+    )
+    named_expense_names = {name for name, _ in ranked_expenses[:_MAX_STACK_CATEGORIES]}
+    other_total = sum(
+        (amt for name, amt in ranked_expenses[_MAX_STACK_CATEGORIES:]),
+        Decimal("0"),
+    )
+    grouped_expense_totals: dict[str, Decimal] = {
+        name: amt for name, amt in expense_totals.items()
+        if name == "Uncategorized" or name in named_expense_names
+    }
+    if other_total > 0:
+        grouped_expense_totals["Other"] = other_total
+    expense_totals = grouped_expense_totals
 
     nodes: list[schemas.SankeyNode] = []
     links: list[schemas.SankeyLink] = []
