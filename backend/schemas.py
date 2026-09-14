@@ -934,6 +934,8 @@ class YearlyTrendEntry(BaseModel):
 class RollingMonthEntry(BaseModel):
     month: str  # "YYYY-MM"
     total: Decimal
+    checking: Decimal
+    cards: Decimal
 
 
 # ── Savings Goals ─────────────────────────────────────────────────────────────
