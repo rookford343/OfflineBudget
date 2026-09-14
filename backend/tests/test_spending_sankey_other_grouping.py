@@ -74,7 +74,7 @@ def test_small_categories_collapse_into_other_uncategorized_stays_separate(db_se
     db_session.commit()
 
     c = _client(db_session, user)
-    resp = c.get("/spending/sankey", params={"year": 2026, "month": 8})
+    resp = c.get(f"/spending/sankey/2026/8")
 
     assert resp.status_code == 200
     body = resp.json()
