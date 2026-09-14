@@ -32,7 +32,6 @@ function chartTheme() {
 }
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const YEAR_COLORS = ["#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"];
 
 export default function Spending() {
   const [showHelp, setShowHelp] = useState(false);
@@ -57,6 +56,7 @@ export default function Spending() {
   const [activeIndex, setActiveIndex] = useState(-1);
   const [merchantSortCol, setMerchantSortCol] = useState<"name" | "count" | "total">("total");
   const [merchantSortDir, setMerchantSortDir] = useState<"asc" | "desc">("desc");
+  const [trendsRangeMonths, setTrendsRangeMonths] = useState(12);
 
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: cards = [] } = useQuery({ queryKey: ["cards"], queryFn: cardsApi.list });
@@ -77,15 +77,9 @@ export default function Spending() {
     enabled: !!start && !!end,
   });
 
-  const { data: yearlyTrends = [] } = useQuery({
-    queryKey: ["yearly-trends"],
-    queryFn: () => analyticsApi.yearlyTrends(3),
-    enabled: activeTab === "trends",
-  });
-
   const { data: rollingMonthly = [] } = useQuery({
-    queryKey: ["rolling-monthly"],
-    queryFn: () => analyticsApi.rollingMonthly(24),
+    queryKey: ["rolling-monthly", trendsRangeMonths],
+    queryFn: () => analyticsApi.rollingMonthly(trendsRangeMonths),
     enabled: activeTab === "trends",
   });
 
@@ -322,21 +316,12 @@ export default function Spending() {
     else setCatFilter(next);
   }
 
-  const trendBarData = useMemo(() => {
-    if (!yearlyTrends.length) return [];
-    return MONTH_NAMES.map((name, i) => {
-      const entry: Record<string, number | string> = { month: name };
-      (yearlyTrends as any[]).forEach((yr: any) => {
-        entry[String(yr.year)] = parseFloat(yr.months[String(i + 1)] ?? "0");
-      });
-      return entry;
-    });
-  }, [yearlyTrends]);
-
   const rollingBarData = useMemo(() => {
     return (rollingMonthly as any[]).map((r: any) => ({
       month: r.month,
       total: parseFloat(r.total),
+      checking: parseFloat(r.checking),
+      cards: parseFloat(r.cards),
     }));
   }, [rollingMonthly]);
 
@@ -385,50 +370,39 @@ export default function Spending() {
       {/* Trends tab */}
       {activeTab === "trends" && (
         <div className="space-y-6">
-          {trendBarData.length > 0 && yearlyTrends.length > 0 && (
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8]">Spending Over Time</h3>
+            <div className="flex gap-1">
+              {([["6M", 6], ["YTD", new Date().getMonth() + 1], ["1Y", 12], ["2Y", 24]] as const).map(([label, months]) => (
+                <button
+                  key={label}
+                  type="button"
+                  className={`px-2.5 py-1 text-xs rounded-md ${
+                    trendsRangeMonths === months
+                      ? "bg-indigo-500 text-white"
+                      : "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-400"
+                  }`}
+                  onClick={() => setTrendsRangeMonths(months)}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
+
+          {rollingBarData.length > 0 ? (
             <div className="card">
-              <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8] mb-4">Year-Over-Year Monthly Spending</h3>
               <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={trendBarData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <BarChart data={rollingBarData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
-                  <XAxis dataKey="month" tick={{ fontSize: 11, fill: ct.tick }} axisLine={{ stroke: ct.grid }} tickLine={false} />
+                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: ct.tick }} interval={trendsRangeMonths > 12 ? 2 : 0} axisLine={{ stroke: ct.grid }} tickLine={false} />
                   <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
-                  <Tooltip content={({ active, payload, label }) => active && payload?.length ? (
-                    <TooltipBox label={label} rows={payload.map((p: any) => ({ name: p.dataKey, value: p.value, color: p.fill }))} />
-                  ) : null} cursor={{ fill: isDarkMode() ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }} />
+                  <Tooltip content={<StackedTooltip />} cursor={{ fill: isDarkMode() ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }} />
                   <Legend formatter={(v) => <span style={{ color: ct.tick }} className="text-sm">{v}</span>} />
-                  {(yearlyTrends as any[]).map((yr: any, i: number) => (
-                    <Bar key={yr.year} dataKey={String(yr.year)} fill={YEAR_COLORS[i % YEAR_COLORS.length]} radius={[3, 3, 0, 0]} name={String(yr.year)} />
-                  ))}
+                  <Bar dataKey="checking" stackId="spend" fill={ct.barFill} name="Checking" />
+                  <Bar dataKey="cards" stackId="spend" fill="#f59e0b" radius={[3, 3, 0, 0]} name="Cards" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
-          )}
-
-          {rollingBarData.length > 0 && (
-            <div className="card">
-              <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8] mb-4">24-Month Spending Trend</h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={rollingBarData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="spendingTrendGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.20} />
-                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0.00} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
-                  <XAxis dataKey="month" tick={{ fontSize: 10, fill: ct.tick }} interval={2} axisLine={{ stroke: ct.grid }} tickLine={false} />
-                  <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
-                  <Tooltip content={({ active, payload, label }) => active && payload?.length ? (
-                    <TooltipBox label={label} rows={[{ name: "Spending", value: payload[0].value as number }]} />
-                  ) : null} />
-                  <Area type="monotone" dataKey="total" stroke="#6366f1" strokeWidth={2} fill="url(#spendingTrendGradient)" dot={false} animationDuration={700} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-
-          {trendBarData.length === 0 && rollingBarData.length === 0 && (
+          ) : (
             <div className="card text-center py-8 text-gray-400 dark:text-[#949daf] text-sm">
               No transaction data yet. Add transactions to see spending trends.
             </div>
