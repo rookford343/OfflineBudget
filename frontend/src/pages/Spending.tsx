@@ -287,6 +287,19 @@ export default function Spending() {
     );
   }
 
+  // "$1,240 checking · $310 card" -- omits a source entirely if it's $0, so
+  // a category/bucket that's 100% one source doesn't show a pointless
+  // "$0 card". Returns null when there's nothing worth showing (zero or
+  // one non-zero source), so callers can skip rendering the line at all.
+  function sourceSplitLabel(breakdown: Record<string, number>): string | null {
+    const nonZero = Object.entries(breakdown).filter(([, v]) => v > 0.005);
+    if (nonZero.length < 2) return null;
+    return nonZero
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, v]) => `${fmt(v)} ${label}`)
+      .join(" · ");
+  }
+
   function ProgressBar({ actual, budgeted }: { actual: number; budgeted: number }) {
     if (budgeted === 0) return null;
     const pct = Math.min(100, (actual / budgeted) * 100);
@@ -437,6 +450,27 @@ export default function Spending() {
             const left = discBudget - disc;
             const pct = discBudget > 0 ? (disc / discBudget) * 100 : 0;
             const over = left < 0;
+
+            // breakdown_by_source lives on each child category; bucket by
+            // the PARENT's is_discretionary flag to get discretionary vs.
+            // fixed vs. total split by source, with no new backend call.
+            const discBySource: Record<string, number> = {};
+            const fixedBySource: Record<string, number> = {};
+            (overview.categories ?? []).forEach((top: any) => {
+              const bucket = top.is_discretionary ? discBySource : fixedBySource;
+              (top.children ?? []).forEach((ch: any) => {
+                Object.entries(ch.breakdown_by_source ?? {}).forEach(([label, amt]) => {
+                  bucket[label] = (bucket[label] ?? 0) + parseFloat(amt as string);
+                });
+              });
+            });
+            const totalBySource: Record<string, number> = {};
+            [discBySource, fixedBySource].forEach(bucket => {
+              Object.entries(bucket).forEach(([label, amt]) => {
+                totalBySource[label] = (totalBySource[label] ?? 0) + amt;
+              });
+            });
+
             return (
               <div className="space-y-4">
                 {discBudget > 0 && (
@@ -461,16 +495,25 @@ export default function Spending() {
                     <span className="stat-label">Discretionary</span>
                     <span className="stat-value text-gray-900 dark:text-[#c4ccd8]">{fmt(disc)}</span>
                     <span className="text-xs text-gray-400">what you chose</span>
+                    {sourceSplitLabel(discBySource) && (
+                      <span className="text-xs text-gray-400 dark:text-[#8f99a8] mt-0.5">{sourceSplitLabel(discBySource)}</span>
+                    )}
                   </div>
                   <div className="stat-card">
                     <span className="stat-label">Fixed Commitments</span>
                     <span className="stat-value text-gray-500 dark:text-gray-400">{fmt(fixed)}</span>
                     <span className="text-xs text-gray-400">mortgage, tithe, insurance</span>
+                    {sourceSplitLabel(fixedBySource) && (
+                      <span className="text-xs text-gray-400 dark:text-[#8f99a8] mt-0.5">{sourceSplitLabel(fixedBySource)}</span>
+                    )}
                   </div>
                   <div className="stat-card">
                     <span className="stat-label">Total Spent</span>
                     <span className="stat-value text-gray-900 dark:text-[#c4ccd8]">{fmt(overview.total_actual)}</span>
                     <span className="text-xs text-gray-400">of {fmt(overview.total_budgeted)} budgeted</span>
+                    {sourceSplitLabel(totalBySource) && (
+                      <span className="text-xs text-gray-400 dark:text-[#8f99a8] mt-0.5">{sourceSplitLabel(totalBySource)}</span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -673,6 +716,11 @@ export default function Spending() {
                 const actual = parseFloat(cat.actual);
                 const budgeted = parseFloat(cat.budgeted);
                 const over = budgeted > 0 && actual > budgeted;
+                const split = sourceSplitLabel(
+                  Object.fromEntries(
+                    Object.entries(cat.breakdown_by_source ?? {}).map(([k, v]) => [k, parseFloat(v as string)])
+                  )
+                );
                 return (
                   <div key={cat.category_id}>
                     <div className="flex items-baseline justify-between gap-3 mb-1">
@@ -696,6 +744,7 @@ export default function Spending() {
                         </span>
                       </div>
                     </div>
+                    {split && <p className="text-xs text-gray-400 dark:text-[#8f99a8] mb-1">{split}</p>}
                     {budgeted > 0 && <ProgressBar actual={actual} budgeted={budgeted} />}
                   </div>
                 );
