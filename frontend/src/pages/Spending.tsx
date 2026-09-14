@@ -127,10 +127,13 @@ export default function Spending() {
 
   const visibleCatIds: Set<number> = catFilter ?? new Set(allTopCats.map(c => c.id));
 
-  // Recharts data for total monthly bars
+  // Recharts data for total monthly bars, split checking/cards for the
+  // stacked chart -- both fields already come back from /spending/monthly.
   const barData = monthly.map((m: any) => ({
     month: m.month,
     total: parseFloat(m.total),
+    checking: parseFloat(m.checking),
+    cards: parseFloat(m.cards),
   }));
   const avg = barData.length > 1 ? barData.reduce((s: number, d: any) => s + d.total, 0) / barData.length : 0;
 
@@ -256,11 +259,6 @@ export default function Spending() {
       </div>
     );
   }
-
-  const TotalBarTooltip = ({ active, payload, label }: any) =>
-    active && payload?.length ? (
-      <TooltipBox label={label} rows={[{ name: "Spending", value: payload[0].value }]} />
-    ) : null;
 
   const StackedTooltip = ({ active, payload, label }: any) =>
     active && payload?.length ? (
@@ -502,8 +500,9 @@ export default function Spending() {
                   <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis dataKey="month" tick={{ fontSize: 11, fill: ct.tick }} axisLine={{ stroke: ct.grid }} tickLine={false} />
                   <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
-                  <Tooltip content={<TotalBarTooltip />} cursor={{ fill: isDarkMode() ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }} />
-                  <Bar dataKey="total" fill={ct.barFill} radius={[4, 4, 0, 0]} name="Total" className="cursor-pointer" />
+                  <Tooltip content={<StackedTooltip />} cursor={{ fill: isDarkMode() ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }} />
+                  <Bar dataKey="checking" stackId="spend" fill={ct.barFill} name="Checking" className="cursor-pointer" />
+                  <Bar dataKey="cards" stackId="spend" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Cards" className="cursor-pointer" />
                   {avg > 0 && (
                     <ReferenceLine
                       y={avg}
