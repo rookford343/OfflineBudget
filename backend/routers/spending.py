@@ -650,7 +650,7 @@ def spending_rolling_monthly(
         start_year -= 1
     start = date(start_year, start_month, 1)
 
-    results: dict[str, Decimal] = {}
+    results: dict[str, dict[str, Decimal]] = {}
     txns = (
         db.query(models.Transaction)
         .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
@@ -666,7 +666,8 @@ def spending_rolling_monthly(
     txns = filter_real_spend(db, user.id, txns)
     for t in txns:
         key = t.date.strftime("%Y-%m")
-        results[key] = results.get(key, Decimal("0")) + abs(t.amount)
+        results.setdefault(key, {"checking": Decimal("0"), "cards": Decimal("0")})
+        results[key]["checking"] += abs(t.amount)
     card_txns = db.query(models.CreditCardTransaction).filter(
         models.CreditCardTransaction.user_id == user.id,
         models.CreditCardTransaction.date >= start,
@@ -677,10 +678,16 @@ def spending_rolling_monthly(
         if is_card_payment(t.merchant):
             continue
         key = t.date.strftime("%Y-%m")
-        results[key] = results.get(key, Decimal("0")) + t.amount
+        results.setdefault(key, {"checking": Decimal("0"), "cards": Decimal("0")})
+        results[key]["cards"] += t.amount
 
     return [
-        schemas.RollingMonthEntry(month=m, total=results.get(m, Decimal("0")))
+        schemas.RollingMonthEntry(
+            month=m,
+            total=results[m]["checking"] + results[m]["cards"],
+            checking=results[m]["checking"],
+            cards=results[m]["cards"],
+        )
         for m in sorted(results.keys())
     ]
 
