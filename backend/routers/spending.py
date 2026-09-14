@@ -743,10 +743,10 @@ def _months_in_range(start: date, end: date) -> list[int]:
     return list(months)
 
 
-@router.get("/sankey", response_model=schemas.SankeyResponse)
+@router.get("/sankey/{year}/{month}", response_model=schemas.SankeyResponse)
 def spending_sankey(
-    year: int = Query(...),
-    month: int = Query(...),
+    year: int,
+    month: int,
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
@@ -813,7 +813,12 @@ def spending_sankey(
         if name == "Uncategorized" or name in named_expense_names
     }
     if other_total > 0:
-        grouped_expense_totals["Other"] = other_total
+        if "Other" in grouped_expense_totals:
+            # A real category is named "Other" -- add collapsed tail to it
+            grouped_expense_totals["Other"] += other_total
+        else:
+            # No collision, assign normally
+            grouped_expense_totals["Other"] = other_total
     expense_totals = grouped_expense_totals
 
     nodes: list[schemas.SankeyNode] = []
