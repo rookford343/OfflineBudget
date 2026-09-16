@@ -7,7 +7,7 @@ import { fmt, firstOfMonth, today, quickRange } from "../lib/utils";
 import {
   PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine,
-  AreaChart, Area, Sector,
+  Sector,
 } from "recharts";
 import { ChevronDown, ChevronRight, HelpCircle, Pencil, AlertTriangle, X } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
