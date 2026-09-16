@@ -250,7 +250,9 @@ export default function Spending() {
     active && payload?.length ? (
       <TooltipBox
         label={label}
-        rows={payload.map((p: any) => ({ name: p.name, value: p.value, color: p.fill }))}
+        rows={payload
+          .filter((p: any) => Number(p.value) > 0)
+          .map((p: any) => ({ name: p.name, value: p.value, color: p.fill }))}
       />
     ) : null;
 
@@ -273,17 +275,39 @@ export default function Spending() {
     );
   }
 
-  // "$1,240 checking · $310 card" -- omits a source entirely if it's $0, so
-  // a category/bucket that's 100% one source doesn't show a pointless
-  // "$0 card". Returns null when there's nothing worth showing (zero or
-  // one non-zero source), so callers can skip rendering the line at all.
-  function sourceSplitLabel(breakdown: Record<string, number>): string | null {
+  // "$1,240 Checking · $310 Chase Freedom" -- omits a source entirely if
+  // it's $0, so a category/bucket that's 100% one source doesn't show a
+  // pointless "$0 Cards". Returns null when there's nothing worth showing
+  // (zero or one non-zero source), so callers can skip rendering the line
+  // at all. Caps at the top two sources by amount, folding the rest into a
+  // "+N more" suffix so the line still fits a one-third-width stat card
+  // when `breakdown_by_source` keys are real card names rather than just
+  // "Checking"/"Cards".
+  //
+  // `headline` is the total this split is supposed to add up to. A
+  // top-level category can carry spend directly on itself (no child --
+  // see the "(uncategorized)" synthetic row above), and that spend IS
+  // counted in headline numbers like `disc`/`fixed`/`total_actual` but
+  // ISN'T captured by a source-split bucket built by walking only
+  // `children[].breakdown_by_source`. Rather than render a split that
+  // silently doesn't sum to the number above it, refuse to render at all
+  // when the two disagree by more than a cent. Omit `headline` when the
+  // bucket IS the full total already (e.g. a leaf category's own
+  // breakdown_by_source), since there's no gap to reconcile.
+  function sourceSplitLabel(breakdown: Record<string, number>, headline?: number): string | null {
     const nonZero = Object.entries(breakdown).filter(([, v]) => v > 0.005);
     if (nonZero.length < 2) return null;
-    return nonZero
-      .sort((a, b) => b[1] - a[1])
-      .map(([label, v]) => `${fmt(v)} ${label}`)
+    if (headline !== undefined) {
+      const sum = nonZero.reduce((s, [, v]) => s + v, 0);
+      if (Math.abs(sum - headline) > 0.01) return null;
+    }
+    const sorted = nonZero.sort((a, b) => b[1] - a[1]);
+    const shown = sorted.slice(0, 2);
+    const extra = sorted.length - shown.length;
+    const label = shown
+      .map(([name, v]) => `${fmt(v, { minimumFractionDigits: 0, maximumFractionDigits: 0 })} ${name}`)
       .join(" · ");
+    return extra > 0 ? `${label} +${extra} more` : label;
   }
 
   function ProgressBar({ actual, budgeted }: { actual: number; budgeted: number }) {
@@ -461,24 +485,24 @@ export default function Spending() {
                     <span className="stat-label">Discretionary</span>
                     <span className="stat-value text-gray-900 dark:text-[#c4ccd8]">{fmt(disc)}</span>
                     <span className="text-xs text-gray-400">what you chose</span>
-                    {sourceSplitLabel(discBySource) && (
-                      <span className="text-xs text-gray-400 dark:text-[#8f99a8] mt-0.5">{sourceSplitLabel(discBySource)}</span>
+                    {sourceSplitLabel(discBySource, disc) && (
+                      <span className="text-xs text-gray-400 dark:text-[#8f99a8] mt-0.5">{sourceSplitLabel(discBySource, disc)}</span>
                     )}
                   </div>
                   <div className="stat-card">
                     <span className="stat-label">Fixed Commitments</span>
                     <span className="stat-value text-gray-500 dark:text-gray-400">{fmt(fixed)}</span>
                     <span className="text-xs text-gray-400">mortgage, tithe, insurance</span>
-                    {sourceSplitLabel(fixedBySource) && (
-                      <span className="text-xs text-gray-400 dark:text-[#8f99a8] mt-0.5">{sourceSplitLabel(fixedBySource)}</span>
+                    {sourceSplitLabel(fixedBySource, fixed) && (
+                      <span className="text-xs text-gray-400 dark:text-[#8f99a8] mt-0.5">{sourceSplitLabel(fixedBySource, fixed)}</span>
                     )}
                   </div>
                   <div className="stat-card">
                     <span className="stat-label">Total Spent</span>
                     <span className="stat-value text-gray-900 dark:text-[#c4ccd8]">{fmt(overview.total_actual)}</span>
                     <span className="text-xs text-gray-400">of {fmt(overview.total_budgeted)} budgeted</span>
-                    {sourceSplitLabel(totalBySource) && (
-                      <span className="text-xs text-gray-400 dark:text-[#8f99a8] mt-0.5">{sourceSplitLabel(totalBySource)}</span>
+                    {sourceSplitLabel(totalBySource, parseFloat(overview.total_actual)) && (
+                      <span className="text-xs text-gray-400 dark:text-[#8f99a8] mt-0.5">{sourceSplitLabel(totalBySource, parseFloat(overview.total_actual))}</span>
                     )}
                   </div>
                 </div>
