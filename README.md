@@ -54,7 +54,7 @@ Income and bills that repeat, with monthly/quarterly/yearly frequencies.
 | Area | Highlights |
 |------|-----------|
 | [Forecast](#forecasting) | Day-by-day balance projection; quarterly and multi-year views; scenario planning |
-| [Spending Analysis](#spending-analysis) | Monthly trends, year-over-year, merchant ranking, income flow diagram |
+| [Spending Analysis](#spending-analysis) | Monthly trends, ranged spending chart, merchant ranking, income flow diagram |
 | [Tax Estimator](#tax-estimator) | Full 2025 federal + state estimate; itemized vs. standard deduction; bracket ladder |
 | [Transaction Import](#transaction-import) | CSV and OFX/QFX upload; auto-categorization; custom rules engine; optional automated bank sync via SimpleFIN |
 | [Credit Cards](#credit-cards) | Balance tracking, due-date reminders, payment recording, per-card spending |
@@ -187,17 +187,18 @@ counted individually, so counting the payment too would double-count the
 whole statement.
 
 
-The **Spending** page has five tabs:
+The **Spending** page has four tabs:
 
 | Tab | Description |
 |-----|-------------|
 | **Overview** | Total spent vs. budgeted; monthly bar chart; stacked category chart; donut chart; expandable category drill-down |
-| **Trends** | Year-over-year monthly comparison (up to 3 years); 24-month rolling spending area chart |
+| **Trends** | One ranged, stacked (Checking/Cards) spending chart with a 6M/YTD/1Y/2Y range control |
 | **Merchants** | Ranked table of spending by merchant/description — sortable by name, transaction count, or total |
 | **Flow** | Sankey diagram showing income sources flowing into expense categories for any month |
-| **Tax Export** | Full tax estimate and CSV export of deductible transactions |
 
 Spending totals exclude savings-type categories and account transfers so CC payments don't inflate your numbers.
+
+Tax Export now lives on its own **Tax** page (Money → Tax in the sidebar), not a Spending tab — see [Tax Estimator](#tax-estimator) below.
 
 Quick-filter buttons (**This Month / 3 Months / YTD / Last Year**) appear above the date inputs on both Spending and Transactions pages.
 
