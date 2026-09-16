@@ -8,6 +8,7 @@ import Dashboard from "./pages/Dashboard";
 import CreditCards from "./pages/CreditCards";
 import Forecast from "./pages/Forecast";
 import Spending from "./pages/Spending";
+import TaxExport from "./pages/TaxExport";
 import Recurring from "./pages/Recurring";
 import Transactions from "./pages/Transactions";
 import Budget from "./pages/Budget";
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="credit-cards" element={<CreditCards />} />
           <Route path="forecast" element={<Forecast />} />
           <Route path="spending" element={<Spending />} />
+          <Route path="tax" element={<TaxExport />} />
           <Route path="recurring" element={<Recurring />} />
           <Route path="transactions" element={<Transactions />} />
           <Route path="accounts/:id" element={<AccountDetail />} />
