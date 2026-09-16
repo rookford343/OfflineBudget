@@ -54,7 +54,7 @@ export default function TaxTab() {
     <div className="card">
       <div className="space-y-3">
         <h3 className="font-semibold text-gray-900 dark:text-gray-100">Tax Profile</h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400">Used to estimate your tax obligation in the Spending → Tax tab. All values are estimates — consult a tax professional.</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Used to estimate your tax obligation on the Tax page (Money → Tax). All values are estimates — consult a tax professional.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
           <div>
             <label className="label">Filing Status</label>

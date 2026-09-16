@@ -181,7 +181,7 @@ Configure your tax information under **Settings → Profile → Tax Profile**:
 5. **Itemized Deductions** — enter mortgage interest (Form 1098), charitable donations, SALT, property taxes, and other deductions
 6. **Social Security Tracker** — enter your gross per paycheck and YTD bonus to track when you'll hit the wage base
 
-After saving, go to **Spending → Tax Export** to see your full estimated tax liability for any year.
+After saving, go to **Tax** (Money → Tax in the sidebar) to see your full estimated tax liability for any year.
 
 ---
 
