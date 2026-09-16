@@ -1001,7 +1001,7 @@ export default function Spending() {
 function SankeyChart({ data }: { data: any }) {
   const WIDTH = 720;
   const HEIGHT = 400;
-  const PADDING = 120;
+  const PADDING = 140;
 
   if (!data || (!data.nodes?.length)) {
     return <div className="card text-center py-12 text-gray-400 text-sm">No income or expense data for this period.</div>;
@@ -1023,7 +1023,7 @@ function SankeyChart({ data }: { data: any }) {
     .nodeId((d: any) => d.id)
     .nodeAlign(sankeyLeft)
     .nodeWidth(14)
-    .nodePadding(16)
+    .nodePadding(20)
     .extent([[PADDING, 10], [WIDTH - PADDING, HEIGHT - 10]]);
 
   let graph: any;
@@ -1051,7 +1051,10 @@ function SankeyChart({ data }: { data: any }) {
         ))}
         {graph.nodes.map((n: any, i: number) => {
           const isLeft = n.x0 < WIDTH / 2;
-          const color = n.type === "income" ? "#10b981" : n.type === "income_total" ? "#6366f1" : "#f59e0b";
+          // Semantic green/red for income/expense, indigo for the total
+          // pool node -- was a three-color scheme (green/indigo/amber) that
+          // didn't map expense to the red used everywhere else on this page.
+          const color = n.type === "income" ? "#10b981" : n.type === "income_total" ? "#6366f1" : "#dc2626";
           const labelX = isLeft ? n.x0 - 6 : n.x1 + 6;
           const anchor = isLeft ? "end" : "start";
           const midY = (n.y0 + n.y1) / 2;
@@ -1061,7 +1064,7 @@ function SankeyChart({ data }: { data: any }) {
               <text x={labelX} y={midY - 5} textAnchor={anchor} fontSize={11} fill={isDarkMode() ? "#c4ccd8" : "#374151"} fontWeight={500}>
                 {n.name}
               </text>
-              <text x={labelX} y={midY + 8} textAnchor={anchor} fontSize={10} fill="#6b7280">
+              <text x={labelX} y={midY + 8} textAnchor={anchor} fontSize={10} fill={isDarkMode() ? "#8f99a8" : "#6b7280"}>
                 {fmt2(n.value)}
               </text>
             </g>
