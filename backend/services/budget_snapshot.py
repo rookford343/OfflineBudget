@@ -428,6 +428,7 @@ def compute_budget_snapshot(
     cards = [
         CardSnapshot(
             id=c.id, name=c.name, current_balance=c.current_balance,
+            balance_due=c.balance_due,
             pending_charges=c.pending_charges, credit_limit=c.credit_limit,
             utilization_pct=round(float(c.current_balance) / float(c.credit_limit) * 100, 1) if c.credit_limit else 0.0,
             due_day=c.due_day,
