@@ -13,7 +13,7 @@ Idempotent. Run from project root:
     source .venv/bin/activate
     python scripts/set_ss_checkpoint_20260814.py [--apply]
 """
-import sys, os, argparse, shutil
+import sys, os, argparse
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.database import SessionLocal
 from backend import models
+from backend.services.db_backup import backup_database
 
 USER_ID = 2
 WITHHELD_YTD = Decimal("11343.06")
@@ -38,7 +39,7 @@ def main():
         stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
         backup = os.path.join(os.path.dirname(DB_PATH), "backups", f"budget_{stamp}_pre-ss-checkpoint.db")
         os.makedirs(os.path.dirname(backup), exist_ok=True)
-        shutil.copy2(DB_PATH, backup)
+        backup_database(DB_PATH, backup)
         print(f"Backed up to {backup}")
 
     db = SessionLocal()
