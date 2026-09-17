@@ -22,7 +22,7 @@ Run from project root:
 
 Without --apply it reports what it would do and changes nothing.
 """
-import sys, os, shutil, argparse
+import sys, os, argparse
 from collections import defaultdict
 from datetime import datetime
 
@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from backend.database import SessionLocal
 from backend import models
+from backend.services.db_backup import backup_database
 from backend.services.import_service import _DATE_WINDOW_DAYS, _normalize_desc
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -115,7 +116,7 @@ def main():
     os.makedirs(BACKUP_DIR, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
     backup = os.path.join(BACKUP_DIR, f"budget.db.pre-dedupe-{stamp}")
-    shutil.copy2(DB_PATH, backup)
+    backup_database(DB_PATH, backup)
     print(f"\nBacked up to {backup}")
 
     for _, sync_row in pairs:
