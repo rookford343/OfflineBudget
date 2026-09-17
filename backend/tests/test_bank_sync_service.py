@@ -615,6 +615,30 @@ def test_checking_sync_creates_checkpoint_once_the_same_day_recurring_item_has_p
     assert cp.actual_balance == Decimal("7881.03")
 
 
+def test_checking_sync_skips_checkpoint_when_a_planned_expense_lands_that_day(db_session):
+    """Second real incident, 2026-09-17: the first fix only guarded against
+    RecurringItem, so a day carrying a PLANNED expense's funding transfer got
+    checkpointed anyway -- erasing the +$20,000 funding leg of a self-funded
+    purchase while leaving its -$20,000 outflow two days later intact, and
+    dropping the whole forward forecast by $20,000 (reported 3-month low went
+    from -$1,420.84 to -$15,306.04 overnight). The guard has to cover
+    everything build_forecast projects, not one type of it."""
+    user, account, connection, link = _make_connection(db_session)
+    today = date.today()
+    db_session.add(models.PlannedExpense(
+        user_id=user.id, account_id=account.id, name="Car purchase",
+        amount=Decimal("20000.00"), expected_date=today,
+    ))
+    db_session.commit()
+    txns: list = []
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("5000.00"), None)):
+        sync_connection(db_session, connection)
+
+    assert db_session.query(models.ForecastDayCheckpoint).filter_by(account_id=account.id).count() == 0
+
+
 def test_savings_account_sync_does_not_get_a_forecast_day_checkpoint(db_session):
     """Only checking accounts feed the forecast walk (generate_daily_summary
     filters to AccountType.checking, and build_forecast/_lookahead_minimum
