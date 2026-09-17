@@ -1251,6 +1251,11 @@ class CardSnapshot(BaseModel):
     id: int
     name: str
     current_balance: Decimal
+    # The already-statemented total that gets paid on due_day -- the same
+    # figure forecast_engine subtracts as "CC Payment: <card>". Carried here
+    # so the daily email can break a blended current_balance into settled
+    # debt vs. new spend without re-deriving either from the model.
+    balance_due: Decimal
     pending_charges: Decimal
     credit_limit: Decimal
     utilization_pct: float
