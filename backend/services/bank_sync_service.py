@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.crypto import decrypt
 from backend.services.csv_parser import ParsedRow
-from backend.services.forecast_engine import has_unsettled_recurring_item
+from backend.services.forecast_engine import has_unsettled_projection
 from backend.services.import_service import build_preview, run_import
 from backend.services.simplefin_client import fetch_transactions
 
@@ -151,15 +151,14 @@ def _sync_link(
                 # (can lag the sync run by a day); fall back to today only
                 # when it's missing.
                 checkpoint_date = balance_date.date() if balance_date else date.today()
-                # A recurring item scheduled for checkpoint_date that hasn't
-                # posted as a real transaction yet means the sync ran before
-                # that day settled (e.g. a payroll processor's memo-post lag)
-                # -- checkpointing anyway would silently erase that item's
-                # effect from every day after it (see has_unsettled_recurring_item's
-                # docstring for the real incident this fixes). Skip this sync's
-                # checkpoint entirely and let a later sync, once the item has
-                # posted, anchor the date correctly instead.
-                if not has_unsettled_recurring_item(db, user.id, account.id, checkpoint_date):
+                # Anything still projected on checkpoint_date -- a paycheck
+                # that hasn't cleared, a planned purchase's funding transfer --
+                # means the sync ran before that day settled. Checkpointing
+                # anyway silently erases that projection from every day after
+                # it (see has_unsettled_projection's docstring for the two
+                # real incidents this fixes). Skip this sync's checkpoint and
+                # let a later one, after the day settles, anchor it instead.
+                if not has_unsettled_projection(db, user.id, account.id, checkpoint_date):
                     cp = db.query(models.ForecastDayCheckpoint).filter(
                         models.ForecastDayCheckpoint.user_id == user.id,
                         models.ForecastDayCheckpoint.account_id == account.id,
