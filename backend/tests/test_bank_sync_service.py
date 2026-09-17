@@ -554,6 +554,67 @@ def test_checking_sync_updates_same_day_checkpoint_instead_of_duplicating(db_ses
     assert checkpoints[0].actual_balance == Decimal("52.00")
 
 
+def test_checking_sync_skips_checkpoint_when_a_same_day_recurring_item_hasnt_posted(db_session):
+    """Real incident, 2026-09-16: the daily anchor stamped a checkpoint dated
+    2026-09-15 at $7,881.03 from a sync that ran before that day's Paycheck
+    (+$6,600) and Tithing (-$1,300) had posted as real transactions.
+    forecast_engine.py's checkpoint application overwrites the WHOLE day's
+    balance after that day's own projections are applied (see
+    build_forecast, "Apply day checkpoint AFTER all transactions"), so the
+    checkpoint silently erased that day's entire net effect -- understating
+    every day after it by the same amount for the rest of the 3-month
+    forecast. A same-day recurring item with no matching actual transaction
+    yet means the sync ran too early to trust this day as settled -- skip
+    the checkpoint and let a later sync (once the item has posted) anchor
+    it correctly instead."""
+    user, account, connection, link = _make_connection(db_session)
+    today = date.today()
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Paycheck",
+        amount=Decimal("6600.00"), type=models.RecurringType.income,
+        frequency=models.RecurringFrequency.monthly,
+        day_of_month=today.day, start_date=date(2026, 1, 1),
+    ))
+    db_session.commit()
+    txns: list = []
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("7881.03"), None)):
+        sync_connection(db_session, connection)
+
+    assert db_session.query(models.ForecastDayCheckpoint).filter_by(account_id=account.id).count() == 0
+
+
+def test_checking_sync_creates_checkpoint_once_the_same_day_recurring_item_has_posted(db_session):
+    """Once the day's recurring item has a real actual transaction on record
+    for this cycle, the sync's balance genuinely reflects a settled day --
+    the checkpoint should proceed normally."""
+    user, account, connection, link = _make_connection(db_session)
+    today = date.today()
+    item = models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Paycheck",
+        amount=Decimal("6600.00"), type=models.RecurringType.income,
+        frequency=models.RecurringFrequency.monthly,
+        day_of_month=today.day, start_date=date(2026, 1, 1),
+    )
+    db_session.add(item)
+    db_session.flush()
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=account.id, date=today,
+        amount=Decimal("6600.00"), description="Paycheck", is_actual=True,
+        recurring_item_id=item.id,
+    ))
+    db_session.commit()
+    txns: list = []
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("7881.03"), None)):
+        sync_connection(db_session, connection)
+
+    cp = db_session.query(models.ForecastDayCheckpoint).filter_by(account_id=account.id).one()
+    assert cp.actual_balance == Decimal("7881.03")
+
+
 def test_savings_account_sync_does_not_get_a_forecast_day_checkpoint(db_session):
     """Only checking accounts feed the forecast walk (generate_daily_summary
     filters to AccountType.checking, and build_forecast/_lookahead_minimum
