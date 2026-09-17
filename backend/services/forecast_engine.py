@@ -245,6 +245,51 @@ def _fires_on(item: models.RecurringItem, d: date) -> bool:
     return d.day == target
 
 
+def has_unsettled_recurring_item(db: Session, user_id: int, account_id: int, target: date) -> bool:
+    """True if an active recurring item on this account fires on `target` but
+    has no matching ACTUAL transaction yet for its current cycle.
+
+    Exists for bank_sync_service.py's daily balance-checkpoint anchor.
+    build_forecast applies a day's checkpoint AFTER that day's own
+    transactions, unconditionally overwriting the running balance with it
+    (the checkpoint is meant to BE the settled end-of-day figure) -- so a
+    checkpoint dated on a day whose own scheduled income/expense hasn't
+    posted yet silently erases that transaction's effect from every day
+    after it. Real incident, 2026-09-16: a sync ran before that day's
+    Paycheck posted, and the resulting checkpoint erased +$5,300 net from
+    the whole rest of the 3-month forecast. Matches build_forecast's own
+    actual-vs-projected suppression window (same calendar month for
+    monthly/yearly/quarterly items, +/-3 days for weekly/biweekly).
+    """
+    items = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user_id,
+        models.RecurringItem.account_id == account_id,
+        models.RecurringItem.is_active == True,
+        models.RecurringItem.include_in_forecast == True,
+    ).all()
+    for item in items:
+        if not _fires_on(item, target):
+            continue
+        actual_q = db.query(models.Transaction).filter(
+            models.Transaction.recurring_item_id == item.id,
+            models.Transaction.is_actual == True,
+        )
+        freq = getattr(item, "frequency", None)
+        if freq in (models.RecurringFrequency.monthly, models.RecurringFrequency.yearly, models.RecurringFrequency.quarterly):
+            has_actual = actual_q.filter(
+                models.Transaction.date >= date(target.year, target.month, 1),
+                models.Transaction.date <= target,
+            ).first() is not None
+        else:
+            has_actual = actual_q.filter(
+                models.Transaction.date >= target - timedelta(days=3),
+                models.Transaction.date <= target,
+            ).first() is not None
+        if not has_actual:
+            return True
+    return False
+
+
 def build_forecast(
     db: Session,
     user_id: int,
