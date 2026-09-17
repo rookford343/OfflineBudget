@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import MonthlySummary, WeeklyDigest, ForecastRisk
 from backend.services.spending_helpers import category_totals_for_range
-from backend.services.forecast_engine import build_forecast, find_balance_risk
+from backend.services.forecast_engine import build_forecast, find_balance_risk, _next_occurrence_on_or_after
 from backend.services.budget_snapshot import compute_budget_snapshot
 
 _STALE_SYNC_HOURS = 24
@@ -216,6 +216,36 @@ def generate_daily_summary(
     snap_cards_by_id = {c.id: c for c in snap.cards} if snap is not None else {}
     card_last_txn = _last_txn_dates(db, models.CreditCardTransaction.card_id, models.CreditCardTransaction.date, [c.id for c in cards])
 
+    def _cycle_breakdown(c: models.CreditCard) -> tuple[Decimal, Decimal, bool]:
+        """(balance_due, spend since that statement closed, statement-looks-stale).
+
+        A card's current_balance blends two things that call for different
+        reactions: balance_due is already-statemented debt that leaves on the
+        due date no matter what Dan does now, while the remainder is new spend
+        he can still steer. Same arithmetic budget_snapshot uses for
+        new_spending_total, so the email and Left to Spend can never disagree
+        about what counts as new spend.
+
+        balance_due is manual-entry only (bank sync never writes it), so it
+        goes stale after a payment and can exceed current_balance -- which
+        makes the subtraction negative. That negative IS the staleness
+        signal, so report it as one rather than rendering it.
+        """
+        sc = snap_cards_by_id.get(c.id)
+        balance_due = sc.balance_due if sc else c.balance_due
+        pending = sc.pending_charges if sc else c.pending_charges
+        cycle_spend = c.current_balance - balance_due + pending
+        if cycle_spend < 0:
+            return balance_due, Decimal("0"), True
+        return balance_due, cycle_spend, False
+
+    def _due_label(c: models.CreditCard) -> str:
+        """"due Sep 25" -- the date the statement actually leaves checking."""
+        if not c.due_day:
+            return "due"
+        due_date = _next_occurrence_on_or_after(c.due_day, today)
+        return f"due {due_date.strftime('%b %-d')}"
+
     def _card_row(c: models.CreditCard) -> str:
         sc = snap_cards_by_id.get(c.id)
         util = sc.utilization_pct if sc else (
@@ -228,11 +258,17 @@ def generate_daily_summary(
         if c.due_day:
             days_out = (c.due_day - today.day) % calendar.monthrange(today.year, today.month)[1]
             due_in = "due today" if days_out == 0 else f"due in {days_out}d"
+        balance_due, cycle_spend, stale = _cycle_breakdown(c)
+        breakdown = (
+            f"{fmt(balance_due)} {_due_label(c)} &middot; {fmt(cycle_spend)} spent this cycle"
+            + (" &middot; <span style='color:#d97706'>statement figure may be stale</span>" if stale else "")
+        )
         return (
             f"<tr><td style='padding:6px 12px 6px 0;color:#374151'>{c.name}"
-            f"<br><span style='color:#9ca3af;font-size:11px;font-weight:400'>{_last_txn_label(card_last_txn.get(c.id))}</span></td>"
-            f"<td style='padding:6px 0;text-align:right'><b style='color:#111827'>{fmt(c.current_balance)}</b>{pending_html}</td>"
-            f"<td style='padding:6px 0 6px 12px;text-align:right;white-space:nowrap;font-size:12px'>"
+            f"<br><span style='color:#9ca3af;font-size:11px;font-weight:400'>{_last_txn_label(card_last_txn.get(c.id))}</span>"
+            f"<br><span style='color:#6b7280;font-size:11px;font-weight:400'>{breakdown}</span></td>"
+            f"<td style='padding:6px 0;text-align:right;vertical-align:top'><b style='color:#111827'>{fmt(c.current_balance)}</b>{pending_html}</td>"
+            f"<td style='padding:6px 0 6px 12px;text-align:right;white-space:nowrap;font-size:12px;vertical-align:top'>"
             f"<span style='color:{util_color}'>{util:.0f}% used</span>"
             + (f" <span style='color:#9ca3af'>&middot; {due_in}</span>" if due_in else "")
             + "</td></tr>"
@@ -340,12 +376,17 @@ def generate_daily_summary(
         f"  {_day_label(d):<10} {r.name}: {'+' if r.type == models.RecurringType.income else '-'}{fmt(r.amount)}"
         for r, d in upcoming
     ) or "  None in the next 7 days"
-    card_text = "\n".join(
-        f"  {c.name}: {fmt(c.current_balance)} "
-        f"({(snap_cards_by_id.get(c.id).utilization_pct if snap_cards_by_id.get(c.id) else 0):.0f}% used, due day {c.due_day}, "
-        f"{_last_txn_label(card_last_txn.get(c.id))})"
-        for c in cards
-    ) or "  No credit cards"
+    def _card_text_row(c: models.CreditCard) -> str:
+        balance_due, cycle_spend, stale = _cycle_breakdown(c)
+        util = snap_cards_by_id.get(c.id).utilization_pct if snap_cards_by_id.get(c.id) else 0
+        return (
+            f"  {c.name}: {fmt(c.current_balance)} "
+            f"({util:.0f}% used, due day {c.due_day}, {_last_txn_label(card_last_txn.get(c.id))})\n"
+            f"    {fmt(balance_due)} {_due_label(c)} | {fmt(cycle_spend)} spent this cycle"
+            + (" | statement figure may be stale" if stale else "")
+        )
+
+    card_text = "\n".join(_card_text_row(c) for c in cards) or "  No credit cards"
 
     if snap is not None:
         household_text = (
