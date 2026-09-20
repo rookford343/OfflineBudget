@@ -2,12 +2,13 @@ from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
+from backend.services import scenario_service
 from backend.services.forecast_engine import build_forecast, build_quarters, find_balance_risk, find_transfer_signal, suggest_transfer
 from backend.services.reconciliation_helper import compute_reconciliation
 
@@ -192,7 +193,13 @@ def get_monthly_summary(
 class ScenarioForecastRequest(BaseModel):
     account_id: int
     year: int
+    # Kept for the existing Forecast page, which assembles overrides itself
+    # from the scenario it has already loaded (Forecast.tsx:343-354).
     overrides: list[dict[str, Any]] = []
+    # Preferred: let the server resolve the scenario, which is the only side
+    # that can build a proposal's transient objects, and the only side that
+    # knows a committed scenario resolves to nothing.
+    scenario_id: int | None = None
 
 
 @router.post("/quarters-scenario", response_model=list[schemas.QuarterSummary])
@@ -201,4 +208,17 @@ def get_quarters_with_scenario(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    return build_quarters(db, user.id, body.account_id, body.year, overrides=body.overrides)
+    overrides = body.overrides
+    proposal = None
+    if body.scenario_id is not None:
+        resolved = scenario_service.resolve_scenario(db, user.id, body.scenario_id)
+        if resolved is None:
+            raise HTTPException(404, "Scenario not found")
+        resolved_overrides, proposal = resolved
+        # A scenario_id supersedes a client-supplied override list: mixing the
+        # two would apply the same delta twice when the client sent both.
+        overrides = resolved_overrides
+    return build_quarters(
+        db, user.id, body.account_id, body.year,
+        overrides=overrides, proposal=proposal,
+    )
