@@ -7,7 +7,7 @@ would be a second implementation of _fires_on, the weekend pull-forward and
 end-date handling, and this repo has spent real time fixing bugs born of
 exactly that kind of duplication.
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from backend import models
@@ -41,11 +41,16 @@ def _trace(entries):
 
 
 def test_a_proposal_forecasts_identically_to_the_real_item(db_session):
+    """start_date (2026-06-01) is deliberately earlier than the forecast
+    window (2026-11-01..) so the five pre-window occurrences (Jun-Oct) must be
+    folded into the opening balance via build_forecast's own bridge recursion
+    -- a proposal that dropped out of that recursion would seed a balance
+    $225 richer than the real item's and this parity check would catch it."""
     user, account, scenario = _seed(db_session)
     fields = dict(
         name="Gym", amount=Decimal("45.00"), type=models.RecurringType.expense,
         frequency=models.RecurringFrequency.monthly, day_of_month=10,
-        start_date=date(2026, 11, 1), account_id=account.id,
+        start_date=date(2026, 6, 1), account_id=account.id,
     )
     db_session.add(models.ScenarioProposedItem(scenario_id=scenario.id, **fields))
     db_session.commit()
@@ -190,3 +195,55 @@ def test_a_proposal_for_a_different_account_is_ignored(db_session):
 
     names = [t.name for e in entries for t in e.transactions]
     assert "Savings-only bill" not in names
+
+
+def test_a_proposals_buffer_transfer_fires_identically_to_the_real_item(db_session):
+    """A proposal must feed the buffer-transfer dry run too, or a proposed
+    draw-down that would trip a rule's action_threshold produces a different
+    transaction SET than the real item it stands in for -- not merely a
+    different balance. start_date == today so this exercises the dry-run
+    threading independently of the opening-balance bridge recursion covered
+    by test_a_proposal_forecasts_identically_to_the_real_item."""
+    user, checking, scenario = _seed(db_session)
+    savings = models.Account(
+        user_id=user.id, name="Savings", type=models.AccountType.savings,
+        current_balance=Decimal("10000.00"),
+    )
+    db_session.add(savings)
+    db_session.flush()
+    db_session.add(models.BufferTransferRule(
+        user_id=user.id, from_account_id=savings.id, to_account_id=checking.id,
+        action_threshold=Decimal("1000.00"), target_floor=Decimal("2000.00"),
+        increment=Decimal("1000.00"), check_day=15,
+    ))
+    db_session.commit()
+
+    today = date.today()
+    window_end = today + timedelta(days=45)
+    fields = dict(
+        name="Big Draw", amount=Decimal("900.00"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.weekly, day_of_month=1,
+        start_date=today, account_id=checking.id,
+    )
+    db_session.add(models.ScenarioProposedItem(scenario_id=scenario.id, **fields))
+    db_session.commit()
+
+    _overrides, proposal = scenario_service.resolve_scenario(db_session, user.id, scenario.id)
+    with_proposal = build_forecast(
+        db_session, user.id, checking.id, today, window_end, proposal=proposal,
+    )
+
+    # Now make it real and forecast with no proposal at all.
+    db_session.query(models.ScenarioProposedItem).delete()
+    db_session.add(models.RecurringItem(user_id=user.id, **fields))
+    db_session.commit()
+    as_real = build_forecast(db_session, user.id, checking.id, today, window_end)
+
+    transfer_names = [
+        t.name for e in with_proposal for t in e.transactions if t.is_transfer
+    ]
+    assert "Transfer from Savings" in transfer_names, (
+        "test setup did not actually trip the buffer rule -- strengthen the "
+        "draw-down before trusting the parity assertion below"
+    )
+    assert _trace(with_proposal) == _trace(as_real)

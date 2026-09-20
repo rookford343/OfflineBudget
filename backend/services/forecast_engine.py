@@ -140,6 +140,7 @@ def _compute_transfer_schedule(
     start_date: date,
     end_date: date,
     overrides: list[dict] | None = None,
+    proposal: ScenarioProposal | None = None,
 ) -> dict[date, Decimal]:
     """Dry-run `rule.to_account_id` with no transfers applied, then decide on
     each check_day whether a buffer transfer is needed to keep it above
@@ -159,6 +160,7 @@ def _compute_transfer_schedule(
         db, user_id, rule.to_account_id, anchor, end_date,
         overrides=overrides,
         apply_buffer_transfers=False,
+        proposal=proposal,
     )
     if not raw_entries:
         return {}
@@ -818,6 +820,7 @@ def build_forecast(
         bridge = build_forecast(
             db, user_id, account_id, bridge_start, start_date - timedelta(days=1),
             overrides=overrides, apply_buffer_transfers=apply_buffer_transfers,
+            proposal=proposal,
         )
         balance = bridge[-1].projected_balance if bridge else current_balance
     else:
@@ -859,6 +862,7 @@ def build_forecast(
         bridge = build_forecast(
             db, user_id, account_id, lookback_start, today - timedelta(days=1),
             overrides=overrides, apply_buffer_transfers=apply_buffer_transfers,
+            proposal=proposal,
         )
         bridged_balance = bridge[-1].projected_balance if bridge else current_balance
         balance = bridged_balance - today_actuals_sum
@@ -891,7 +895,10 @@ def build_forecast(
             ),
         ).all()
         for rule in transfer_rules:
-            schedule = _compute_transfer_schedule(db, user_id, rule, start_date, end_date, overrides=overrides)
+            schedule = _compute_transfer_schedule(
+                db, user_id, rule, start_date, end_date,
+                overrides=overrides, proposal=proposal,
+            )
             if not schedule:
                 continue
             if rule.to_account_id == account_id:
