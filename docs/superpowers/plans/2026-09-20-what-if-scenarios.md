@@ -223,7 +223,21 @@ Add one column to `ScenarioOverride`, after `amount_delta`:
 
 - [ ] **Step 4: Add the two proposal models**
 
-In `backend/models.py`, immediately after the `ScenarioOverride` class:
+**Placement is load-bearing.** Put BOTH classes at the END of the
+`# ── Planned Expenses ──` section, immediately after the `PlannedExpense`
+class (which ends around line 663). Not after `ScenarioOverride`:
+`PlannedDirection` is declared at `models.py:589`, *after* `ScenarioOverride`
+at `:575`, and `Enum(PlannedDirection)` plus
+`default=PlannedDirection.outflow` are evaluated at class-definition time, so
+placing them earlier raises `NameError` on import. `ForecastScenario`'s new
+relationships are unaffected by ordering because they use string forward
+references and the file carries `from __future__ import annotations`.
+
+The enum-column idiom in this file is `mapped_column(Enum(SomeEnum), ...)`
+using the plain `Enum` already imported from `sqlalchemy` at `models.py:6` —
+there is no `Enum` alias.
+
+In `backend/models.py`, after the `PlannedExpense` class:
 
 ```python
 class ScenarioProposedItem(Base):
@@ -244,9 +258,9 @@ class ScenarioProposedItem(Base):
     )
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
-    type: Mapped[RecurringType] = mapped_column(SAEnum(RecurringType), nullable=False)
+    type: Mapped[RecurringType] = mapped_column(Enum(RecurringType), nullable=False)
     frequency: Mapped[RecurringFrequency] = mapped_column(
-        SAEnum(RecurringFrequency), nullable=False, default=RecurringFrequency.monthly,
+        Enum(RecurringFrequency), nullable=False, default=RecurringFrequency.monthly,
     )
     day_of_month: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     month_of_year: Mapped[int | None] = mapped_column(Integer)
@@ -275,7 +289,7 @@ class ScenarioProposedExpense(Base):
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     expected_date: Mapped[date] = mapped_column(Date, nullable=False)
     direction: Mapped[PlannedDirection] = mapped_column(
-        SAEnum(PlannedDirection), nullable=False, default=PlannedDirection.outflow,
+        Enum(PlannedDirection), nullable=False, default=PlannedDirection.outflow,
     )
     account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
     card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
@@ -288,7 +302,7 @@ class ScenarioProposedExpense(Base):
     scenario: Mapped[ForecastScenario] = relationship(back_populates="proposed_expenses")
 ```
 
-`ScenarioProposedItem` references `RecurringType`, `RecurringFrequency`, `SAEnum`, `Date`, and `PlannedDirection`. All five are already imported or defined earlier in `models.py` — confirm with `grep -n "SAEnum\|^class PlannedDirection\|^class RecurringFrequency" backend/models.py` before running the test, and note that `ScenarioProposedExpense` sits AFTER `PlannedDirection`'s definition only if you place these classes after it; if `PlannedDirection` is defined below `ScenarioOverride`, put both new classes at the end of the `# ── Planned Expenses ──` section instead so every name resolves at import time.
+Every name these classes use — `RecurringType` (`models.py:25`), `RecurringFrequency` (`:57`), `PlannedDirection` (`:589`), plus `Enum`, `Date`, `Numeric`, `String`, `Integer` and `ForeignKey` from the `sqlalchemy` import at `:5-8` — is already available ahead of the placement named above. Verified against the file, not assumed.
 
 - [ ] **Step 5: Add the DDL**
 
@@ -2682,7 +2696,7 @@ function ProposedItemsSection({ scenario, accounts, cards, disabled, onAdd, onDr
               )}
             </span>
             {!disabled && (
-              <button className="btn-sm" onClick={() => onDrop(i.id)}>
+              <button className="btn-ghost" onClick={() => onDrop(i.id)}>
                 <Trash2 className="w-4 h-4" />
               </button>
             )}
@@ -2782,7 +2796,7 @@ function ProposedExpensesSection({ scenario, accounts, cards, disabled, onAdd, o
           <li key={e.id} className="py-2 flex items-center justify-between text-sm">
             <span>{e.name} — {money(e.amount)} on {e.expected_date}</span>
             {!disabled && (
-              <button className="btn-sm" onClick={() => onDrop(e.id)}>
+              <button className="btn-ghost" onClick={() => onDrop(e.id)}>
                 <Trash2 className="w-4 h-4" />
               </button>
             )}
@@ -2859,7 +2873,7 @@ function OverridesSection({ scenario, recurring, disabled, onAdd, onDrop }: {
           <li key={o.id} className="py-2 flex items-center justify-between text-sm">
             <span>{nameOf(o.recurring_item_id)} — {money(o.amount_delta)} change</span>
             {!disabled && (
-              <button className="btn-sm" onClick={() => onDrop(o.id)}>
+              <button className="btn-ghost" onClick={() => onDrop(o.id)}>
                 <Trash2 className="w-4 h-4" />
               </button>
             )}
@@ -2895,7 +2909,7 @@ function OverridesSection({ scenario, recurring, disabled, onAdd, onDrop }: {
 
 Run: `grep -n "export const accountsApi\|export const cardsApi\|export const recurringApi" frontend/src/api/index.ts`
 
-All three must be present. If `recurringApi.list` takes no argument in this repo, drop the `()` argument in the query function. Also confirm the `btn`, `btn-sm`, `input` and `card` utility classes exist with `grep -rn "\.btn-sm\|\.btn\b\|\.input\b" frontend/src/index.css`; if `btn-sm` is absent, use `btn` for the delete buttons rather than inventing a class.
+All three exist. `recurringApi.list(activeOnly = true)` takes an optional argument (`api/index.ts:84`), so the bare `recurringApi.list()` call above is correct. The utility classes in `frontend/src/index.css` are `card` (`:16`), `btn` (`:20`), `btn-primary` (`:23`), `btn-secondary` (`:26`), `btn-danger` (`:30`), `btn-ghost` (`:33`) and `input` (`:37`) — there is NO `btn-sm`, which is why the delete buttons above use `btn-ghost`. Do not invent a class.
 
 - [ ] **Step 6: Check for new TypeScript errors**
 
