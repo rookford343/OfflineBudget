@@ -428,6 +428,17 @@ def build_forecast(
         # would count the same money twice.
         models.PlannedExpense.settled_on.is_(None),
     ).all()
+    # Spliced in before the routing loop below, not after it: that loop is what
+    # derives funding legs and sends card-linked expenses to the card's payoff
+    # date instead of their own. Joining `planned` gets a proposal all of it.
+    # The window filter mirrors the query above -- without it a proposal
+    # outside the window could still route a charge into it, so a scenario
+    # forecast would disagree with what committing the scenario produces.
+    if proposal:
+        planned = planned + [
+            pe for pe in proposal.expenses
+            if start_date <= pe.expected_date <= end_date
+        ]
     # Funding legs derived from the planned expenses above. A purchase funded
     # from savings implies a transfer INTO the spending account (and out of the
     # savings account), on a date computed from the purchase rather than stored
