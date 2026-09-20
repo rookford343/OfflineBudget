@@ -1167,6 +1167,17 @@ class ScenarioOut(BaseModel):
     proposed_expenses: list[ScenarioProposedExpenseOut] = []
 
 
+class ScenarioCommitResult(BaseModel):
+    """Counts only. Both directions use the same shape so the UI has one
+    success message to render; the unused keys are zero."""
+    items_created: int = 0
+    expenses_created: int = 0
+    overrides_applied: int = 0
+    items_removed: int = 0
+    expenses_removed: int = 0
+    overrides_restored: int = 0
+
+
 # ── Planned Expenses ─────────────────────────────────────────────────────────
 
 class PlannedExpenseCreate(BaseModel):
