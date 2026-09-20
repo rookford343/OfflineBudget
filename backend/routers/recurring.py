@@ -1,3 +1,5 @@
+from datetime import date
+from decimal import Decimal, ROUND_HALF_UP
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models
@@ -5,6 +7,39 @@ from backend import schemas
 from backend.dependencies import get_db, get_current_user
 
 router = APIRouter(prefix="/recurring", tags=["recurring"])
+
+# What one occurrence of each frequency costs per month on average.
+# Deliberately NOT the same treatment as budget_snapshot._monthly_expenses,
+# which charges a yearly bill in full in the month it lands to reconcile
+# with the spreadsheet's Leftover row. This is the "what does my life cost
+# per month" figure, so a yearly bill is a twelfth of itself.
+_MONTHLY_FACTOR = {
+    models.RecurringFrequency.monthly: Decimal(1),
+    models.RecurringFrequency.quarterly: Decimal(1) / Decimal(3),
+    models.RecurringFrequency.yearly: Decimal(1) / Decimal(12),
+    models.RecurringFrequency.weekly: Decimal(52) / Decimal(12),
+    models.RecurringFrequency.biweekly: Decimal(26) / Decimal(12),
+}
+
+
+def _monthly_equivalent(item: models.RecurringItem) -> Decimal:
+    factor = _MONTHLY_FACTOR.get(item.frequency, Decimal(1))
+    return (item.amount * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+def _months_until(today: date, end: date) -> int:
+    """Whole months from today to `end`, floored at 0 once it has passed.
+
+    An item already past its end date reports 0 rather than a negative --
+    it is still listed (an active item past its term is worth seeing) but
+    has no runway left to report.
+    """
+    if end <= today:
+        return 0
+    months = (end.year - today.year) * 12 + (end.month - today.month)
+    if end.day < today.day:
+        months -= 1
+    return max(months, 0)
 
 
 @router.get("", response_model=list[schemas.RecurringOut])
@@ -41,6 +76,56 @@ def get_suggestions(
 ):
     from backend.services.recurring_detector import detect_patterns
     return detect_patterns(db, user.id, min_occurrences=min_occurrences)
+
+
+# Declared BEFORE /{item_id} on purpose: FastAPI matches routes in
+# declaration order, so the other way round "breakdown" is read as an
+# item_id and this endpoint 422s instead of answering.
+@router.get("/breakdown", response_model=schemas.RecurringBreakdown)
+def get_breakdown(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Recurring commitments split by whether they ever stop.
+
+    Answers three things at once: what life costs indefinitely (ongoing),
+    what is temporary and when it frees up (ending, soonest first), and how
+    much of the monthly burn is each.
+    """
+    items = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user.id,
+        models.RecurringItem.is_active == True,
+    ).all()
+
+    today = date.today()
+    ongoing: list[schemas.RecurringBreakdownItem] = []
+    ending: list[schemas.RecurringBreakdownItem] = []
+    ongoing_monthly = Decimal("0")
+    ending_monthly = Decimal("0")
+
+    for item in items:
+        monthly = _monthly_equivalent(item)
+        out = schemas.RecurringBreakdownItem(
+            id=item.id, name=item.name, amount=item.amount, type=item.type,
+            frequency=item.frequency, monthly_equivalent=monthly,
+            end_date=item.end_date,
+            months_remaining=_months_until(today, item.end_date) if item.end_date else None,
+        )
+        is_expense = item.type == models.RecurringType.expense
+        if item.end_date:
+            ending.append(out)
+            if is_expense:
+                ending_monthly += monthly
+        else:
+            ongoing.append(out)
+            if is_expense:
+                ongoing_monthly += monthly
+
+    ending.sort(key=lambda i: i.end_date)
+    return schemas.RecurringBreakdown(
+        ongoing=ongoing, ending=ending,
+        ongoing_monthly=ongoing_monthly, ending_monthly=ending_monthly,
+    )
 
 
 @router.get("/{item_id}", response_model=schemas.RecurringOut)
