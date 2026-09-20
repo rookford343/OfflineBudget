@@ -482,6 +482,19 @@ def build_forecast(
     for item in card_expense_items:
         card_items_by_card.setdefault(item.card_id, []).append(item)
 
+    # Card-routed proposals go HERE, not into recurring_items: the checking
+    # walk excludes card-linked expenses on purpose, and this dict is what
+    # feeds both the upcoming-cycle accrual and _card_subscription_charges,
+    # so a proposal added here reaches checking through the card's payoff --
+    # the same path the real item would take.
+    for item in proposal_items:
+        if (
+            item.account_id == account_id
+            and item.type == models.RecurringType.expense
+            and item.card_id is not None
+        ):
+            card_items_by_card.setdefault(item.card_id, []).append(item)
+
     # CC payment injections: cards with next_payment_date set, balance_due > 0,
     # and no existing recurring CC payment item already handling this card (avoid double-count).
     recurring_cc_card_ids = {item.card_id for item in recurring_items if item.type == models.RecurringType.credit_card_payment}
