@@ -9,6 +9,7 @@ For each day in the requested range:
 """
 from __future__ import annotations
 from calendar import monthrange
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_CEILING
 from sqlalchemy.orm import Session, joinedload
@@ -275,6 +276,29 @@ def has_unsettled_projection(db: Session, user_id: int, account_id: int, target:
     return any(not t.is_actual for t in entries[0].transactions)
 
 
+@dataclass(frozen=True)
+class ScenarioProposal:
+    """Transient, never-persisted stand-ins for what a scenario proposes.
+
+    `items` are real RecurringItem instances and `expenses` real
+    PlannedExpense instances -- constructed but never db.add()ed -- so
+    build_forecast can splice them into the lists it already walks and every
+    scheduling rule (_fires_on, the weekend pull-forward, end dates,
+    actual-vs-projected suppression) applies to a proposal because it IS the
+    same object type in the same loop.
+
+    Each item's id is the NEGATION of its proposal row's id. override_map and
+    actual_by_ri are keyed by item id; a positive id could collide with a real
+    item and silently apply that item's override, or its actuals, to a
+    hypothetical.
+
+    Frozen because build_forecast is a read path -- a proposal it could mutate
+    would be a proposal that leaks between the baseline and scenario walks.
+    """
+    items: tuple["models.RecurringItem", ...] = ()
+    expenses: tuple["models.PlannedExpense", ...] = ()
+
+
 def build_forecast(
     db: Session,
     user_id: int,
@@ -284,6 +308,7 @@ def build_forecast(
     *,
     overrides: list[dict] | None = None,
     apply_buffer_transfers: bool = True,
+    proposal: ScenarioProposal | None = None,
 ) -> list[ForecastEntry]:
     account: models.Account = db.query(models.Account).filter(
         models.Account.id == account_id,
@@ -304,6 +329,18 @@ def build_forecast(
         # CC charges (expense + card_id) hit the card, not the checking account
         if not (item.type == models.RecurringType.expense and item.card_id is not None)
     ]
+
+    # Proposals are spliced into the same lists the real queries produced. The
+    # account filter and the card exclusion below mirror the comprehension
+    # above exactly: a proposal must be subject to the same routing as the real
+    # item it stands in for, or the scenario line diverges from what committing
+    # it would actually produce.
+    proposal_items = list(proposal.items) if proposal else []
+    recurring_items.extend(
+        item for item in proposal_items
+        if item.account_id == account_id
+        and not (item.type == models.RecurringType.expense and item.card_id is not None)
+    )
 
     # SS paycheck boost setup
     user = db.query(models.User).filter(models.User.id == user_id).first()
@@ -1380,6 +1417,7 @@ def build_quarters(
     year: int,
     overrides: list[dict] | None = None,
     precomputed_days: list[ForecastEntry] | None = None,
+    proposal: ScenarioProposal | None = None,
 ) -> list[QuarterSummary]:
     """Quarter summaries for one calendar year.
 
@@ -1403,11 +1441,14 @@ def build_quarters(
         # so the two screens disagreed about the same date.
         span = build_forecast(
             db, user_id, account_id, date(date.today().year, 1, 1), full_end,
-            overrides=overrides,
+            overrides=overrides, proposal=proposal,
         )
         all_days = [d for d in span if full_start <= d.date <= full_end]
     else:
-        all_days = build_forecast(db, user_id, account_id, full_start, full_end, overrides=overrides)
+        all_days = build_forecast(
+            db, user_id, account_id, full_start, full_end,
+            overrides=overrides, proposal=proposal,
+        )
     if not all_days:
         return []
 
