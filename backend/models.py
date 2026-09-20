@@ -532,10 +532,22 @@ class ForecastScenario(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # "draft" until committed, "committed" after. A plain string rather than a
+    # PyEnum because the value round-trips through the API as a string anyway
+    # and the existing ALTER-TABLE-based schema upgrades have no enum support.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="draft", server_default="draft")
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="forecast_scenarios")
     overrides: Mapped[list[ScenarioOverride]] = relationship(back_populates="scenario", cascade="all, delete-orphan")
+    proposed_items: Mapped[list["ScenarioProposedItem"]] = relationship(
+        back_populates="scenario", cascade="all, delete-orphan",
+    )
+    proposed_expenses: Mapped[list["ScenarioProposedExpense"]] = relationship(
+        back_populates="scenario", cascade="all, delete-orphan",
+    )
 
 
 class BillAmountOverride(Base):
@@ -579,6 +591,11 @@ class ScenarioOverride(Base):
     scenario_id: Mapped[int] = mapped_column(Integer, ForeignKey("forecast_scenarios.id"), nullable=False)
     recurring_item_id: Mapped[int] = mapped_column(Integer, ForeignKey("recurring_items.id"), nullable=False)
     amount_delta: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # The real item's amount at the moment this scenario was committed.
+    # Committing an amount tweak EDITS the real item, so uncommit needs the
+    # value it replaced -- a delta alone cannot be reversed safely if the
+    # item was edited by hand in between.
+    committed_previous_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
     scenario: Mapped[ForecastScenario] = relationship(back_populates="overrides")
     recurring_item: Mapped[RecurringItem] = relationship()
@@ -658,6 +675,68 @@ class PlannedExpense(Base):
     @property
     def is_settled(self) -> bool:
         return self.settled_on is not None
+
+
+class ScenarioProposedItem(Base):
+    """A RecurringItem that does not exist yet.
+
+    Mirrors only the fields build_forecast actually reads, so a proposal can be
+    materialized into a transient RecurringItem and walked by the same loop as
+    a real one -- see forecast_engine.ScenarioProposal. `is_active` and
+    `include_in_forecast` are absent on purpose: a proposal that exists is by
+    definition both, and storing them would invite a proposal that silently
+    does nothing.
+    """
+    __tablename__ = "scenario_proposed_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scenario_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("forecast_scenarios.id", ondelete="CASCADE"), nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    type: Mapped[RecurringType] = mapped_column(Enum(RecurringType), nullable=False)
+    frequency: Mapped[RecurringFrequency] = mapped_column(
+        Enum(RecurringFrequency), nullable=False, default=RecurringFrequency.monthly,
+    )
+    day_of_month: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    month_of_year: Mapped[int | None] = mapped_column(Integer)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date | None] = mapped_column(Date)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
+    card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
+    category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
+    # Set by commit; read by uncommit to find the row it created.
+    committed_recurring_item_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("recurring_items.id"),
+    )
+
+    scenario: Mapped[ForecastScenario] = relationship(back_populates="proposed_items")
+
+
+class ScenarioProposedExpense(Base):
+    """A PlannedExpense that does not exist yet. See ScenarioProposedItem."""
+    __tablename__ = "scenario_proposed_expenses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scenario_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("forecast_scenarios.id", ondelete="CASCADE"), nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    expected_date: Mapped[date] = mapped_column(Date, nullable=False)
+    direction: Mapped[PlannedDirection] = mapped_column(
+        Enum(PlannedDirection), nullable=False, default=PlannedDirection.outflow,
+    )
+    account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
+    card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
+    funding_account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
+    category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
+    committed_planned_expense_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("planned_expenses.id"),
+    )
+
+    scenario: Mapped[ForecastScenario] = relationship(back_populates="proposed_expenses")
 
 
 # ── Transaction Rules ─────────────────────────────────────────────────────────

@@ -191,6 +191,41 @@ def upgrade_schema():
         # SchedulerRun, BankSyncRawSnapshot and AppSetting are brand-new
         # tables, created automatically by create_tables()'s
         # Base.metadata.create_all -- no ALTER TABLE needed for them.
+        # What-if scenarios: a scenario can now propose items that do not
+        # exist yet, and remember what it created so it can be uncommitted.
+        "ALTER TABLE forecast_scenarios ADD COLUMN status VARCHAR(16) DEFAULT 'draft'",
+        "ALTER TABLE forecast_scenarios ADD COLUMN committed_at DATETIME",
+        "ALTER TABLE forecast_scenarios ADD COLUMN notes TEXT",
+        "ALTER TABLE scenario_overrides ADD COLUMN committed_previous_amount NUMERIC(14,2)",
+        """CREATE TABLE IF NOT EXISTS scenario_proposed_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scenario_id INTEGER NOT NULL REFERENCES forecast_scenarios(id) ON DELETE CASCADE,
+            name VARCHAR(128) NOT NULL,
+            amount NUMERIC(14,2) NOT NULL,
+            type VARCHAR(32) NOT NULL,
+            frequency VARCHAR(10) NOT NULL DEFAULT 'monthly',
+            day_of_month INTEGER NOT NULL DEFAULT 1,
+            month_of_year INTEGER,
+            start_date DATE NOT NULL,
+            end_date DATE,
+            account_id INTEGER NOT NULL REFERENCES accounts(id),
+            card_id INTEGER REFERENCES credit_cards(id),
+            category_id INTEGER REFERENCES categories(id),
+            committed_recurring_item_id INTEGER REFERENCES recurring_items(id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS scenario_proposed_expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            scenario_id INTEGER NOT NULL REFERENCES forecast_scenarios(id) ON DELETE CASCADE,
+            name VARCHAR(128) NOT NULL,
+            amount NUMERIC(14,2) NOT NULL,
+            expected_date DATE NOT NULL,
+            direction VARCHAR(8) NOT NULL DEFAULT 'outflow',
+            account_id INTEGER REFERENCES accounts(id),
+            card_id INTEGER REFERENCES credit_cards(id),
+            funding_account_id INTEGER REFERENCES accounts(id),
+            category_id INTEGER REFERENCES categories(id),
+            committed_planned_expense_id INTEGER REFERENCES planned_expenses(id)
+        )""",
     ]
     with engine.connect() as conn:
         for s in stmts:

@@ -1077,10 +1077,12 @@ class NetWorthSnapshotOut(BaseModel):
 
 class ScenarioCreate(BaseModel):
     name: str
+    notes: Optional[str] = None
 
 
 class ScenarioUpdate(BaseModel):
     name: Optional[str] = None
+    notes: Optional[str] = None
 
 
 class ScenarioOverrideCreate(BaseModel):
@@ -1093,14 +1095,76 @@ class ScenarioOverrideOut(BaseModel):
     id: int
     recurring_item_id: int
     amount_delta: Decimal
+    committed_previous_amount: Optional[Decimal] = None
+
+
+class ScenarioProposedItemCreate(BaseModel):
+    name: str
+    amount: Decimal
+    type: str = "expense"
+    frequency: str = "monthly"
+    day_of_month: int = 1
+    month_of_year: Optional[int] = None
+    start_date: date
+    end_date: Optional[date] = None
+    account_id: int
+    card_id: Optional[int] = None
+    category_id: Optional[int] = None
+
+
+class ScenarioProposedItemOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    amount: Decimal
+    type: str
+    frequency: str
+    day_of_month: int
+    month_of_year: Optional[int] = None
+    start_date: date
+    end_date: Optional[date] = None
+    account_id: int
+    card_id: Optional[int] = None
+    category_id: Optional[int] = None
+    committed_recurring_item_id: Optional[int] = None
+
+
+class ScenarioProposedExpenseCreate(BaseModel):
+    name: str
+    amount: Decimal
+    expected_date: date
+    direction: str = "outflow"
+    account_id: Optional[int] = None
+    card_id: Optional[int] = None
+    funding_account_id: Optional[int] = None
+    category_id: Optional[int] = None
+
+
+class ScenarioProposedExpenseOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+    amount: Decimal
+    expected_date: date
+    direction: str
+    account_id: Optional[int] = None
+    card_id: Optional[int] = None
+    funding_account_id: Optional[int] = None
+    category_id: Optional[int] = None
+    committed_planned_expense_id: Optional[int] = None
 
 
 class ScenarioOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
+    status: str
+    committed_at: Optional[datetime] = None
+    notes: Optional[str] = None
     created_at: datetime
     overrides: list[ScenarioOverrideOut] = []
+    proposed_items: list[ScenarioProposedItemOut] = []
+    proposed_expenses: list[ScenarioProposedExpenseOut] = []
 
 
 # ── Planned Expenses ─────────────────────────────────────────────────────────
