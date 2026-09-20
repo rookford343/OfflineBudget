@@ -89,6 +89,7 @@ export const recurringApi = {
     api.post(`/recurring/${itemId}/link-pattern`, data).then((r) => r.data),
   suggestions: (minOccurrences = 2) =>
     api.get("/recurring/suggestions", { params: { min_occurrences: minOccurrences } }).then((r) => r.data),
+  breakdown: () => api.get("/recurring/breakdown").then((r) => r.data),
 };
 
 // ── Forecast ──────────────────────────────────────────────────────────────────
