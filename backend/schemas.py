@@ -279,6 +279,39 @@ class RecurringOut(BaseModel):
     notes: Optional[str]
 
 
+class RecurringBreakdownItem(BaseModel):
+    """One recurring item, normalized to what it costs per month."""
+    id: int
+    name: str
+    amount: Decimal
+    type: RecurringType
+    frequency: RecurringFrequency
+    # amount restated as a monthly rate: a yearly bill is a twelfth of itself
+    # here, unlike budget_snapshot._monthly_expenses, which charges a yearly
+    # bill in full in its own month to match the spreadsheet's Leftover row.
+    # Different questions: "what does this cost me per month, on average" vs.
+    # "what hits this particular month".
+    monthly_equivalent: Decimal
+    end_date: Optional[date]
+    # Whole months from today until end_date; 0 once the end date has passed.
+    months_remaining: Optional[int]
+
+
+class RecurringBreakdown(BaseModel):
+    """Recurring commitments split by whether they ever stop.
+
+    Ongoing is what life costs indefinitely; ending is temporary and rolls
+    off on a known date, so a long-range forecast that treats the two the
+    same overstates the future.
+    """
+    ongoing: list[RecurringBreakdownItem]
+    # Soonest roll-off first -- the list doubles as the expiration timeline.
+    ending: list[RecurringBreakdownItem]
+    # Expenses only: income is not burn.
+    ongoing_monthly: Decimal
+    ending_monthly: Decimal
+
+
 # ── Transactions ──────────────────────────────────────────────────────────────
 
 class TransactionCreate(BaseModel):

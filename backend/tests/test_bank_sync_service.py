@@ -566,20 +566,28 @@ def test_checking_sync_skips_checkpoint_when_a_same_day_recurring_item_hasnt_pos
     forecast. A same-day recurring item with no matching actual transaction
     yet means the sync ran too early to trust this day as settled -- skip
     the checkpoint and let a later sync (once the item has posted) anchor
-    it correctly instead."""
+    it correctly instead.
+
+    Pinned to a fixed WEEKDAY (2026-08-05, a Wednesday) rather than
+    date.today(): build_forecast doesn't project recurring items on a
+    Saturday or Sunday, it pulls them back to the preceding Friday, so a
+    day_of_month taken from "today" projects nothing at all two days in
+    seven -- and the guard then correctly allows a checkpoint, failing this
+    test for a reason that has nothing to do with what it checks. Caught
+    live on Sunday 2026-09-20."""
     user, account, connection, link = _make_connection(db_session)
-    today = date.today()
+    anchor = datetime(2026, 8, 5, 12, 0)  # Wednesday
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Paycheck",
         amount=Decimal("6600.00"), type=models.RecurringType.income,
         frequency=models.RecurringFrequency.monthly,
-        day_of_month=today.day, start_date=date(2026, 1, 1),
+        day_of_month=anchor.day, start_date=date(2026, 1, 1),
     ))
     db_session.commit()
     txns: list = []
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("6856.78"), None)):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("6856.78"), anchor)):
         sync_connection(db_session, connection)
 
     assert db_session.query(models.ForecastDayCheckpoint).filter_by(account_id=account.id).count() == 0
@@ -588,19 +596,23 @@ def test_checking_sync_skips_checkpoint_when_a_same_day_recurring_item_hasnt_pos
 def test_checking_sync_creates_checkpoint_once_the_same_day_recurring_item_has_posted(db_session):
     """Once the day's recurring item has a real actual transaction on record
     for this cycle, the sync's balance genuinely reflects a settled day --
-    the checkpoint should proceed normally."""
+    the checkpoint should proceed normally.
+
+    Same fixed-weekday pinning as the test above: on a weekend the item
+    wouldn't project on its own day at all, so this would pass without ever
+    exercising the has-posted path."""
     user, account, connection, link = _make_connection(db_session)
-    today = date.today()
+    anchor = datetime(2026, 8, 5, 12, 0)  # Wednesday
     item = models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Paycheck",
         amount=Decimal("6600.00"), type=models.RecurringType.income,
         frequency=models.RecurringFrequency.monthly,
-        day_of_month=today.day, start_date=date(2026, 1, 1),
+        day_of_month=anchor.day, start_date=date(2026, 1, 1),
     )
     db_session.add(item)
     db_session.flush()
     db_session.add(models.Transaction(
-        user_id=user.id, account_id=account.id, date=today,
+        user_id=user.id, account_id=account.id, date=anchor.date(),
         amount=Decimal("6600.00"), description="Paycheck", is_actual=True,
         recurring_item_id=item.id,
     ))
@@ -608,7 +620,7 @@ def test_checking_sync_creates_checkpoint_once_the_same_day_recurring_item_has_p
     txns: list = []
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("6856.78"), None)):
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("6856.78"), anchor)):
         sync_connection(db_session, connection)
 
     cp = db_session.query(models.ForecastDayCheckpoint).filter_by(account_id=account.id).one()
