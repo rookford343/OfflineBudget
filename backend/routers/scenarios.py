@@ -1,14 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
+from backend.services import scenario_service
 
 router = APIRouter(prefix="/scenarios", tags=["scenarios"])
 
 
 @router.post("", response_model=schemas.ScenarioOut)
 def create_scenario(body: schemas.ScenarioCreate, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    scenario = models.ForecastScenario(user_id=user.id, name=body.name)
+    scenario = models.ForecastScenario(user_id=user.id, name=body.name, notes=body.notes)
     db.add(scenario)
     db.commit()
     db.refresh(scenario)
@@ -32,6 +33,8 @@ def update_scenario(scenario_id: int, body: schemas.ScenarioUpdate, db: Session 
         raise HTTPException(404, "Scenario not found")
     if body.name is not None:
         scenario.name = body.name
+    if body.notes is not None:
+        scenario.notes = body.notes
     db.commit()
     db.refresh(scenario)
     return scenario
@@ -86,3 +89,84 @@ def delete_override(scenario_id: int, override_id: int, db: Session = Depends(ge
     db.delete(override)
     db.commit()
     return {"ok": True}
+
+
+def _owned_scenario(db: Session, user_id: int, scenario_id: int) -> models.ForecastScenario:
+    scenario = scenario_service.get_scenario(db, user_id, scenario_id)
+    if not scenario:
+        raise HTTPException(404, "Scenario not found")
+    return scenario
+
+
+@router.post(
+    "/{scenario_id}/items",
+    response_model=schemas.ScenarioProposedItemOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_proposed_item(
+    scenario_id: int,
+    body: schemas.ScenarioProposedItemCreate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    _owned_scenario(db, user.id, scenario_id)
+    item = models.ScenarioProposedItem(scenario_id=scenario_id, **body.model_dump())
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@router.delete("/{scenario_id}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_proposed_item(
+    scenario_id: int,
+    item_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    _owned_scenario(db, user.id, scenario_id)
+    item = db.query(models.ScenarioProposedItem).filter(
+        models.ScenarioProposedItem.id == item_id,
+        models.ScenarioProposedItem.scenario_id == scenario_id,
+    ).first()
+    if not item:
+        raise HTTPException(404, "Proposed item not found")
+    db.delete(item)
+    db.commit()
+
+
+@router.post(
+    "/{scenario_id}/expenses",
+    response_model=schemas.ScenarioProposedExpenseOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_proposed_expense(
+    scenario_id: int,
+    body: schemas.ScenarioProposedExpenseCreate,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    _owned_scenario(db, user.id, scenario_id)
+    expense = models.ScenarioProposedExpense(scenario_id=scenario_id, **body.model_dump())
+    db.add(expense)
+    db.commit()
+    db.refresh(expense)
+    return expense
+
+
+@router.delete("/{scenario_id}/expenses/{expense_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_proposed_expense(
+    scenario_id: int,
+    expense_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    _owned_scenario(db, user.id, scenario_id)
+    expense = db.query(models.ScenarioProposedExpense).filter(
+        models.ScenarioProposedExpense.id == expense_id,
+        models.ScenarioProposedExpense.scenario_id == scenario_id,
+    ).first()
+    if not expense:
+        raise HTTPException(404, "Proposed expense not found")
+    db.delete(expense)
+    db.commit()
