@@ -170,3 +170,29 @@ def delete_proposed_expense(
         raise HTTPException(404, "Proposed expense not found")
     db.delete(expense)
     db.commit()
+
+
+@router.post("/{scenario_id}/commit", response_model=schemas.ScenarioCommitResult)
+def commit_scenario(
+    scenario_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    _owned_scenario(db, user.id, scenario_id)
+    try:
+        return scenario_service.commit_scenario(db, user.id, scenario_id)
+    except scenario_service.ScenarioAlreadyCommitted:
+        raise HTTPException(409, "Scenario is already committed")
+
+
+@router.post("/{scenario_id}/uncommit", response_model=schemas.ScenarioCommitResult)
+def uncommit_scenario(
+    scenario_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    _owned_scenario(db, user.id, scenario_id)
+    try:
+        return scenario_service.uncommit_scenario(db, user.id, scenario_id)
+    except scenario_service.ScenarioNotCommitted:
+        raise HTTPException(409, "Scenario is not committed")
