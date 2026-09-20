@@ -2,12 +2,19 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { recurringApi, accountsApi, categoriesApi, cardsApi, billOverridesApi } from "../api";
 import { fmt } from "../lib/utils";
-import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt } from "lucide-react";
+import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt, CalendarClock } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import { CategoryOptions, AccountOptions, RecurringOptions } from "../lib/selectOptions";
 import { sortCategoryList, byName } from "../lib/selectOptions";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+
+/** "Jun 2027" from an ISO date, for end-date labels. Parsed at noon so a
+ *  UTC-negative timezone can't shift the date back a day. */
+function endMonthLabel(iso: string): string {
+  const d = new Date(iso + "T12:00:00");
+  return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
+}
 
 const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "" };
 
@@ -93,6 +100,7 @@ export default function Recurring() {
   });
   const [showHelp, setShowHelp] = useState(false);
   const { data: items = [] } = useQuery<any[]>({ queryKey: ["recurring"], queryFn: () => recurringApi.list(false) });
+  const { data: breakdown } = useQuery<any>({ queryKey: ["recurring-breakdown"], queryFn: recurringApi.breakdown });
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoriesApi.list });
   const { data: cards = [] } = useQuery<any[]>({ queryKey: ["cards"], queryFn: cardsApi.list });
@@ -118,9 +126,9 @@ export default function Recurring() {
 
   const createMut = useMutation({ mutationFn: recurringApi.create, onSuccess: done });
   const updateMut = useMutation({ mutationFn: ({ id, data }: any) => recurringApi.update(id, data), onSuccess: done });
-  const deleteMut = useMutation({ mutationFn: recurringApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["recurring"] }); setDeleteId(null); } });
+  const deleteMut = useMutation({ mutationFn: recurringApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); setDeleteId(null); } });
 
-  function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); setShowForm(false); setEditItem(null); }
+  function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); setShowForm(false); setEditItem(null); }
   function openNew() { setForm({ ...emptyForm, account_id: accounts[0]?.id?.toString() ?? "" }); setEditItem(null); setShowForm(true); }
   function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "" }); setShowForm(true); }
 
@@ -138,9 +146,16 @@ export default function Recurring() {
   const ccCharges = items.filter((i: any) => i.type === "expense" && i.card_id && i.is_active);
   const ccPayments = items.filter((i: any) => i.type === "credit_card_payment" && i.is_active);
   const inactive = items.filter((i: any) => !i.is_active);
-  // Both totals are "per month", so a bill covering several months is spread
-  // across them -- the same accrual the backend's _monthly_expenses does.
-  const perMonth = (i: any) => parseFloat(i.amount) / (i.frequency === "yearly" ? 12 : i.frequency === "quarterly" ? 3 : 1);
+  // Monthly-equivalent and end-date runway both come from /recurring/breakdown
+  // rather than being recomputed here: the local version handled only yearly
+  // and quarterly, so a weekly item would have been counted at a quarter of
+  // its real monthly cost and a biweekly at under half. The backend handles
+  // every frequency, and one implementation can't disagree with itself.
+  const breakdownItems = [...(breakdown?.ongoing ?? []), ...(breakdown?.ending ?? [])];
+  const byId: Record<number, any> = Object.fromEntries(breakdownItems.map((i: any) => [i.id, i]));
+  const perMonth = (i: any) =>
+    byId[i.id] ? parseFloat(byId[i.id].monthly_equivalent)
+      : parseFloat(i.amount) / (i.frequency === "yearly" ? 12 : i.frequency === "quarterly" ? 3 : 1);
   const monthlyIncome = income.reduce((s: number, i: any) => s + perMonth(i), 0);
   const monthlyExpenses = [...checkingExpenses, ...ccCharges, ...ccPayments].reduce((s: number, i: any) => s + perMonth(i), 0);
 
@@ -178,6 +193,13 @@ export default function Recurring() {
             }
             <span className="text-xs text-gray-400">{dayLabel}</span>
             {cardName && <span className="text-xs text-gray-400">· {cardName}</span>}
+            {item.end_date && (
+              <span className="badge-amber" title={`Ends ${item.end_date}`}>
+                {(byId[item.id]?.months_remaining ?? 0) === 0
+                  ? "ended"
+                  : `ends ${endMonthLabel(item.end_date)} · ${byId[item.id]?.months_remaining} mo`}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -255,6 +277,46 @@ export default function Recurring() {
           <span className="text-xs text-gray-400">yearly + quarterly averaged</span>
         </div>
       </div>
+
+      {/* Ongoing vs. temporary. A device payment that rolls off in 8 months
+          isn't what life costs -- blending the two overstates the future. */}
+      {breakdown && (breakdown.ongoing.length > 0 || breakdown.ending.length > 0) && (
+        <div className="card">
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
+            <CalendarClock size={16} className="text-indigo-500" /> Ongoing vs. Temporary
+          </h3>
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Ongoing</p>
+              <p className="text-lg font-bold tabular-nums text-gray-900 dark:text-white">{fmt(breakdown.ongoing_monthly)}/mo</p>
+              <p className="text-xs text-gray-400">{breakdown.ongoing.length} items with no end date</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Temporary</p>
+              <p className="text-lg font-bold tabular-nums text-amber-600 dark:text-amber-400">{fmt(breakdown.ending_monthly)}/mo</p>
+              <p className="text-xs text-gray-400">{breakdown.ending.length} items that roll off</p>
+            </div>
+          </div>
+          {breakdown.ending.length > 0 && (
+            <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
+              <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">Rolls off</p>
+              <div className="space-y-1.5">
+                {breakdown.ending.map((i: any) => (
+                  <div key={i.id} className="flex items-baseline justify-between gap-3 text-sm">
+                    <span className="text-gray-700 dark:text-gray-300 truncate">{i.name}</span>
+                    <span className="shrink-0 text-xs text-gray-400 tabular-nums">
+                      {i.months_remaining === 0
+                        ? "ended"
+                        : `${endMonthLabel(i.end_date)} · ${i.months_remaining} mo left`}
+                      <span className="ml-2 text-green-600 dark:text-green-400">frees {fmt(i.monthly_equivalent)}/mo</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {(income.length > 0 || checkingExpenses.length > 0 || ccCharges.length > 0 || ccPayments.length > 0) && (
         <div className={`card flex items-center justify-between ${monthlyIncome - monthlyExpenses >= 0 ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"}`}>
