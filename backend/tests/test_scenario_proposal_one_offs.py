@@ -105,27 +105,45 @@ def test_a_funded_proposed_one_off_brings_its_transfer_with_it(db_session):
     )
 
     # Funding arrives and the purchase leaves on the same day (lead 0), so
-    # checking nets flat while savings drops.
+    # checking nets flat while savings drops. A flat balance alone doesn't
+    # prove a wash -- dropping BOTH checking-side legs together would also
+    # leave checking at 5000.00 -- so assert the two transactions themselves.
     assert _balance_on(checking_entries, date(2026, 11, 10)) == Decimal("5000.00")
     assert _balance_on(savings_entries, date(2026, 11, 10)) == Decimal("17600.00")
+    purchase_day_txns = [
+        (t.name, t.amount) for e in checking_entries if e.date == date(2026, 11, 10)
+        for t in e.transactions
+    ]
+    assert len(purchase_day_txns) == 2
+    assert purchase_day_txns == [
+        ("Transfer for Funded laptop", Decimal("2400.00")),
+        ("Funded laptop", Decimal("-2400.00")),
+    ]
 
 
-def test_a_proposed_one_off_outside_the_window_is_ignored(db_session):
-    """The real query filters expected_date to the window; a proposal must use
-    the same filter or a scenario forecast would diverge from what committing
-    it produces."""
-    user, checking, _savings, _card, scenario = _seed(db_session)
+def test_a_proposed_card_charge_before_the_window_does_not_route_its_payoff_into_it(db_session):
+    """The real query filters expected_date to the window before routing even
+    runs; a proposal must use the same filter. A charge with expected_date
+    outside the window but a DERIVED payoff date inside it is the case the
+    filter actually guards -- statement_day=28, due_day=25 means an 11/10
+    charge closes 11/28 and pays 12/25, landing inside a Dec forecast window
+    if the filter didn't exclude it first."""
+    user, checking, _savings, card, scenario = _seed(db_session)
     db_session.add(models.ScenarioProposedExpense(
         scenario_id=scenario.id, name="Way off", amount=Decimal("2400.00"),
-        expected_date=date(2027, 6, 1), account_id=checking.id,
+        expected_date=date(2026, 11, 10), account_id=checking.id, card_id=card.id,
     ))
     db_session.commit()
 
     entries = build_forecast(
-        db_session, user.id, checking.id, date(2026, 11, 1), date(2026, 11, 30),
+        db_session, user.id, checking.id, date(2026, 12, 1), date(2026, 12, 31),
         proposal=_resolve(db_session, user, scenario),
     )
 
+    names_on_due_date = [
+        t.name for e in entries if e.date == date(2026, 12, 25) for t in e.transactions
+    ]
+    assert names_on_due_date == []
     assert all(e.projected_balance == Decimal("5000.00") for e in entries)
 
 
