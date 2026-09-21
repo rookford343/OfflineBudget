@@ -112,3 +112,79 @@ def test_quarters_scenario_with_an_unknown_scenario_id_is_404(client):
         "account_id": account.id, "year": 2026, "scenario_id": 9999,
     })
     assert r.status_code == 404
+
+
+# ── Proposal validation ───────────────────────────────────────────────────────
+# Committing a scenario copies these fields VERBATIM onto real RecurringItem
+# and PlannedExpense rows, so this schema is the last gate before a typo
+# becomes a real bill. It used to type `type`, `frequency` and `direction` as
+# bare strings with no day_of_month bounds at all, while RecurringCreate --
+# the schema for the identical row created any other way -- used enums and a
+# 0-31 check. The two consequences were not symmetrical: an out-of-range day
+# was ACCEPTED (45 silently reads as "last day of month", a negative day never
+# fires at all, so committing one creates a permanently invisible real bill),
+# while an unknown enum value 500'd. Both are 422 now.
+
+def test_a_day_of_month_past_the_end_of_any_month_is_rejected(client):
+    c, _user, account, scenario = client
+    r = c.post(f"/scenarios/{scenario.id}/items", json={
+        "name": "Typo", "amount": "10.00", "type": "expense", "frequency": "monthly",
+        "day_of_month": 45, "start_date": "2026-10-01", "account_id": account.id,
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_a_negative_day_of_month_is_rejected(client):
+    """The worse half of the pair: a negative day matches no day of any month,
+    so the committed item is real, active, counted in the commitments total --
+    and never appears on the forecast."""
+    c, _user, account, scenario = client
+    r = c.post(f"/scenarios/{scenario.id}/items", json={
+        "name": "Typo", "amount": "10.00", "type": "expense", "frequency": "monthly",
+        "day_of_month": -3, "start_date": "2026-10-01", "account_id": account.id,
+    })
+    assert r.status_code == 422, r.text
+    assert c.get("/scenarios").json()[0]["proposed_items"] == []
+
+
+def test_day_of_month_zero_is_still_accepted_as_last_day(client):
+    """0 is the encoding for 'last day of month', not an out-of-range value --
+    the same convention RecurringCreate uses. Bounding the field must not
+    outlaw it."""
+    c, _user, account, scenario = client
+    r = c.post(f"/scenarios/{scenario.id}/items", json={
+        "name": "Last day", "amount": "10.00", "type": "expense",
+        "frequency": "monthly", "day_of_month": 0,
+        "start_date": "2026-10-01", "account_id": account.id,
+    })
+    assert r.status_code == 201, r.text
+
+
+def test_an_unknown_recurring_type_is_a_422_not_a_500(client):
+    c, _user, account, scenario = client
+    r = c.post(f"/scenarios/{scenario.id}/items", json={
+        "name": "Nonsense", "amount": "10.00", "type": "banana",
+        "frequency": "monthly", "day_of_month": 1,
+        "start_date": "2026-10-01", "account_id": account.id,
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_an_unknown_frequency_is_a_422_not_a_500(client):
+    c, _user, account, scenario = client
+    r = c.post(f"/scenarios/{scenario.id}/items", json={
+        "name": "Nonsense", "amount": "10.00", "type": "expense",
+        "frequency": "fortnightly", "day_of_month": 1,
+        "start_date": "2026-10-01", "account_id": account.id,
+    })
+    assert r.status_code == 422, r.text
+
+
+def test_an_unknown_expense_direction_is_rejected(client):
+    """Direction decides the SIGN of real money once committed."""
+    c, _user, account, scenario = client
+    r = c.post(f"/scenarios/{scenario.id}/expenses", json={
+        "name": "Nonsense", "amount": "10.00", "expected_date": "2026-12-01",
+        "direction": "sideways", "account_id": account.id,
+    })
+    assert r.status_code == 422, r.text

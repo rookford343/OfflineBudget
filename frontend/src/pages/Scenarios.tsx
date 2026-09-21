@@ -516,7 +516,10 @@ function ProposedItemsSection({ scenario, accounts, cards, disabled, onAdd, onDr
             <option value="weekly">Weekly</option>
             <option value="biweekly">Biweekly</option>
           </select>
-          <input className="input" type="number" placeholder="Day of month"
+          {/* 0 = last day of month, matching RecurringCreate. Bounded here so
+              the stepper and the browser's own validation agree with the
+              server's 0-31 check instead of inviting a 422. */}
+          <input className="input" type="number" min={0} max={31} placeholder="Day of month"
                  value={form.day_of_month} onChange={(e) => set("day_of_month", e.target.value)} />
           <input className="input" type="number" placeholder="Month (yearly/qtr)"
                  value={form.month_of_year} onChange={(e) => set("month_of_year", e.target.value)} />
