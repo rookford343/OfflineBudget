@@ -70,6 +70,14 @@ data/.DS_Store
 # briefly started with the frontend as cwd, creating an empty second DB here.
 frontend/data/
 
+# Same failure mode, other cwd: running the app or a script from inside
+# backend/ creates backend/offlinebudget.db, which none of the data/ rules
+# above can match. The pre-commit hook scans for bank data, but a hook is a
+# backstop, not the policy. This repo is PUBLIC.
+backend/*.db
+backend/*.db-*
+backend/*.sqlite*
+
 # Superpowers scratch workspaces
 .superpowers/
 
