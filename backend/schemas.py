@@ -1099,17 +1099,33 @@ class ScenarioOverrideOut(BaseModel):
 
 
 class ScenarioProposedItemCreate(BaseModel):
+    """Validated exactly as strictly as RecurringCreate, because committing a
+    scenario copies these fields verbatim into a real RecurringItem row.
+
+    Before this matched, `type` was a bare str and an unknown value 500'd on
+    the way to the forecast, while `day_of_month` had no bounds at all: 45
+    silently meant "last day of month" in the preview, and a negative day
+    never fired, so committing one created a real bill that was permanently
+    invisible. The form is a plain number input, so that was a typo away.
+    """
     name: str
     amount: Decimal
-    type: str = "expense"
-    frequency: str = "monthly"
-    day_of_month: int = 1
+    type: RecurringType = RecurringType.expense
+    frequency: RecurringFrequency = RecurringFrequency.monthly
+    day_of_month: int = 1  # 1-31; 0 = last day
     month_of_year: Optional[int] = None
     start_date: date
     end_date: Optional[date] = None
     account_id: int
     card_id: Optional[int] = None
     category_id: Optional[int] = None
+
+    @field_validator("day_of_month")
+    @classmethod
+    def validate_day(cls, v: int) -> int:
+        if not (0 <= v <= 31):
+            raise ValueError("day_of_month must be 0 (last day) or 1-31")
+        return v
 
 
 class ScenarioProposedItemOut(BaseModel):
@@ -1133,7 +1149,10 @@ class ScenarioProposedExpenseCreate(BaseModel):
     name: str
     amount: Decimal
     expected_date: date
-    direction: str = "outflow"
+    # Enum for the same reason as the item schema above: commit copies this
+    # straight onto a real PlannedExpense, where an unrecognised direction
+    # decides the sign of real money.
+    direction: PlannedDirection = PlannedDirection.outflow
     account_id: Optional[int] = None
     card_id: Optional[int] = None
     funding_account_id: Optional[int] = None
