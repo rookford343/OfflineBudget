@@ -11,23 +11,36 @@ from decimal import Decimal, ROUND_CEILING
 from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry
-from backend.services.forecast_engine import build_forecast
+from backend.services.forecast_engine import build_forecast, ScenarioProposal
 from backend.services.card_matching import card_matches_description
 from backend.services.spendable_pacer import compute_weekly_spendable
 from backend.services.spending_helpers import category_totals_for_range, merchant_totals
 
 
-def _monthly_income(db: Session, user_id: int) -> Decimal:
+def _monthly_income(
+    db: Session, user_id: int,
+    extra_items: list[models.RecurringItem] | None = None,
+) -> Decimal:
     items = db.query(models.RecurringItem).filter(
         models.RecurringItem.user_id == user_id,
         models.RecurringItem.type == models.RecurringType.income,
         models.RecurringItem.is_active == True,
         models.RecurringItem.frequency == models.RecurringFrequency.monthly,
     ).all()
+    # A scenario's proposed items are RecurringItem-shaped and never persisted,
+    # so the same filter is applied in Python instead of SQL.
+    items = items + [
+        i for i in (extra_items or [])
+        if i.type == models.RecurringType.income
+        and i.frequency == models.RecurringFrequency.monthly
+    ]
     return sum((item.amount for item in items), Decimal("0"))
 
 
-def _monthly_expenses(db: Session, user_id: int, as_of: date) -> Decimal:
+def _monthly_expenses(
+    db: Session, user_id: int, as_of: date,
+    extra_items: list[models.RecurringItem] | None = None,
+) -> Decimal:
     """All active expense recurring items, monthly + any yearly item due
     this month -- covers Checking Bills, Credit Card Bills, and Tithing
     combined, matching how Budget.xlsx's Leftover formula treats them."""
@@ -36,6 +49,10 @@ def _monthly_expenses(db: Session, user_id: int, as_of: date) -> Decimal:
         models.RecurringItem.type == models.RecurringType.expense,
         models.RecurringItem.is_active == True,
     ).all()
+    items = items + [
+        i for i in (extra_items or [])
+        if i.type == models.RecurringType.expense
+    ]
     total = Decimal("0")
     for item in items:
         if item.frequency == models.RecurringFrequency.monthly:
@@ -140,6 +157,7 @@ def _charged_so_far(db: Session, user_id: int, as_of: date) -> Decimal:
 
 def _lookahead_minimum(
     db: Session, user_id: int, account_id: int, as_of: date, months: int = 3,
+    *, proposal: ScenarioProposal | None = None,
 ) -> tuple[Decimal, date | None]:
     """The lowest projected checking balance over the NEXT `months` months and
     the day it lands, EXCLUDING the dip caused by the LOCKED-IN card payoff.
@@ -198,7 +216,7 @@ def _lookahead_minimum(
     # Started early so the skip state below is already settled by `as_of` --
     # asking on the 27th, three days into a payoff dip, must give the same
     # answer as asking on the 14th.
-    days = build_forecast(db, user_id, account_id, as_of - timedelta(days=45), end)
+    days = build_forecast(db, user_id, account_id, as_of - timedelta(days=45), end, proposal=proposal)
     if not days:
         return Decimal("0"), None
 
@@ -260,11 +278,14 @@ def compute_budget_snapshot(
     user: models.User,
     account_id: int,
     as_of: date | None = None,
+    *,
+    proposal: ScenarioProposal | None = None,
 ) -> BudgetSnapshot:
     as_of = as_of or date.today()
+    extra_items = list(proposal.items) if proposal else None
 
-    monthly_income = _monthly_income(db, user.id)
-    monthly_expenses = _monthly_expenses(db, user.id, as_of)
+    monthly_income = _monthly_income(db, user.id, extra_items)
+    monthly_expenses = _monthly_expenses(db, user.id, as_of, extra_items)
     savings_budget = _budget_allocation_total(db, user.id, "Savings", as_of.year, as_of.month)
     groceries_budget = _budget_allocation_total(db, user.id, "Groceries", as_of.year, as_of.month)
     # Groceries is committed, not spendable. the user's sheet formula cancels its
@@ -317,7 +338,7 @@ def compute_budget_snapshot(
     cc_budget_total = _cc_budget_total(db, user.id, as_of)
 
     left_to_spend = leftover - new_spending_total + charged_so_far
-    quarter_min, quarter_min_date = _lookahead_minimum(db, user.id, account_id, as_of)
+    quarter_min, quarter_min_date = _lookahead_minimum(db, user.id, account_id, as_of, proposal=proposal)
     # Safety Margin does NOT subtract new_spending_total -- unlike Left to
     # Spend, quarter_min here is a CHECKING-account balance that the new
     # spending has already flowed through (a card swipe debits checking the

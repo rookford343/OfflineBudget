@@ -1,30 +1,13 @@
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
+from backend.services.recurring_math import monthly_equivalent as _monthly_equivalent
 
 router = APIRouter(prefix="/recurring", tags=["recurring"])
-
-# What one occurrence of each frequency costs per month on average.
-# Deliberately NOT the same treatment as budget_snapshot._monthly_expenses,
-# which charges a yearly bill in full in the month it lands to reconcile
-# with the spreadsheet's Leftover row. This is the "what does my life cost
-# per month" figure, so a yearly bill is a twelfth of itself.
-_MONTHLY_FACTOR = {
-    models.RecurringFrequency.monthly: Decimal(1),
-    models.RecurringFrequency.quarterly: Decimal(1) / Decimal(3),
-    models.RecurringFrequency.yearly: Decimal(1) / Decimal(12),
-    models.RecurringFrequency.weekly: Decimal(52) / Decimal(12),
-    models.RecurringFrequency.biweekly: Decimal(26) / Decimal(12),
-}
-
-
-def _monthly_equivalent(item: models.RecurringItem) -> Decimal:
-    factor = _MONTHLY_FACTOR.get(item.frequency, Decimal(1))
-    return (item.amount * factor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 def _months_until(today: date, end: date) -> int:

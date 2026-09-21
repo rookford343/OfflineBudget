@@ -416,3 +416,49 @@ def uncommit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
         "expenses_removed": expenses_removed,
         "overrides_restored": overrides_restored,
     }
+
+
+from backend.services.budget_snapshot import compute_budget_snapshot
+from backend.services.recurring_math import monthly_equivalent
+
+
+def _monthly_burn(db: Session, user_id: int, extra_items: list) -> Decimal:
+    """Ongoing monthly cost of every active expense item, proposals included.
+
+    Reuses recurring_math.monthly_equivalent -- the same helper
+    /recurring/breakdown uses -- so this figure and the Recurring page's
+    Ongoing-vs-Temporary card agree by construction rather than by two
+    implementations happening to round the same way.
+    """
+    items = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user_id,
+        models.RecurringItem.is_active == True,
+        models.RecurringItem.type == models.RecurringType.expense,
+    ).all()
+    total = Decimal("0")
+    for item in items + [i for i in extra_items if i.type == models.RecurringType.expense]:
+        total += monthly_equivalent(item)
+    return total
+
+
+def _impact_column(db, user, account_id, proposal) -> dict:
+    snapshot = compute_budget_snapshot(db, user, account_id, proposal=proposal)
+    extra_items = list(proposal.items) if proposal else []
+    return {
+        "low": snapshot.lookahead_minimum,
+        "low_date": snapshot.lookahead_minimum_date,
+        "safety_margin_weekly": snapshot.safety_margin_weekly,
+        "monthly_burn": _monthly_burn(db, user.id, extra_items),
+    }
+
+
+def scenario_impact(db: Session, user: models.User, account_id: int, scenario_id: int) -> dict:
+    """Baseline and scenario side by side. Raises LookupError if no scenario."""
+    resolved = resolve_scenario(db, user.id, scenario_id)
+    if resolved is None:
+        raise LookupError("Scenario not found")
+    _overrides, proposal = resolved
+    return {
+        "baseline": _impact_column(db, user, account_id, None),
+        "scenario": _impact_column(db, user, account_id, proposal),
+    }
