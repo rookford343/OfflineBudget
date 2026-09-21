@@ -6,6 +6,7 @@ business logic with real failure modes worth testing without HTTP in the way.
 """
 from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 
 from sqlalchemy import update
 from sqlalchemy.orm import Session
@@ -422,9 +423,21 @@ from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.recurring_math import monthly_equivalent
 
 
-def _total_monthly_commitments(db: Session, user_id: int, extra_items: list) -> Decimal:
+def _total_monthly_commitments(
+    db: Session, user_id: int, extra_items: list,
+    overrides: list[dict] | None = None,
+) -> Decimal:
     """Sum of every active expense recurring item's monthly-equivalent cost,
-    proposals included -- end-dated items too, deliberately not filtered out.
+    proposals AND amount tweaks included -- end-dated items too, deliberately
+    not filtered out.
+
+    A tweak is an `amount_delta` on an existing item, so it is folded in by
+    costing that item at its tweaked amount rather than by adding the raw
+    delta: a delta on a quarterly or yearly item is not a monthly delta. The
+    tweaked amount is carried on a throwaway stand-in, never written onto the
+    ORM row -- assigning to `item.amount` here would be flushed to the
+    database by the next query in the same session, turning a read-only
+    preview into a real edit of a real bill.
 
     A temporary commitment (an installment plan, anything with an end_date)
     still costs money every month it's active, and seeing that cost show up
@@ -440,6 +453,10 @@ def _total_monthly_commitments(db: Session, user_id: int, extra_items: list) -> 
     rounding agrees even though the totals being compared aren't the same
     total.
     """
+    delta_by_item_id = {
+        o["recurring_item_id"]: Decimal(str(o["amount_delta"]))
+        for o in (overrides or [])
+    }
     items = db.query(models.RecurringItem).filter(
         models.RecurringItem.user_id == user_id,
         models.RecurringItem.is_active == True,
@@ -447,28 +464,43 @@ def _total_monthly_commitments(db: Session, user_id: int, extra_items: list) -> 
     ).all()
     total = Decimal("0")
     for item in items + [i for i in extra_items if i.type == models.RecurringType.expense]:
+        delta = delta_by_item_id.get(item.id)
+        if delta:
+            item = SimpleNamespace(amount=item.amount + delta, frequency=item.frequency)
         total += monthly_equivalent(item)
     return total
 
 
-def _impact_column(db, user, account_id, proposal) -> dict:
-    snapshot = compute_budget_snapshot(db, user, account_id, proposal=proposal)
+def _impact_column(db, user, account_id, proposal, overrides=None) -> dict:
+    snapshot = compute_budget_snapshot(
+        db, user, account_id, proposal=proposal, overrides=overrides,
+    )
     extra_items = list(proposal.items) if proposal else []
     return {
         "low": snapshot.lookahead_minimum,
         "low_date": snapshot.lookahead_minimum_date,
         "safety_margin_weekly": snapshot.safety_margin_weekly,
-        "total_monthly_commitments": _total_monthly_commitments(db, user.id, extra_items),
+        "total_monthly_commitments": _total_monthly_commitments(
+            db, user.id, extra_items, overrides,
+        ),
     }
 
 
 def scenario_impact(db: Session, user: models.User, account_id: int, scenario_id: int) -> dict:
-    """Baseline and scenario side by side. Raises LookupError if no scenario."""
+    """Baseline and scenario side by side. Raises LookupError if no scenario.
+
+    Both halves of what `resolve_scenario` returns are threaded through, not
+    just the proposals: a scenario is allowed to hold nothing but amount
+    tweaks, and for that shape the strip used to report the scenario column as
+    identical to the baseline in every figure while the comparison chart on
+    the same page drew the two lines diverging. The strip is the panel read
+    just before Commit, so agreeing with the chart is the whole job.
+    """
     resolved = resolve_scenario(db, user.id, scenario_id)
     if resolved is None:
         raise LookupError("Scenario not found")
-    _overrides, proposal = resolved
+    overrides, proposal = resolved
     return {
         "baseline": _impact_column(db, user, account_id, None),
-        "scenario": _impact_column(db, user, account_id, proposal),
+        "scenario": _impact_column(db, user, account_id, proposal, overrides),
     }
