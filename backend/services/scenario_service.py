@@ -7,6 +7,7 @@ business logic with real failure modes worth testing without HTTP in the way.
 from datetime import datetime
 from decimal import Decimal
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from backend import models
@@ -96,18 +97,116 @@ class ScenarioNotCommitted(Exception):
     pass
 
 
+class ScenarioUncommitBlocked(Exception):
+    """Another scenario's amount tweak still targets a row this scenario
+    created. Deleting that row would violate the FK constraint on
+    ScenarioOverride.recurring_item_id (nullable=False, no ondelete) and crash
+    mid-uncommit, stranding this scenario as committed forever -- so it is
+    detected and refused before the first delete instead."""
+
+    def __init__(self, blocking_scenario_name: str, recurring_item_id: int):
+        self.blocking_scenario_name = blocking_scenario_name
+        self.recurring_item_id = recurring_item_id
+        super().__init__(
+            f"recurring item {recurring_item_id} still has a tweak from scenario "
+            f"{blocking_scenario_name!r}"
+        )
+
+
+class ScenarioCommitConflict(Exception):
+    """A different, already-committed scenario already tweaked this item.
+    Stacking a second tweak on top would leave only room to remember one
+    committed_previous_amount, permanently losing the true original amount
+    the moment both scenarios were uncommitted in sequence."""
+
+    def __init__(self, conflicting_scenario_name: str, item_name: str, recurring_item_id: int):
+        self.conflicting_scenario_name = conflicting_scenario_name
+        self.item_name = item_name
+        self.recurring_item_id = recurring_item_id
+        super().__init__(
+            f"item {item_name!r} (id {recurring_item_id}) is already tweaked by "
+            f"committed scenario {conflicting_scenario_name!r}"
+        )
+
+
+class ScenarioAccountNotOwned(Exception):
+    def __init__(self, account_id: int):
+        self.account_id = account_id
+        super().__init__(f"account {account_id} is not owned by this user")
+
+
+def _assert_account_owned(db: Session, user_id: int, account_id: int | None) -> None:
+    """Mirrors routers/recurring.py's _assert_account_owned: commit creates
+    real RecurringItem/PlannedExpense rows from proposal data that was never
+    itself validated against the committing user's accounts."""
+    if account_id is None:
+        return
+    owned = db.query(models.Account).filter(
+        models.Account.id == account_id,
+        models.Account.user_id == user_id,
+    ).first()
+    if owned is None:
+        raise ScenarioAccountNotOwned(account_id)
+
+
 def commit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
     """Materialize a scenario into real rows, recording what it created.
 
     One transaction: a half-committed scenario would leave proposals whose
     committed_* links point at rows that may or may not exist, which uncommit
-    cannot reason about.
+    cannot reason about. Every guard below is checked in full before any row
+    is created or mutated, so a refusal never leaves partial work behind.
     """
     scenario = get_scenario(db, user_id, scenario_id)
     if scenario is None:
         raise LookupError("Scenario not found")
-    if scenario.status == "committed":
+
+    for p in scenario.proposed_items:
+        _assert_account_owned(db, user_id, p.account_id)
+    for p in scenario.proposed_expenses:
+        _assert_account_owned(db, user_id, p.account_id)
+
+    for o in scenario.overrides:
+        conflict = (
+            db.query(models.ScenarioOverride)
+            .join(models.ScenarioOverride.scenario)
+            .filter(
+                models.ScenarioOverride.recurring_item_id == o.recurring_item_id,
+                models.ScenarioOverride.scenario_id != scenario.id,
+                models.ForecastScenario.status == "committed",
+                models.ScenarioOverride.committed_previous_amount.isnot(None),
+            )
+            .first()
+        )
+        if conflict is not None:
+            item = db.query(models.RecurringItem).filter(
+                models.RecurringItem.id == o.recurring_item_id,
+            ).first()
+            raise ScenarioCommitConflict(
+                conflicting_scenario_name=conflict.scenario.name,
+                item_name=item.name if item is not None else f"item {o.recurring_item_id}",
+                recurring_item_id=o.recurring_item_id,
+            )
+
+    # The write itself is the concurrency guard, not a prior read: two
+    # requests can both read status=="draft" before either writes, so the
+    # authoritative check is this UPDATE's rowcount. Only one request's
+    # conditional UPDATE can ever flip draft -> committed; the other affects
+    # zero rows and is refused before it creates anything.
+    now = datetime.utcnow()
+    result = db.execute(
+        update(models.ForecastScenario)
+        .where(
+            models.ForecastScenario.id == scenario_id,
+            models.ForecastScenario.status == "draft",
+        )
+        .values(status="committed", committed_at=now)
+    )
+    if result.rowcount == 0:
+        db.rollback()
         raise ScenarioAlreadyCommitted(scenario_id)
+    scenario.status = "committed"
+    scenario.committed_at = now
 
     items_created = 0
     for p in scenario.proposed_items:
@@ -165,8 +264,6 @@ def commit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
         item.amount = item.amount + o.amount_delta
         overrides_applied += 1
 
-    scenario.status = "committed"
-    scenario.committed_at = datetime.utcnow()
     db.commit()
     return {
         "items_created": items_created,
@@ -183,12 +280,41 @@ def uncommit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
     not an error. Edits made to a created row after commit are LOST: the row
     is deleted regardless. Refusing instead would mean fingerprinting every
     created row and surfacing a refusal the user cannot resolve.
+
+    One case IS refused, up front, before any delete: if another scenario's
+    amount tweak still points at an item this scenario created, deleting that
+    item would violate the FK constraint on
+    ScenarioOverride.recurring_item_id and crash mid-uncommit, stranding this
+    scenario as committed forever. That is checked in one query covering
+    every row this scenario created, before the first delete, so the refusal
+    is atomic and partial work is impossible.
     """
     scenario = get_scenario(db, user_id, scenario_id)
     if scenario is None:
         raise LookupError("Scenario not found")
     if scenario.status != "committed":
         raise ScenarioNotCommitted(scenario_id)
+
+    committed_item_ids = [
+        p.committed_recurring_item_id
+        for p in scenario.proposed_items
+        if p.committed_recurring_item_id is not None
+    ]
+    if committed_item_ids:
+        blocking = (
+            db.query(models.ScenarioOverride)
+            .filter(
+                models.ScenarioOverride.recurring_item_id.in_(committed_item_ids),
+                models.ScenarioOverride.scenario_id != scenario.id,
+            )
+            .order_by(models.ScenarioOverride.id.asc())
+            .first()
+        )
+        if blocking is not None:
+            raise ScenarioUncommitBlocked(
+                blocking_scenario_name=blocking.scenario.name,
+                recurring_item_id=blocking.recurring_item_id,
+            )
 
     items_removed = 0
     for p in scenario.proposed_items:
