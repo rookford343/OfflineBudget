@@ -48,6 +48,8 @@ def delete_scenario(scenario_id: int, db: Session = Depends(get_db), user: model
     ).first()
     if not scenario:
         raise HTTPException(404, "Scenario not found")
+    if scenario.status == "committed":
+        raise HTTPException(409, "Uncommit this scenario before deleting it")
     db.delete(scenario)
     db.commit()
     return {"ok": True}
@@ -124,7 +126,9 @@ def delete_proposed_item(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    _owned_scenario(db, user.id, scenario_id)
+    scenario = _owned_scenario(db, user.id, scenario_id)
+    if scenario.status == "committed":
+        raise HTTPException(409, "Uncommit this scenario before deleting it")
     item = db.query(models.ScenarioProposedItem).filter(
         models.ScenarioProposedItem.id == item_id,
         models.ScenarioProposedItem.scenario_id == scenario_id,
@@ -161,7 +165,9 @@ def delete_proposed_expense(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    _owned_scenario(db, user.id, scenario_id)
+    scenario = _owned_scenario(db, user.id, scenario_id)
+    if scenario.status == "committed":
+        raise HTTPException(409, "Uncommit this scenario before deleting it")
     expense = db.query(models.ScenarioProposedExpense).filter(
         models.ScenarioProposedExpense.id == expense_id,
         models.ScenarioProposedExpense.scenario_id == scenario_id,
@@ -182,7 +188,15 @@ def commit_scenario(
     try:
         return scenario_service.commit_scenario(db, user.id, scenario_id)
     except scenario_service.ScenarioAlreadyCommitted:
-        raise HTTPException(409, "Scenario is already committed")
+        raise HTTPException(409, "Scenario is already committed") from None
+    except scenario_service.ScenarioAccountNotOwned:
+        raise HTTPException(404, "Account not found") from None
+    except scenario_service.ScenarioCommitConflict as e:
+        raise HTTPException(
+            409,
+            f"Cannot commit: item '{e.item_name}' is already tweaked by committed "
+            f"scenario '{e.conflicting_scenario_name}'.",
+        ) from None
 
 
 @router.post("/{scenario_id}/uncommit", response_model=schemas.ScenarioCommitResult)
@@ -195,4 +209,10 @@ def uncommit_scenario(
     try:
         return scenario_service.uncommit_scenario(db, user.id, scenario_id)
     except scenario_service.ScenarioNotCommitted:
-        raise HTTPException(409, "Scenario is not committed")
+        raise HTTPException(409, "Scenario is not committed") from None
+    except scenario_service.ScenarioUncommitBlocked as e:
+        raise HTTPException(
+            409,
+            f"Cannot uncommit: scenario '{e.blocking_scenario_name}' has an amount "
+            f"tweak on an item this scenario created. Remove that tweak first.",
+        ) from None
