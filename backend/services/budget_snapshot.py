@@ -158,9 +158,18 @@ def _charged_so_far(db: Session, user_id: int, as_of: date) -> Decimal:
 def _lookahead_minimum(
     db: Session, user_id: int, account_id: int, as_of: date, months: int = 3,
     *, proposal: ScenarioProposal | None = None,
+    overrides: list[dict] | None = None,
 ) -> tuple[Decimal, date | None]:
     """The lowest projected checking balance over the NEXT `months` months and
     the day it lands, EXCLUDING the dip caused by the LOCKED-IN card payoff.
+
+    `overrides` is a scenario's amount tweaks on EXISTING recurring items, in
+    `build_forecast`'s shape ({"recurring_item_id", "amount_delta"}). It is
+    keyword-only with a None default because the Dashboard and the daily email
+    call this with no scenario at all and must keep behaving identically. A
+    scenario holding only tweaks and no proposals used to arrive here with the
+    tweaks dropped on the floor, so the impact strip reported "no change" about
+    a change the chart beside it was already drawing.
 
     The distinction is locked vs in-flux, not payoff vs everything else (the user,
     2026-08-14). The next payoff has already been statemented: its amount is
@@ -216,7 +225,10 @@ def _lookahead_minimum(
     # Started early so the skip state below is already settled by `as_of` --
     # asking on the 27th, three days into a payoff dip, must give the same
     # answer as asking on the 14th.
-    days = build_forecast(db, user_id, account_id, as_of - timedelta(days=45), end, proposal=proposal)
+    days = build_forecast(
+        db, user_id, account_id, as_of - timedelta(days=45), end,
+        overrides=overrides, proposal=proposal,
+    )
     if not days:
         return Decimal("0"), None
 
@@ -280,7 +292,21 @@ def compute_budget_snapshot(
     as_of: date | None = None,
     *,
     proposal: ScenarioProposal | None = None,
+    overrides: list[dict] | None = None,
 ) -> BudgetSnapshot:
+    """`overrides` (a scenario's amount tweaks on existing recurring items)
+    reaches the day-by-day walk only -- `_lookahead_minimum`, and therefore
+    `lookahead_minimum`, `lookahead_minimum_date`, `safety_margin` and
+    `safety_margin_weekly`. It deliberately does NOT reach the flat monthly
+    aggregates (`_monthly_income`/`_monthly_expenses`, hence `leftover` and
+    `left_to_spend`); those are not figures the scenario impact strip shows,
+    and widening the blast radius would change what the Dashboard means.
+
+    Both scenario kwargs are keyword-only with None defaults so the three
+    existing callers -- routers/spending.py's /snapshot, and
+    summary_generator's daily and weekly emails -- keep behaving byte for byte
+    as they did.
+    """
     as_of = as_of or date.today()
     extra_items = list(proposal.items) if proposal else None
 
@@ -338,7 +364,9 @@ def compute_budget_snapshot(
     cc_budget_total = _cc_budget_total(db, user.id, as_of)
 
     left_to_spend = leftover - new_spending_total + charged_so_far
-    quarter_min, quarter_min_date = _lookahead_minimum(db, user.id, account_id, as_of, proposal=proposal)
+    quarter_min, quarter_min_date = _lookahead_minimum(
+        db, user.id, account_id, as_of, proposal=proposal, overrides=overrides,
+    )
     # Safety Margin does NOT subtract new_spending_total -- unlike Left to
     # Spend, quarter_min here is a CHECKING-account balance that the new
     # spending has already flowed through (a card swipe debits checking the
