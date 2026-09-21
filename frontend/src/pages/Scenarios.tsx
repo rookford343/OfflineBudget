@@ -77,9 +77,19 @@ export default function Scenarios() {
 
   const selected = scenarios.find((s) => s.id === selectedId) ?? null;
   const committed = selected?.status === "committed";
+  // Every mutation that changes a scenario's own proposed items/expenses/
+  // overrides changes that scenario's forecast line, so `scenario-lines`
+  // belongs in the shared helper -- these are explicit button clicks, not
+  // keystroke-level, so the extra refetch is real work, not waste.
+  // `scenario-baseline` is deliberately NOT here: a draft scenario's edits
+  // never touch the real recurring items/planned expenses that baseline is
+  // computed from, so invalidating it here would refetch the same baseline
+  // every time for zero effect. It's added only in commit/uncommit below,
+  // where the real data actually changes.
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["scenarios"] });
     qc.invalidateQueries({ queryKey: ["scenario-impact"] });
+    qc.invalidateQueries({ queryKey: ["scenario-lines"] });
   };
 
   const { data: impact } = useQuery<any>({
@@ -160,6 +170,13 @@ export default function Scenarios() {
     mutationFn: () => scenariosApi.commit(selected!.id),
     onSuccess: () => {
       invalidate();
+      // Committing turns this scenario's proposals into real recurring items
+      // and planned expenses, which changes the real forecast baseline --
+      // and since every other scenario's line is baseline plus its own
+      // overrides, their lines shift too. Without this the chart keeps
+      // drawing the pre-commit line for up to `staleTime` (main.tsx), while
+      // the impact table above it has already redrawn at zero delta.
+      qc.invalidateQueries({ queryKey: ["scenario-baseline"] });
       qc.invalidateQueries({ queryKey: ["recurring"] });
       qc.invalidateQueries({ queryKey: ["planned-expenses"] });
     },
@@ -168,6 +185,10 @@ export default function Scenarios() {
     mutationFn: () => scenariosApi.uncommit(selected!.id),
     onSuccess: () => {
       invalidate();
+      // Same reasoning as commit: uncommitting removes real recurring items/
+      // planned expenses and restores overridden amounts, so baseline (and
+      // every scenario line derived from it) has to be refetched too.
+      qc.invalidateQueries({ queryKey: ["scenario-baseline"] });
       qc.invalidateQueries({ queryKey: ["recurring"] });
       qc.invalidateQueries({ queryKey: ["planned-expenses"] });
     },
@@ -183,6 +204,17 @@ export default function Scenarios() {
     commit.reset(); uncommit.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
+
+  // A scenario checked for comparison can be deleted out from under the
+  // chart. Drop it from compareIds rather than letting it linger in
+  // lineIds, where it would keep firing a forecast fetch against a
+  // scenario id that no longer exists.
+  useEffect(() => {
+    setCompareIds((ids) => {
+      const stillExists = ids.filter((id) => scenarios.some((s) => s.id === id));
+      return stillExists.length === ids.length ? ids : stillExists;
+    });
+  }, [scenarios]);
 
   return (
     <div className="space-y-6">
