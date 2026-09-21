@@ -3079,7 +3079,7 @@ Then render these three blocks inside the `{selected && (<>…</>)}` fragment, a
                   {([
                     ["3-month low", "low", true],
                     ["Weekly safety margin", "safety_margin_weekly", true],
-                    ["Ongoing monthly burn", "monthly_burn", false],
+                    ["Total monthly commitments", "total_monthly_commitments", false],
                   ] as [string, string, boolean][]).map(([label, key, higherIsBetter]) => {
                     const base = Number(impact.baseline[key]);
                     const scen = Number(impact.scenario[key]);
