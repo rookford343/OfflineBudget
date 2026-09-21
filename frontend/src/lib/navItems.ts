@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard, CreditCard, TrendingUp, PieChart,
   Repeat, ArrowLeftRight, Target, Settings, Upload,
-  CalendarDays, Wallet, BarChart2, Receipt,
+  CalendarDays, Wallet, BarChart2, Receipt, FlaskConical,
 } from "lucide-react";
 
 export interface NavItem {
@@ -42,6 +42,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/goals", icon: Wallet, label: "Goals" },
       { to: "/credit-cards", icon: CreditCard, label: "Credit Cards" },
       { to: "/forecast", icon: TrendingUp, label: "Forecast" },
+      { to: "/scenarios", icon: FlaskConical, label: "Scenarios" },
     ],
   },
 ];

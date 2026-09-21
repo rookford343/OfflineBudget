@@ -265,6 +265,21 @@ export const scenariosApi = {
     api.post(`/scenarios/${scenarioId}/overrides`, data).then((r) => r.data),
   removeOverride: (scenarioId: number, overrideId: number) =>
     api.delete(`/scenarios/${scenarioId}/overrides/${overrideId}`),
+  createItem: (scenarioId: number, data: object) =>
+    api.post(`/scenarios/${scenarioId}/items`, data).then((r) => r.data),
+  removeItem: (scenarioId: number, itemId: number) =>
+    api.delete(`/scenarios/${scenarioId}/items/${itemId}`),
+  createExpense: (scenarioId: number, data: object) =>
+    api.post(`/scenarios/${scenarioId}/expenses`, data).then((r) => r.data),
+  removeExpense: (scenarioId: number, expenseId: number) =>
+    api.delete(`/scenarios/${scenarioId}/expenses/${expenseId}`),
+  commit: (scenarioId: number) =>
+    api.post(`/scenarios/${scenarioId}/commit`).then((r) => r.data),
+  uncommit: (scenarioId: number) =>
+    api.post(`/scenarios/${scenarioId}/uncommit`).then((r) => r.data),
+  impact: (scenarioId: number, accountId: number) =>
+    api.get(`/scenarios/${scenarioId}/impact`, { params: { account_id: accountId } })
+      .then((r) => r.data),
 };
 
 // ── Day Checkpoints ───────────────────────────────────────────────────────────
