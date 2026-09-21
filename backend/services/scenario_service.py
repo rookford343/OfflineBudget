@@ -316,31 +316,41 @@ def uncommit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
                 recurring_item_id=blocking.recurring_item_id,
             )
 
+    # Clear each back-link and flush it BEFORE deleting the row it points at.
+    # committed_recurring_item_id/committed_planned_expense_id are plain FK
+    # columns with no relationship() mapping, so the ORM's unit-of-work has no
+    # dependency information telling it the UPDATE must precede the DELETE --
+    # left to its own ordering, it can (and did) emit the DELETE first and hit
+    # the same FK constraint C1 refuses for the ScenarioOverride case.
     items_removed = 0
     for p in scenario.proposed_items:
         if p.committed_recurring_item_id is None:
             continue
+        item_id = p.committed_recurring_item_id
+        p.committed_recurring_item_id = None
+        db.flush()
         item = db.query(models.RecurringItem).filter(
-            models.RecurringItem.id == p.committed_recurring_item_id,
+            models.RecurringItem.id == item_id,
             models.RecurringItem.user_id == user_id,
         ).first()
         if item is not None:
             db.delete(item)
             items_removed += 1
-        p.committed_recurring_item_id = None
 
     expenses_removed = 0
     for p in scenario.proposed_expenses:
         if p.committed_planned_expense_id is None:
             continue
+        expense_id = p.committed_planned_expense_id
+        p.committed_planned_expense_id = None
+        db.flush()
         expense = db.query(models.PlannedExpense).filter(
-            models.PlannedExpense.id == p.committed_planned_expense_id,
+            models.PlannedExpense.id == expense_id,
             models.PlannedExpense.user_id == user_id,
         ).first()
         if expense is not None:
             db.delete(expense)
             expenses_removed += 1
-        p.committed_planned_expense_id = None
 
     overrides_restored = 0
     for o in scenario.overrides:
