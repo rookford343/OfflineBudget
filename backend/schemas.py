@@ -1178,6 +1178,18 @@ class ScenarioCommitResult(BaseModel):
     overrides_restored: int = 0
 
 
+class ScenarioImpactColumn(BaseModel):
+    low: Decimal
+    low_date: Optional[date] = None
+    safety_margin_weekly: Decimal
+    monthly_burn: Decimal
+
+
+class ScenarioImpact(BaseModel):
+    baseline: ScenarioImpactColumn
+    scenario: ScenarioImpactColumn
+
+
 # ── Planned Expenses ─────────────────────────────────────────────────────────
 
 class PlannedExpenseCreate(BaseModel):

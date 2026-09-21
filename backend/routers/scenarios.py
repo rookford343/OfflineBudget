@@ -188,6 +188,17 @@ def delete_proposed_expense(
     db.commit()
 
 
+@router.get("/{scenario_id}/impact", response_model=schemas.ScenarioImpact)
+def get_scenario_impact(
+    scenario_id: int,
+    account_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    _owned_scenario(db, user.id, scenario_id)
+    return scenario_service.scenario_impact(db, user, account_id, scenario_id)
+
+
 @router.post("/{scenario_id}/commit", response_model=schemas.ScenarioCommitResult)
 def commit_scenario(
     scenario_id: int,
