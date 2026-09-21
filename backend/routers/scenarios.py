@@ -196,6 +196,12 @@ def get_scenario_impact(
     user: models.User = Depends(get_current_user),
 ):
     _owned_scenario(db, user.id, scenario_id)
+    account = db.query(models.Account).filter(
+        models.Account.id == account_id,
+        models.Account.user_id == user.id,
+    ).first()
+    if not account:
+        raise HTTPException(404, "Account not found")
     return scenario_service.scenario_impact(db, user, account_id, scenario_id)
 
 

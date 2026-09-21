@@ -422,13 +422,23 @@ from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.recurring_math import monthly_equivalent
 
 
-def _monthly_burn(db: Session, user_id: int, extra_items: list) -> Decimal:
-    """Ongoing monthly cost of every active expense item, proposals included.
+def _total_monthly_commitments(db: Session, user_id: int, extra_items: list) -> Decimal:
+    """Sum of every active expense recurring item's monthly-equivalent cost,
+    proposals included -- end-dated items too, deliberately not filtered out.
 
-    Reuses recurring_math.monthly_equivalent -- the same helper
-    /recurring/breakdown uses -- so this figure and the Recurring page's
-    Ongoing-vs-Temporary card agree by construction rather than by two
-    implementations happening to round the same way.
+    A temporary commitment (an installment plan, anything with an end_date)
+    still costs money every month it's active, and seeing that cost show up
+    when a scenario proposes one is the whole point of this feature -- a
+    strip of $57.87/mo that quietly excluded itself because it happens to
+    end someday would hide the exact thing being tested.
+
+    This is NOT the same total as the Recurring page's Ongoing-vs-Temporary
+    "ongoing" figure -- it equals that card's ongoing total PLUS its ending
+    total, because both are active expenses right now. What IS shared with
+    that page: recurring_math.monthly_equivalent, the same per-item
+    monthly-equivalent helper /recurring/breakdown uses, so the two screens'
+    rounding agrees even though the totals being compared aren't the same
+    total.
     """
     items = db.query(models.RecurringItem).filter(
         models.RecurringItem.user_id == user_id,
@@ -448,7 +458,7 @@ def _impact_column(db, user, account_id, proposal) -> dict:
         "low": snapshot.lookahead_minimum,
         "low_date": snapshot.lookahead_minimum_date,
         "safety_margin_weekly": snapshot.safety_margin_weekly,
-        "monthly_burn": _monthly_burn(db, user.id, extra_items),
+        "total_monthly_commitments": _total_monthly_commitments(db, user.id, extra_items),
     }
 
 

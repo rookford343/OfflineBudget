@@ -1182,7 +1182,7 @@ class ScenarioImpactColumn(BaseModel):
     low: Decimal
     low_date: Optional[date] = None
     safety_margin_weekly: Decimal
-    monthly_burn: Decimal
+    total_monthly_commitments: Decimal
 
 
 class ScenarioImpact(BaseModel):
