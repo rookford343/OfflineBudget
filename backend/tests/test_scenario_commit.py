@@ -148,23 +148,22 @@ def test_uncommit_removes_exactly_what_it_created(seeded):
     assert scenario.committed_at is None
 
 
-def test_uncommit_tolerates_a_proposal_whose_link_is_already_gone(seeded):
-    """With foreign keys enforced, a proposal's committed_recurring_item_id
-    cannot be left dangling at a deleted row through normal operation -- the
-    FK constraint blocks that delete outright (this is the C1 fix). The only
-    way this state exists is a null-then-delete done by hand outside
-    uncommit_scenario, e.g. a restored backup or a manual DB fix. This test
-    covers uncommit's tolerance for that state directly, since enforced keys
-    make it unreachable any other way."""
+def test_uncommit_tolerates_a_proposal_whose_link_is_already_cleared(seeded):
+    """Covers ONLY the case where committed_recurring_item_id is already None
+    before uncommit_scenario runs -- e.g. a previous uncommit already cleared
+    it, or the database was edited externally. uncommit_scenario's per-item
+    loop short-circuits on that null link, so it never even looks up a row.
+
+    This does NOT test (and cannot honestly claim to test) a link that still
+    points at a since-deleted row: under enforced foreign keys that state
+    can't be constructed through normal operation at all, since a live link
+    blocks the row's deletion outright (see the C1 guard). See the comment at
+    the `if item is not None` check in uncommit_scenario for that branch.
+    """
     db, user, _account, scenario, _dining = seeded
     scenario_service.commit_scenario(db, user.id, scenario.id)
     proposal = db.query(models.ScenarioProposedItem).one()
-    created = db.query(models.RecurringItem).filter(
-        models.RecurringItem.name == "iPhone Trade-In"
-    ).one()
     proposal.committed_recurring_item_id = None
-    db.commit()
-    db.delete(created)
     db.commit()
 
     result = scenario_service.uncommit_scenario(db, user.id, scenario.id)
@@ -172,6 +171,10 @@ def test_uncommit_tolerates_a_proposal_whose_link_is_already_gone(seeded):
     assert result["items_removed"] == 0
     db.refresh(scenario)
     assert scenario.status == "draft"
+    # uncommit had no live link to this row, so it never touched it.
+    assert db.query(models.RecurringItem).filter(
+        models.RecurringItem.name == "iPhone Trade-In"
+    ).count() == 1
 
 
 def test_uncommit_discards_later_edits_to_a_created_row(seeded):
@@ -332,3 +335,97 @@ def test_commit_refused_when_proposal_account_not_owned(seeded):
     ).count() == 0
     db.refresh(scenario)
     assert scenario.status == "draft"
+
+
+def test_uncommit_blocked_by_its_own_override(seeded):
+    """N1: a scenario tweaking an item IT created reproduces the identical FK
+    crash C1 exists to prevent -- the blocking query must not exclude this
+    scenario's own overrides. Reachable via POST .../overrides, which has no
+    committed-status guard, against a real item the picker lists."""
+    db, user, _account, scenario, _dining = seeded
+    scenario_service.commit_scenario(db, user.id, scenario.id)
+    created = db.query(models.RecurringItem).filter(
+        models.RecurringItem.name == "iPhone Trade-In"
+    ).one()
+    c = _client(db, user)
+
+    create_response = c.post(
+        f"/scenarios/{scenario.id}/overrides",
+        json={"recurring_item_id": created.id, "amount_delta": "-5.00"},
+    )
+    assert create_response.status_code == 200
+
+    response = c.post(f"/scenarios/{scenario.id}/uncommit")
+
+    assert response.status_code == 409
+    assert "an item it created" in response.json()["detail"]
+    assert db.query(models.RecurringItem).filter(
+        models.RecurringItem.id == created.id
+    ).count() == 1
+    db.refresh(scenario)
+    assert scenario.status == "committed"
+
+
+def test_delete_override_refused_on_a_committed_scenario(seeded):
+    """N2: deleting a committed override destroys committed_previous_amount,
+    permanently stranding the real item at its tweaked amount with nothing
+    left for uncommit to restore it from -- the one delete route I4 missed."""
+    db, user, _account, scenario, dining = seeded
+    scenario_service.commit_scenario(db, user.id, scenario.id)
+    override = db.query(models.ScenarioOverride).one()
+    assert override.committed_previous_amount == Decimal("400.00")
+
+    response = _client(db, user).delete(f"/scenarios/{scenario.id}/overrides/{override.id}")
+
+    assert response.status_code == 409
+    db.refresh(override)
+    assert override.committed_previous_amount == Decimal("400.00")
+    assert db.query(models.ScenarioOverride).count() == 1
+    db.refresh(dining)
+    assert dining.amount == Decimal("300.00")
+    db.refresh(scenario)
+    assert scenario.status == "committed"
+
+
+def test_commit_refused_on_two_overrides_targeting_the_same_item(seeded):
+    """N3 (commit-side): each commit would record the PREVIOUS override's
+    already-tweaked value as committed_previous_amount, permanently losing
+    the true original amount. Outside I2's guard by construction, since I2
+    only ever compares against OTHER scenarios. Built directly at the ORM
+    level since create_override now refuses to build this state via the API
+    -- commit must still catch it defensively."""
+    db, user, _account, scenario, dining = seeded
+    db.add(models.ScenarioOverride(
+        scenario_id=scenario.id, recurring_item_id=dining.id,
+        amount_delta=Decimal("-20.00"),
+    ))
+    db.commit()
+
+    with pytest.raises(scenario_service.ScenarioDuplicateOverride):
+        scenario_service.commit_scenario(db, user.id, scenario.id)
+
+    db.refresh(dining)
+    assert dining.amount == Decimal("400.00")
+    db.refresh(scenario)
+    assert scenario.status == "draft"
+    assert db.query(models.RecurringItem).filter(
+        models.RecurringItem.name == "iPhone Trade-In"
+    ).count() == 0
+
+
+def test_create_override_refused_for_a_duplicate_item_within_one_scenario(seeded):
+    """N3 (create-side): refusing at creation time means the bad state (two
+    overrides on the same item in one scenario) can never be built through
+    the API in the first place."""
+    db, user, _account, scenario, dining = seeded
+
+    response = _client(db, user).post(
+        f"/scenarios/{scenario.id}/overrides",
+        json={"recurring_item_id": dining.id, "amount_delta": "-20.00"},
+    )
+
+    assert response.status_code == 409
+    assert db.query(models.ScenarioOverride).filter(
+        models.ScenarioOverride.scenario_id == scenario.id,
+        models.ScenarioOverride.recurring_item_id == dining.id,
+    ).count() == 1
