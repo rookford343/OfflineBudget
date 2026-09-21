@@ -63,6 +63,12 @@ def create_override(scenario_id: int, body: schemas.ScenarioOverrideCreate, db: 
     ).first()
     if not scenario:
         raise HTTPException(404, "Scenario not found")
+    duplicate = db.query(models.ScenarioOverride).filter(
+        models.ScenarioOverride.scenario_id == scenario_id,
+        models.ScenarioOverride.recurring_item_id == body.recurring_item_id,
+    ).first()
+    if duplicate is not None:
+        raise HTTPException(409, "This scenario already has an amount tweak on that item")
     override = models.ScenarioOverride(
         scenario_id=scenario_id,
         recurring_item_id=body.recurring_item_id,
@@ -82,6 +88,8 @@ def delete_override(scenario_id: int, override_id: int, db: Session = Depends(ge
     ).first()
     if not scenario:
         raise HTTPException(404, "Scenario not found")
+    if scenario.status == "committed":
+        raise HTTPException(409, "Uncommit this scenario before deleting an override")
     override = db.query(models.ScenarioOverride).filter(
         models.ScenarioOverride.id == override_id,
         models.ScenarioOverride.scenario_id == scenario_id,
@@ -197,6 +205,12 @@ def commit_scenario(
             f"Cannot commit: item '{e.item_name}' is already tweaked by committed "
             f"scenario '{e.conflicting_scenario_name}'.",
         ) from None
+    except scenario_service.ScenarioDuplicateOverride as e:
+        raise HTTPException(
+            409,
+            f"Cannot commit: this scenario has more than one amount tweak on "
+            f"item '{e.item_name}'.",
+        ) from None
 
 
 @router.post("/{scenario_id}/uncommit", response_model=schemas.ScenarioCommitResult)
@@ -211,6 +225,12 @@ def uncommit_scenario(
     except scenario_service.ScenarioNotCommitted:
         raise HTTPException(409, "Scenario is not committed") from None
     except scenario_service.ScenarioUncommitBlocked as e:
+        if e.is_self:
+            raise HTTPException(
+                409,
+                "Cannot uncommit: this scenario has an amount tweak on an item "
+                "it created. Remove that tweak first.",
+            ) from None
         raise HTTPException(
             409,
             f"Cannot uncommit: scenario '{e.blocking_scenario_name}' has an amount "

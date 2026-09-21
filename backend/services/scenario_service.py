@@ -98,18 +98,20 @@ class ScenarioNotCommitted(Exception):
 
 
 class ScenarioUncommitBlocked(Exception):
-    """Another scenario's amount tweak still targets a row this scenario
-    created. Deleting that row would violate the FK constraint on
-    ScenarioOverride.recurring_item_id (nullable=False, no ondelete) and crash
-    mid-uncommit, stranding this scenario as committed forever -- so it is
-    detected and refused before the first delete instead."""
+    """A scenario's amount tweak -- this one's own, or another's -- still
+    targets a row this scenario created. Deleting that row would violate the
+    FK constraint on ScenarioOverride.recurring_item_id (nullable=False, no
+    ondelete) and crash mid-uncommit, stranding this scenario as committed
+    forever -- so it is detected and refused before the first delete
+    instead."""
 
-    def __init__(self, blocking_scenario_name: str, recurring_item_id: int):
+    def __init__(self, blocking_scenario_name: str, recurring_item_id: int, is_self: bool):
         self.blocking_scenario_name = blocking_scenario_name
         self.recurring_item_id = recurring_item_id
+        self.is_self = is_self
         super().__init__(
             f"recurring item {recurring_item_id} still has a tweak from scenario "
-            f"{blocking_scenario_name!r}"
+            f"{blocking_scenario_name!r} (is_self={is_self})"
         )
 
 
@@ -126,6 +128,23 @@ class ScenarioCommitConflict(Exception):
         super().__init__(
             f"item {item_name!r} (id {recurring_item_id}) is already tweaked by "
             f"committed scenario {conflicting_scenario_name!r}"
+        )
+
+
+class ScenarioDuplicateOverride(Exception):
+    """Two overrides within the SAME scenario target the same recurring item.
+    Committing would apply the second on top of the amount the first already
+    changed, and record that already-tweaked value as committed_previous_amount
+    -- permanently losing the true original the moment the scenario is
+    uncommitted. This sits outside the cross-scenario conflict check by
+    construction, since that one only ever compares against OTHER scenarios."""
+
+    def __init__(self, item_name: str, recurring_item_id: int):
+        self.item_name = item_name
+        self.recurring_item_id = recurring_item_id
+        super().__init__(
+            f"more than one override in this scenario targets item {item_name!r} "
+            f"(id {recurring_item_id})"
         )
 
 
@@ -165,6 +184,18 @@ def commit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
         _assert_account_owned(db, user_id, p.account_id)
     for p in scenario.proposed_expenses:
         _assert_account_owned(db, user_id, p.account_id)
+
+    seen_override_targets: set[int] = set()
+    for o in scenario.overrides:
+        if o.recurring_item_id in seen_override_targets:
+            item = db.query(models.RecurringItem).filter(
+                models.RecurringItem.id == o.recurring_item_id,
+            ).first()
+            raise ScenarioDuplicateOverride(
+                item_name=item.name if item is not None else f"item {o.recurring_item_id}",
+                recurring_item_id=o.recurring_item_id,
+            )
+        seen_override_targets.add(o.recurring_item_id)
 
     for o in scenario.overrides:
         conflict = (
@@ -281,9 +312,11 @@ def uncommit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
     is deleted regardless. Refusing instead would mean fingerprinting every
     created row and surfacing a refusal the user cannot resolve.
 
-    One case IS refused, up front, before any delete: if another scenario's
-    amount tweak still points at an item this scenario created, deleting that
-    item would violate the FK constraint on
+    One case IS refused, up front, before any delete: if ANY scenario's
+    amount tweak still points at an item this scenario created -- another
+    scenario's, or this one's own (e.g. an override added through the
+    overrides route after this scenario was already committed, which has no
+    status guard) -- deleting that item would violate the FK constraint on
     ScenarioOverride.recurring_item_id and crash mid-uncommit, stranding this
     scenario as committed forever. That is checked in one query covering
     every row this scenario created, before the first delete, so the refusal
@@ -301,11 +334,13 @@ def uncommit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
         if p.committed_recurring_item_id is not None
     ]
     if committed_item_ids:
+        # No scenario_id exclusion here -- a self-override (this scenario
+        # tweaking an item it created) reproduces the identical FK crash, and
+        # is reachable with no cross-scenario or authz bug at all.
         blocking = (
             db.query(models.ScenarioOverride)
             .filter(
                 models.ScenarioOverride.recurring_item_id.in_(committed_item_ids),
-                models.ScenarioOverride.scenario_id != scenario.id,
             )
             .order_by(models.ScenarioOverride.id.asc())
             .first()
@@ -314,6 +349,7 @@ def uncommit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
             raise ScenarioUncommitBlocked(
                 blocking_scenario_name=blocking.scenario.name,
                 recurring_item_id=blocking.recurring_item_id,
+                is_self=(blocking.scenario_id == scenario.id),
             )
 
     # Clear each back-link and flush it BEFORE deleting the row it points at.
@@ -336,6 +372,12 @@ def uncommit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
         if item is not None:
             db.delete(item)
             items_removed += 1
+        # else: the link (just captured, just nulled above) pointed at a row
+        # that's already gone. Genuinely unreachable while foreign keys are
+        # enforced -- a live link blocks that row's deletion everywhere else
+        # in the app, which is what the guard above exists to guarantee -- so
+        # this only defends against a restored backup or an externally /
+        # manually modified database.
 
     expenses_removed = 0
     for p in scenario.proposed_expenses:
@@ -351,6 +393,7 @@ def uncommit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
         if expense is not None:
             db.delete(expense)
             expenses_removed += 1
+        # else: same defensive case as the items loop above.
 
     overrides_restored = 0
     for o in scenario.overrides:
