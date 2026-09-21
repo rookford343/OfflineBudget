@@ -100,6 +100,10 @@ export const forecastApi = {
     api.get("/forecast/quarters", { params: { account_id: accountId, year } }).then((r) => r.data),
   quartersWithScenario: (accountId: number, year: number, overrides: object[]) =>
     api.post("/forecast/quarters-scenario", { account_id: accountId, year, overrides }).then((r) => r.data),
+  quartersWithScenarioId: (accountId: number, year: number, scenarioId: number) =>
+    api.post("/forecast/quarters-scenario", {
+      account_id: accountId, year, scenario_id: scenarioId,
+    }).then((r) => r.data),
   multiYear: (accountId: number, startYear: number, years: number) =>
     api.get("/forecast/multi-year", { params: { account_id: accountId, start_year: startYear, years } }).then((r) => r.data),
   monthlySummary: (accountId: number, year: number, month: number) =>
