@@ -148,12 +148,22 @@ def test_uncommit_removes_exactly_what_it_created(seeded):
     assert scenario.committed_at is None
 
 
-def test_uncommit_tolerates_a_row_already_deleted_by_hand(seeded):
+def test_uncommit_tolerates_a_proposal_whose_link_is_already_gone(seeded):
+    """With foreign keys enforced, a proposal's committed_recurring_item_id
+    cannot be left dangling at a deleted row through normal operation -- the
+    FK constraint blocks that delete outright (this is the C1 fix). The only
+    way this state exists is a null-then-delete done by hand outside
+    uncommit_scenario, e.g. a restored backup or a manual DB fix. This test
+    covers uncommit's tolerance for that state directly, since enforced keys
+    make it unreachable any other way."""
     db, user, _account, scenario, _dining = seeded
     scenario_service.commit_scenario(db, user.id, scenario.id)
+    proposal = db.query(models.ScenarioProposedItem).one()
     created = db.query(models.RecurringItem).filter(
         models.RecurringItem.name == "iPhone Trade-In"
     ).one()
+    proposal.committed_recurring_item_id = None
+    db.commit()
     db.delete(created)
     db.commit()
 
