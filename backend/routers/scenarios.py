@@ -63,6 +63,8 @@ def create_override(scenario_id: int, body: schemas.ScenarioOverrideCreate, db: 
     ).first()
     if not scenario:
         raise HTTPException(404, "Scenario not found")
+    if scenario.status == "committed":
+        raise HTTPException(409, "Uncommit this scenario before adding an amount tweak")
     duplicate = db.query(models.ScenarioOverride).filter(
         models.ScenarioOverride.scenario_id == scenario_id,
         models.ScenarioOverride.recurring_item_id == body.recurring_item_id,

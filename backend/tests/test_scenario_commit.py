@@ -340,22 +340,25 @@ def test_commit_refused_when_proposal_account_not_owned(seeded):
 def test_uncommit_blocked_by_its_own_override(seeded):
     """N1: a scenario tweaking an item IT created reproduces the identical FK
     crash C1 exists to prevent -- the blocking query must not exclude this
-    scenario's own overrides. Reachable via POST .../overrides, which has no
-    committed-status guard, against a real item the picker lists."""
+    scenario's own overrides. Built directly at the ORM level since round 4's
+    create_override guard now refuses to build this state via the API once
+    the scenario is committed (see test_create_override_refused_on_a_committed_scenario);
+    this test proves uncommit's own guard remains the backstop for the state
+    if it's ever reached some other way (a database predating the guard, or
+    edited directly)."""
     db, user, _account, scenario, _dining = seeded
     scenario_service.commit_scenario(db, user.id, scenario.id)
     created = db.query(models.RecurringItem).filter(
         models.RecurringItem.name == "iPhone Trade-In"
     ).one()
-    c = _client(db, user)
 
-    create_response = c.post(
-        f"/scenarios/{scenario.id}/overrides",
-        json={"recurring_item_id": created.id, "amount_delta": "-5.00"},
-    )
-    assert create_response.status_code == 200
+    db.add(models.ScenarioOverride(
+        scenario_id=scenario.id, recurring_item_id=created.id,
+        amount_delta=Decimal("-5.00"),
+    ))
+    db.commit()
 
-    response = c.post(f"/scenarios/{scenario.id}/uncommit")
+    response = _client(db, user).post(f"/scenarios/{scenario.id}/uncommit")
 
     assert response.status_code == 409
     assert "an item it created" in response.json()["detail"]
@@ -429,3 +432,78 @@ def test_create_override_refused_for_a_duplicate_item_within_one_scenario(seeded
         models.ScenarioOverride.scenario_id == scenario.id,
         models.ScenarioOverride.recurring_item_id == dining.id,
     ).count() == 1
+
+
+def test_create_override_refused_on_a_committed_scenario(seeded):
+    """Round 4 fix: an override on an already-committed scenario is inert --
+    resolve_scenario returns no overrides at all for a committed scenario --
+    and if its target happens to be an item this same scenario created, it
+    also permanently traps the scenario as 'committed' (see the third test
+    below). Refused at the root instead of letting either happen."""
+    db, user, _account, scenario, dining = seeded
+    scenario_service.commit_scenario(db, user.id, scenario.id)
+
+    response = _client(db, user).post(
+        f"/scenarios/{scenario.id}/overrides",
+        json={"recurring_item_id": dining.id, "amount_delta": "-20.00"},
+    )
+
+    assert response.status_code == 409
+    assert "uncommit" in response.json()["detail"].lower()
+    # No new override row was created -- only the one the fixture seeded.
+    assert db.query(models.ScenarioOverride).count() == 1
+
+
+def test_create_override_still_works_on_a_draft_scenario(seeded):
+    """The guard must not touch the normal path: a draft scenario can still
+    take a new amount tweak on a different item."""
+    db, user, account, scenario, _dining = seeded
+    other_item = models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Streaming",
+        amount=Decimal("15.00"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly, day_of_month=5,
+        start_date=date(2026, 1, 5),
+    )
+    db.add(other_item)
+    db.commit()
+
+    response = _client(db, user).post(
+        f"/scenarios/{scenario.id}/overrides",
+        json={"recurring_item_id": other_item.id, "amount_delta": "-5.00"},
+    )
+
+    assert response.status_code == 200
+    assert db.query(models.ScenarioOverride).filter(
+        models.ScenarioOverride.scenario_id == scenario.id,
+        models.ScenarioOverride.recurring_item_id == other_item.id,
+    ).count() == 1
+
+
+def test_dead_end_is_closed_commit_then_blocked_override_then_uncommit_succeeds(seeded):
+    """The one that matters: proves the trap described in the brief is gone
+    end to end, not just that the new guard fires in isolation. Before this
+    fix: commit, then POST an override on the item the scenario itself just
+    created succeeded, and from there NO route could ever return the scenario
+    to draft -- uncommit refused (an override targets a created item),
+    deleting that override refused (scenario is committed), deleting the
+    scenario refused (scenario is committed). After this fix: the POST itself
+    is refused, so the trap is never built, and uncommit succeeds normally."""
+    db, user, _account, scenario, dining = seeded
+    scenario_service.commit_scenario(db, user.id, scenario.id)
+    created = db.query(models.RecurringItem).filter(
+        models.RecurringItem.name == "iPhone Trade-In"
+    ).one()
+    c = _client(db, user)
+
+    blocked = c.post(
+        f"/scenarios/{scenario.id}/overrides",
+        json={"recurring_item_id": created.id, "amount_delta": "-5.00"},
+    )
+    assert blocked.status_code == 409
+
+    response = c.post(f"/scenarios/{scenario.id}/uncommit")
+
+    assert response.status_code == 200
+    db.refresh(scenario)
+    assert scenario.status == "draft"
+    assert scenario.committed_at is None
