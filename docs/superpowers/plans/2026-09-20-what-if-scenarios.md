@@ -2954,7 +2954,7 @@ Run: `cd frontend && bunx tsc --noEmit 2>&1 | tee /tmp/tsc-before9.txt | tail -3
 
 - [ ] **Step 2: Add the scenario-id forecast call**
 
-In `frontend/src/api/index.ts`, inside `forecastApi`, beside the existing `quartersWithScenario`:
+In `frontend/src/api/index.ts`, inside `forecastApi` (the older `quartersWithScenario` helper was removed in the final fix wave once it had no callers):
 
 ```ts
   quartersWithScenarioId: (accountId: number, year: number, scenarioId: number) =>
