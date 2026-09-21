@@ -98,8 +98,10 @@ export const forecastApi = {
     api.get("/forecast", { params: { account_id: accountId, start, end } }).then((r) => r.data),
   quarters: (accountId: number, year: number) =>
     api.get("/forecast/quarters", { params: { account_id: accountId, year } }).then((r) => r.data),
-  quartersWithScenario: (accountId: number, year: number, overrides: object[]) =>
-    api.post("/forecast/quarters-scenario", { account_id: accountId, year, overrides }).then((r) => r.data),
+  // No client-side override-list variant on purpose. Sending raw deltas skips
+  // the server's resolver, which is the only place that knows a committed
+  // scenario resolves to nothing -- and it cannot express proposed items at
+  // all. Always identify the scenario by id.
   quartersWithScenarioId: (accountId: number, year: number, scenarioId: number) =>
     api.post("/forecast/quarters-scenario", {
       account_id: accountId, year, scenario_id: scenarioId,

@@ -340,17 +340,21 @@ export default function Forecast() {
     },
   });
 
+  // Send the scenario's id and let the server resolve it, rather than
+  // assembling an override list here. Only the server-side resolver knows that
+  // a COMMITTED scenario must resolve to nothing: its tweaks are already
+  // baked into the real recurring rows, so re-sending the deltas drew the
+  // delta on top of itself and this page contradicted the Scenarios page
+  // about the same scenario in the same year. The id path also carries the
+  // scenario's PROPOSED items, which the override-list path cannot express at
+  // all -- a proposal-only scenario used to trace a line identical to
+  // baseline here.
   const { data: scenarioQuarters = [] } = useQuery({
     queryKey: ["forecast-quarters-scenario", activeAccountId, year, scenarioId],
-    queryFn: () => {
-      const scenario = (scenarios as any[]).find((s: any) => s.id === scenarioId);
-      if (!scenario) return [];
-      const overrides = scenario.overrides.map((o: any) => ({
-        recurring_item_id: o.recurring_item_id,
-        amount_delta: parseFloat(o.amount_delta),
-      }));
-      return forecastApi.quartersWithScenario(activeAccountId, year, overrides);
-    },
+    queryFn: () => forecastApi.quartersWithScenarioId(activeAccountId, year, scenarioId!),
+    // Unchanged: still waits for an account, a selection, and for that
+    // selection to still exist in the loaded list (a scenario deleted
+    // elsewhere leaves a stale id behind, which would now 404 server-side).
     enabled: !!activeAccountId && scenarioId !== null && (scenarios as any[]).some((s: any) => s.id === scenarioId),
   });
 
