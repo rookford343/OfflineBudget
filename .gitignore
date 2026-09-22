@@ -97,3 +97,8 @@ data/**/*.ofx
 data/**/*.qfx
 data/**/*.db
 data/**/*.sqlite*
+
+# graphify knowledge-graph output. NEVER commit: extraction quotes real
+# figures out of the design docs, and this repo is public. The pre-commit
+# hook only blocks csv/db/ofx, not the json graphify writes.
+graphify-out/
