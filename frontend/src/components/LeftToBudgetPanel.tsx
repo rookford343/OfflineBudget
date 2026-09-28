@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { budgetApi } from "../api";
@@ -19,10 +19,27 @@ export default function LeftToBudgetPanel({ year, month }: { year: number; month
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<Record<number, string>>({});
 
+  // Drafts are keyed by category_id only, and this component isn't remounted
+  // on a month change (Budget.tsx passes no key) -- without this, a value
+  // typed for October but not yet blurred/saved would still show as October's
+  // draft after switching to November for the same category. Clearing on
+  // [year, month] means a month switch always falls back to that month's
+  // fetched value until the user types something new.
+  useEffect(() => {
+    setDrafts({});
+  }, [year, month]);
+
   const save = useMutation({
     mutationFn: ({ category_id, amount }: { category_id: number; amount: string }) =>
       budgetApi.upsert({ category_id, year, month, budgeted_amount: amount }),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
+      // Drop the draft so the input falls back to the freshly-fetched
+      // (now-authoritative) value instead of continuing to show what was typed.
+      setDrafts((d) => {
+        const next = { ...d };
+        delete next[variables.category_id];
+        return next;
+      });
       qc.invalidateQueries({ queryKey: ["left-to-budget", year, month] });
       // Budget.tsx's own allocation queries -- not "budget"-prefixed.
       qc.invalidateQueries({ queryKey: ["budget-overview"] });
@@ -91,26 +108,43 @@ export default function LeftToBudgetPanel({ year, month }: { year: number; month
 
         <div>
           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Assign</h3>
-          {data.assignable.map((a: any) => (
-            <div key={a.category_id} className="flex items-center justify-between gap-2 py-1 text-sm">
-              <span>
-                {a.category_name}
-                {!a.is_set && <span className="ml-2 text-xs text-gray-400">not assigned yet</span>}
-              </span>
-              <input
-                type="number" step="0.01" min="0"
-                aria-label={`Assign amount for ${a.category_name}`}
-                className="input w-28 text-right text-sm"
-                value={drafts[a.category_id] ?? (a.is_set ? a.assigned : "")}
-                placeholder="0.00"
-                onChange={(e) => setDrafts((d) => ({ ...d, [a.category_id]: e.target.value }))}
-                onBlur={(e) => {
-                  const v = e.target.value;
-                  if (v !== "" && v !== String(a.assigned)) save.mutate({ category_id: a.category_id, amount: v });
-                }}
-              />
-            </div>
-          ))}
+          {data.assignable.map((a: any) => {
+            // A single mutation instance handles every row; `variables` says
+            // which category_id the in-flight (or last-failed) call was for,
+            // so pending/error state can be shown per row instead of globally.
+            const isThisRow = save.variables?.category_id === a.category_id;
+            const isSaving = save.isPending && isThisRow;
+            const failed = save.isError && isThisRow;
+            return (
+              <div key={a.category_id} className="py-1">
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <span>
+                    {a.category_name}
+                    {!a.is_set && <span className="ml-2 text-xs text-gray-400">not assigned yet</span>}
+                  </span>
+                  <input
+                    type="number" step="0.01" min="0"
+                    aria-label={`Assign amount for ${a.category_name}`}
+                    className="input w-28 text-right text-sm"
+                    value={drafts[a.category_id] ?? (a.is_set ? a.assigned : "")}
+                    placeholder="0.00"
+                    disabled={isSaving}
+                    onChange={(e) => setDrafts((d) => ({ ...d, [a.category_id]: e.target.value }))}
+                    onBlur={(e) => {
+                      const v = e.target.value;
+                      if (v !== "" && v !== String(a.assigned)) save.mutate({ category_id: a.category_id, amount: v });
+                    }}
+                  />
+                </div>
+                {/* Keep the typed draft visible on failure (it's not cleared
+                    here, only on success above) so the user can retry without
+                    retyping. */}
+                {failed && (
+                  <p className="text-right text-xs text-red-500">Save failed — try again</p>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
