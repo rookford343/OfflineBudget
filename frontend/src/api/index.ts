@@ -90,6 +90,13 @@ export const recurringApi = {
   suggestions: (minOccurrences = 2) =>
     api.get("/recurring/suggestions", { params: { min_occurrences: minOccurrences } }).then((r) => r.data),
   breakdown: () => api.get("/recurring/breakdown").then((r) => r.data),
+  triage: () => api.get("/recurring/triage").then((r) => r.data),
+  triageClassify: (data: { category_id: number; recurring_item_id?: number; pattern_key?: string }) =>
+    api.post("/recurring/triage/classify", data).then((r) => r.data),
+  triageDismiss: (patternKey: string) =>
+    api.post("/recurring/triage/dismiss", { pattern_key: patternKey }).then((r) => r.data),
+  triageDuplicate: (keepId: number, deactivateId: number) =>
+    api.post("/recurring/triage/duplicate", { keep_id: keepId, deactivate_id: deactivateId }).then((r) => r.data),
 };
 
 // ── Forecast ──────────────────────────────────────────────────────────────────

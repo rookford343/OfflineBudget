@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clearAuth, getUser } from "../store/auth";
-import { authApi, accountsApi, transactionsApi } from "../api";
+import { authApi, accountsApi, transactionsApi, recurringApi } from "../api";
 import QuickStartWizard from "./QuickStartWizard";
 import { TrendBadge } from "./TrendBadge";
 import { LogOut, Eye, EyeOff, Moon, Sun, ChevronDown, ChevronsUpDown, KeyRound, Settings as SettingsIcon } from "lucide-react";
@@ -31,6 +31,14 @@ export default function Layout() {
     queryFn: () => transactionsApi.list({ start: firstOfMonth() }),
     staleTime: 30_000,
   });
+  const { data: triage } = useQuery({ queryKey: ["recurring-triage"], queryFn: recurringApi.triage, staleTime: 60_000 });
+  const triageCount = triage?.unclassified_count ?? 0;
+  const badgeFor = (item: { badgeKey?: string }) =>
+    item.badgeKey === "triage" && triageCount > 0 ? (
+      <span className="ml-auto rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+        {triageCount}
+      </span>
+    ) : null;
   const [wizardOpen, setWizardOpen] = useState(false);
   const [pinned, setPinned] = useState<string[]>(loadPinnedNav);
   const [accountsExpanded, setAccountsExpanded] = useState(false);
@@ -142,6 +150,7 @@ export default function Layout() {
             <NavLink key={item.to} to={item.to} className={navLinkClass}>
               <item.icon size={18} />
               {item.label}
+              {badgeFor(item)}
             </NavLink>
           ))}
           {pinnedItems.length > 0 && <div className="my-2 border-t border-gray-100 dark:border-gray-700" />}
@@ -155,6 +164,7 @@ export default function Layout() {
                   <NavLink key={item.to} to={item.to} className={navLinkClass}>
                     <item.icon size={18} />
                     {item.label}
+                    {badgeFor(item)}
                   </NavLink>
                 ))}
               </div>

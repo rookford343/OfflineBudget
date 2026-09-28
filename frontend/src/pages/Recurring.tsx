@@ -4,6 +4,7 @@ import { recurringApi, accountsApi, categoriesApi, cardsApi, billOverridesApi } 
 import { fmt } from "../lib/utils";
 import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt, CalendarClock } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import TriageInbox from "../components/TriageInbox";
 import { CategoryOptions, AccountOptions, RecurringOptions } from "../lib/selectOptions";
 import { sortCategoryList, byName } from "../lib/selectOptions";
 
@@ -264,6 +265,8 @@ export default function Recurring() {
         </div>
         <button onClick={openNew} className="btn-primary"><Plus size={16} /> Add Item</button>
       </div>
+
+      <TriageInbox />
 
       <div className="grid grid-cols-2 gap-4">
         <div className="stat-card">
