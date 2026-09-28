@@ -40,6 +40,7 @@ class UserOut(BaseModel):
     itemized_other: Optional[Decimal] = None
     transfer_increment: Optional[Decimal] = None
     savings_strategy: Optional[str] = None
+    budget_carry_forward: Optional[bool] = None
 
 
 
@@ -65,6 +66,7 @@ class UserUpdate(BaseModel):
     itemized_other: Optional[Decimal] = None
     transfer_increment: Optional[Decimal] = None
     savings_strategy: Optional[str] = None
+    budget_carry_forward: Optional[bool] = None
 
     @field_validator("savings_strategy")
     @classmethod

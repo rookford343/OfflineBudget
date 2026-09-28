@@ -9,6 +9,7 @@ from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.spending_helpers import filter_real_spend, is_card_payment, looks_like_internal_transfer, NOT_SAVINGS, merchant_totals
+from backend.services.budget_buckets import assignable_category_ids, drop_uncarried_defaults
 from backend.services.summary_generator import generate_weekly_digest
 from backend.services.budget_snapshot import compute_budget_snapshot
 
@@ -322,6 +323,7 @@ def spending_by_category(
         models.BudgetAllocation.year.in_([start.year, end.year]),
         models.BudgetAllocation.month.in_([0] + month_numbers),
     ).all()
+    budgets = drop_uncarried_defaults(budgets, user, assignable_category_ids(db, user.id))
     budget_by_cat: dict[int, Decimal] = {}
     for b in sorted(budgets, key=lambda x: x.month):
         budget_by_cat[b.category_id] = b.budgeted_amount
