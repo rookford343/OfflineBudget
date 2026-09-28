@@ -320,7 +320,10 @@ export default function Budget() {
         </div>
       </div>
 
-      <LeftToBudgetPanel year={year} month={month} />
+      {/* Keyed by year-month so switching the month gets a fresh mutation,
+          drafts, and error state instead of one instance's in-flight/failed
+          save from a prior month bleeding into the newly viewed month. */}
+      <LeftToBudgetPanel key={`${year}-${month}`} year={year} month={month} />
 
       {isLoading && <div className="card text-sm text-gray-400">Loading…</div>}
 

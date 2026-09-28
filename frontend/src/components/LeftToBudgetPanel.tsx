@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { budgetApi } from "../api";
@@ -19,19 +19,14 @@ export default function LeftToBudgetPanel({ year, month }: { year: number; month
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [drafts, setDrafts] = useState<Record<number, string>>({});
 
-  // Drafts are keyed by category_id only, and this component isn't remounted
-  // on a month change (Budget.tsx passes no key) -- without this, a value
-  // typed for October but not yet blurred/saved would still show as October's
-  // draft after switching to November for the same category. Clearing on
-  // [year, month] means a month switch always falls back to that month's
-  // fetched value until the user types something new.
-  useEffect(() => {
-    setDrafts({});
-  }, [year, month]);
-
+  // Budget.tsx mounts this component with key={`${year}-${month}`}, so a
+  // month switch always gets a fresh instance -- new drafts, new mutation,
+  // new isPending/isError state. No in-component reset needed, and (more
+  // importantly) no risk of a prior month's in-flight/failed save bleeding
+  // into the newly viewed month's UI.
   const save = useMutation({
-    mutationFn: ({ category_id, amount }: { category_id: number; amount: string }) =>
-      budgetApi.upsert({ category_id, year, month, budgeted_amount: amount }),
+    mutationFn: ({ category_id, amount, year: y, month: m }: { category_id: number; amount: string; year: number; month: number }) =>
+      budgetApi.upsert({ category_id, year: y, month: m, budgeted_amount: amount }),
     onSuccess: (_data, variables) => {
       // Drop the draft so the input falls back to the freshly-fetched
       // (now-authoritative) value instead of continuing to show what was typed.
@@ -40,7 +35,10 @@ export default function LeftToBudgetPanel({ year, month }: { year: number; month
         delete next[variables.category_id];
         return next;
       });
-      qc.invalidateQueries({ queryKey: ["left-to-budget", year, month] });
+      // Invalidate the month the save was actually issued for (from
+      // variables), not whatever year/month happens to be in this closure --
+      // matters if props changed while the request was in flight.
+      qc.invalidateQueries({ queryKey: ["left-to-budget", variables.year, variables.month] });
       // Budget.tsx's own allocation queries -- not "budget"-prefixed.
       qc.invalidateQueries({ queryKey: ["budget-overview"] });
       qc.invalidateQueries({ queryKey: ["budget-allocations"] });
@@ -109,9 +107,11 @@ export default function LeftToBudgetPanel({ year, month }: { year: number; month
         <div>
           <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Assign</h3>
           {data.assignable.map((a: any) => {
-            // A single mutation instance handles every row; `variables` says
-            // which category_id the in-flight (or last-failed) call was for,
-            // so pending/error state can be shown per row instead of globally.
+            // One mutation instance handles every row in this month (fresh
+            // per month via Budget.tsx's key={`${year}-${month}`}); `variables`
+            // says which category_id the in-flight (or last-failed) call was
+            // for, so pending/error state can be shown per row instead of
+            // for the whole panel.
             const isThisRow = save.variables?.category_id === a.category_id;
             const isSaving = save.isPending && isThisRow;
             const failed = save.isError && isThisRow;
@@ -132,7 +132,7 @@ export default function LeftToBudgetPanel({ year, month }: { year: number; month
                     onChange={(e) => setDrafts((d) => ({ ...d, [a.category_id]: e.target.value }))}
                     onBlur={(e) => {
                       const v = e.target.value;
-                      if (v !== "" && v !== String(a.assigned)) save.mutate({ category_id: a.category_id, amount: v });
+                      if (v !== "" && v !== String(a.assigned)) save.mutate({ category_id: a.category_id, amount: v, year, month });
                     }}
                   />
                 </div>
