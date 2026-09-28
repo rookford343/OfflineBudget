@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.auto_categorizer import categorize
 from backend.services.merchant_normalizer import normalize_merchant
-from backend.services.recurring_detector import detect_patterns
+from backend.services.recurring_detector import detect_patterns, transactions_for_pattern
 from backend.services.recurring_math import monthly_equivalent
 from backend.services.rules_engine import apply_rules
 
@@ -153,3 +153,151 @@ def build_triage(db: Session, user_id: int) -> schemas.TriageOut:
         unclassified_count=len(uncategorized),
         unclassified_monthly_total=sum((o.monthly_amount for o in uncategorized_out), Decimal("0")),
     )
+
+
+class TriageError(Exception):
+    """Request is well-formed but not allowed (-> 400)."""
+
+
+class TriageNotFound(Exception):
+    """Target item or pattern doesn't exist for this user (-> 404)."""
+
+
+def _expense_category_or_error(db: Session, user_id: int, category_id: int) -> models.Category:
+    cat = db.query(models.Category).filter(
+        models.Category.id == category_id,
+        models.Category.user_id == user_id,
+    ).first()
+    if cat is None or cat.type != models.CategoryType.expense:
+        raise TriageError("category must be one of your expense categories")
+    return cat
+
+
+def _ensure_rule(db: Session, user_id: int, label: str, pattern: str, category_id: int) -> tuple[int, bool]:
+    existing = db.query(models.TransactionRule).filter(
+        models.TransactionRule.user_id == user_id,
+        models.TransactionRule.pattern == pattern,
+        models.TransactionRule.category_id == category_id,
+    ).first()
+    if existing:
+        return existing.id, False
+    rule = models.TransactionRule(
+        user_id=user_id, name=f"Auto: {label}"[:128],
+        field=models.RuleField.merchant, pattern_type=models.RulePatternType.contains,
+        pattern=pattern[:256], action=models.RuleAction.set_category, category_id=category_id,
+    )
+    db.add(rule)
+    db.flush()
+    return rule.id, True
+
+
+def _classify_item(db, user_id, item_id, cat) -> schemas.TriageClassifyResult:
+    item = db.query(models.RecurringItem).filter(
+        models.RecurringItem.id == item_id,
+        models.RecurringItem.user_id == user_id,
+    ).first()
+    if item is None:
+        raise TriageNotFound("recurring item not found")
+    item.category_id = cat.id
+
+    latest = _latest_linked(db, item.id)
+    pattern = latest.description if latest else item.name
+    rule_id, created = _ensure_rule(db, user_id, item.name, pattern, cat.id)
+
+    # Only rows nobody has categorized yet -- a category set by hand or by an
+    # earlier rule is a decision, and this must never overwrite it.
+    backfilled = 0
+    for t in db.query(models.Transaction).filter(
+        models.Transaction.recurring_item_id == item.id,
+        models.Transaction.category_id.is_(None),
+    ).all():
+        t.category_id = cat.id
+        backfilled += 1
+    # Card rows have no recurring_item_id, so match them on merchant within
+    # the item's own card.
+    if item.card_id:
+        for t in db.query(models.CreditCardTransaction).filter(
+            models.CreditCardTransaction.user_id == user_id,
+            models.CreditCardTransaction.card_id == item.card_id,
+            models.CreditCardTransaction.category_id.is_(None),
+            models.CreditCardTransaction.merchant.ilike(f"%{pattern}%"),
+        ).all():
+            t.category_id = cat.id
+            backfilled += 1
+
+    db.commit()
+    return schemas.TriageClassifyResult(
+        recurring_item_id=item.id, category_id=cat.id,
+        rule_id=rule_id, rule_created=created, backfilled=backfilled,
+    )
+
+
+def _classify_pattern(db, user_id, pattern_key, cat) -> schemas.TriageClassifyResult:
+    suggestion = next((s for s in detect_patterns(db, user_id) if s.pattern_key == pattern_key), None)
+    txns = transactions_for_pattern(db, user_id, pattern_key)
+    if suggestion is None or not txns:
+        raise TriageNotFound("pattern not found")
+    latest = max(txns, key=lambda t: t.date)
+
+    item = models.RecurringItem(
+        user_id=user_id, account_id=latest.account_id, category_id=cat.id,
+        name=normalize_merchant(latest.description)[:128],
+        amount=suggestion.median_amount, type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency(suggestion.frequency),
+        day_of_month=latest.date.day, start_date=latest.date, is_active=True,
+    )
+    db.add(item)
+    db.flush()
+
+    backfilled = 0
+    for t in txns:
+        t.recurring_item_id = item.id
+        if t.category_id is None:
+            t.category_id = cat.id
+            backfilled += 1
+    rule_id, created = _ensure_rule(db, user_id, item.name, latest.description, cat.id)
+    db.commit()
+    return schemas.TriageClassifyResult(
+        recurring_item_id=item.id, category_id=cat.id,
+        rule_id=rule_id, rule_created=created, backfilled=backfilled,
+    )
+
+
+def classify(db: Session, user_id: int, body: schemas.TriageClassify) -> schemas.TriageClassifyResult:
+    cat = _expense_category_or_error(db, user_id, body.category_id)
+    if body.recurring_item_id is not None:
+        return _classify_item(db, user_id, body.recurring_item_id, cat)
+    return _classify_pattern(db, user_id, body.pattern_key, cat)
+
+
+def dismiss(db: Session, user_id: int, pattern_key: str) -> None:
+    exists = db.query(models.RecurringDismissal).filter(
+        models.RecurringDismissal.user_id == user_id,
+        models.RecurringDismissal.pattern_key == pattern_key,
+    ).first()
+    if exists is None:
+        db.add(models.RecurringDismissal(user_id=user_id, pattern_key=pattern_key[:256]))
+        db.commit()
+
+
+def mark_duplicate(db: Session, user_id: int, keep_id: int, deactivate_id: int) -> schemas.TriageDuplicateResult:
+    if keep_id == deactivate_id:
+        raise TriageError("keep_id and deactivate_id must differ")
+    found = {
+        i.id: i for i in db.query(models.RecurringItem).filter(
+            models.RecurringItem.user_id == user_id,
+            models.RecurringItem.id.in_([keep_id, deactivate_id]),
+        ).all()
+    }
+    if len(found) != 2:
+        raise TriageNotFound("recurring item not found")
+    if not (found[keep_id].is_active and found[deactivate_id].is_active):
+        raise TriageError("both items must be active")
+
+    found[deactivate_id].is_active = False
+    relinked = 0
+    for t in db.query(models.Transaction).filter(models.Transaction.recurring_item_id == deactivate_id).all():
+        t.recurring_item_id = keep_id
+        relinked += 1
+    db.commit()
+    return schemas.TriageDuplicateResult(deactivated_id=deactivate_id, relinked=relinked)
