@@ -118,12 +118,12 @@ KEYWORD_RULES: list[tuple[str, str]] = [
     ("allstate", "Insurance"),
     ("nationwide", "Insurance"),
     ("usaa", "Insurance"),
-    # Healthcare
-    ("cvs", "Healthcare"),
-    ("walgreens", "Healthcare"),
-    ("rite aid", "Healthcare"),
-    ("labcorp", "Healthcare"),
-    ("quest diagnostics", "Healthcare"),
+    # Health
+    ("cvs", "Health"),
+    ("walgreens", "Health"),
+    ("rite aid", "Health"),
+    ("labcorp", "Health"),
+    ("quest diagnostics", "Health"),
     # Church / Tithe
     ("church", "Church / Tithe"),
     ("tithe", "Church / Tithe"),

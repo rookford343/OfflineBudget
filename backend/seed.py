@@ -13,7 +13,7 @@ DEFAULT_CATEGORIES = [
         ("Home", "expense", "#2563eb", "home"),
         ("Insurance", "expense", "#1d4ed8", "shield"),
         ("Transportation", "expense", "#1e40af", "car"),
-        ("Healthcare", "expense", "#1e3a8a", "heart"),
+        ("Health", "expense", "#1e3a8a", "heart"),
         ("Mortgage / Rent", "expense", "#172554", "building"),
     ]),
     ("Wants", "expense", "#f59e0b", "shopping-bag", [
