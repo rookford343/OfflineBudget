@@ -66,6 +66,8 @@ def left_to_budget(
 ):
     if not 1 <= month <= 12:
         raise HTTPException(status_code=400, detail="month must be 1-12")
+    if not 1 <= year <= 9999:
+        raise HTTPException(status_code=400, detail="year must be 1-9999")
     from backend.services.left_to_budget import compute_left_to_budget
     return compute_left_to_budget(db, user, year, month)
 

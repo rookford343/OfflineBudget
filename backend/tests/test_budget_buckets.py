@@ -75,3 +75,12 @@ def test_overview_carries_forward_when_enabled(db_session):
     user, cats = _seed(db_session, carry_forward=True)
     rows = {r.category_id: r for r in compute_overview(db_session, user.id, 2026, 10)}
     assert rows[cats["Shopping"].id].budgeted == Decimal("500.00")
+
+
+def test_overview_flags_assignable_rows(db_session):
+    user, cats = _seed(db_session)
+    rows = {r.category_id: r for r in compute_overview(db_session, user.id, 2026, 10)}
+    assert rows[cats["Shopping"].id].is_assignable is True
+    assert rows[cats["Groceries"].id].is_assignable is False
+    assert rows[cats["Subscriptions"].id].is_assignable is False
+    assert rows[cats["Wants"].id].is_assignable is False

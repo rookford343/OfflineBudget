@@ -487,6 +487,10 @@ class BudgetOverviewRow(BaseModel):
     variance: Decimal  # budgeted - actual (positive = under budget)
     rollover_enabled: bool = False
     rollover_balance: Decimal = Decimal("0")
+    # Assignable buckets only carry a month=0 default when the user has turned
+    # carry-forward on, so the Budget page needs this to pick which month an
+    # edit writes to.
+    is_assignable: bool = False
 
 
 class BillAmountOverrideCreate(BaseModel):

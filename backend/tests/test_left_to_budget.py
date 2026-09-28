@@ -106,6 +106,17 @@ def test_endpoint_returns_payload(db_session):
     assert r.json()["unclassified_count"] == 2
 
 
+def test_endpoint_rejects_out_of_range_year(db_session):
+    user, _ = _seed(db_session)
+    app = FastAPI()
+    app.include_router(budget_router_module.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: user
+    c = TestClient(app)
+    for year in (0, 10000):
+        assert c.get("/budget/left-to-budget", params={"year": year, "month": 10}).status_code == 400
+
+
 def test_guard_leftover_and_left_to_spend_unchanged_by_classification_and_setting(db_session):
     user, checking, _card = _seed_spreadsheet_scenario(db_session)
     as_of = date(2026, 8, 7)

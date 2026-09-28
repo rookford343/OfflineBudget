@@ -30,7 +30,8 @@ def compute_overview(
         models.BudgetAllocation.month.in_([0, month]),
     ).all()
     user = db.get(models.User, user_id)
-    allocations = drop_uncarried_defaults(allocations, user, assignable_category_ids(db, user_id))
+    assignable_ids = assignable_category_ids(db, user_id)
+    allocations = drop_uncarried_defaults(allocations, user, assignable_ids)
     budget_by_cat: dict[int, Decimal] = {}
     for a in sorted(allocations, key=lambda x: x.month):  # month=0 first, overridden by specific
         budget_by_cat[a.category_id] = a.budgeted_amount
@@ -83,6 +84,7 @@ def compute_overview(
             variance=budgeted - actual_total,
             rollover_enabled=cat.rollover_enabled,
             rollover_balance=cat.rollover_balance or Decimal("0"),
+            is_assignable=cat.id in assignable_ids,
         ))
 
     # Roll subcategory actuals up into parent rows
