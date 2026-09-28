@@ -96,6 +96,22 @@ _NOISE_PATTERNS = [
 _STRIP_PREFIXES = re.compile(r"^(TST\*|SQ \*|SP \*|PY \*|LS |POS PURCHASE |DEBIT CARD PURCHASE )", re.IGNORECASE)
 
 
+def strip_descriptor_noise(raw: str | None) -> str:
+    """The raw descriptor minus processor prefixes, reference ids, dates and
+    store numbers -- the part that stays the same from one month's charge to
+    the next. Unlike normalize_merchant there is no known-merchant display
+    mapping and no title-casing: rules match this as a substring of raw bank
+    text, and "Amazon" is not a substring of "AMZN MKTP". Empty when nothing
+    is left.
+    """
+    if not raw or not raw.strip():
+        return ""
+    cleaned = _STRIP_PREFIXES.sub("", raw.strip())
+    for pattern in _NOISE_PATTERNS:
+        cleaned = pattern.sub(" ", cleaned)
+    return re.sub(r"[\s,]{2,}", " ", cleaned).strip(" -*,.")
+
+
 def normalize_merchant(raw: str | None) -> str:
     """Best-effort display name for a raw bank descriptor.
 
@@ -113,10 +129,7 @@ def normalize_merchant(raw: str | None) -> str:
         if needle in upper:
             return display
 
-    cleaned = _STRIP_PREFIXES.sub("", original)
-    for pattern in _NOISE_PATTERNS:
-        cleaned = pattern.sub(" ", cleaned)
-    cleaned = re.sub(r"[\s,]{2,}", " ", cleaned).strip(" -*,.")
+    cleaned = strip_descriptor_noise(original)
 
     if not cleaned or len(cleaned) < 3:
         return original

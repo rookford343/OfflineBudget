@@ -9,13 +9,23 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.auto_categorizer import categorize
-from backend.services.merchant_normalizer import normalize_merchant
+from backend.services.merchant_normalizer import normalize_merchant, strip_descriptor_noise
 from backend.services.recurring_detector import detect_patterns, transactions_for_pattern
 from backend.services.recurring_math import monthly_equivalent
 from backend.services.rules_engine import apply_rules
 
 _WORD = re.compile(r"[a-z]{4,}")
 DUPLICATE_AMOUNT_TOLERANCE = Decimal("0.10")
+PATTERN_MAX = 256  # TransactionRule.pattern / RecurringDismissal.pattern_key width
+
+# Names too broad to become a merchant-wide "contains" rule: "Gas" would
+# claim every VEGAS and GASTROPUB charge. The item still gets classified;
+# only the rule and the card-merchant backfill are skipped.
+_MIN_RULE_PATTERN = 4
+_GENERIC_PATTERNS = {
+    "gas", "water", "hoa", "apple", "max", "bill", "payment", "service", "auto",
+    "fee", "electric", "internet", "phone", "insurance", "subscription",
+}
 
 
 def guess_category(
@@ -67,6 +77,33 @@ def _latest_linked(db: Session, item_id: int) -> models.Transaction | None:
         .order_by(models.Transaction.date.desc())
         .first()
     )
+
+
+def rule_pattern(raw: str) -> str | None:
+    """The stable, noise-free part of a descriptor to match future charges
+    on, or None when it is too weak to match on safely.
+
+    Stripping an interior reference ("ACMEFLIX.COM #5001 LOS GATOS") can
+    leave text that isn't contiguous in the raw descriptor, and a contains
+    rule on that would never fire -- so keep the longest leading run of words
+    the raw text actually contains.
+    """
+    words = strip_descriptor_noise(raw).split()
+    raw_lower = raw.lower()
+    pattern = ""
+    for n in range(len(words), 0, -1):
+        candidate = " ".join(words[:n])
+        if candidate.lower() in raw_lower:
+            pattern = candidate
+            break
+    pattern = pattern[:PATTERN_MAX]
+    if len(pattern) < _MIN_RULE_PATTERN or pattern.lower() in _GENERIC_PATTERNS:
+        return None
+    return pattern
+
+
+def _escape_like(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _item_out(db, item, categories, rules, with_guess: bool) -> schemas.TriageItem:
@@ -174,6 +211,8 @@ def _expense_category_or_error(db: Session, user_id: int, category_id: int) -> m
 
 
 def _ensure_rule(db: Session, user_id: int, label: str, pattern: str, category_id: int) -> tuple[int, bool]:
+    # Truncate before the lookup so it compares against what was stored.
+    pattern = pattern[:PATTERN_MAX]
     existing = db.query(models.TransactionRule).filter(
         models.TransactionRule.user_id == user_id,
         models.TransactionRule.pattern == pattern,
@@ -184,7 +223,7 @@ def _ensure_rule(db: Session, user_id: int, label: str, pattern: str, category_i
     rule = models.TransactionRule(
         user_id=user_id, name=f"Auto: {label}"[:128],
         field=models.RuleField.merchant, pattern_type=models.RulePatternType.contains,
-        pattern=pattern[:256], action=models.RuleAction.set_category, category_id=category_id,
+        pattern=pattern, action=models.RuleAction.set_category, category_id=category_id,
     )
     db.add(rule)
     db.flush()
@@ -201,8 +240,10 @@ def _classify_item(db, user_id, item_id, cat) -> schemas.TriageClassifyResult:
     item.category_id = cat.id
 
     latest = _latest_linked(db, item.id)
-    pattern = latest.description if latest else item.name
-    rule_id, created = _ensure_rule(db, user_id, item.name, pattern, cat.id)
+    pattern = rule_pattern(latest.description if latest else item.name)
+    rule_id, created = None, False
+    if pattern:
+        rule_id, created = _ensure_rule(db, user_id, item.name, pattern, cat.id)
 
     # Only rows nobody has categorized yet -- a category set by hand or by an
     # earlier rule is a decision, and this must never overwrite it.
@@ -214,13 +255,13 @@ def _classify_item(db, user_id, item_id, cat) -> schemas.TriageClassifyResult:
         t.category_id = cat.id
         backfilled += 1
     # Card rows have no recurring_item_id, so match them on merchant within
-    # the item's own card.
-    if item.card_id:
+    # the item's own card -- only on a pattern strong enough to be a rule.
+    if item.card_id and pattern:
         for t in db.query(models.CreditCardTransaction).filter(
             models.CreditCardTransaction.user_id == user_id,
             models.CreditCardTransaction.card_id == item.card_id,
             models.CreditCardTransaction.category_id.is_(None),
-            models.CreditCardTransaction.merchant.ilike(f"%{pattern}%"),
+            models.CreditCardTransaction.merchant.ilike(f"%{_escape_like(pattern)}%", escape="\\"),
         ).all():
             t.category_id = cat.id
             backfilled += 1
@@ -255,7 +296,10 @@ def _classify_pattern(db, user_id, pattern_key, cat) -> schemas.TriageClassifyRe
         if t.category_id is None:
             t.category_id = cat.id
             backfilled += 1
-    rule_id, created = _ensure_rule(db, user_id, item.name, latest.description, cat.id)
+    pattern = rule_pattern(latest.description)
+    rule_id, created = None, False
+    if pattern:
+        rule_id, created = _ensure_rule(db, user_id, item.name, pattern, cat.id)
     db.commit()
     return schemas.TriageClassifyResult(
         recurring_item_id=item.id, category_id=cat.id,
@@ -271,12 +315,13 @@ def classify(db: Session, user_id: int, body: schemas.TriageClassify) -> schemas
 
 
 def dismiss(db: Session, user_id: int, pattern_key: str) -> None:
+    pattern_key = pattern_key[:PATTERN_MAX]  # before the lookup, so it matches what was stored
     exists = db.query(models.RecurringDismissal).filter(
         models.RecurringDismissal.user_id == user_id,
         models.RecurringDismissal.pattern_key == pattern_key,
     ).first()
     if exists is None:
-        db.add(models.RecurringDismissal(user_id=user_id, pattern_key=pattern_key[:256]))
+        db.add(models.RecurringDismissal(user_id=user_id, pattern_key=pattern_key))
         db.commit()
 
 
