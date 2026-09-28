@@ -1577,3 +1577,38 @@ class RuleTestRequest(BaseModel):
 
 class RuleTestResponse(BaseModel):
     matched: bool
+
+
+# ── Left to Budget ────────────────────────────────────────────────────────────
+
+class CommittedBill(BaseModel):
+    recurring_item_id: int
+    name: str
+    amount: Decimal
+
+
+class CommittedRow(BaseModel):
+    category_id: Optional[int] = None
+    category_name: str
+    amount: Decimal
+    items: list[CommittedBill] = []
+
+
+class AssignableRow(BaseModel):
+    category_id: int
+    category_name: str
+    assigned: Decimal
+    is_set: bool
+
+
+class LeftToBudgetOut(BaseModel):
+    year: int
+    month: int
+    leftover: Decimal
+    committed: list[CommittedRow]
+    unclassified_count: int
+    unclassified_amount: Decimal
+    assignable: list[AssignableRow]
+    assigned_total: Decimal
+    unassigned: Decimal
+    carry_forward: bool
