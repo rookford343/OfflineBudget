@@ -49,6 +49,41 @@ def rename_utilities_to_home(conn) -> None:
     """))
 
 
+def ensure_health_category(conn) -> None:
+    """Every top-level Necessities gets a Health child.
+
+    An existing Healthcare there is renamed in place (links keep working);
+    otherwise Health is created, last in sort order. Committed spending, not
+    an assignable bucket, so is_discretionary stays 0. Idempotent: a parent
+    that already has Health is left alone, Healthcare included.
+    """
+    conn.execute(text("""
+        UPDATE categories SET name = 'Health'
+        WHERE name = 'Healthcare'
+          AND parent_id IN (
+              SELECT id FROM categories WHERE name = 'Necessities' AND parent_id IS NULL
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM categories AS sib
+              WHERE sib.parent_id = categories.parent_id AND sib.name = 'Health'
+          )
+    """))
+    conn.execute(text("""
+        INSERT INTO categories (
+            user_id, parent_id, name, type, color, icon, sort_order,
+            rollover_enabled, rollover_balance, tax_deductible, is_discretionary
+        )
+        SELECT n.user_id, n.id, 'Health', 'expense', '#1e3a8a', 'heart',
+               COALESCE((SELECT MAX(c.sort_order) + 1 FROM categories AS c WHERE c.parent_id = n.id), 0),
+               0, 0, 0, 0
+        FROM categories AS n
+        WHERE n.name = 'Necessities' AND n.parent_id IS NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM categories AS s WHERE s.parent_id = n.id AND s.name = 'Health'
+          )
+    """))
+
+
 def upgrade_categories():
     """One-time rename: 'Tithing / Giving' → 'Charity'; remove orphan 'Charity' sub-category."""
     with engine.connect() as conn:
@@ -66,6 +101,8 @@ def upgrade_categories():
             """))
             conn.commit()
             rename_utilities_to_home(conn)
+            conn.commit()
+            ensure_health_category(conn)
             conn.commit()
         except Exception:
             conn.rollback()
