@@ -1,7 +1,7 @@
 from datetime import date, date as date_type, datetime
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus, PlannedTransferStatus, VerificationFeature, VerificationFlagStatus, PlannedDirection
 
 
@@ -1650,3 +1650,37 @@ class TriageOut(BaseModel):
     duplicates: list[TriageDuplicate]
     unclassified_count: int
     unclassified_monthly_total: Decimal
+
+
+class TriageClassify(BaseModel):
+    category_id: int
+    recurring_item_id: Optional[int] = None
+    pattern_key: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _exactly_one_target(self):
+        if (self.recurring_item_id is None) == (self.pattern_key is None):
+            raise ValueError("provide exactly one of recurring_item_id or pattern_key")
+        return self
+
+
+class TriageClassifyResult(BaseModel):
+    recurring_item_id: int
+    category_id: int
+    rule_id: Optional[int] = None
+    rule_created: bool = False
+    backfilled: int = 0
+
+
+class TriageDismiss(BaseModel):
+    pattern_key: str
+
+
+class TriageDuplicateAction(BaseModel):
+    keep_id: int
+    deactivate_id: int
+
+
+class TriageDuplicateResult(BaseModel):
+    deactivated_id: int
+    relinked: int

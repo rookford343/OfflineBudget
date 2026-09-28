@@ -73,6 +73,47 @@ def get_triage(
     return build_triage(db, user.id)
 
 
+def _triage_call(fn, *args):
+    from backend.services.recurring_triage import TriageError, TriageNotFound
+    try:
+        return fn(*args)
+    except TriageNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except TriageError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/triage/classify", response_model=schemas.TriageClassifyResult)
+def triage_classify(
+    body: schemas.TriageClassify,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    from backend.services.recurring_triage import classify
+    return _triage_call(classify, db, user.id, body)
+
+
+@router.post("/triage/dismiss")
+def triage_dismiss(
+    body: schemas.TriageDismiss,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    from backend.services.recurring_triage import dismiss
+    _triage_call(dismiss, db, user.id, body.pattern_key)
+    return {"ok": True}
+
+
+@router.post("/triage/duplicate", response_model=schemas.TriageDuplicateResult)
+def triage_duplicate(
+    body: schemas.TriageDuplicateAction,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    from backend.services.recurring_triage import mark_duplicate
+    return _triage_call(mark_duplicate, db, user.id, body.keep_id, body.deactivate_id)
+
+
 # Declared BEFORE /{item_id} on purpose: FastAPI matches routes in
 # declaration order, so the other way round "breakdown" is read as an
 # item_id and this endpoint 422s instead of answering.
