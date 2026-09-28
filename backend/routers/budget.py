@@ -57,6 +57,19 @@ def budget_overview(
     return compute_overview(db, user.id, year, month)
 
 
+@router.get("/left-to-budget", response_model=schemas.LeftToBudgetOut)
+def left_to_budget(
+    year: int,
+    month: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not 1 <= month <= 12:
+        raise HTTPException(status_code=400, detail="month must be 1-12")
+    from backend.services.left_to_budget import compute_left_to_budget
+    return compute_left_to_budget(db, user, year, month)
+
+
 @router.post("/rollover/{year}/{month}")
 def apply_rollover(
     year: int,
