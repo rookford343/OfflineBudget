@@ -9,6 +9,7 @@ export interface NavItem {
   to: string;
   icon: LucideIcon;
   label: string;
+  badgeKey?: "triage";
 }
 
 export const DASHBOARD_ITEM: NavItem = { to: "/dashboard", icon: LayoutDashboard, label: "Dashboard" };
@@ -32,7 +33,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/transactions", icon: ArrowLeftRight, label: "Transactions" },
       { to: "/spending", icon: PieChart, label: "Spending" },
       { to: "/tax", icon: Receipt, label: "Tax" },
-      { to: "/recurring", icon: Repeat, label: "Recurring" },
+      { to: "/recurring", icon: Repeat, label: "Recurring", badgeKey: "triage" },
       { to: "/import", icon: Upload, label: "Import" },
     ],
   },
