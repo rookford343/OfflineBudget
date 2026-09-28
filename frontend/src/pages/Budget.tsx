@@ -4,6 +4,7 @@ import { budgetApi, categoriesApi } from "../api";
 import { fmt } from "../lib/utils";
 import { Pencil, Check, X, RotateCcw, HelpCircle, ChevronRight, ChevronDown, Plus, Trash2 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import LeftToBudgetPanel from "../components/LeftToBudgetPanel";
 import MonthYearPicker from "../components/MonthYearPicker";
 import { CategoryOptions } from "../lib/selectOptions";
 
@@ -318,6 +319,8 @@ export default function Budget() {
           <MonthYearPicker year={year} month={month} onChange={(y, m) => { setYear(y); setMonth(m); }} />
         </div>
       </div>
+
+      <LeftToBudgetPanel year={year} month={month} />
 
       {isLoading && <div className="card text-sm text-gray-400">Loading…</div>}
 
