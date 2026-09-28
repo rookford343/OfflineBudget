@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+import pytest
 from decimal import Decimal
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -179,25 +180,51 @@ def test_rule_from_noisy_descriptor_matches_next_months_variant(db_session):
     assert hit is not None and hit.category_id == cats["home"].id
 
 
-def test_rule_pattern_keeps_only_the_leading_run_the_raw_text_contains(db_session):
-    user, acct, cats, _ = _seed(db_session)
-    item = models.RecurringItem(
-        user_id=user.id, account_id=acct.id, name="Streaming", amount=Decimal("12.00"),
-        type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
-        day_of_month=3, start_date=date(2026, 1, 1),
-    )
-    db_session.add(item); db_session.flush()
-    db_session.add(models.Transaction(
+def _classify_card_item_with_descriptor(db, user, acct, cats, descriptor, card_merchants):
+    """A card-paid item whose linked checking row carries `descriptor`, with
+    uncategorized card rows that a broad rule would wrongly claim."""
+    card = db.query(models.CreditCard).one()
+    item = _card_item(db, user, card, "Utility")
+    db.add(models.Transaction(
         user_id=user.id, account_id=acct.id, recurring_item_id=item.id, date=date(2026, 9, 3),
-        amount=Decimal("-12.00"), description="ACMEFLIX.COM #5001 LOS GATOS CA", is_actual=True,
+        amount=Decimal("-60.00"), description=descriptor, is_actual=True,
     ))
-    db_session.commit()
-    body = _client(db_session, user).post("/recurring/triage/classify", json={"recurring_item_id": item.id, "category_id": cats["subs"].id}).json()
+    for n, m in enumerate(card_merchants):
+        db.add(models.CreditCardTransaction(user_id=user.id, card_id=card.id, date=date(2026, 9, 4 + n),
+                                            amount=Decimal("10.00"), merchant=m))
+    db.commit()
+    return _client(db, user).post("/recurring/triage/classify", json={"recurring_item_id": item.id, "category_id": cats["home"].id}).json()
+
+
+@pytest.mark.parametrize("descriptor, merchant", [
+    ("ACH DEBIT 20260903 CITY OF SPRINGFIELD", "ACH DEBIT ELSEWHERE"),
+    ("HOME #5001 DEPOT", "HOMEGOODS 12"),
+    ("ACMEFLIX.COM #5001 LOS GATOS CA", "ACMEFLIX.COM OTHER"),
+])
+def test_interior_noise_makes_the_pattern_weak_not_a_broad_leading_run(db_session, descriptor, merchant):
+    # Stripping interior noise leaves text that isn't contiguous in the raw
+    # descriptor. Its leading run ("ACH DEBIT", "HOME") would be a rule that
+    # files every future ACH debit / anything "home" -- so no rule at all.
+    user, acct, cats, _ = _seed(db_session)
+    body = _classify_card_item_with_descriptor(db_session, user, acct, cats, descriptor, [merchant])
+    assert body["rule_id"] is None and body["rule_created"] is False
+    assert body["backfilled"] == 1   # its own linked row only
+    assert db_session.query(models.TransactionRule).count() == 0
+    db_session.expire_all()
+    assert db_session.query(models.CreditCardTransaction).filter_by(merchant=merchant).one().category_id is None
+
+
+def test_whitespace_only_difference_keeps_the_full_pattern_as_written(db_session):
+    # Repeated spaces are not noise: the rule is the full descriptor exactly
+    # as the bank spaced it (so a contains-match on raw text still fires),
+    # never a leading fragment like "CITY".
+    user, acct, cats, _ = _seed(db_session)
+    body = _classify_card_item_with_descriptor(db_session, user, acct, cats, "CITY  OF SPRINGFIELD UTIL", ["CITY PIZZA"])
     rule = db_session.get(models.TransactionRule, body["rule_id"])
-    # Stripping the interior "#5001" leaves text that isn't contiguous in the
-    # raw descriptor; a contains rule on it would never fire.
-    assert rule.pattern == "ACMEFLIX.COM"
-    assert apply_rules("ACMEFLIX.COM #7002 LOS GATOS CA", [rule]) is not None
+    assert rule.pattern == "CITY  OF SPRINGFIELD UTIL"
+    assert apply_rules("CITY  OF SPRINGFIELD UTIL", [rule]) is not None
+    db_session.expire_all()
+    assert db_session.query(models.CreditCardTransaction).filter_by(merchant="CITY PIZZA").one().category_id is None
 
 
 def test_generic_card_item_name_creates_no_rule_and_no_card_backfill(db_session):
