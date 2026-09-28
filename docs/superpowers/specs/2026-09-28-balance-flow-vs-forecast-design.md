@@ -47,7 +47,13 @@ New `backend/services/forecast_baseline.py`:
   run `build_forecast(db, user_id, account_id, first_of_month, last_of_month)`,
   store the points, `taken_on = as_of`, and return the new row.
 - Never updates an existing row. Idempotent.
-- If saved after the 1st (e.g. the Mac slept), days up to `taken_on` are
+- **Save window:** a new row is only created when `as_of.day <= 7`
+  (`BASELINE_SAVE_WINDOW_DAYS = 7`). Later in the month it returns `None`
+  and the month has no baseline. A forecast saved late is mostly actuals and
+  would report near-zero deviation, which misleads; the window still covers a
+  Mac that slept through the 1st. This is also what keeps September 2026 on
+  the fallback view.
+- If saved after the 1st but inside the window, days up to `taken_on` are
   actuals in the saved points, so deviation for those days is zero by
   construction; the card notes the save date.
 
@@ -63,7 +69,8 @@ Triggers (both call the same function):
 `{ year, month, taken_on, points: [{date, projected_balance}] }`
 
 - Account must belong to the user, otherwise 404.
-- Current month: calls `ensure_month_baseline` (creates on first request).
+- Current month: calls `ensure_month_baseline` (creates on first request
+  inside the save window); `None` → 404.
 - Past or future month with no row: 404. Past month with a row: returns it.
 - Declared before any path-parameter route in `routers/forecast.py`.
 
@@ -96,13 +103,13 @@ Triggers (both call the same function):
 Backend (pytest):
 - `ensure_month_baseline` saves one row with one point per day of the month
   and `taken_on`; a second call returns the same row unchanged even after a
-  recurring item changes.
+  recurring item changes; day 7 creates, day 8 returns `None` and creates nothing.
 - Endpoint: current month creates; past month without a row 404s; another
   user's account 404s.
 - Sweep helper creates baselines for active checking accounts only and
   swallows a failing account.
 
-Frontend: type-check gate (no new tsc errors). Interceptor: the card renders
-the fallback view in September; with a baseline present (seeded in a test
-database or by a dev run), the dashed line, headline, subtitle and footer
-render.
+Frontend: type-check gate (no new tsc errors). Interceptor now: the card
+still renders the fallback view in September and the baseline endpoint 404s.
+Interceptor on or after 2026-10-01: dashed forecast line, headline, subtitle
+and footer render. The live database is never seeded with a fake baseline.
