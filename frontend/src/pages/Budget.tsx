@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { budgetApi, categoriesApi } from "../api";
+import { authApi, budgetApi, categoriesApi } from "../api";
 import { fmt } from "../lib/utils";
 import { Pencil, Check, X, RotateCcw, HelpCircle, ChevronRight, ChevronDown, Plus, Trash2 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
@@ -42,6 +42,7 @@ interface RowShape {
   actual_total: string;
   parent_id?: number | null;
   category_type?: string;
+  is_assignable?: boolean;
 }
 
 type BudgetTab = "track" | "set";
@@ -82,9 +83,12 @@ export default function Budget() {
     queryFn: categoriesApi.list,
   });
 
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
+
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["budget-overview"] });
     qc.invalidateQueries({ queryKey: ["budget-allocations"] });
+    qc.invalidateQueries({ queryKey: ["left-to-budget"] });
   };
 
   const upsertMut = useMutation({
@@ -109,9 +113,17 @@ export default function Budget() {
   });
 
   // month: 0 is the "every month" allocation. Budgets are set that way by
-  // default so a new month doesn't silently start unbudgeted.
+  // default so a new month doesn't silently start unbudgeted. The exception
+  // is an assignable bucket with carry-forward off: the backend ignores its
+  // month=0 row by design (each month is assigned fresh), so a month=0 save
+  // there would silently do nothing -- write the viewed month instead. Until
+  // /auth/me loads, carry-forward is treated as off (its default); a
+  // month-specific row is honored either way, so that errs visible.
+  const assignableIds = new Set(overview.filter(r => r.is_assignable).map(r => r.category_id));
+  const monthOnly = (catId: number) => !me?.budget_carry_forward && assignableIds.has(catId);
+  const monthLabel = `${MONTHS[month - 1]} ${year}`;
   function saveEdit(catId: number, amount: string) {
-    upsertMut.mutate({ category_id: catId, year, month: 0, budgeted_amount: parseFloat(amount) });
+    upsertMut.mutate({ category_id: catId, year, month: monthOnly(catId) ? month : 0, budgeted_amount: parseFloat(amount) });
   }
   function toggle(id: number) {
     setExpanded(prev => {
@@ -121,8 +133,15 @@ export default function Budget() {
     });
   }
 
+  // The allocation that governs the viewed month: its month-specific row if
+  // there is one, else the every-month (month=0) row. Other months' rows are
+  // ignored, so the trash button only ever removes what this month shows.
   const allocByCat: Record<number, any> = {};
-  allocations.forEach(a => { allocByCat[a.category_id] = a; });
+  allocations.forEach(a => {
+    if (a.month === month || (a.month === 0 && allocByCat[a.category_id]?.month !== month)) {
+      allocByCat[a.category_id] = a;
+    }
+  });
 
   // A budget line is an EXPENSE category with an allocation, at whatever level
   // it was set. the user budgets at the level he thinks in (Subscriptions), which
@@ -211,6 +230,11 @@ export default function Budget() {
       <div className="flex items-center justify-between gap-3 py-2.5 border-b border-gray-50 dark:border-gray-800 last:border-0">
         <div className="flex items-center gap-2 min-w-0">
           <span className="truncate font-medium text-gray-900 dark:text-white">{row.category_name}</span>
+          {monthOnly(row.category_id) && (
+            <span className="shrink-0 text-xs text-gray-400" title="Carry-forward is off, so this bucket is set month by month">
+              for {monthLabel} only
+            </span>
+          )}
           {row.rollover_enabled && parseFloat(row.rollover_balance || "0") > 0 && (
             <span className="shrink-0 text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
               +{fmt(parseFloat(row.rollover_balance || "0"))} rolled over
@@ -391,6 +415,9 @@ export default function Budget() {
                 </select>
                 <input type="number" step="0.01" className="input w-28 py-1 text-sm text-right"
                   placeholder="Amount" value={addAmt} onChange={e => setAddAmt(e.target.value)} />
+                {addCat && monthOnly(Number(addCat)) && (
+                  <span className="text-xs text-gray-400">for {monthLabel} only</span>
+                )}
                 <button className="btn-primary text-xs px-2 py-1" disabled={!addCat || !addAmt || upsertMut.isPending}
                   onClick={() => saveEdit(Number(addCat), addAmt)}>
                   {upsertMut.isPending ? "Saving…" : "Add"}
@@ -416,7 +443,10 @@ export default function Budget() {
               <div className="space-y-2">
                 {unbudgeted.map(r => (
                   <div key={r.category_id} className="flex items-center justify-between gap-3">
-                    <span className="text-sm text-gray-700 dark:text-gray-300 truncate">{r.category_name}</span>
+                    <span className="text-sm text-gray-700 dark:text-gray-300 truncate">
+                      {r.category_name}
+                      {monthOnly(r.category_id) && <span className="ml-2 text-xs text-gray-400">for {monthLabel} only</span>}
+                    </span>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-sm tabular-nums text-gray-500 dark:text-gray-400">
                         {fmt(parseFloat(r.actual_total))}
@@ -441,7 +471,7 @@ export default function Budget() {
           body={
             "Track Budgets shows the amount you set relative to what you actually spent -- progress bars, spent/left, and the merchants behind each line. Set Budgets is where you add, edit, or remove a line, and turn rollover on or off -- no progress bars there, just the numbers you're setting.\n\n" +
             "Set a few broad budget lines rather than many small ones — a single Subscriptions budget is easier to hit than a limit per service.\n\n" +
-            "Budgets are saved as 'every month' by default, so a new month never starts unbudgeted. Removing a line is different from setting it to zero: zero means spend nothing here, while removing it means the category simply isn't budgeted.\n\n" +
+            "Budgets are saved as 'every month' by default, so a new month never starts unbudgeted. The exception is a bucket you assign from Left to budget while carry-forward is off (Settings → Preferences): those are set for the month you're viewing only. Removing a line is different from setting it to zero: zero means spend nothing here, while removing it means the category simply isn't budgeted.\n\n" +
             "'Spending with no budget' (on Set Budgets) shows where money went that no line covers, so you can budget it at what you actually spend."
           }
           onClose={() => setShowHelp(false)}

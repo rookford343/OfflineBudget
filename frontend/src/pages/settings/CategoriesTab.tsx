@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { categoriesApi, budgetApi, rulesApi } from "../../api";
+import { authApi, categoriesApi, budgetApi, rulesApi } from "../../api";
 import { fmt } from "../../lib/utils";
 import { Plus, Pencil, Trash2, X, Check, ChevronRight, ChevronDown } from "lucide-react";
 import { sortCategoryList, byName } from "../../lib/selectOptions";
@@ -11,8 +11,15 @@ const COLOR_SWATCHES = ["#6366f1", "#22c55e", "#ef4444", "#f59e0b", "#3b82f6", "
 export default function CategoriesTab() {
   const qc = useQueryClient();
   const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
   const { data: categories = [] } = useQuery<any[]>({ queryKey: ["categories"], queryFn: categoriesApi.list });
   const { data: budgets = [] } = useQuery<any[]>({ queryKey: ["budget", currentYear], queryFn: () => budgetApi.list(currentYear) });
+  // Only for is_assignable -- same key as the Budget page so the cache is shared.
+  const { data: overview = [] } = useQuery<any[]>({
+    queryKey: ["budget-overview", currentYear, currentMonth],
+    queryFn: () => budgetApi.overview(currentYear, currentMonth),
+  });
+  const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
 
   const [showCatForm, setShowCatForm] = useState(false);
   const [editCat, setEditCat] = useState<any | null>(null);
@@ -22,13 +29,37 @@ export default function CategoriesTab() {
   const [budgetDraft, setBudgetDraft] = useState("");
   const [expandedCats, setExpandedCats] = useState<Set<number>>(new Set());
 
+  // Assignable buckets with carry-forward off ignore their month=0 row (each
+  // month is assigned fresh), so a month=0 save there would silently do
+  // nothing. This tab has no month picker, so those edits write the current
+  // calendar month. Carry-forward counts as off (its default) until /auth/me
+  // loads -- a month-specific row is honored either way.
+  const assignableIds = new Set(overview.filter((r: any) => r.is_assignable).map((r: any) => r.category_id));
+  const monthOnly = (catId: number) => !me?.budget_carry_forward && assignableIds.has(catId);
+
+  // Show what governs the current month: its month-specific row if present,
+  // else the every-month row (unless that row is ignored, per above).
   const budgetMap: Record<number, string> = {};
-  budgets.forEach((b: any) => { budgetMap[b.category_id] = b.budgeted_amount; });
+  budgets.forEach((b: any) => {
+    if (b.month === currentMonth) budgetMap[b.category_id] = b.budgeted_amount;
+  });
+  budgets.forEach((b: any) => {
+    if (b.month === 0 && !(b.category_id in budgetMap) && !monthOnly(b.category_id)) budgetMap[b.category_id] = b.budgeted_amount;
+  });
 
   const createCatMut = useMutation({ mutationFn: categoriesApi.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["categories"] }); setShowCatForm(false); } });
   const updateCatMut = useMutation({ mutationFn: ({ id, data }: any) => categoriesApi.update(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["categories"] }); setEditCat(null); setShowCatForm(false); } });
   const deleteCatMut = useMutation({ mutationFn: categoriesApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["categories"] }); setDeleteCatId(null); } });
-  const upsertBudgetMut = useMutation({ mutationFn: budgetApi.upsert, onSuccess: () => { qc.invalidateQueries({ queryKey: ["budget", currentYear] }); setEditBudgetCatId(null); } });
+  const upsertBudgetMut = useMutation({
+    mutationFn: budgetApi.upsert,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["budget", currentYear] });
+      qc.invalidateQueries({ queryKey: ["budget-overview"] });
+      qc.invalidateQueries({ queryKey: ["budget-allocations"] });
+      qc.invalidateQueries({ queryKey: ["left-to-budget"] });
+      setEditBudgetCatId(null);
+    },
+  });
 
   function submitCat(e: React.FormEvent) {
     e.preventDefault();
@@ -53,7 +84,7 @@ export default function CategoriesTab() {
     setShowCatForm(true);
   }
   function saveBudget(catId: number) {
-    upsertBudgetMut.mutate({ category_id: catId, year: currentYear, month: 0, budgeted_amount: parseFloat(budgetDraft) || 0 });
+    upsertBudgetMut.mutate({ category_id: catId, year: currentYear, month: monthOnly(catId) ? currentMonth : 0, budgeted_amount: parseFloat(budgetDraft) || 0 });
   }
 
   const { data: rules = [] } = useQuery<any[]>({ queryKey: ["rules"], queryFn: rulesApi.list });
@@ -112,6 +143,9 @@ export default function CategoriesTab() {
                 <div key={ch.id} className="flex items-center gap-2 py-1.5 pl-9 pr-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700/50">
                   <div className="w-2 h-2 rounded-full shrink-0" style={{ background: ch.color }} />
                   <span className="text-sm text-gray-700 dark:text-gray-300 flex-1">{ch.name}</span>
+                  {monthOnly(ch.id) && (
+                    <span className="text-xs text-gray-400" title="Carry-forward is off, so this bucket is set month by month">this month</span>
+                  )}
                   {editBudgetCatId === ch.id ? (
                     <div className="flex items-center gap-1">
                       <input type="number" step="0.01" className="input w-24 py-0.5 text-right text-xs" value={budgetDraft} onChange={e => setBudgetDraft(e.target.value)} autoFocus />
