@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { recurringApi, categoriesApi } from "../api";
 import { fmt } from "../lib/utils";
 import { CategoryOptions } from "../lib/selectOptions";
-import { Inbox, Check, X, Copy } from "lucide-react";
+import { Inbox, Check, X, Copy, Ban } from "lucide-react";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 /**
  * "Needs a home": recurring charges with no category, repeating charges
@@ -50,6 +51,13 @@ export default function TriageInbox() {
     mutationFn: ({ keep, drop }: { keep: number; drop: number }) => recurringApi.triageDuplicate(keep, drop),
     onSuccess: refresh,
   });
+  // A cancelled or not-real bill: DELETE /recurring/{id} only deactivates it,
+  // so it moves to the Recurring page's Inactive list and can be turned back on.
+  const [stopTarget, setStopTarget] = useState<{ id: number; name: string } | null>(null);
+  const stopTracking = useMutation({
+    mutationFn: (id: number) => recurringApi.remove(id),
+    onSuccess: () => { setStopTarget(null); refresh(); },
+  });
 
   if (!data) return null;
   const total = data.uncategorized.length + data.untracked.length + data.duplicates.length;
@@ -91,6 +99,14 @@ export default function TriageInbox() {
                     onClick={() => classify.mutate({ recurring_item_id: u.recurring_item_id, category_id: Number(chosen) })}
                   >
                     <Check size={14} />
+                  </button>
+                  <button
+                    className="btn-ghost p-1 text-gray-400 hover:text-red-500"
+                    title="Stop tracking"
+                    aria-label={`Stop tracking ${u.name}`}
+                    onClick={() => setStopTarget({ id: u.recurring_item_id, name: u.name })}
+                  >
+                    <Ban size={14} />
                   </button>
                 </div>
               </div>
@@ -149,6 +165,18 @@ export default function TriageInbox() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={stopTarget !== null}
+        onOpenChange={(o) => { if (!o) setStopTarget(null); }}
+        icon={Ban}
+        title={`Stop tracking ${stopTarget?.name ?? ""}?`}
+        description="It leaves the forecast and your budget totals. Its history is kept, and you can turn it back on from the Inactive list below."
+        confirmLabel="Stop tracking"
+        confirmingLabel="Stopping…"
+        isPending={stopTracking.isPending}
+        onConfirm={() => stopTarget && stopTracking.mutate(stopTarget.id)}
+      />
     </div>
   );
 }
