@@ -71,6 +71,19 @@ def test_uncategorized_items_listed_with_best_guess(db_session):
     assert by_name["Trash service"].guess_category_id is None       # no weak guess
 
 
+def test_rule_beats_keyword_when_both_match(db_session):
+    user, _, cats, _ = _seed(db_session)
+    # "hulu" is a Subscriptions keyword; the user's rule says otherwise.
+    db_session.add(models.TransactionRule(
+        user_id=user.id, name="Auto: hulu", field=models.RuleField.description,
+        pattern_type=models.RulePatternType.contains, pattern="hulu",
+        action=models.RuleAction.set_category, category_id=cats["home"].id,
+    ))
+    db_session.commit()
+    by_name = {u.name: u for u in build_triage(db_session, user.id).uncategorized}
+    assert by_name["Hulu"].guess_category_name == "Home"
+
+
 def test_badge_totals(db_session):
     user, *_ = _seed(db_session)
     out = build_triage(db_session, user.id)
