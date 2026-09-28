@@ -80,11 +80,16 @@ a `Home` sibling already exists.
 
 ### Three-level reporting without a third level
 
-Reports drill **group → category → bill** using the existing
-`Transaction.recurring_item_id` link. Within a category, spending grouped by
-recurring item shows each bill; transactions with no recurring item show as
-"Other in <category>". Committed amounts in the Budget page use the same
-grouping over `RecurringItem` rows.
+The Budget page's committed list drills **group → category → bill** over
+`RecurringItem` rows: each committed category expands into the bills that
+make it up, with each bill's amount for that month.
+
+This is a **planned** view, not an actual-spend view. An actual-spend
+drill-down by bill is out of scope: `CreditCardTransaction` has no
+`recurring_item_id` column, so card-paid bills (most subscriptions) could
+not be attributed to a bill without a new linking mechanism. The existing
+merchant breakdown (`/budget/category-breakdown`) remains the actual-spend
+view per category.
 
 ## 2. "Needs a home" triage inbox
 
@@ -106,9 +111,14 @@ Resolved in order, first hit wins:
 
 1. An active `TransactionRule` (`set_category`) matching the item's name or
    a linked transaction's merchant.
-2. The `auto_categorizer` keyword table, extended with home keywords
-   (electric, energy, gas, water, sewer, stormwater, trash, waste, HOA,
-   internet, fiber, lawn, landscape, pest) mapping to **Home**, and the
+2. The `auto_categorizer` keyword table, with every existing `Utilities`
+   target retargeted to **Home** and specific home keywords added
+   (electric, natural gas, water & sewer, stormwater, waste management,
+   republic services, hoa fee, hoa dues, homeowners assoc, metronet, lawn,
+   landscap, pest, greenix, terminix). Bare words such as "gas", "water" or
+   "hoa" are deliberately excluded — the same table categorizes every
+   imported transaction, and those would catch gas stations and "hoagie".
+   The
    existing streaming keywords remapped from the old Subscriptions meaning
    to the narrowed one (they still land in Subscriptions).
 3. No match → the picker is shown **blank**. No low-confidence guess.
@@ -120,6 +130,11 @@ Resolved in order, first hit wins:
 | **Confirm** guess / **Pick** category | Set `category_id`; create merchant rule if none matches; backfill (below). For an untracked pattern, create the `RecurringItem` via the existing create path with that category. |
 | **Not recurring** | Insert a `RecurringDismissal` row so the pattern never reappears. Untracked patterns only. |
 | **Duplicate of…** | Set `is_active = False` on the chosen item. Never deletes. Re-link its transactions' `recurring_item_id` to the kept item. |
+| **Not a duplicate** | Insert a `RecurringDismissal` with key `dup:<low_id>:<high_id>` so that pair is never flagged again. |
+
+Duplicate detection is a heuristic flag only: two active expense items with
+the same frequency, amounts within 10%, and the same first significant word
+(≥ 4 letters) of their normalized name.
 
 **Backfill rule:** after classifying an item, set `category_id` on its linked
 transactions (`recurring_item_id = item.id`) **only where `category_id` is
@@ -141,14 +156,15 @@ recurring_dismissals
 ### API
 
 - `GET  /api/recurring/triage` → `{ uncategorized[], untracked[], duplicates[], unclassified_count, unclassified_monthly_total }`
-- `POST /api/recurring/triage/classify` → `{ recurring_item_id | suggestion, category_id }`
+- `POST /api/recurring/triage/classify` → `{ recurring_item_id | pattern_key, category_id }`
 - `POST /api/recurring/triage/dismiss` → `{ pattern_key }`
 - `POST /api/recurring/triage/duplicate` → `{ keep_id, deactivate_id }`
 
 ### Visibility
 
-A badge — "N unclassified · $X/mo" (monthly-equivalent, using the same
-monthly/quarterly/yearly accrual rules as `_monthly_expenses`) — on the
+A badge — "N unclassified · $X/mo" (smoothed monthly cost via
+`recurring_math.monthly_equivalent`, so a yearly bill reads as 1/12 of
+itself every month rather than spiking once a year) — on the
 Recurring nav item and on the Budget page's committed list, so unknowns are
 never silently missing from rollup totals.
 
@@ -164,8 +180,12 @@ changes how the committed total is **broken down**, never the total itself.
 
 ### Committed (read-only)
 
-- Every category with active expense recurring items, amount = sum of those
-  items' monthly-equivalent cost. Expandable to the individual bills.
+- Every category with active expense recurring items, amount = sum of each
+  item's **leftover share** for the month — exactly what `_monthly_expenses`
+  counts for it (monthly in full, quarterly ÷ 3, yearly in full only in its
+  due month). Using the same per-item rule is what makes committed +
+  leftover reconcile to income to the cent. Expandable to the individual
+  bills.
 - An **Unclassified** row for recurring items with no category (links to the
   inbox).
 - **Savings** and **Groceries** at their allocation amounts, resolved exactly
@@ -181,6 +201,7 @@ deleted.
 A category is assignable when **all** hold:
 
 - expense type, `is_discretionary = True`
+- a leaf (no child categories — excludes group rows like Wants)
 - no active expense recurring items
 - not Savings or Groceries (already subtracted in `leftover`)
 
@@ -206,9 +227,10 @@ row (`month = 1..12`).
 - **On:** month-specific row, else month=0 row — today's behaviour.
 - Committed categories, Savings and Groceries are **unaffected** either way.
 
-One helper, `resolve_allocation(db, user, category, year, month)`, applies
-this rule and is used by `budget_calculator.compute_overview`,
-`routers/spending.py` budget-vs-actual, and the new Budget page endpoint, so
+One helper, `budget_buckets.drop_uncarried_defaults(allocations, user,
+assignable_ids)`, applies this rule to an already-fetched allocation list and
+is used by `budget_calculator.compute_overview`, `routers/spending.py`
+budget-vs-actual, and the new Budget page endpoint, so
 the Spending page and weekly email show "not assigned yet" consistently
 rather than each re-implementing the fallback.
 
