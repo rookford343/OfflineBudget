@@ -975,6 +975,23 @@ class MerchantAlias(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class RecurringDismissal(Base):
+    """A triage suggestion the user said to stop showing.
+
+    `pattern_key` is either a detector key (the normalized descriptor of a
+    repeating charge the user marked "not recurring") or a duplicate pair key
+    "dup:<low_id>:<high_id>" for two items the user said are distinct. Without
+    this the inbox would re-offer the same answered question forever.
+    """
+    __tablename__ = "recurring_dismissals"
+    __table_args__ = (UniqueConstraint("user_id", "pattern_key", name="uq_recurring_dismissal_user_key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    pattern_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class AppSetting(Base):
     """Server configuration editable from the Settings page, overriding the
     matching .env default at runtime.

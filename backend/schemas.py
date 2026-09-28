@@ -541,6 +541,7 @@ class RecurringSuggestion(BaseModel):
     median_amount: Decimal
     frequency: RecurringFrequency
     occurrences: int
+    pattern_key: str = ""
 
 
 class MonthlySummary(BaseModel):
@@ -1612,3 +1613,40 @@ class LeftToBudgetOut(BaseModel):
     assigned_total: Decimal
     unassigned: Decimal
     carry_forward: bool
+
+
+# ── Recurring Triage ──────────────────────────────────────────────────────────
+
+class TriageItem(BaseModel):
+    recurring_item_id: int
+    name: str
+    amount: Decimal
+    frequency: RecurringFrequency
+    monthly_amount: Decimal
+    card_id: Optional[int] = None
+    guess_category_id: Optional[int] = None
+    guess_category_name: Optional[str] = None
+
+
+class TriageSuggestion(BaseModel):
+    pattern_key: str
+    description: str
+    median_amount: Decimal
+    frequency: RecurringFrequency
+    occurrences: int
+    guess_category_id: Optional[int] = None
+    guess_category_name: Optional[str] = None
+
+
+class TriageDuplicate(BaseModel):
+    pair_key: str
+    a: TriageItem
+    b: TriageItem
+
+
+class TriageOut(BaseModel):
+    uncategorized: list[TriageItem]
+    untracked: list[TriageSuggestion]
+    duplicates: list[TriageDuplicate]
+    unclassified_count: int
+    unclassified_monthly_total: Decimal

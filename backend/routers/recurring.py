@@ -62,6 +62,18 @@ def get_suggestions(
 
 
 # Declared BEFORE /{item_id} on purpose: FastAPI matches routes in
+# declaration order, so the other way round "triage" is read as an item_id
+# and this endpoint 422s instead of answering.
+@router.get("/triage", response_model=schemas.TriageOut)
+def get_triage(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    from backend.services.recurring_triage import build_triage
+    return build_triage(db, user.id)
+
+
+# Declared BEFORE /{item_id} on purpose: FastAPI matches routes in
 # declaration order, so the other way round "breakdown" is read as an
 # item_id and this endpoint 422s instead of answering.
 @router.get("/breakdown", response_model=schemas.RecurringBreakdown)

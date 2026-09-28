@@ -13,14 +13,9 @@ def _normalize(description: str) -> str:
     return re.sub(r"[^a-z0-9 ]", "", description.lower()).strip()
 
 
-def detect_patterns(
-    db: Session,
-    user_id: int,
-    min_occurrences: int = 2,
-) -> list[RecurringSuggestion]:
-    """Scan transaction history for recurring patterns not already in recurring_items."""
+def _candidate_transactions(db: Session, user_id: int) -> list[models.Transaction]:
     cutoff = date.today() - timedelta(days=395)  # ~13 months — enough for reliable pattern detection
-    transactions = (
+    return (
         db.query(models.Transaction)
         .filter(
             models.Transaction.user_id == user_id,
@@ -38,6 +33,20 @@ def detect_patterns(
         .all()
     )
 
+
+def transactions_for_pattern(db: Session, user_id: int, pattern_key: str) -> list[models.Transaction]:
+    """The untracked transactions a detector suggestion was built from."""
+    return [t for t in _candidate_transactions(db, user_id) if _normalize(t.description) == pattern_key]
+
+
+def detect_patterns(
+    db: Session,
+    user_id: int,
+    min_occurrences: int = 2,
+) -> list[RecurringSuggestion]:
+    """Scan transaction history for recurring patterns not already in recurring_items."""
+    transactions = _candidate_transactions(db, user_id)
+
     # Group by normalized description
     groups: dict[str, list[models.Transaction]] = defaultdict(list)
     for t in transactions:
@@ -53,9 +62,14 @@ def detect_patterns(
         .all()
     }
 
+    dismissed = {
+        k for (k,) in db.query(models.RecurringDismissal.pattern_key)
+        .filter(models.RecurringDismissal.user_id == user_id).all()
+    }
+
     suggestions: list[RecurringSuggestion] = []
     for key, txns in groups.items():
-        if key in existing:
+        if key in existing or key in dismissed:
             continue
         if len(txns) < min_occurrences:
             continue
@@ -82,6 +96,7 @@ def detect_patterns(
             median_amount=med_amount,
             frequency=frequency,
             occurrences=len(txns),
+            pattern_key=key,
         ))
 
     return sorted(suggestions, key=lambda s: s.occurrences, reverse=True)
