@@ -83,20 +83,21 @@ def rule_pattern(raw: str) -> str | None:
     """The stable, noise-free part of a descriptor to match future charges
     on, or None when it is too weak to match on safely.
 
-    Stripping an interior reference ("ACMEFLIX.COM #5001 LOS GATOS") can
-    leave text that isn't contiguous in the raw descriptor, and a contains
-    rule on that would never fire -- so keep the longest leading run of words
-    the raw text actually contains.
+    The noise-stripped words must appear together in the raw descriptor.
+    When stripping removed something from the MIDDLE ("ACH DEBIT 20260903
+    CITY OF ..."), what's left isn't contiguous raw text, and a fragment of
+    it ("ACH DEBIT") would be a rule that claims every future ACH debit --
+    so that is weak too. Runs of whitespace are matched loosely and the rule
+    keeps the raw text's own spacing, so a bank's double space neither makes
+    a good pattern weak nor produces a rule that can't match raw text.
     """
     words = strip_descriptor_noise(raw).split()
-    raw_lower = raw.lower()
-    pattern = ""
-    for n in range(len(words), 0, -1):
-        candidate = " ".join(words[:n])
-        if candidate.lower() in raw_lower:
-            pattern = candidate
-            break
-    pattern = pattern[:PATTERN_MAX]
+    if not words:
+        return None
+    m = re.search(r"\s+".join(re.escape(w) for w in words), raw, re.IGNORECASE)
+    if m is None:
+        return None
+    pattern = m.group(0)[:PATTERN_MAX]
     if len(pattern) < _MIN_RULE_PATTERN or pattern.lower() in _GENERIC_PATTERNS:
         return None
     return pattern
