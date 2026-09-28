@@ -41,6 +41,8 @@ export default function TriageInbox() {
     qc.invalidateQueries({ queryKey: ["recurring-triage"] });
     qc.invalidateQueries({ queryKey: ["recurring"] });
     qc.invalidateQueries({ queryKey: ["left-to-budget"] });
+    // Classifying can change which buckets are assignable on the Budget page.
+    qc.invalidateQueries({ queryKey: ["budget-overview"] });
   };
   const classify = useMutation({ mutationFn: recurringApi.triageClassify, onSuccess: refresh });
   const dismiss = useMutation({ mutationFn: recurringApi.triageDismiss, onSuccess: refresh });
