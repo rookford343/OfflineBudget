@@ -8,6 +8,7 @@ from __future__ import annotations
 import calendar
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_CEILING
+from typing import NamedTuple
 from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry
@@ -37,6 +38,28 @@ def _monthly_income(
     return sum((item.amount for item in items), Decimal("0"))
 
 
+def leftover_share(item, as_of: date) -> Decimal:
+    """What one expense recurring item contributes to `_monthly_expenses` for
+    as_of's month. Shared with the Budget page's committed list so committed
+    + leftover reconcile to income to the cent.
+
+    Weekly/biweekly items contribute nothing here, matching the long-standing
+    behavior of `_monthly_expenses`.
+    """
+    if item.frequency == models.RecurringFrequency.monthly:
+        return item.amount
+    if item.frequency == models.RecurringFrequency.quarterly:
+        # Accrued, not charged: a quarterly bill spreads across the three
+        # months it covers, exactly as the sheet does -- Budget!B15 carries
+        # Stormwater at $4.94/mo while the forecast charges the full $14.82
+        # once a quarter. Counting the whole bill in its own month would
+        # make Leftover lurch every third month.
+        return (item.amount / 3).quantize(Decimal("0.01"))
+    if item.frequency == models.RecurringFrequency.yearly and item.month_of_year == as_of.month:
+        return item.amount
+    return Decimal("0")
+
+
 def _monthly_expenses(
     db: Session, user_id: int, as_of: date,
     extra_items: list[models.RecurringItem] | None = None,
@@ -53,20 +76,7 @@ def _monthly_expenses(
         i for i in (extra_items or [])
         if i.type == models.RecurringType.expense
     ]
-    total = Decimal("0")
-    for item in items:
-        if item.frequency == models.RecurringFrequency.monthly:
-            total += item.amount
-        elif item.frequency == models.RecurringFrequency.quarterly:
-            # Accrued, not charged: a quarterly bill spreads across the three
-            # months it covers, exactly as the sheet does -- Budget!B15 carries
-            # Stormwater at $4.94/mo while the forecast charges the full $14.82
-            # once a quarter. Counting the whole bill in its own month would
-            # make Leftover lurch every third month.
-            total += (item.amount / 3).quantize(Decimal("0.01"))
-        elif item.frequency == models.RecurringFrequency.yearly and item.month_of_year == as_of.month:
-            total += item.amount
-    return total
+    return sum((leftover_share(item, as_of) for item in items), Decimal("0"))
 
 
 def _budget_allocation_total(
@@ -94,6 +104,32 @@ def _budget_allocation_total(
         .all()
     )
     return rows[-1].budgeted_amount if rows else Decimal("0")
+
+
+class LeftoverParts(NamedTuple):
+    income: Decimal
+    expenses: Decimal
+    savings_budget: Decimal
+    committed_savings: Decimal
+    groceries_budget: Decimal
+    leftover: Decimal
+
+
+def leftover_parts(
+    db: Session, user: models.User, as_of: date,
+    extra_items: list[models.RecurringItem] | None = None,
+) -> LeftoverParts:
+    """The pieces of `leftover`, computed once so the snapshot and the
+    Budget page's Left to budget read the same number by construction."""
+    income = _monthly_income(db, user.id, extra_items)
+    expenses = _monthly_expenses(db, user.id, as_of, extra_items)
+    savings_budget = _budget_allocation_total(db, user.id, "Savings", as_of.year, as_of.month)
+    groceries_budget = _budget_allocation_total(db, user.id, "Groceries", as_of.year, as_of.month)
+    committed_savings = (
+        Decimal("0.00") if user.savings_strategy == "pull_from_savings" else savings_budget
+    )
+    leftover = income - expenses - committed_savings - groceries_budget
+    return LeftoverParts(income, expenses, savings_budget, committed_savings, groceries_budget, leftover)
 
 
 def _card_linked_recurring_items(
@@ -310,10 +346,6 @@ def compute_budget_snapshot(
     as_of = as_of or date.today()
     extra_items = list(proposal.items) if proposal else None
 
-    monthly_income = _monthly_income(db, user.id, extra_items)
-    monthly_expenses = _monthly_expenses(db, user.id, as_of, extra_items)
-    savings_budget = _budget_allocation_total(db, user.id, "Savings", as_of.year, as_of.month)
-    groceries_budget = _budget_allocation_total(db, user.id, "Groceries", as_of.year, as_of.month)
     # Groceries is committed, not spendable. the user's sheet formula cancels its
     # groceries term (F5) on both sides -- it is added into the pool and then
     # removed again in the same expression -- so it never reaches Left to
@@ -325,10 +357,13 @@ def compute_budget_snapshot(
     # money stays spendable and Left to Spend reads higher by the savings
     # budget. Under "save_monthly" it leaves the pool, which is the default and
     # what reconciles to the user's sheet at -385.84.
-    committed_savings = (
-        Decimal("0.00") if user.savings_strategy == "pull_from_savings" else savings_budget
-    )
-    leftover = monthly_income - monthly_expenses - committed_savings - groceries_budget
+    parts = leftover_parts(db, user, as_of, extra_items)
+    monthly_income = parts.income
+    monthly_expenses = parts.expenses
+    savings_budget = parts.savings_budget
+    groceries_budget = parts.groceries_budget
+    committed_savings = parts.committed_savings
+    leftover = parts.leftover
 
     active_cards = db.query(models.CreditCard).filter(
         models.CreditCard.user_id == user.id,
