@@ -39,62 +39,51 @@
 
 ```python
 # backend/tests/test_home_category_rollup.py
-from sqlalchemy import create_engine, text
-from sqlalchemy.pool import StaticPool
 from backend import models
-from backend.database import Base, rename_utilities_to_home
+from backend.database import rename_utilities_to_home
 from backend.services.auto_categorizer import categorize
 
-
-def _engine():
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    Base.metadata.create_all(bind=engine)
-    return engine
+E = models.CategoryType.expense
 
 
-def _insert(conn, cid, name, parent_id=None):
-    conn.execute(text(
-        "INSERT INTO categories (id, user_id, parent_id, name, type, color, sort_order, rollover_enabled, rollover_balance, tax_deductible, is_discretionary) "
-        "VALUES (:id, 1, :pid, :name, 'expense', '#000000', 0, 0, 0, 0, 0)"
-    ), {"id": cid, "pid": parent_id, "name": name})
+def _tree(db, parent_name, child_names):
+    user = models.User(username=f"u-{parent_name}", hashed_password="x", display_name="U")
+    db.add(user); db.flush()
+    parent = models.Category(user_id=user.id, name=parent_name, type=E)
+    db.add(parent); db.flush()
+    children = [models.Category(user_id=user.id, parent_id=parent.id, name=n, type=E) for n in child_names]
+    db.add_all(children); db.commit()
+    return [c.id for c in children]
 
 
-def _names(conn):
-    return {r[0]: r[1] for r in conn.execute(text("SELECT id, name FROM categories"))}
+def _run_migration(db):
+    rename_utilities_to_home(db.connection())
+    db.commit()
+    db.expire_all()
 
 
-def test_utilities_under_necessities_becomes_home_keeping_its_id():
-    with _engine().connect() as conn:
-        conn.execute(text("INSERT INTO users (id, username, hashed_password, display_name) VALUES (1, 'u', 'x', 'U')"))
-        _insert(conn, 10, "Necessities")
-        _insert(conn, 11, "Utilities", 10)
-        conn.commit()
-        rename_utilities_to_home(conn)
-        assert _names(conn)[11] == "Home"
+def _name(db, cid):
+    return db.get(models.Category, cid).name
 
 
-def test_rename_is_idempotent_and_skips_when_home_exists():
-    with _engine().connect() as conn:
-        conn.execute(text("INSERT INTO users (id, username, hashed_password, display_name) VALUES (1, 'u', 'x', 'U')"))
-        _insert(conn, 10, "Necessities")
-        _insert(conn, 11, "Utilities", 10)
-        _insert(conn, 12, "Home", 10)
-        conn.commit()
-        rename_utilities_to_home(conn)
-        rename_utilities_to_home(conn)
-        names = _names(conn)
-        assert names[11] == "Utilities"
-        assert names[12] == "Home"
+def test_utilities_under_necessities_becomes_home_keeping_its_id(db_session):
+    (util_id,) = _tree(db_session, "Necessities", ["Utilities"])
+    _run_migration(db_session)
+    assert _name(db_session, util_id) == "Home"
 
 
-def test_utilities_elsewhere_is_untouched():
-    with _engine().connect() as conn:
-        conn.execute(text("INSERT INTO users (id, username, hashed_password, display_name) VALUES (1, 'u', 'x', 'U')"))
-        _insert(conn, 20, "Business")
-        _insert(conn, 21, "Utilities", 20)
-        conn.commit()
-        rename_utilities_to_home(conn)
-        assert _names(conn)[21] == "Utilities"
+def test_rename_is_idempotent_and_skips_when_home_exists(db_session):
+    util_id, home_id = _tree(db_session, "Necessities", ["Utilities", "Home"])
+    _run_migration(db_session)
+    _run_migration(db_session)
+    assert _name(db_session, util_id) == "Utilities"
+    assert _name(db_session, home_id) == "Home"
+
+
+def test_utilities_elsewhere_is_untouched(db_session):
+    (util_id,) = _tree(db_session, "Business", ["Utilities"])
+    _run_migration(db_session)
+    assert _name(db_session, util_id) == "Utilities"
 
 
 def _cats():
