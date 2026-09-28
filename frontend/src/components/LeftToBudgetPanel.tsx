@@ -74,7 +74,14 @@ export default function LeftToBudgetPanel({ year, month }: { year: number; month
 
       <div className="grid gap-4 md:grid-cols-2">
         <div>
-          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-400">Committed</h3>
+          <div className="mb-1 flex items-baseline justify-between gap-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Committed</h3>
+            {data.unclassified_count > 0 && (
+              <Link to="/recurring" className="text-xs text-amber-600 underline">
+                {data.unclassified_count} unclassified · {fmt(data.unclassified_amount)}/mo
+              </Link>
+            )}
+          </div>
           {data.committed.map((r: any) => {
             const k = `${r.category_id ?? "none"}:${r.category_name}`;
             const isOpen = expanded.has(k);
