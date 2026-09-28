@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authApi, bankSyncApi } from "../../api";
 import { useIsDarkMode, toggleTheme } from "../../store/theme";
 import { isParallelOpsEnabled, setParallelOpsEnabled } from "../../store/parallelOps";
@@ -10,6 +10,7 @@ import { parseServerDateTime } from "../../lib/utils";
 
 export default function PreferencesTab() {
   const dark = useIsDarkMode();
+  const qc = useQueryClient();
 
   const balancesHidden = useBalancesHidden();
 
@@ -160,6 +161,30 @@ export default function PreferencesTab() {
               <option value="pull_from_savings">Pull from savings</option>
             </select>
           </div>
+        </div>
+      </div>
+      {/* Zero-based by default: a new month's buckets start unassigned. On,
+          an unset month inherits the all-months amount instead. */}
+      <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Carry budget amounts into the next month</span>
+            <p className="text-xs text-gray-400">
+              {me?.budget_carry_forward
+                ? "On — a month you haven't assigned uses your all-months amounts."
+                : "Off — each month starts unassigned until you assign it on the Budget page."}
+            </p>
+          </div>
+          <input
+            type="checkbox"
+            className="h-4 w-4"
+            aria-label="Carry budget amounts into the next month"
+            checked={!!me?.budget_carry_forward}
+            onChange={() => taxMut.mutate(
+              { budget_carry_forward: !me?.budget_carry_forward },
+              { onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); qc.invalidateQueries({ queryKey: ["left-to-budget"] }); } },
+            )}
+          />
         </div>
       </div>
       <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
