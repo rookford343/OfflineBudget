@@ -200,6 +200,7 @@ def upgrade_schema():
         "ALTER TABLE users ADD COLUMN ss_withheld_ytd_as_of DATE",
         # Debug-only raw bank-sync payload capture -- see BankSyncRawSnapshot.
         "ALTER TABLE users ADD COLUMN debug_capture_raw_bank_data BOOLEAN DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN budget_carry_forward BOOLEAN NOT NULL DEFAULT 0",
         "ALTER TABLE categories ADD COLUMN is_discretionary BOOLEAN DEFAULT 0",
         "ALTER TABLE credit_cards ADD COLUMN payment_sent_pending_sync BOOLEAN DEFAULT 0",
         "ALTER TABLE credit_cards ADD COLUMN payment_sent_amount NUMERIC(14,2)",

@@ -3,6 +3,7 @@ from datetime import date
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from backend.services.spending_helpers import filter_real_spend, is_card_payment
+from backend.services.budget_buckets import assignable_category_ids, drop_uncarried_defaults
 from backend import models
 from backend.schemas import BudgetOverviewRow
 
@@ -28,6 +29,8 @@ def compute_overview(
         models.BudgetAllocation.year == year,
         models.BudgetAllocation.month.in_([0, month]),
     ).all()
+    user = db.get(models.User, user_id)
+    allocations = drop_uncarried_defaults(allocations, user, assignable_category_ids(db, user_id))
     budget_by_cat: dict[int, Decimal] = {}
     for a in sorted(allocations, key=lambda x: x.month):  # month=0 first, overridden by specific
         budget_by_cat[a.category_id] = a.budgeted_amount

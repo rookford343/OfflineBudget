@@ -127,6 +127,12 @@ class User(Base):
     # the pool and Left to Spend reads higher by the savings budget.
     savings_strategy: Mapped[str] = mapped_column(String(32), default="save_monthly")
 
+    # Whether an unset month inherits the all-months (month=0) budget for
+    # assignable buckets (Food, Shopping...). Off by default: zero-based
+    # budgeting starts each month unassigned and you assign it on purpose.
+    # Committed lines (bills, Savings, Groceries) never depend on this.
+    budget_carry_forward: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
+
     linked_to_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"))
     email: Mapped[str | None] = mapped_column(String(256))
     recovery_code_hash: Mapped[str | None] = mapped_column(String(256))
