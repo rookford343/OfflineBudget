@@ -587,9 +587,15 @@ def test_a_just_passed_close_still_carries_the_right_due_date(db_session):
     due date instead of the following month."""
     today = date.today()
     close_date = today - timedelta(days=5)  # within _UNCONFIRMED_LOOKBACK_DAYS (7)
+    # Due ~20 days after the close, like a real card. A fixed due_day=25 put
+    # the "real due date" BEFORE today whenever today's date was 26th-30th
+    # (close on the 21st-25th, due the 25th), so it could never appear in a
+    # forecast starting today and the test failed on those days alone. Capped
+    # at 28 so a short month can't roll the due date somewhere unexpected.
+    due_day = min((close_date + timedelta(days=20)).day, 28)
     user = _user(db_session, username="justclosed")
     account = _checking(db_session, user, balance="60000.00")
-    _card(db_session, user, name="Chase", statement_day=close_date.day, due_day=25,
+    _card(db_session, user, name="Chase", statement_day=close_date.day, due_day=due_day,
           current_balance=Decimal("6374.63"), balance_due=Decimal("0"),
           pending_charges=Decimal("0"), monthly_spend_estimate=Decimal("5500.00"),
           # Non-None is what matters here (the carried-balance derivation
@@ -602,7 +608,7 @@ def test_a_just_passed_close_still_carries_the_right_due_date(db_session):
     entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=90))
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
-    near_due = _next_occurrence_on_or_after(25, close_date + timedelta(days=1))
+    near_due = _next_occurrence_on_or_after(due_day, close_date + timedelta(days=1))
     assert estimates.get(near_due) == Decimal("-6374.63"), (
         f"a close 5 days ago must still carry the real balance to its real "
         f"due date, got {estimates}"
