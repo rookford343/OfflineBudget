@@ -28,6 +28,27 @@ def create_tables():
     Base.metadata.create_all(bind=engine)
 
 
+def rename_utilities_to_home(conn) -> None:
+    """Utilities → Home, in place, so every link to the row keeps working.
+
+    Only the Utilities that sits under a top-level Necessities, and only when
+    that parent has no Home child already -- running twice, or on a database
+    where someone already made Home by hand, must be a no-op rather than
+    producing two Homes.
+    """
+    conn.execute(text("""
+        UPDATE categories SET name = 'Home'
+        WHERE name = 'Utilities'
+          AND parent_id IN (
+              SELECT id FROM categories WHERE name = 'Necessities' AND parent_id IS NULL
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM categories AS sib
+              WHERE sib.parent_id = categories.parent_id AND sib.name = 'Home'
+          )
+    """))
+
+
 def upgrade_categories():
     """One-time rename: 'Tithing / Giving' → 'Charity'; remove orphan 'Charity' sub-category."""
     with engine.connect() as conn:
@@ -43,6 +64,8 @@ def upgrade_categories():
                       SELECT id FROM categories WHERE name = 'Charity' AND parent_id IS NULL
                   )
             """))
+            conn.commit()
+            rename_utilities_to_home(conn)
             conn.commit()
         except Exception:
             conn.rollback()

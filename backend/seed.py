@@ -10,7 +10,7 @@ DEFAULT_CATEGORIES = [
         ("Other Income", "income", "#166534", "plus-circle"),
     ]),
     ("Necessities", "expense", "#3b82f6", "home", [
-        ("Utilities", "expense", "#2563eb", "zap"),
+        ("Home", "expense", "#2563eb", "home"),
         ("Insurance", "expense", "#1d4ed8", "shield"),
         ("Transportation", "expense", "#1e40af", "car"),
         ("Healthcare", "expense", "#1e3a8a", "heart"),
