@@ -14,7 +14,7 @@
 
 - Repo convention: commit directly to `main` after each task. No branches, no worktrees.
 - No frontend test framework exists (confirmed: zero `.test.*` files, no `test` script in `package.json`). Verification per task is `npx tsc --noEmit` (must exit 0) + a manual visual check in both light and dark mode — not TDD.
-- **License boundary:** every component is original OfflineBudget code written from `docs/securo-comparison.md`'s pattern descriptions. No file, CSS, or asset from `github.com/securo-finance/securo` (AGPL-3.0) may be fetched, copied, or referenced during implementation.
+- **License boundary:** every component is original OfflineBudget code written from the Securo comparison notes (kept outside this repo)'s pattern descriptions. No file, CSS, or asset from `github.com/securo-finance/securo` (AGPL-3.0) may be fetched, copied, or referenced during implementation.
 - Dark mode: every new `bg-`/`text-`/`border-` class must have a paired `dark:` variant, matching the convention already used throughout `Layout.tsx`/`Budget.tsx`.
 - Currency formatting always goes through the existing `fmt()` helper in `frontend/src/lib/utils.ts` — never a new ad-hoc `Intl.NumberFormat` call.
 - Do not modify any file under `backend/` in this plan — confirmed zero new backend work is needed.

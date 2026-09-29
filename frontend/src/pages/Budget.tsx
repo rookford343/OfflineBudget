@@ -52,7 +52,7 @@ export default function Budget() {
   const [showHelp, setShowHelp] = useState(false);
   // Split into Track (monitoring: progress bars, spend-vs-budget, read-only)
   // and Set (config: add/edit/delete a line, rollover) tabs (Dan, 2026-09-08,
-  // per docs/securo-comparison.md's flagged principle: "configuration
+  // per the Securo comparison notes' flagged principle: "configuration
   // screens show the number you set; monitoring screens show the number
   // relative to reality" -- this page used to conflate both in one view.
   // Defaults to Track since checking progress is the more frequent visit;
