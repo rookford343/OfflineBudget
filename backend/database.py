@@ -287,6 +287,8 @@ def upgrade_schema():
             category_id INTEGER REFERENCES categories(id),
             committed_planned_expense_id INTEGER REFERENCES planned_expenses(id)
         )""",
+        "ALTER TABLE monthly_forecast_snapshots ADD COLUMN taken_on DATE",
+        "ALTER TABLE monthly_forecast_snapshots ADD COLUMN daily_points TEXT",
     ]
     with engine.connect() as conn:
         for s in stmts:

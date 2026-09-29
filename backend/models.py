@@ -828,6 +828,12 @@ class MonthlyForecastSnapshot(Base):
     month: Mapped[int] = mapped_column(Integer, nullable=False)
     forecasted_open: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     forecasted_close: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # The month's day-by-day forecast as it stood when first saved (see
+    # services/forecast_baseline.py). JSON list of {"date", "projected_balance"}.
+    # Never rewritten, so the Dashboard can show how far the month drifted
+    # from what was expected rather than from a line that moves with every edit.
+    taken_on: Mapped[date | None] = mapped_column(Date)
+    daily_points: Mapped[str | None] = mapped_column(Text)
     snapshot_taken_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="monthly_forecast_snapshots")
