@@ -72,8 +72,9 @@ def test_other_users_account_is_404(db_session):
     assert r.status_code == 404
 
 
-def test_engine_failure_is_503(db_session):
+def test_engine_failure_is_503(db_session, caplog):
     user, acct = _seed(db_session)
     with patch(TODAY, return_value=date(2026, 10, 2)), patch(ENGINE, side_effect=RuntimeError("boom")):
         r = _client(db_session, user).get("/forecast/baseline", params={"account_id": acct.id, "year": 2026, "month": 10})
     assert r.status_code == 503
+    assert any("forecast baseline" in record.message for record in caplog.records if record.levelname == "ERROR")
