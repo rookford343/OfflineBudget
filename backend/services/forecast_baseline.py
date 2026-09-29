@@ -10,8 +10,10 @@ import calendar
 import json
 import logging
 from datetime import date
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from backend import models
+from backend.services import scheduler_state
 from backend.services.forecast_engine import build_forecast
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,17 @@ def ensure_month_baseline(db: Session, user_id: int, account_id: int, as_of: dat
     if as_of.day > BASELINE_SAVE_WINDOW_DAYS:
         return None
 
+    # A user with bank sync connected gets today's balance around 5am; saving
+    # before that bakes the pre-sync offset into the whole month's frozen
+    # baseline as fake "drift" that can never be corrected. A user with no
+    # active connection has no such sync to wait for.
+    has_active_bank_connection = db.query(models.BankConnection).filter(
+        models.BankConnection.user_id == user_id,
+        models.BankConnection.status == models.BankConnectionStatus.active,
+    ).first() is not None
+    if has_active_bank_connection and not scheduler_state.succeeded_today(db, "bank_sync"):
+        return None
+
     start = date(as_of.year, as_of.month, 1)
     end = date(as_of.year, as_of.month, calendar.monthrange(as_of.year, as_of.month)[1])
     entries = build_forecast(db, user_id, account_id, start, end)
@@ -53,7 +66,14 @@ def ensure_month_baseline(db: Session, user_id: int, account_id: int, as_of: dat
         daily_points=json.dumps(points),
     )
     db.add(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Lost the race: another caller (sweep vs. endpoint) saved this
+        # month's baseline between our check and our insert. Their row wins;
+        # return it rather than raising.
+        db.rollback()
+        return get_month_baseline(db, user_id, account_id, as_of.year, as_of.month)
     db.refresh(row)
     return row
 

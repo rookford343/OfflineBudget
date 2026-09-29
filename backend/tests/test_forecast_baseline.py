@@ -8,6 +8,13 @@ from backend.services.forecast_baseline import (
 )
 
 ENGINE = "backend.services.forecast_baseline.build_forecast"
+SUCCEEDED_TODAY = "backend.services.forecast_baseline.scheduler_state.succeeded_today"
+
+
+def _connect_bank(db, user, status=models.BankConnectionStatus.active):
+    conn = models.BankConnection(user_id=user.id, access_url_encrypted="x", status=status)
+    db.add(conn); db.commit()
+    return conn
 
 
 def _seed(db, username="fb"):
@@ -102,3 +109,77 @@ def test_ensure_for_all_covers_active_checking_only_and_survives_a_failure(db_se
         assert ensure_baselines_for_all(db_session, date(2026, 10, 1)) == 1
     saved = {r.account_id for r in db_session.query(models.MonthlyForecastSnapshot).all()}
     assert saved == {acct.id}
+
+
+def test_active_bank_connection_and_sync_not_succeeded_today_creates_nothing(db_session):
+    user, acct = _seed(db_session)
+    _connect_bank(db_session, user)
+    with patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e)) as eng, \
+         patch(SUCCEEDED_TODAY, return_value=False):
+        row = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 1))
+    assert row is None
+    assert eng.call_count == 0
+    assert get_month_baseline(db_session, user.id, acct.id, 2026, 10) is None
+
+
+def test_active_bank_connection_and_sync_succeeded_today_creates(db_session):
+    user, acct = _seed(db_session)
+    _connect_bank(db_session, user)
+    with patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e)), \
+         patch(SUCCEEDED_TODAY, return_value=True):
+        row = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 1))
+    assert row is not None
+    assert get_month_baseline(db_session, user.id, acct.id, 2026, 10) is not None
+
+
+def test_no_bank_connection_creates_without_consulting_sync_state(db_session):
+    user, acct = _seed(db_session)
+    with patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e)), \
+         patch(SUCCEEDED_TODAY) as synced:
+        row = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 1))
+    assert row is not None
+    assert synced.call_count == 0
+
+
+def test_disconnected_bank_connection_is_not_gated(db_session):
+    user, acct = _seed(db_session)
+    _connect_bank(db_session, user, status=models.BankConnectionStatus.disconnected)
+    with patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e)), \
+         patch(SUCCEEDED_TODAY, return_value=False) as synced:
+        row = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 1))
+    assert row is not None
+    assert synced.call_count == 0
+
+
+def test_existing_row_plus_sync_not_succeeded_still_returns_existing_row(db_session):
+    user, acct = _seed(db_session)
+    with patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e)):
+        first = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 1))
+    _connect_bank(db_session, user)
+    with patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e, base="5.00")) as eng, \
+         patch(SUCCEEDED_TODAY, return_value=False):
+        second = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 3))
+    assert eng.call_count == 0
+    assert second.id == first.id
+
+
+def test_save_race_returns_existing_row_instead_of_raising(db_session):
+    user, acct = _seed(db_session)
+    real_get = get_month_baseline
+    calls = {"n": 0}
+
+    def racing_get(db, user_id, account_id, year, month):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return None
+        return real_get(db, user_id, account_id, year, month)
+
+    # Simulate a second caller inserting the row after our check but before
+    # our insert: seed the row directly, then let the real insert race it.
+    with patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e)):
+        winner = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 1))
+    with patch("backend.services.forecast_baseline.get_month_baseline", side_effect=racing_get), \
+         patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e, base="5.00")) as eng:
+        loser = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 3))
+    assert loser.id == winner.id
+    assert db_session.query(models.MonthlyForecastSnapshot).count() == 1
