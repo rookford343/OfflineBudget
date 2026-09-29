@@ -105,6 +105,17 @@ export default function Dashboard() {
     queryFn: () => forecastApi.range(primaryChecking.id, lastMonthRange.start, lastMonthRange.end),
     enabled: !!primaryChecking,
   });
+  // The forecast as saved at the start of this month. When present, the
+  // Balance Flow card measures drift from plan instead of comparing against
+  // last month (Dan, 2026-09-28). Absent (e.g. the month before this shipped,
+  // or first opened after day 7), the card keeps its last-month view.
+  const [baseYear, baseMonth] = monthStart.split("-").map(Number);
+  const { data: baseline = null } = useQuery<any>({
+    queryKey: ["forecast-baseline", primaryChecking?.id, baseYear, baseMonth],
+    queryFn: () => forecastApi.baseline(primaryChecking.id, baseYear, baseMonth),
+    enabled: !!primaryChecking,
+    retry: false,
+  });
   const isDark = useIsDarkMode();
   const { data: snapshot } = useQuery<any>({
     queryKey: ["budget-snapshot", primaryChecking?.id],
@@ -339,15 +350,16 @@ export default function Dashboard() {
           viewport-width based, not container-based -- 2xl leaves enough
           room that this doesn't feel cramped. */}
       <div className="grid 2xl:grid-cols-2 gap-6">
-      {(balanceFlow.length > 0 || lastMonthFlow.length > 0) && (() => {
-        // Keyed by day-of-month, not calendar date, so this month's
-        // still-building line and last month's completed one compare on
-        // the same X position (Dan's reference, 2026-09-02) rather than
-        // needing two different date ranges lined up by hand.
-        const byDay = new Map<number, { day: number; thisMonth?: number; lastMonth?: number }>();
-        for (const e of lastMonthFlow) {
+      {(balanceFlow.length > 0 || lastMonthFlow.length > 0 || !!baseline?.points) && (() => {
+        // Reference line: the saved start-of-month forecast when there is
+        // one, otherwise last month's actuals. Keyed by day-of-month either
+        // way so both lines share an X position.
+        const reference: any[] = baseline?.points ?? lastMonthFlow;
+        const refIsForecast = !!baseline?.points;
+        const byDay = new Map<number, { day: number; thisMonth?: number; reference?: number }>();
+        for (const e of reference) {
           const day = parseInt(e.date.slice(-2), 10);
-          byDay.set(day, { day, lastMonth: parseFloat(e.projected_balance) });
+          byDay.set(day, { day, reference: parseFloat(e.projected_balance) });
         }
         for (const e of balanceFlow) {
           const day = parseInt(e.date.slice(-2), 10);
@@ -359,17 +371,24 @@ export default function Dashboard() {
 
         const first = balanceFlow.length ? parseFloat(balanceFlow[0].projected_balance) : null;
         const last = balanceFlow.length ? parseFloat(balanceFlow[balanceFlow.length - 1].projected_balance) : null;
-        const delta = first != null && last != null ? last - first : null;
 
         const lastMonthName = new Date(lastMonthRange.start + "T12:00:00").toLocaleDateString("en-US", { month: "long" });
         const thisMonthName = new Date(monthStart + "T12:00:00").toLocaleDateString("en-US", { month: "long" });
         const todayDay = parseInt(todayStr.slice(-2), 10);
-        const sameDayLastMonth = lastMonthFlow.find((e: any) => parseInt(e.date.slice(-2), 10) === todayDay);
-        const sameDayPct = sameDayLastMonth && last != null
-          ? (() => {
-              const priorVal = parseFloat(sameDayLastMonth.projected_balance);
-              return priorVal === 0 ? null : ((last - priorVal) / Math.abs(priorVal)) * 100;
-            })()
+        const sameDayRef = reference.find((e: any) => parseInt(e.date.slice(-2), 10) === todayDay);
+        const refToday = sameDayRef ? parseFloat(sameDayRef.projected_balance) : null;
+
+        // Headline: drift from forecast when there's a baseline, otherwise
+        // the month-to-date change it has always shown.
+        const delta = refIsForecast
+          ? (last != null && refToday != null ? last - refToday : null)
+          : (first != null && last != null ? last - first : null);
+        const sameDayPct = refToday != null && last != null && refToday !== 0
+          ? ((last - refToday) / Math.abs(refToday)) * 100
+          : null;
+        const refName = refIsForecast ? "Forecast" : lastMonthName;
+        const savedOn = refIsForecast
+          ? new Date(baseline.taken_on + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })
           : null;
 
         const lineColor = isDark ? "#a5b4fc" : "#6366f1";
@@ -380,7 +399,9 @@ export default function Dashboard() {
               <div>
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><TrendingUp size={16} className="text-indigo-500" /> Balance Flow</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {thisMonthName} so far, vs. all of {lastMonthName}
+                  {refIsForecast
+                    ? <>{thisMonthName} so far, vs. forecast from {savedOn}</>
+                    : <>{thisMonthName} so far, vs. all of {lastMonthName}</>}
                 </p>
               </div>
               {delta != null && (
@@ -403,16 +424,17 @@ export default function Dashboard() {
                 <Tooltip
                   contentStyle={{ backgroundColor: isDark ? "#2a2f3d" : "#ffffff", border: `1px solid ${isDark ? "#3a4051" : "#e5e7eb"}`, borderRadius: 8, fontSize: 12 }}
                   labelStyle={{ color: isDark ? "#c4ccd8" : "#111827" }}
-                  formatter={(v: number, name: string) => [maskIfHidden(balancesHidden, fmt(v)), name === "thisMonth" ? thisMonthName : lastMonthName]}
+                  formatter={(v: number, name: string) => [maskIfHidden(balancesHidden, fmt(v)), name === "thisMonth" ? thisMonthName : refName]}
                   labelFormatter={(d: number) => `Day ${d}`}
                 />
                 <Area type="monotone" dataKey="thisMonth" stroke={lineColor} strokeWidth={2} fill="url(#balanceFlowGradient)" dot={false} connectNulls animationDuration={700} animationEasing="ease-out" />
-                <Line type="monotone" dataKey="lastMonth" stroke={priorLineColor} strokeWidth={1.5} strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false} />
+                <Line type="monotone" dataKey="reference" stroke={priorLineColor} strokeWidth={1.5} strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false} />
               </AreaChart>
             </ResponsiveContainer>
-            {sameDayLastMonth && sameDayPct != null && (
+            {sameDayRef && sameDayPct != null && (
               <p className="text-xs text-gray-400 mt-2">
-                In {lastMonthName} on day {todayDay}: {maskIfHidden(balancesHidden, fmt(parseFloat(sameDayLastMonth.projected_balance)))}
+                {refIsForecast ? <>Forecast for day {todayDay}: </> : <>In {lastMonthName} on day {todayDay}: </>}
+                {maskIfHidden(balancesHidden, fmt(refToday!))}
                 {" "}({sameDayPct >= 0 ? "+" : ""}{sameDayPct.toFixed(1)}%)
               </p>
             )}
