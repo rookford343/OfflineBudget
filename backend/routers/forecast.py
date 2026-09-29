@@ -15,6 +15,11 @@ from backend.services.reconciliation_helper import compute_reconciliation
 router = APIRouter(prefix="/forecast", tags=["forecast"])
 
 
+def _today() -> date:
+    # Indirection so tests can pin "today" without patching the date class.
+    return date.today()
+
+
 @router.get("", response_model=list[schemas.ForecastEntry])
 def get_forecast(
     account_id: int,
@@ -24,6 +29,39 @@ def get_forecast(
     user: models.User = Depends(get_current_user),
 ):
     return build_forecast(db, user.id, account_id, start, end)
+
+
+@router.get("/baseline", response_model=schemas.ForecastBaselineOut)
+def get_forecast_baseline(
+    account_id: int,
+    year: int,
+    month: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """The month's forecast as saved at the start of the month (see
+    services/forecast_baseline.py). Only the current month can be created,
+    and only in its first week; anything else is read-only."""
+    from backend.services.forecast_baseline import ensure_month_baseline, get_month_baseline, baseline_points
+    if not db.query(models.Account).filter(
+        models.Account.id == account_id, models.Account.user_id == user.id,
+    ).first():
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    today = _today()
+    if (year, month) == (today.year, today.month):
+        try:
+            row = ensure_month_baseline(db, user.id, account_id, today)
+        except Exception:
+            db.rollback()
+            raise HTTPException(status_code=503, detail="Forecast baseline unavailable")
+    else:
+        row = get_month_baseline(db, user.id, account_id, year, month)
+
+    points = baseline_points(row)
+    if row is None or points is None or row.taken_on is None:
+        raise HTTPException(status_code=404, detail="No forecast baseline for this month")
+    return schemas.ForecastBaselineOut(year=row.year, month=row.month, taken_on=row.taken_on, points=points)
 
 
 @router.get("/risk", response_model=schemas.ForecastRisk)
