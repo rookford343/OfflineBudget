@@ -236,6 +236,13 @@ def _scheduler_sweep() -> None:
         if scheduler_state.due_for_retry(db, "daily_summary", target_hour=summary_hour):
             logger.info("Scheduler sweep: daily_summary missed today, retrying")
             _send_daily_summaries()
+        # Start-of-month forecast for the Dashboard's Balance Flow card. Cheap
+        # no-op once saved; guarded so a failure can't block the jobs above.
+        try:
+            from backend.services.forecast_baseline import ensure_baselines_for_all
+            ensure_baselines_for_all(db, date.today())
+        except Exception:
+            logger.exception("Scheduler sweep: forecast baseline step failed")
     finally:
         db.close()
 

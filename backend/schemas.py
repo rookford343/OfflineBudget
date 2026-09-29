@@ -1688,3 +1688,15 @@ class TriageDuplicateAction(BaseModel):
 class TriageDuplicateResult(BaseModel):
     deactivated_id: int
     relinked: int
+
+
+class ForecastBaselinePoint(BaseModel):
+    date: date
+    projected_balance: Decimal
+
+
+class ForecastBaselineOut(BaseModel):
+    year: int
+    month: int
+    taken_on: date
+    points: list[ForecastBaselinePoint]
