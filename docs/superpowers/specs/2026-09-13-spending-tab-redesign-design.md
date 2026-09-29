@@ -93,7 +93,7 @@ section 6, optional.
 24-Month Spending Trend area chart — lines 374-426).
 
 **Replace both with one chart** plus a paired segmented control (Securo
-reference pattern from `docs/securo-comparison.md`'s Analytics-page notes):
+reference pattern from the Securo comparison notes (kept outside this repo)'s Analytics-page notes):
 range (6M / YTD / 1Y / 2Y) and implicitly monthly granularity (this app has
 no daily/weekly spending grain to switch to, so the granularity half of
 Securo's D/W/M/Y control isn't applicable — range alone is the control).
