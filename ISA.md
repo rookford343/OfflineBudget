@@ -16,7 +16,7 @@ updated: 2026-08-24T00:00:00Z
 OfflineBudget's UI works but reads as functional rather than polished next to
 comparable self-hosted budgeting apps. A competitive scan of Securo
 (usesecuro.com/github.com/securo-finance/securo, AGPL-3.0, full research and
-screenshot-derived notes at `docs/securo-comparison.md`) surfaced concrete,
+screenshot-derived notes, now kept outside this repo) surfaced concrete,
 reimplementable UI patterns OfflineBudget doesn't currently have: pages that
 fit one viewport height with no scroll, a plain-language pacing sentence on
 the dashboard instead of a chart the user has to interpret, a consistent
@@ -40,7 +40,7 @@ written observation of a competitor's UI.
 
 Phase 2 feature work — household expense splitting, investment/asset
 portfolio tracking, credit-card billing-cycle auto-grouping, 2FA — is
-explicitly out of scope for this ISA; see `docs/securo-comparison.md` §
+explicitly out of scope for this ISA; see the Securo comparison notes (kept outside this repo) §
 "Phase 2 — Feature work" for that separate future pass. No backend schema
 changes. No new API endpoints beyond what's needed to surface data the
 backend already computes (e.g. the pacing sentence uses existing forecast
@@ -54,7 +54,7 @@ rejected as redundant with OfflineBudget's existing Forecast page (Decisions).
   CSS, SVG/icon asset, or image from `github.com/securo-finance/securo` may be
   copied, adapted-in-place, or vendored into this repo. Every claim below is
   implemented as an independent OfflineBudget component built from written
-  pattern descriptions in `docs/securo-comparison.md`, never by referencing
+  pattern descriptions in the Securo comparison notes (kept outside this repo), never by referencing
   Securo's actual source.
 - All visual changes must work in both dark and light mode (existing project
   convention, carried forward from the prior Tier 3 ISA).
@@ -72,7 +72,7 @@ rejected as redundant with OfflineBudget's existing Forecast page (Decisions).
 ## Goal
 
 Ship the nine Phase 1 frontend patterns identified in
-`docs/securo-comparison.md` — chart vocabulary audit, category progress bars,
+the Securo comparison notes (kept outside this repo) — chart vocabulary audit, category progress bars,
 a reconciled dashboard stat header, dark/light parity, spacing/density pass,
 nav flattening, fit-to-viewport no-scroll layout, and a plain-language pacing
 sentence — verified via grep/build checks and confirmed license-clean via git
@@ -85,7 +85,7 @@ split left as an open decision for the user before it becomes a claim.
   view and a "track spending" progress view (Securo's pattern), or stay
   merged as OfflineBudget currently has it? Statable but not yet decided —
   needs the user's call before it can become an ISC. See
-  `docs/securo-comparison.md` § Budgets (setup) page.
+  the Securo comparison notes (kept outside this repo) § Budgets (setup) page.
 - fog: Exact hex values, spacing units, and border-radius figures for the
   visual-uplift claims below are sourced from static screenshot inspection,
   not a live-rendered pass. A live Interceptor walkthrough of
@@ -107,7 +107,7 @@ has a Sankey (keep it) and other chart types; done means every chart on every
 page has been checked against this restrained bar and anything busier than
 necessary is either simplified or justified.
 
-- [ ] ISC-1: A written audit note (`docs/securo-comparison.md` or a new
+- [ ] ISC-1: A written audit note (the Securo comparison notes (kept outside this repo) or a new
       `docs/chart-audit.md`) lists every chart component currently rendered
       across `frontend/src/pages/*.tsx` with its chart type, and marks each
       as keep/simplify/no-change (file-exists + manual content check)
@@ -242,7 +242,7 @@ a chart), not the exact wording.
 - [ ] ISC-26: Anti: no file, asset, or string literal copied verbatim from
       `github.com/securo-finance/securo` appears anywhere in the diff — every
       new component is original OfflineBudget code (manual review of diff
-      against `docs/securo-comparison.md`'s license note)
+      against the Securo comparison notes (kept outside this repo)'s license note)
 - [ ] ISC-27: Anti: no new dependency on a charting library beyond what
       `frontend/package.json` already includes is added without an explicit
       Decisions entry justifying it (grep `package.json` diff)
@@ -291,12 +291,12 @@ a chart), not the exact wording.
   superseding the completed 2026-05-07 Tier 3 Visual Polish ISA per project
   convention — git history preserves the prior content (`git log -- ISA.md`).
 - 2026-08-20: Scope locked to Phase 1 (frontend/visual) from
-  `docs/securo-comparison.md`'s phased plan. Phase 2 feature work
+  the Securo comparison notes (kept outside this repo)'s phased plan. Phase 2 feature work
   (household splitting, investment tracking, CC billing-cycle grouping, 2FA)
   deliberately excluded — separate future ISA.
 - 2026-08-20: Securo's Cash Flow report is not adopted — redundant with
   OfflineBudget's existing day-by-day Forecast page (per
-  `docs/securo-comparison.md` § Real gaps).
+  the Securo comparison notes (kept outside this repo) § Real gaps).
 - 2026-08-20: Budget page config-vs-monitoring split left as fog, not a
   claim — needs the user's decision before it's scoped (see Not yet specified).
 - 2026-08-20: Phase 8's pacing sentence is scoped to *reuse* existing

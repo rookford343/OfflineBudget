@@ -2,7 +2,7 @@
 
 Sub-project 1 of 2 in the Securo-inspired frontend uplift (re-scoped
 2026-08-24 after the first Phase 1 attempt was reverted for landing poorly —
-see `ISA.md` Decisions log and `docs/securo-comparison.md`). Sub-project 2
+see `ISA.md` Decisions log and the Securo comparison notes (kept outside this repo)). Sub-project 2
 (Dashboard & Component Polish — the original F1–F8 plus the transaction
 modal redesign, donut/legend pattern, and hide-balances toggle) is a
 separate spec, scoped after this one ships.
@@ -160,13 +160,13 @@ grep/build/manual pattern the reverted ISA already used:
 - Sub-project 2 items (F1–F8 re-execution, transaction modal redesign,
   donut/legend pattern, hide-balances toggle) — separate spec, sequenced
   after this one ships and is reviewed
-- Any Phase 2 feature work from `docs/securo-comparison.md` (household
+- Any Phase 2 feature work from the Securo comparison notes (kept outside this repo) (household
   splitting, investment tracking, etc.)
 
 ## License note
 
 Every component here is original OfflineBudget code built from the written
-pattern descriptions in `docs/securo-comparison.md`. No source, CSS, or
+pattern descriptions in the Securo comparison notes (kept outside this repo). No source, CSS, or
 asset from `github.com/securo-finance/securo` (AGPL-3.0) is referenced or
 copied — same constraint as the reverted attempt, carried forward
 unchanged.
