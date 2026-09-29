@@ -1,3 +1,4 @@
+import logging
 from calendar import monthrange
 from datetime import date, timedelta
 from decimal import Decimal
@@ -11,6 +12,8 @@ from backend.dependencies import get_db, get_current_user
 from backend.services import scenario_service
 from backend.services.forecast_engine import build_forecast, build_quarters, find_balance_risk, find_transfer_signal, suggest_transfer
 from backend.services.reconciliation_helper import compute_reconciliation
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/forecast", tags=["forecast"])
 
@@ -54,6 +57,7 @@ def get_forecast_baseline(
             row = ensure_month_baseline(db, user.id, account_id, today)
         except Exception:
             db.rollback()
+            logger.exception("Could not save forecast baseline for account %s", account_id)
             raise HTTPException(status_code=503, detail="Forecast baseline unavailable")
     else:
         row = get_month_baseline(db, user.id, account_id, year, month)
