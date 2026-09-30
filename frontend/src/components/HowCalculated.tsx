@@ -31,6 +31,23 @@ export default function HowCalculated(
 
   const money = (v: string) => maskIfHidden(hidden, fmt(Math.abs(parseFloat(v))));
   const signed = (v: string) => `${parseFloat(v) < 0 ? "−" : ""}${money(v)}`;
+  // An add/subtract row's amount can itself be negative (e.g.
+  // new_spending_total < 0 after a payoff syncs before a stale statement).
+  // SYMBOL[op] is a fixed +/−, so left alone a negative amount reads
+  // backwards -- a "subtract" of −300 must show as "+ $300", not "− $300".
+  // Flip the symbol and let money() show the absolute value. Children and
+  // start/result rows are unaffected -- they stay signed via signed().
+  const rowSymbol = (r: ExplainRow): string => {
+    if ((r.op !== "add" && r.op !== "subtract") || parseFloat(r.amount) >= 0) return SYMBOL[r.op];
+    return r.op === "add" ? SYMBOL.subtract : SYMBOL.add;
+  };
+  const rowAmount = (r: ExplainRow) => {
+    // Divide rows carry a week/day count (e.g. "7 days left ÷ 7"), not a
+    // currency amount -- deliberately shown as a plain number, never
+    // through money()/maskIfHidden, since there's no balance to hide.
+    if (r.op === "divide") return parseFloat(r.amount).toFixed(2);
+    return r.op === "result" || r.op === "start" ? signed(r.amount) : money(r.amount);
+  };
   const toggle = (k: string) => setExpanded(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
 
   return (
@@ -65,13 +82,13 @@ export default function HowCalculated(
                       <button type="button" disabled={!hasKids} onClick={() => hasKids && toggle(key)}
                         aria-expanded={hasKids ? expanded.has(key) : undefined}
                         className="w-full flex items-center gap-2 text-sm text-left disabled:cursor-default">
-                        <span className="w-4 text-gray-400 tabular-nums">{SYMBOL[r.op]}</span>
+                        <span className="w-4 text-gray-400 tabular-nums">{rowSymbol(r)}</span>
                         <span className={`flex-1 flex items-center gap-1 ${isResult ? "font-bold" : ""}`}>
                           {r.label}
                           {hasKids && (expanded.has(key) ? <ChevronDown size={12} /> : <ChevronRight size={12} />)}
                         </span>
                         <span className={`tabular-nums ${isResult ? "font-bold" : ""}`}>
-                          {r.op === "divide" ? parseFloat(r.amount).toFixed(2) : isResult || r.op === "start" ? signed(r.amount) : money(r.amount)}
+                          {rowAmount(r)}
                         </span>
                       </button>
                       {r.note && <p className="ml-6 text-xs text-gray-400">{r.note}</p>}
