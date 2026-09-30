@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -458,3 +459,31 @@ def test_pull_from_savings_strategy_keeps_the_savings_budget_spendable(db_sessio
 def test_default_strategy_is_save_monthly(db_session):
     user, checking, card = _seed_spreadsheet_scenario(db_session)
     assert user.savings_strategy == "save_monthly"
+
+
+def test_left_to_spend_card_notes_never_leak_a_balance(db_session):
+    """The frontend renders ExplainChild notes unmasked -- maskIfHidden is
+    only ever applied to `amount` -- so a per-card note built from the
+    card's own numbers (current/balance_due/pending) would leak a hidden
+    balance straight through the dialog. The Left to Spend card children
+    must therefore describe the formula shape only, never the figures.
+
+    Scoped to Left to Spend's card children specifically: other
+    explanations legitimately carry dates in their notes (e.g. Safety
+    Margin's "on Aug 20" lowest-point note), so a blanket no-digit rule
+    across every explanation would be wrong.
+    """
+    snap = _snapshot_for_notes_test(db_session)
+    card_row = next(r for r in snap.explain["left_to_spend"].rows if r.label == "New card spending")
+    assert len(card_row.children) >= 1
+    for child in card_row.children:
+        assert child.note, f"{child.label} must carry a note"
+        assert not re.search(r"\d", child.note), (
+            f"{child.label}'s note leaks a figure: {child.note!r}"
+        )
+
+
+def _snapshot_for_notes_test(db_session):
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        return compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
