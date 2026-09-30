@@ -373,6 +373,70 @@ class RecurringBreakdown(BaseModel):
     by_category: list[RecurringCategoryGroup]
 
 
+# ── Month Summary ─────────────────────────────────────────────────────────────
+# Real (not averaged) totals for one calendar month, built by walking every day
+# of the month through forecast_engine._fires_on -- see services/month_summary.py.
+# Unlike RecurringBreakdown's monthly_equivalent (a smoothed "what this costs
+# per month on average" figure), this is "what actually hits this specific
+# month": a yearly bill counts in full only in its firing month, a biweekly
+# item counts once per real occurrence, and so on.
+
+class MonthIncomeOccurrence(BaseModel):
+    recurring_item_id: int
+    name: str
+    date: date
+    amount: Decimal
+
+
+class MonthlyBillOccurrence(BaseModel):
+    """One occurrence of a monthly/weekly/biweekly expense item this month."""
+    recurring_item_id: int
+    name: str
+    date: date
+    amount: Decimal
+    overridden: bool
+    card_id: Optional[int] = None
+
+
+class PeriodicDueOccurrence(BaseModel):
+    """One occurrence of a quarterly/yearly expense item firing this month."""
+    recurring_item_id: int
+    name: str
+    frequency: RecurringFrequency
+    date: date
+    amount: Decimal
+    overridden: bool
+    card_id: Optional[int] = None
+
+
+class OneOffOccurrence(BaseModel):
+    planned_expense_id: int
+    name: str
+    date: date
+    amount: Decimal
+    direction: PlannedDirection
+    settled: bool
+
+
+class MonthSummaryOut(BaseModel):
+    year: int
+    month: int
+    income_items: list[MonthIncomeOccurrence]
+    income_total: Decimal
+    monthly_bills: list[MonthlyBillOccurrence]
+    monthly_bills_total: Decimal
+    periodic_due: list[PeriodicDueOccurrence]
+    periodic_total: Decimal
+    # monthly_bills_total + periodic_total -- credit_card_payment items never
+    # contribute: they pay off card charges already counted elsewhere.
+    expense_total: Decimal
+    one_offs: list[OneOffOccurrence]
+    one_off_out_total: Decimal
+    one_off_in_total: Decimal
+    # income_total - expense_total - one_off_out_total + one_off_in_total
+    left_over: Decimal
+
+
 # ── Transactions ──────────────────────────────────────────────────────────────
 
 class TransactionCreate(BaseModel):

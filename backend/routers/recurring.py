@@ -255,6 +255,24 @@ def get_bills_to_confirm(
     return bills_to_confirm(db, user.id, _today())
 
 
+# Declared BEFORE /{item_id} on purpose: FastAPI matches routes in
+# declaration order, so the other way round "month-summary" is read as an
+# item_id and this endpoint 422s instead of answering.
+@router.get("/month-summary", response_model=schemas.MonthSummaryOut)
+def get_month_summary(
+    year: int,
+    month: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    if not (1 <= month <= 12):
+        raise HTTPException(status_code=400, detail="month must be between 1 and 12")
+    if not (1 <= year <= 9999):
+        raise HTTPException(status_code=400, detail="year must be between 1 and 9999")
+    from backend.services.month_summary import build_month_summary
+    return build_month_summary(db, user.id, year, month)
+
+
 @router.get("/{item_id}", response_model=schemas.RecurringOut)
 def get_recurring(
     item_id: int,
