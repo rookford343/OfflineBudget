@@ -289,6 +289,9 @@ def upgrade_schema():
         )""",
         "ALTER TABLE monthly_forecast_snapshots ADD COLUMN taken_on DATE",
         "ALTER TABLE monthly_forecast_snapshots ADD COLUMN daily_points TEXT",
+        # Statement-date prompts ("Bills to confirm") -- see
+        # services/bill_prompts.py and RecurringItem.statement_day.
+        "ALTER TABLE recurring_items ADD COLUMN statement_day INTEGER",
     ]
     with engine.connect() as conn:
         for s in stmts:
