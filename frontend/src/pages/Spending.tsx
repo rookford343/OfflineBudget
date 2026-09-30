@@ -432,12 +432,18 @@ export default function Spending() {
     );
   }
 
+  // With everything showing, a click focuses that one category -- the common
+  // case is "just show me Groceries", which used to take a click per other
+  // chip. Once filtered, clicks add/remove categories from the set; emptying
+  // it (or pressing All) goes back to everything.
   function toggleCat(id: number) {
-    const current = catFilter ?? new Set(allTopCats.map(c => c.id));
-    const next = new Set(current);
+    if (catFilter === null) {
+      setCatFilter(new Set([id]));
+      return;
+    }
+    const next = new Set(catFilter);
     if (next.has(id)) next.delete(id); else next.add(id);
-    // If all are now checked, reset to null (all)
-    if (next.size === allTopCats.length) setCatFilter(null);
+    if (next.size === 0 || next.size === allTopCats.length) setCatFilter(null);
     else setCatFilter(next);
   }
 
@@ -730,7 +736,8 @@ export default function Spending() {
                       <button
                         key={cat.id}
                         onClick={() => toggleCat(cat.id)}
-                        aria-label={`Toggle ${cat.name} category${catAvg !== null ? `, average ${fmt(catAvg)} per month` : ""}`}
+                        aria-label={`${catFilter === null ? "Show only" : on ? "Hide" : "Add"} ${cat.name}${catAvg !== null ? `, average ${fmt(catAvg)} per month` : ""}`}
+                        title={catFilter === null ? `Show only ${cat.name}` : on ? `Hide ${cat.name}` : `Add ${cat.name}`}
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
                           on
                             ? "border-transparent opacity-95 hover:opacity-100"
