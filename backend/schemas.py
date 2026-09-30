@@ -299,6 +299,32 @@ class RecurringBreakdownItem(BaseModel):
     months_remaining: Optional[int]
 
 
+class RecurringCategoryNode(BaseModel):
+    """A child category (e.g. Groceries) filed under a top-level group,
+    with the bills filed directly on it."""
+    category_id: int
+    category_name: str
+    monthly: Decimal
+    items: list[RecurringBreakdownItem]
+
+
+class RecurringCategoryGroup(BaseModel):
+    """A top-level category (e.g. Necessities, Wants, Charity) -- the
+    "group" in the group -> category -> bill rollup on the Recurring page.
+
+    `items` holds bills filed directly on the group itself (no child
+    category); bills filed on a child category live on that node instead.
+    `group_id` is None only for the synthetic "Unclassified" group, which
+    collects bills with no category or a category that isn't the user's own
+    -- included only when it actually has items.
+    """
+    group_id: Optional[int]
+    group_name: str
+    monthly: Decimal
+    categories: list[RecurringCategoryNode]
+    items: list[RecurringBreakdownItem]
+
+
 class RecurringBreakdown(BaseModel):
     """Recurring commitments split by whether they ever stop.
 
@@ -312,6 +338,19 @@ class RecurringBreakdown(BaseModel):
     # Expenses only: income is not burn.
     ongoing_monthly: Decimal
     ending_monthly: Decimal
+    # Sums below feed the Recurring page's summary strip. Unlike
+    # ongoing_monthly/ending_monthly, these ignore whether an item ever
+    # rolls off -- they answer "what does income/spending look like per
+    # month right now", not "what's permanent vs temporary".
+    income_monthly: Decimal
+    # Active expense items only -- credit_card_payment is excluded because it
+    # pays off card charges already counted elsewhere, and including it would
+    # double-count that spending.
+    expense_monthly: Decimal
+    # Active expense items only, grouped group -> category -> bill for the
+    # Recurring page's "By category" rollup. Sorted by monthly descending at
+    # every level, with a trailing Unclassified group always last.
+    by_category: list[RecurringCategoryGroup]
 
 
 # ── Transactions ──────────────────────────────────────────────────────────────

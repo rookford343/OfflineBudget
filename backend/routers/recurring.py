@@ -132,12 +132,30 @@ def get_breakdown(
         models.RecurringItem.user_id == user.id,
         models.RecurringItem.is_active == True,
     ).all()
+    # Scoped to this user only -- an item's category_id is looked up through
+    # this dict, so a category belonging to someone else (or since deleted)
+    # simply misses and the item falls into Unclassified rather than leaking
+    # a foreign category's name into this user's rollup.
+    categories = {
+        c.id: c for c in db.query(models.Category).filter(
+            models.Category.user_id == user.id,
+        ).all()
+    }
 
     today = date.today()
     ongoing: list[schemas.RecurringBreakdownItem] = []
     ending: list[schemas.RecurringBreakdownItem] = []
     ongoing_monthly = Decimal("0")
     ending_monthly = Decimal("0")
+    income_monthly = Decimal("0")
+    expense_monthly = Decimal("0")
+    groups: dict[int | None, dict] = {}
+
+    def _group(group_id: int | None, group_name: str) -> dict:
+        return groups.setdefault(group_id, {
+            "group_id": group_id, "group_name": group_name,
+            "monthly": Decimal("0"), "categories": {}, "items": [],
+        })
 
     for item in items:
         monthly = _monthly_equivalent(item)
@@ -157,10 +175,69 @@ def get_breakdown(
             if is_expense:
                 ongoing_monthly += monthly
 
+        if item.type == models.RecurringType.income:
+            income_monthly += monthly
+        elif is_expense:
+            # credit_card_payment falls through neither branch: it pays off
+            # card charges already counted elsewhere, so folding it in here
+            # would double-count that spending.
+            expense_monthly += monthly
+            cat = categories.get(item.category_id) if item.category_id else None
+            if cat is None:
+                g = _group(None, "Unclassified")
+                g["items"].append(out)
+                g["monthly"] += monthly
+            elif cat.parent_id is None:
+                g = _group(cat.id, cat.name)
+                g["items"].append(out)
+                g["monthly"] += monthly
+            else:
+                parent = categories.get(cat.parent_id)
+                if parent is None:
+                    g = _group(None, "Unclassified")
+                    g["items"].append(out)
+                    g["monthly"] += monthly
+                else:
+                    g = _group(parent.id, parent.name)
+                    node = g["categories"].setdefault(cat.id, {
+                        "category_id": cat.id, "category_name": cat.name,
+                        "monthly": Decimal("0"), "items": [],
+                    })
+                    node["items"].append(out)
+                    node["monthly"] += monthly
+                    g["monthly"] += monthly
+
     ending.sort(key=lambda i: i.end_date)
+
+    unclassified = groups.pop(None, None)
+    by_category = [
+        schemas.RecurringCategoryGroup(
+            group_id=g["group_id"], group_name=g["group_name"], monthly=g["monthly"],
+            categories=sorted(
+                (schemas.RecurringCategoryNode(
+                    category_id=c["category_id"], category_name=c["category_name"],
+                    monthly=c["monthly"],
+                    items=sorted(c["items"], key=lambda i: i.monthly_equivalent, reverse=True),
+                ) for c in g["categories"].values()),
+                key=lambda n: n.monthly, reverse=True,
+            ),
+            items=sorted(g["items"], key=lambda i: i.monthly_equivalent, reverse=True),
+        )
+        for g in groups.values()
+    ]
+    by_category.sort(key=lambda g: g.monthly, reverse=True)
+    if unclassified is not None:
+        by_category.append(schemas.RecurringCategoryGroup(
+            group_id=None, group_name="Unclassified", monthly=unclassified["monthly"],
+            categories=[],
+            items=sorted(unclassified["items"], key=lambda i: i.monthly_equivalent, reverse=True),
+        ))
+
     return schemas.RecurringBreakdown(
         ongoing=ongoing, ending=ending,
         ongoing_monthly=ongoing_monthly, ending_monthly=ending_monthly,
+        income_monthly=income_monthly, expense_monthly=expense_monthly,
+        by_category=by_category,
     )
 
 
