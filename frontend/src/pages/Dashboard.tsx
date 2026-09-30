@@ -12,6 +12,7 @@ import { TrendBadge } from "../components/TrendBadge";
 import { SparkLine } from "../components/SparkLine";
 import { RiskBanner } from "../components/RiskBanner";
 import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
+import BillsToConfirm from "../components/BillsToConfirm";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
 
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
@@ -171,6 +172,7 @@ export default function Dashboard() {
           past on a page whose top half is reference figures. */}
       {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
       <PlannedTransferReminder />
+      <BillsToConfirm />
 
       {/* Wide screens gain a COLUMN, not width. These panels are label/value
           lists and short prose, so stretching two of them to 900px only pads
