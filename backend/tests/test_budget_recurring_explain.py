@@ -57,3 +57,46 @@ def test_month_summary_explanations_replay(db_session):
         assert children_consistent(ex), key
     assert any(r.label.startswith("Annual plan") for r in out.explain["expense_total"].rows)
     assert any(r.label.startswith("Couch") and r.op == "subtract" for r in out.explain["left_over"].rows)
+
+
+def _month_seed_with_inflow(db):
+    user = models.User(username="mi", hashed_password="x", display_name="MI")
+    db.add(user); db.flush()
+    acct = models.Account(user_id=user.id, name="Chk", type=models.AccountType.checking)
+    db.add(acct); db.flush()
+
+    def item(name, amount, typ, freq, day, moy=None):
+        db.add(models.RecurringItem(
+            user_id=user.id, account_id=acct.id, name=name, amount=Decimal(amount),
+            type=typ, frequency=freq, day_of_month=day, month_of_year=moy,
+            start_date=date(2026, 1, 1),
+        ))
+
+    E, I = models.RecurringType.expense, models.RecurringType.income
+    M = models.RecurringFrequency.monthly
+    item("Pay", "3000.00", I, M, 15)
+    item("Rent", "1200.00", E, M, 1)
+    db.add(models.PlannedExpense(
+        user_id=user.id, account_id=acct.id, name="Couch", amount=Decimal("400.00"),
+        expected_date=date(2026, 10, 20),
+    ))
+    db.add(models.PlannedExpense(
+        user_id=user.id, account_id=acct.id, name="Refund", amount=Decimal("150.00"),
+        expected_date=date(2026, 10, 22), direction=models.PlannedDirection.inflow,
+    ))
+    db.commit()
+    return user
+
+
+def test_left_over_explanation_handles_inflow_one_off(db_session):
+    user = _month_seed_with_inflow(db_session)
+    out = build_month_summary(db_session, user.id, 2026, 10)
+    ex = out.explain["left_over"]
+    assert ex.result == out.left_over
+    assert replay(ex) == out.left_over
+    assert children_consistent(ex)
+
+    inflow_rows = [r for r in ex.rows if r.label.startswith("Refund")]
+    outflow_rows = [r for r in ex.rows if r.label.startswith("Couch")]
+    assert len(inflow_rows) == 1 and inflow_rows[0].op == "add"
+    assert len(outflow_rows) == 1 and outflow_rows[0].op == "subtract"
