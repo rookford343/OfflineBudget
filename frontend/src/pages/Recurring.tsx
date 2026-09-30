@@ -4,6 +4,7 @@ import { recurringApi, accountsApi, categoriesApi, cardsApi, billOverridesApi } 
 import { fmt } from "../lib/utils";
 import { Plus, Pencil, Trash2, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt, CalendarClock } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import BillsToConfirm from "../components/BillsToConfirm";
 import TriageInbox from "../components/TriageInbox";
 import RecurringSummaryStrip from "../components/RecurringSummaryStrip";
 import RecurringCategoryRollup from "../components/RecurringCategoryRollup";
@@ -19,7 +20,7 @@ function endMonthLabel(iso: string): string {
   return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
 }
 
-const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "" };
+const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "" };
 
 /** Next occurrence of a monthly item's due day, on or after today.
  *  Only monthly items get inline actual-amount entry: yearly and quarterly
@@ -133,11 +134,11 @@ export default function Recurring() {
 
   function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); setShowForm(false); setEditItem(null); }
   function openNew() { setForm({ ...emptyForm, account_id: accounts[0]?.id?.toString() ?? "" }); setEditItem(null); setShowForm(true); }
-  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "" }); setShowForm(true); }
+  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "" }); setShowForm(true); }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null };
+    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null };
     if (editItem) updateMut.mutate({ id: editItem.id, data });
     else createMut.mutate(data);
   }
@@ -267,6 +268,8 @@ export default function Recurring() {
         </div>
         <button onClick={openNew} className="btn-primary"><Plus size={16} /> Add Item</button>
       </div>
+
+      <BillsToConfirm />
 
       <TriageInbox />
 
@@ -520,6 +523,12 @@ export default function Recurring() {
                 <label className="label">Day of Month (0 = last day)</label>
                 <input type="number" min="0" max="31" className="input" value={form.day_of_month} onChange={e => setForm({ ...form, day_of_month: e.target.value })} required />
               </div>
+              {form.type === "expense" && form.frequency === "monthly" && !form.card_id && (
+                <div>
+                  <label className="label">Statement arrives around day <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input type="number" min="1" max="31" className="input" placeholder="17" value={form.statement_day} onChange={e => setForm({ ...form, statement_day: e.target.value })} />
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="label">Start Date</label><input type="date" className="input" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} required /></div>
                 <div><label className="label">End Date (optional)</label><input type="date" className="input" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} /></div>

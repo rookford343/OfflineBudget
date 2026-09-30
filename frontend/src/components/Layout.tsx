@@ -32,7 +32,12 @@ export default function Layout() {
     staleTime: 30_000,
   });
   const { data: triage } = useQuery({ queryKey: ["recurring-triage"], queryFn: recurringApi.triage, staleTime: 60_000 });
-  const triageCount = triage?.unclassified_count ?? 0;
+  const { data: billsToConfirm = [] } = useQuery<any[]>({
+    queryKey: ["bills-to-confirm"],
+    queryFn: recurringApi.billsToConfirm,
+    staleTime: 60_000,
+  });
+  const triageCount = (triage?.unclassified_count ?? 0) + billsToConfirm.length;
   const badgeFor = (item: { badgeKey?: string }) =>
     item.badgeKey === "triage" && triageCount > 0 ? (
       <span className="ml-auto rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
