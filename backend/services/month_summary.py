@@ -30,6 +30,13 @@ def build_month_summary(db: Session, user_id: int, year: int, month: int) -> sch
         models.RecurringItem.user_id == user_id,
         models.RecurringItem.is_active == True,
         models.RecurringItem.type != models.RecurringType.credit_card_payment,
+        # Real but not cash landing this month -- e.g. an annual bonus
+        # modelled as 1/12th per month for budget planning (models.py's own
+        # comment on this column). build_forecast excludes these from the
+        # day-by-day forecast the same way (forecast_engine.py ~line 329 and
+        # ~488); this summary has to agree with it or "real cash this month"
+        # stops being true.
+        models.RecurringItem.include_in_forecast == True,
     ).all()
 
     # Keyed by (recurring_item_id, due_date) so a lookup during the day walk
