@@ -136,9 +136,11 @@ def leftover_parts(
 def leftover_children(parts: LeftoverParts) -> list[ExplainChild]:
     """The four pieces of `leftover`, signed so they sum to it exactly."""
     return [
-        ExplainChild(label="Income this month", amount=parts.income),
+        ExplainChild(label="Income this month", amount=parts.income,
+                     note="Monthly income items only"),
         ExplainChild(label="Recurring bills this month", amount=-parts.expenses,
-                     note="Monthly bills, quarterly bills spread over 3 months, yearly bills in their month"),
+                     note="Monthly bills, quarterly bills spread over 3 months, yearly bills in "
+                          "their month; weekly and biweekly bills aren't included here"),
         ExplainChild(label="Savings set aside", amount=-parts.committed_savings),
         ExplainChild(label="Groceries budget", amount=-parts.groceries_budget),
     ]
@@ -406,7 +408,13 @@ def compute_budget_snapshot(
     # exactly equal to the $8,318.42 of balance_due across both cards. The old
     # test fixture hid this by pre-computing the delta into current_balance
     # and leaving balance_due at 0.
-    new_spending_total = sum((c.current_balance - c.balance_due + c.pending_charges for c in active_cards), Decimal("0"))
+    # Computed once per card so this and `card_children` below can never
+    # drift apart -- `new_spending_total` is just their sum, not the same
+    # formula written a second time.
+    card_new_spending = [
+        (c, c.current_balance - c.balance_due + c.pending_charges) for c in active_cards
+    ]
+    new_spending_total = sum((amount for _c, amount in card_new_spending), Decimal("0"))
     charged_so_far = _charged_so_far(db, user.id, as_of)
     cc_budget_total = _cc_budget_total(db, user.id, as_of)
 
@@ -563,13 +571,17 @@ def compute_budget_snapshot(
             )
         return builder.build(weekly_amount)
 
+    # Static text, no amounts: the frontend renders ExplainChild.note
+    # unmasked (maskIfHidden only ever wraps `amount`), so a note built from
+    # the card's own numbers would leak a hidden balance straight through
+    # the dialog.
     card_children = [
         ExplainChild(
             label=c.name,
-            amount=c.current_balance - c.balance_due + c.pending_charges,
-            note=f"current {c.current_balance} − last statement {c.balance_due} + pending {c.pending_charges}",
+            amount=amount,
+            note="current balance − last statement + pending charges",
         )
-        for c in active_cards
+        for c, amount in card_new_spending
     ]
     low_note = (
         f"Lowest projected checking balance in the next 3 months"
