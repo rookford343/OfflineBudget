@@ -1,8 +1,32 @@
 from datetime import date, date as date_type, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus, PlannedTransferStatus, VerificationFeature, VerificationFlagStatus, PlannedDirection
+
+
+# ── Calculation explanations ("How is this calculated?") ─────────────────────
+# Built by services/explain.py from the same variables a calculator used, so
+# the receipt a user sees can be replayed to the exact displayed value.
+
+class ExplainChild(BaseModel):
+    label: str
+    amount: Decimal          # signed: a deduction inside its parent is negative
+    note: Optional[str] = None
+
+
+class ExplainRow(BaseModel):
+    op: Literal["start", "add", "subtract", "divide", "result"]
+    label: str
+    amount: Decimal          # for "divide": the exact divisor, never rounded
+    note: Optional[str] = None
+    children: list[ExplainChild] = []
+
+
+class Explanation(BaseModel):
+    title: str
+    result: Decimal
+    rows: list[ExplainRow]
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
