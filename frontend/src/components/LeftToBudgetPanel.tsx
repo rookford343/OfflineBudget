@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { budgetApi } from "../api";
 import { fmt, cx } from "../lib/utils";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import HowCalculated from "./HowCalculated";
 
 /**
  * Zero-based view of the month. Committed lines come from recurring bills
@@ -59,7 +60,10 @@ export default function LeftToBudgetPanel({ year, month }: { year: number; month
     <div className="card space-y-4">
       <div>
         <div className="flex items-baseline justify-between">
-          <h2 className="font-semibold">Left to budget</h2>
+          <h2 className="font-semibold flex items-center gap-1.5">
+            Left to budget
+            <HowCalculated title="Left to budget" explanations={[data.explain_unassigned]} />
+          </h2>
           <span className={cx("text-lg font-semibold", tone)}>
             {fmt(data.unassigned)} {unassigned < 0 ? "over-assigned" : "unassigned"}
           </span>
