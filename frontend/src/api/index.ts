@@ -98,6 +98,8 @@ export const recurringApi = {
   triageDuplicate: (keepId: number, deactivateId: number) =>
     api.post("/recurring/triage/duplicate", { keep_id: keepId, deactivate_id: deactivateId }).then((r) => r.data),
   billsToConfirm: () => api.get("/recurring/bills-to-confirm").then((r) => r.data),
+  monthSummary: (year: number, month: number) =>
+    api.get("/recurring/month-summary", { params: { year, month } }).then((r) => r.data),
 };
 
 // ── Forecast ──────────────────────────────────────────────────────────────────

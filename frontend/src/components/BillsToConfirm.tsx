@@ -40,6 +40,10 @@ export default function BillsToConfirm() {
       qc.invalidateQueries({ queryKey: ["forecast-risk"] });
       qc.invalidateQueries({ queryKey: ["budget-snapshot"] });
       qc.invalidateQueries({ queryKey: ["recurring-triage"] });
+      // The confirmed amount replaces an estimate in the month's real totals
+      // (Recurring page's summary strip), same as the Recurring page's own
+      // inline $ button.
+      qc.invalidateQueries({ queryKey: ["recurring-month-summary"] });
       setAmounts((a) => {
         const next = { ...a };
         delete next[variables.recurring_item_id];
