@@ -286,6 +286,39 @@ def test_left_over_arithmetic(db_session):
     )
 
 
+def test_include_in_forecast_false_contributes_nothing(db_session):
+    """include_in_forecast=False is real (e.g. an annual bonus modelled as
+    1/12th per month for budget planning) but not cash landing in checking
+    that month -- build_forecast excludes it from the day-by-day forecast
+    (forecast_engine.py ~line 329/488), so this summary must too, on both
+    income and expense items."""
+    user = _user(db_session)
+    acct = _account(db_session, user)
+    _item(
+        db_session, user, acct, name="Smoothed Bonus", amount=Decimal("1000.00"),
+        type=models.RecurringType.income, day_of_month=15, start_date=date(2020, 1, 1),
+        include_in_forecast=False,
+    )
+    _item(
+        db_session, user, acct, name="Smoothed Expense", amount=Decimal("60.00"),
+        day_of_month=15, start_date=date(2020, 1, 1),
+        include_in_forecast=False,
+    )
+    db_session.commit()
+
+    summary = build_month_summary(db_session, user.id, 2026, 6)
+
+    names = (
+        [o.name for o in summary.income_items]
+        + [o.name for o in summary.monthly_bills]
+        + [o.name for o in summary.periodic_due]
+    )
+    assert "Smoothed Bonus" not in names
+    assert "Smoothed Expense" not in names
+    assert summary.income_total == Decimal("0")
+    assert summary.expense_total == Decimal("0")
+
+
 def test_other_users_items_never_appear(db_session):
     user_a = _user(db_session, "usera")
     acct_a = _account(db_session, user_a)
