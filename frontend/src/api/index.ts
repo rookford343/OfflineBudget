@@ -97,6 +97,7 @@ export const recurringApi = {
     api.post("/recurring/triage/dismiss", { pattern_key: patternKey }).then((r) => r.data),
   triageDuplicate: (keepId: number, deactivateId: number) =>
     api.post("/recurring/triage/duplicate", { keep_id: keepId, deactivate_id: deactivateId }).then((r) => r.data),
+  billsToConfirm: () => api.get("/recurring/bills-to-confirm").then((r) => r.data),
 };
 
 // ── Forecast ──────────────────────────────────────────────────────────────────
