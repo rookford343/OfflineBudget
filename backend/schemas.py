@@ -459,6 +459,8 @@ class MonthSummaryOut(BaseModel):
     one_off_in_total: Decimal
     # income_total - expense_total - one_off_out_total + one_off_in_total
     left_over: Decimal
+    # Receipts for the headline numbers, keyed "expense_total" and "left_over".
+    explain: dict[str, Explanation] = {}
 
 
 # ── Transactions ──────────────────────────────────────────────────────────────
@@ -1776,6 +1778,7 @@ class LeftToBudgetOut(BaseModel):
     assigned_total: Decimal
     unassigned: Decimal
     carry_forward: bool
+    explain_unassigned: Optional[Explanation] = None
 
 
 # ── Recurring Triage ──────────────────────────────────────────────────────────
