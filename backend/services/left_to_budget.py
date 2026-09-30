@@ -11,7 +11,8 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.budget_buckets import assignable_category_ids, drop_uncarried_defaults
-from backend.services.budget_snapshot import leftover_parts, leftover_share
+from backend.services.budget_snapshot import leftover_children, leftover_parts, leftover_share
+from backend.services.explain import ExplainBuilder
 from backend.services.recurring_math import monthly_equivalent
 
 ZERO = Decimal("0")
@@ -90,6 +91,16 @@ def compute_left_to_budget(db: Session, user: models.User, year: int, month: int
     ]
     assigned_total = sum((r.assigned for r in assignable), ZERO)
 
+    unassigned_builder = ExplainBuilder("Left to budget").start(
+        "Leftover", parts.leftover,
+        note="Income after bills, savings and groceries",
+        children=leftover_children(parts),
+    )
+    for row in assignable:
+        if row.assigned:
+            unassigned_builder.subtract(row.category_name, row.assigned, note="Assigned this month")
+    explain_unassigned = unassigned_builder.build(parts.leftover - assigned_total)
+
     return schemas.LeftToBudgetOut(
         year=year, month=month,
         leftover=parts.leftover,
@@ -100,4 +111,5 @@ def compute_left_to_budget(db: Session, user: models.User, year: int, month: int
         assigned_total=assigned_total,
         unassigned=parts.leftover - assigned_total,
         carry_forward=bool(user.budget_carry_forward),
+        explain_unassigned=explain_unassigned,
     )

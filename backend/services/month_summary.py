@@ -18,6 +18,8 @@ from datetime import date
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from backend import models, schemas
+from backend.schemas import ExplainChild
+from backend.services.explain import ExplainBuilder
 from backend.services.forecast_engine import _fires_on
 
 
@@ -126,6 +128,33 @@ def build_month_summary(db: Session, user_id: int, year: int, month: int) -> sch
 
     left_over = income_total - expense_total - one_off_out_total + one_off_in_total
 
+    expense_builder = ExplainBuilder("Expenses this month").start(
+        "Monthly bills", monthly_bills_total,
+        note="Every weekly, biweekly and monthly bill charged this month",
+        children=[ExplainChild(label=f"{b.name} ({b.date:%b %-d})", amount=b.amount,
+                               note="actual statement amount" if b.overridden else None)
+                  for b in monthly_bills],
+    )
+    for p in periodic_due:
+        expense_builder.add(f"{p.name} ({p.date:%b %-d})", p.amount,
+                            note=f"{p.frequency.value if hasattr(p.frequency, 'value') else p.frequency} bill due this month")
+    left_builder = ExplainBuilder("Left over").start(
+        "Income", income_total,
+        children=[ExplainChild(label=f"{i.name} ({i.date:%b %-d})", amount=i.amount) for i in income_items],
+    ).subtract("Expenses this month", expense_total)
+    for o in one_offs:
+        direction = o.direction.value if hasattr(o.direction, "value") else str(o.direction)
+        label = f"{o.name} ({o.date:%b %-d})"
+        note = "one-off, settled" if o.settled else "planned one-off"
+        if direction == "inflow":
+            left_builder.add(label, o.amount, note=note)
+        else:
+            left_builder.subtract(label, o.amount, note=note)
+    explain = {
+        "expense_total": expense_builder.build(expense_total),
+        "left_over": left_builder.build(left_over),
+    }
+
     return schemas.MonthSummaryOut(
         year=year, month=month,
         income_items=income_items, income_total=income_total,
@@ -134,4 +163,5 @@ def build_month_summary(db: Session, user_id: int, year: int, month: int) -> sch
         expense_total=expense_total,
         one_offs=one_offs, one_off_out_total=one_off_out_total, one_off_in_total=one_off_in_total,
         left_over=left_over,
+        explain=explain,
     )
