@@ -426,11 +426,9 @@ export default function Recurring() {
       </div>
 
       {ccPayments.length > 0 && (
-        <div className="grid md:grid-cols-2 gap-6">
-          <div className="card">
-            <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><CreditCard size={16} className="text-blue-500" /> Credit Card Payments ({ccPayments.length})</h3>
-            {ccPayments.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
-          </div>
+        <div className="card">
+          <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><CreditCard size={16} className="text-blue-500" /> Credit Card Payments ({ccPayments.length})</h3>
+          {ccPayments.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
         </div>
       )}
 
