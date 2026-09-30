@@ -68,6 +68,10 @@ export default function Recurring() {
     qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
     qc.invalidateQueries({ queryKey: ["forecast-risk"] });
     qc.invalidateQueries({ queryKey: ["budget-snapshot"] });
+    // Same reasoning as the two invalidations below: an override changes the
+    // real amount for its one occurrence, which the summary strip's month
+    // totals read directly.
+    qc.invalidateQueries({ queryKey: ["recurring-month-summary"] });
   };
   const linkMut = useMutation({
     mutationFn: ({ itemId, pattern }: { itemId: number; pattern: string }) =>
@@ -130,9 +134,9 @@ export default function Recurring() {
 
   const createMut = useMutation({ mutationFn: recurringApi.create, onSuccess: done });
   const updateMut = useMutation({ mutationFn: ({ id, data }: any) => recurringApi.update(id, data), onSuccess: done });
-  const deleteMut = useMutation({ mutationFn: recurringApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); setDeleteId(null); } });
+  const deleteMut = useMutation({ mutationFn: recurringApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setDeleteId(null); } });
 
-  function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); setShowForm(false); setEditItem(null); }
+  function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setShowForm(false); setEditItem(null); }
   function openNew() { setForm({ ...emptyForm, account_id: accounts[0]?.id?.toString() ?? "" }); setEditItem(null); setShowForm(true); }
   function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "" }); setShowForm(true); }
 
@@ -160,8 +164,6 @@ export default function Recurring() {
   const perMonth = (i: any) =>
     byId[i.id] ? parseFloat(byId[i.id].monthly_equivalent)
       : parseFloat(i.amount) / (i.frequency === "yearly" ? 12 : i.frequency === "quarterly" ? 3 : 1);
-  const monthlyIncome = income.reduce((s: number, i: any) => s + perMonth(i), 0);
-  const monthlyExpenses = [...checkingExpenses, ...ccCharges, ...ccPayments].reduce((s: number, i: any) => s + perMonth(i), 0);
 
   function ItemRow({ item }: { item: any }) {
     const isYearly = item.frequency === "yearly";
@@ -259,6 +261,34 @@ export default function Recurring() {
     );
   }
 
+  /** Monthly/weekly/biweekly items first (existing day-of-month sort), then a
+   *  thin "Quarterly & yearly" divider, then those items (same sort). Used by
+   *  both the Checking Expenses and Credit Card Charges lists. */
+  function MonthlyFirstList({ items, emptyLabel }: { items: any[]; emptyLabel: string }) {
+    if (items.length === 0) {
+      return <p className="text-sm text-gray-400 py-4 text-center">{emptyLabel}</p>;
+    }
+    const monthlyFirst = items
+      .filter((i: any) => i.frequency === "monthly" || i.frequency === "weekly" || i.frequency === "biweekly")
+      .sort((a: any, b: any) => a.day_of_month - b.day_of_month);
+    const periodic = items
+      .filter((i: any) => i.frequency === "quarterly" || i.frequency === "yearly")
+      .sort((a: any, b: any) => a.day_of_month - b.day_of_month);
+    return (
+      <>
+        {monthlyFirst.map((i: any) => <ItemRow key={i.id} item={i} />)}
+        {periodic.length > 0 && (
+          <div className="my-2 flex items-center gap-2">
+            <span className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
+            <span className="shrink-0 text-xs font-medium uppercase tracking-wide text-gray-400">Quarterly &amp; yearly</span>
+            <span className="h-px flex-1 bg-gray-100 dark:bg-gray-800" />
+          </div>
+        )}
+        {periodic.map((i: any) => <ItemRow key={i.id} item={i} />)}
+      </>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -274,8 +304,6 @@ export default function Recurring() {
       <TriageInbox />
 
       <RecurringSummaryStrip
-        incomeMonthly={parseFloat(breakdown?.income_monthly ?? String(monthlyIncome))}
-        expenseMonthly={parseFloat(breakdown?.expense_monthly ?? String(monthlyExpenses))}
         incomeItems={income}
         onEdit={openEdit}
         onDelete={(id) => setDeleteId(id)}
@@ -418,12 +446,12 @@ export default function Recurring() {
       <div className="grid md:grid-cols-2 gap-6">
         <div className="card">
           <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><TrendingDown size={16} className="text-red-500" /> Checking Expenses ({checkingExpenses.length})</h3>
-          {checkingExpenses.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No checking expenses yet</p> : checkingExpenses.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
+          <MonthlyFirstList items={checkingExpenses} emptyLabel="No checking expenses yet" />
         </div>
         {(ccCharges.length > 0 || ccPayments.length > 0) && (
           <div className="card">
             <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><CreditCard size={16} className="text-purple-500" /> Credit Card Charges ({ccCharges.length})</h3>
-            {ccCharges.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No recurring CC charges yet</p> : ccCharges.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
+            <MonthlyFirstList items={ccCharges} emptyLabel="No recurring CC charges yet" />
           </div>
         )}
       </div>

@@ -48,7 +48,7 @@ export default function RecurringCategoryRollup({ groups }: { groups: any[] }) {
                     </span>
                   )}
                 </span>
-                <span className="tabular-nums text-gray-700 dark:text-gray-300">{fmt(g.monthly)}/mo</span>
+                <span className="tabular-nums text-gray-700 dark:text-gray-300">{fmt(g.monthly)} avg/mo</span>
               </button>
 
               {isOpen && (
@@ -69,14 +69,14 @@ export default function RecurringCategoryRollup({ groups }: { groups: any[] }) {
                             {catOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
                             {c.category_name}
                           </span>
-                          <span className="tabular-nums text-gray-600 dark:text-gray-400">{fmt(c.monthly)}/mo</span>
+                          <span className="tabular-nums text-gray-600 dark:text-gray-400">{fmt(c.monthly)} avg/mo</span>
                         </button>
                         {catOpen && (
                           <div className="space-y-0.5 pl-5">
                             {c.items.map((item: any) => (
                               <div key={item.id} className="flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
                                 <span className="truncate">{item.name}</span>
-                                <span className="shrink-0 tabular-nums">{fmt(item.monthly_equivalent)}/mo</span>
+                                <span className="shrink-0 tabular-nums">{fmt(item.monthly_equivalent)} avg/mo</span>
                               </div>
                             ))}
                           </div>
@@ -87,7 +87,7 @@ export default function RecurringCategoryRollup({ groups }: { groups: any[] }) {
                   {g.items.map((item: any) => (
                     <div key={item.id} className="flex items-center justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
                       <span className="truncate">{item.name}</span>
-                      <span className="shrink-0 tabular-nums">{fmt(item.monthly_equivalent)}/mo</span>
+                      <span className="shrink-0 tabular-nums">{fmt(item.monthly_equivalent)} avg/mo</span>
                     </div>
                   ))}
                 </div>
