@@ -11,7 +11,8 @@ from decimal import Decimal, ROUND_CEILING
 from typing import NamedTuple
 from sqlalchemy.orm import Session
 from backend import models
-from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry
+from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
+from backend.services.explain import ExplainBuilder
 from backend.services.forecast_engine import build_forecast, ScenarioProposal
 from backend.services.card_matching import card_matches_description
 from backend.services.spendable_pacer import compute_weekly_spendable
@@ -130,6 +131,17 @@ def leftover_parts(
     )
     leftover = income - expenses - committed_savings - groceries_budget
     return LeftoverParts(income, expenses, savings_budget, committed_savings, groceries_budget, leftover)
+
+
+def leftover_children(parts: LeftoverParts) -> list[ExplainChild]:
+    """The four pieces of `leftover`, signed so they sum to it exactly."""
+    return [
+        ExplainChild(label="Income this month", amount=parts.income),
+        ExplainChild(label="Recurring bills this month", amount=-parts.expenses,
+                     note="Monthly bills, quarterly bills spread over 3 months, yearly bills in their month"),
+        ExplainChild(label="Savings set aside", amount=-parts.committed_savings),
+        ExplainChild(label="Groceries budget", amount=-parts.groceries_budget),
+    ]
 
 
 def _card_linked_recurring_items(
@@ -538,6 +550,61 @@ def compute_budget_snapshot(
     merchants = merchant_totals(db, user.id, week_start, as_of, limit=10)
     top_merchants = [MerchantSpendingEntry(name=n, total=t, count=c) for n, t, c in merchants]
 
+    def weekly_explanation(title: str, source_label: str, source_amount, weekly_amount):
+        # Mirrors _weekly_allowance exactly: whole amount in the last week,
+        # otherwise divided by the exact number of weeks left.
+        builder = ExplainBuilder(title)
+        if days_remaining <= 7:
+            builder.start(source_label, source_amount, note="Last week of the month: the whole amount")
+        else:
+            builder.start(source_label, source_amount).divide(
+                "Weeks left in the month", Decimal(days_remaining) / Decimal(7),
+                note=f"{days_remaining} days left ÷ 7",
+            )
+        return builder.build(weekly_amount)
+
+    card_children = [
+        ExplainChild(
+            label=c.name,
+            amount=c.current_balance - c.balance_due + c.pending_charges,
+            note=f"current {c.current_balance} − last statement {c.balance_due} + pending {c.pending_charges}",
+        )
+        for c in active_cards
+    ]
+    low_note = (
+        f"Lowest projected checking balance in the next 3 months"
+        + (f", on {quarter_min_date:%b %-d}" if quarter_min_date else "")
+        + ". Excludes the already-scheduled card payoff."
+    )
+    explain = {
+        "left_to_spend": ExplainBuilder("Left to Spend")
+            .start("Leftover", leftover, note="Income after bills, savings and groceries",
+                   children=leftover_children(parts))
+            .subtract("New card spending", new_spending_total,
+                      note="Spent on cards since each card's last statement", children=card_children)
+            .add("Card bills already charged", charged_so_far,
+                 note="Recurring card subscriptions already posted this month (already inside card spending)")
+            .build(left_to_spend),
+        "spendable_week": weekly_explanation(
+            "Spendable this week", "Left to Spend", left_to_spend, left_to_spend_weekly),
+        "spendable_today": ExplainBuilder("Spendable today")
+            .start("Spendable this week", left_to_spend_weekly)
+            .divide("Days left this week", Decimal(days_left_in_week))
+            .build(spendable_today),
+        "safety_margin": ExplainBuilder("Safety Margin")
+            .start("3-month lowest point", quarter_min, note=low_note)
+            .subtract("This month's card bills", cc_budget_total,
+                      note="Every recurring subscription charged to a card this month")
+            .add("Card bills already charged", charged_so_far,
+                 note="Already posted, so already inside the projected balance")
+            .build(safety_margin),
+        "safety_margin_week": weekly_explanation(
+            "Safety Margin (this week)", "Safety Margin", safety_margin, safety_margin_weekly),
+        "lookahead_minimum": ExplainBuilder("3-month lowest point")
+            .start("Lowest projected checking balance", quarter_min, note=low_note)
+            .build(quarter_min),
+    }
+
     return BudgetSnapshot(
         as_of=as_of,
         leftover=leftover,
@@ -558,6 +625,7 @@ def compute_budget_snapshot(
         days_remaining_in_month=days_remaining,
         lookahead_minimum=quarter_min,
         lookahead_minimum_date=quarter_min_date,
+        explain=explain,
         cards=cards,
         categories=categories,
         top_merchants=top_merchants,

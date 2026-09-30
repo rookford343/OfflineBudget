@@ -1600,6 +1600,8 @@ class BudgetSnapshot(BaseModel):
     # by side).
     lookahead_minimum: Decimal = Decimal("0")
     lookahead_minimum_date: Optional[date] = None
+    # Receipts for the headline numbers, keyed as in services/budget_snapshot.py.
+    explain: dict[str, Explanation] = {}
     cards: list[CardSnapshot]
     categories: list[WeeklyDigestCategory]
     top_merchants: list[MerchantSpendingEntry]
