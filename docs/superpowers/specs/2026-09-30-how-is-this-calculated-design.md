@@ -36,7 +36,9 @@ In `backend/schemas.py`:
 ExplainRow:
   op: "start" | "add" | "subtract" | "divide" | "result"
   label: str
-  amount: Decimal          # for "divide", the divisor (e.g. 3.43 weeks)
+  amount: Decimal          # for "divide", the EXACT divisor as the calculator
+                           # used it (e.g. Decimal(24)/Decimal(7), never a rounded
+                           # 3.43); the UI rounds it for display only
   note: str | None         # one-line "why"
   children: list[ExplainChild] = []
 
