@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { recurringApi } from "../api";
 import { fmt } from "../lib/utils";
+import HowCalculated from "./HowCalculated";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -113,7 +114,10 @@ export default function RecurringSummaryStrip({
         </div>
 
         <div className="stat-card">
-          <span className="stat-label">Expenses</span>
+          <span className="stat-label flex items-center gap-1.5">
+            Expenses
+            <HowCalculated title="Expenses this month" explanations={[summary?.explain?.expense_total]} />
+          </span>
           <span className="stat-value text-red-600">{fmt(expenseTotal)}</span>
           <p className="mt-1 text-xs text-gray-400">Monthly bills {fmt(monthlyBillsTotal)}</p>
           {periodicDue.length > 0 && (
@@ -140,7 +144,10 @@ export default function RecurringSummaryStrip({
         </div>
 
         <div className="stat-card">
-          <span className="stat-label">Left over</span>
+          <span className="stat-label flex items-center gap-1.5">
+            Left over
+            <HowCalculated title="Left over" explanations={[summary?.explain?.left_over]} />
+          </span>
           <span className={`stat-value ${leftOver >= 0 ? "text-green-600" : "text-red-600"}`}>
             {leftOver >= 0 ? "+" : ""}{fmt(leftOver)}
           </span>
