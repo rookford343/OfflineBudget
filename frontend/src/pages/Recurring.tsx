@@ -2,9 +2,11 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { recurringApi, accountsApi, categoriesApi, cardsApi, billOverridesApi } from "../api";
 import { fmt } from "../lib/utils";
-import { Plus, Pencil, Trash2, TrendingUp, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt, CalendarClock } from "lucide-react";
+import { Plus, Pencil, Trash2, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt, CalendarClock } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import TriageInbox from "../components/TriageInbox";
+import RecurringSummaryStrip from "../components/RecurringSummaryStrip";
+import RecurringCategoryRollup from "../components/RecurringCategoryRollup";
 import { CategoryOptions, AccountOptions, RecurringOptions } from "../lib/selectOptions";
 import { sortCategoryList, byName } from "../lib/selectOptions";
 
@@ -268,18 +270,15 @@ export default function Recurring() {
 
       <TriageInbox />
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="stat-card">
-          <span className="stat-label">Monthly Income</span>
-          <span className="stat-value text-green-600">{fmt(monthlyIncome)}</span>
-          <span className="text-xs text-gray-400">yearly + quarterly averaged</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Monthly Expenses</span>
-          <span className="stat-value text-red-600">{fmt(monthlyExpenses)}</span>
-          <span className="text-xs text-gray-400">yearly + quarterly averaged</span>
-        </div>
-      </div>
+      <RecurringSummaryStrip
+        incomeMonthly={parseFloat(breakdown?.income_monthly ?? String(monthlyIncome))}
+        expenseMonthly={parseFloat(breakdown?.expense_monthly ?? String(monthlyExpenses))}
+        incomeItems={income}
+        onEdit={openEdit}
+        onDelete={(id) => setDeleteId(id)}
+      />
+
+      <RecurringCategoryRollup groups={breakdown?.by_category ?? []} />
 
       {/* Ongoing vs. temporary. A device payment that rolls off in 8 months
           isn't what life costs -- blending the two overstates the future. */}
@@ -318,18 +317,6 @@ export default function Recurring() {
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {(income.length > 0 || checkingExpenses.length > 0 || ccCharges.length > 0 || ccPayments.length > 0) && (
-        <div className={`card flex items-center justify-between ${monthlyIncome - monthlyExpenses >= 0 ? "bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800" : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"}`}>
-          <div>
-            <p className="text-sm font-semibold text-gray-900 dark:text-white">Monthly Cash Flow</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">{fmt(monthlyIncome)} income − {fmt(monthlyExpenses)} expenses</p>
-          </div>
-          <p className={`text-xl font-bold tabular-nums ${monthlyIncome - monthlyExpenses >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-            {monthlyIncome - monthlyExpenses >= 0 ? "+" : ""}{fmt(monthlyIncome - monthlyExpenses)}
-          </p>
         </div>
       )}
 
@@ -427,29 +414,25 @@ export default function Recurring() {
 
       <div className="grid md:grid-cols-2 gap-6">
         <div className="card">
-          <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><TrendingUp size={16} className="text-green-500" /> Income ({income.length})</h3>
-          {income.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No income sources yet</p> : income.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
-        </div>
-        <div className="card">
           <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><TrendingDown size={16} className="text-red-500" /> Checking Expenses ({checkingExpenses.length})</h3>
           {checkingExpenses.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No checking expenses yet</p> : checkingExpenses.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
         </div>
-      </div>
-
-      <div className="grid md:grid-cols-2 gap-6">
         {(ccCharges.length > 0 || ccPayments.length > 0) && (
           <div className="card">
             <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><CreditCard size={16} className="text-purple-500" /> Credit Card Charges ({ccCharges.length})</h3>
             {ccCharges.length === 0 ? <p className="text-sm text-gray-400 py-4 text-center">No recurring CC charges yet</p> : ccCharges.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
           </div>
         )}
-        {ccPayments.length > 0 && (
+      </div>
+
+      {ccPayments.length > 0 && (
+        <div className="grid md:grid-cols-2 gap-6">
           <div className="card">
             <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2"><CreditCard size={16} className="text-blue-500" /> Credit Card Payments ({ccPayments.length})</h3>
             {ccPayments.sort((a: any, b: any) => a.day_of_month - b.day_of_month).map((i: any) => <ItemRow key={i.id} item={i} />)}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {inactive.length > 0 && (
         <div className="card opacity-60">
