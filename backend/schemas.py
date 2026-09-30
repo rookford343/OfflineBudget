@@ -236,12 +236,23 @@ class RecurringCreate(BaseModel):
     start_date: date
     end_date: Optional[date] = None
     notes: Optional[str] = None
+    # The day the real statement usually arrives (e.g. Duke Electric's around
+    # the 17th) -- drives services/bill_prompts.py's "Bills to confirm"
+    # prompts. None means the item never prompts.
+    statement_day: Optional[int] = None
 
     @field_validator("day_of_month")
     @classmethod
     def validate_day(cls, v: int) -> int:
         if not (0 <= v <= 31):
             raise ValueError("day_of_month must be 0 (last day) or 1-31")
+        return v
+
+    @field_validator("statement_day")
+    @classmethod
+    def validate_statement_day(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (1 <= v <= 31):
+            raise ValueError("statement_day must be None or 1-31")
         return v
 
 
@@ -260,6 +271,14 @@ class RecurringUpdate(BaseModel):
     is_active: Optional[bool] = None
     include_in_forecast: Optional[bool] = None
     notes: Optional[str] = None
+    statement_day: Optional[int] = None
+
+    @field_validator("statement_day")
+    @classmethod
+    def validate_statement_day(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (1 <= v <= 31):
+            raise ValueError("statement_day must be None or 1-31")
+        return v
 
 
 class RecurringOut(BaseModel):
@@ -279,6 +298,7 @@ class RecurringOut(BaseModel):
     is_active: bool
     include_in_forecast: bool = True
     notes: Optional[str]
+    statement_day: Optional[int] = None
 
 
 class RecurringBreakdownItem(BaseModel):
@@ -548,6 +568,16 @@ class BillAmountOverrideOut(BaseModel):
     actual_amount: Decimal
     projected_amount: Decimal = Decimal("0")
     notes: Optional[str] = None
+
+
+class BillToConfirmOut(BaseModel):
+    """One eligible bill inside its statement-to-due-date window, still
+    unconfirmed for that occurrence. See services/bill_prompts.py."""
+    recurring_item_id: int
+    name: str
+    estimated_amount: Decimal
+    statement_date: date
+    due_date: date
 
 
 class RecurringLinkPattern(BaseModel):

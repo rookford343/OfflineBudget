@@ -265,6 +265,13 @@ class RecurringItem(Base):
     # spent. Defaults True so every existing item keeps forecasting exactly
     # as before.
     include_in_forecast: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 1-31: the day the real statement usually arrives for a monthly checking
+    # expense (e.g. Duke Electric's statement lands around the 17th). Null
+    # means no statement-date prompts for this item -- opt-in per item, since
+    # most bills don't need one. Drives services/bill_prompts.py's "Bills to
+    # confirm" window; clamped to the month length the same way day_of_month
+    # already is (a 31 in February means Feb 28/29).
+    statement_day: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
