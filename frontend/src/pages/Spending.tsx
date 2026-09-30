@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { spendingApi, accountsApi, cardsApi, analyticsApi, merchantsApi } from "../api";
+import { spendingApi, accountsApi, cardsApi, analyticsApi, merchantsApi, budgetApi } from "../api";
 import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyLeft } from "d3-sankey";
 import { fmt, firstOfMonth, today, quickRange } from "../lib/utils";
 import {
@@ -31,6 +31,38 @@ function chartTheme() {
 }
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// Mean of one category's monthly totals over the full months present in
+// `rows` (as returned by /spending/monthly-by-category). The current
+// calendar month is excluded when present -- it's a partial month, and
+// mixing a partial month into the average would silently understate it. A
+// full month with $0 for this category still counts (drags the average
+// down); only months that actually appear in `rows` are considered, since
+// there's no synthesizing of months the chart never fetched.
+function categoryMonthlyAverage(
+  rows: { month: string; categories: { category_id: number; total: number | string }[] }[],
+  categoryKey: number,
+  currentMonthKey: string,
+): number | null {
+  const fullMonths = rows.filter(r => r.month !== currentMonthKey);
+  if (fullMonths.length === 0) return null;
+  const sum = fullMonths.reduce((s, r) => {
+    const match = r.categories.find(c => c.category_id === categoryKey);
+    return s + (match ? parseFloat(String(match.total)) : 0);
+  }, 0);
+  return sum / fullMonths.length;
+}
+
+// Y-axis tick label: `$500` under $1k; `$1.0k`/`$1.5k` under $10k (one
+// decimal); `$12k` at $10k+ (none). Replaces the old `${(v/1000).toFixed(0)}k`,
+// which rounded everything under $1,000 to a duplicate "$0k" tick and
+// collapsed the whole $1,000-$1,999 range into the same "$1k" label as the
+// next real tick at $2,000.
+function formatAxisDollars(v: number): string {
+  if (Math.abs(v) < 1000) return `$${Math.round(v)}`;
+  const k = v / 1000;
+  return `$${k.toFixed(Math.abs(v) < 10000 ? 1 : 0)}k`;
+}
 
 export default function Spending() {
   const [showHelp, setShowHelp] = useState(false);
@@ -204,6 +236,52 @@ export default function Spending() {
       selectedAccountId ?? undefined, selectedCardId ?? undefined, 12),
     enabled: !!drillRange,
   });
+
+  // Category drill-down: click a (category, month) bar segment to see the
+  // merchants behind it. /budget/category-breakdown has no account/card
+  // filter param, so this panel always reflects all sources -- the "All
+  // accounts" note below tells Dan when that differs from the page's filter.
+  const [drillCat, setDrillCat] = useState<{ categoryId: number; categoryName: string; month: string } | null>(null);
+
+  const { data: drillCatMerchants = [] } = useQuery<any[]>({
+    queryKey: ["category-breakdown", drillCat?.categoryId, drillCat?.month],
+    queryFn: () => {
+      const [y, m] = drillCat!.month.split("-").map(Number);
+      return budgetApi.categoryBreakdown(drillCat!.categoryId, y, m);
+    },
+    enabled: !!drillCat,
+  });
+
+  const drillCatMonthLabel = drillCat
+    ? new Date(drillCat.month + "-01T12:00:00").toLocaleDateString("en-US", { month: "long", year: "numeric" })
+    : "";
+  const drillCatTotal = drillCat
+    ? parseFloat(String(
+        monthlyByCat.find((r: any) => r.month === drillCat.month)?.categories
+          ?.find((c: any) => c.category_id === drillCat.categoryId)?.total ?? 0
+      ))
+    : 0;
+
+  // This calendar month is a partial month -- excluded from every category's
+  // average below so a still-accumulating month doesn't understate it.
+  const currentMonthKey = (() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  })();
+
+  const visibleCatAverages = useMemo(() => {
+    const map = new Map<number, number | null>();
+    allTopCats.forEach(cat => {
+      if (visibleCatIds.has(cat.id)) {
+        map.set(cat.id, categoryMonthlyAverage(monthlyByCat, cat.id, currentMonthKey));
+      }
+    });
+    return map;
+  }, [allTopCats, visibleCatIds, monthlyByCat, currentMonthKey]);
+
+  const singleVisibleAvg = visibleCatIds.size === 1
+    ? (visibleCatAverages.get(allTopCats.find(c => visibleCatIds.has(c.id))?.id ?? -1) ?? null)
+    : null;
 
   // Pie chart data
   const pieData = (overview?.categories ?? [])
@@ -410,7 +488,7 @@ export default function Spending() {
                 <BarChart data={rollingBarData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis dataKey="month" tick={{ fontSize: 10, fill: ct.tick }} interval={trendsRangeMonths > 12 ? 2 : 0} axisLine={{ stroke: ct.grid }} tickLine={false} />
-                  <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={formatAxisDollars} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
                   <Tooltip content={<StackedTooltip />} cursor={{ fill: isDarkMode() ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }} />
                   <Legend formatter={(v) => <span style={{ color: ct.tick }} className="text-sm">{v}</span>} />
                   <Bar dataKey="checking" stackId="spend" fill={ct.barFill} name="Checking" />
@@ -532,7 +610,7 @@ export default function Spending() {
                   }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis dataKey="month" tick={{ fontSize: 11, fill: ct.tick }} axisLine={{ stroke: ct.grid }} tickLine={false} />
-                  <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={formatAxisDollars} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
                   <Tooltip content={<StackedTooltip />} cursor={{ fill: isDarkMode() ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }} />
                   <Bar dataKey="checking" stackId="spend" fill={ct.barFill} name="Checking" className="cursor-pointer" />
                   <Bar dataKey="cards" stackId="spend" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Cards" className="cursor-pointer" />
@@ -616,10 +694,12 @@ export default function Spending() {
                 <div className="flex flex-wrap gap-1.5 ml-auto">
                   {allTopCats.map(cat => {
                     const on = visibleCatIds.has(cat.id);
+                    const avg = on ? visibleCatAverages.get(cat.id) ?? null : null;
                     return (
                       <button
                         key={cat.id}
                         onClick={() => toggleCat(cat.id)}
+                        aria-label={`Toggle ${cat.name} category${avg !== null ? `, average ${fmt(avg)} per month` : ""}`}
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
                           on
                             ? "border-transparent opacity-95 hover:opacity-100"
@@ -629,6 +709,7 @@ export default function Spending() {
                       >
                         <span className="w-2 h-2 rounded-full shrink-0" style={{ background: on ? "currentColor" : cat.color, opacity: on ? 0.55 : 1 }} />
                         {cat.name}
+                        {avg !== null && <span className="opacity-75 font-normal">avg {fmt(avg)}/mo</span>}
                       </button>
                     );
                   })}
@@ -641,13 +722,89 @@ export default function Spending() {
                 <BarChart data={stackedData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke={ct.grid} />
                   <XAxis dataKey="month" tick={{ fontSize: 11, fill: ct.tick }} axisLine={{ stroke: ct.grid }} tickLine={false} />
-                  <YAxis tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={formatAxisDollars} tick={{ fontSize: 11, fill: ct.tick }} axisLine={false} tickLine={false} />
                   <Tooltip content={<StackedTooltip />} cursor={{ fill: isDarkMode() ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }} />
                   {allTopCats.filter(c => visibleCatIds.has(c.id)).map(cat => (
-                    <Bar key={cat.id} dataKey={cat.name} stackId="a" fill={cat.color} name={cat.name} />
+                    <Bar
+                      key={cat.id}
+                      dataKey={cat.name}
+                      stackId="a"
+                      fill={cat.color}
+                      name={cat.name}
+                      className="cursor-pointer"
+                      onClick={(barData: any) => {
+                        const month = barData?.payload?.month;
+                        if (!month) return;
+                        setDrillCat(prev =>
+                          prev && prev.categoryId === cat.id && prev.month === month
+                            ? null
+                            : { categoryId: cat.id, categoryName: cat.name, month }
+                        );
+                      }}
+                    />
                   ))}
+                  {singleVisibleAvg !== null && (
+                    <ReferenceLine
+                      y={singleVisibleAvg}
+                      stroke={ct.refLine}
+                      strokeDasharray="6 3"
+                      label={{ value: `avg ${fmt(singleVisibleAvg)}`, fill: ct.tick, fontSize: 10, position: "insideTopRight" }}
+                    />
+                  )}
                 </BarChart>
               </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* Category × month merchant drill-down. Mirrors the Monthly
+              Spending drill-down above -- click a segment again, or the ✕,
+              to close. */}
+          {drillCat && (
+            <div className="card border-indigo-200 dark:border-indigo-900/60">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="font-semibold text-gray-900 dark:text-[#c4ccd8]">
+                    {drillCat.categoryName} · {drillCatMonthLabel} · {fmt(drillCatTotal)}
+                  </h3>
+                  {(selectedAccountId !== undefined || selectedCardId !== undefined) && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">All accounts</p>
+                  )}
+                </div>
+                <button
+                  onClick={() => setDrillCat(null)}
+                  className="btn-ghost p-1 text-gray-400 hover:text-gray-600"
+                  aria-label="Close category breakdown"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              {drillCatMerchants.length === 0 && (
+                <p className="text-sm text-gray-400">No merchant activity.</p>
+              )}
+              {drillCatMerchants.length > 0 && (() => {
+                const maxTotal = Math.max(...drillCatMerchants.map((m: any) => Number(m.total)));
+                return (
+                  <div className="space-y-2">
+                    {drillCatMerchants.map((m: any) => {
+                      const pct = maxTotal > 0 ? (Number(m.total) / maxTotal) * 100 : 0;
+                      return (
+                        <div key={m.name}>
+                          <div className="flex items-baseline justify-between gap-3 text-sm">
+                            <span className="truncate text-gray-700 dark:text-gray-300">{m.name}</span>
+                            <span className="shrink-0 tabular-nums font-medium text-gray-900 dark:text-gray-100">
+                              {fmt(m.total)}
+                              <span className="ml-1.5 text-xs font-normal text-gray-400">{m.count}x</span>
+                            </span>
+                          </div>
+                          <div className="mt-1 h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full bg-indigo-400" style={{ width: `${pct}%` }} />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
