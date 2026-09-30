@@ -215,7 +215,7 @@ def test_groups_sorted_by_monthly_descending(client, db_session):
 
 def test_existing_breakdown_fields_keep_working_alongside_the_new_ones(client, db_session):
     test_client, user, account = client
-    _item(db_session, user, account, name="Mortgage", amount=Decimal("4404.65"))
+    _item(db_session, user, account, name="Mortgage", amount=Decimal("1850.00"))
     _item(db_session, user, account, name="iPhone Duo", amount=Decimal("57.87"),
           end_date=date(2028, 10, 23))
     _item(db_session, user, account, name="Paycheck", amount=Decimal("6066.63"),
@@ -224,7 +224,7 @@ def test_existing_breakdown_fields_keep_working_alongside_the_new_ones(client, d
 
     body = test_client.get("/recurring/breakdown").json()
 
-    assert Decimal(body["ongoing_monthly"]) == Decimal("4404.65")
+    assert Decimal(body["ongoing_monthly"]) == Decimal("1850.00")
     assert Decimal(body["ending_monthly"]) == Decimal("57.87")
     assert "Mortgage" in [i["name"] for i in body["ongoing"]]
     assert [i["name"] for i in body["ending"]] == ["iPhone Duo"]
