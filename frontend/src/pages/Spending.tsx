@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { spendingApi, accountsApi, cardsApi, analyticsApi, merchantsApi, budgetApi } from "../api";
 import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyLeft } from "d3-sankey";
@@ -57,11 +57,20 @@ function categoryMonthlyAverage(
 // decimal); `$12k` at $10k+ (none). Replaces the old `${(v/1000).toFixed(0)}k`,
 // which rounded everything under $1,000 to a duplicate "$0k" tick and
 // collapsed the whole $1,000-$1,999 range into the same "$1k" label as the
-// next real tick at $2,000.
+// next real tick at $2,000. Negative sign goes before the `$`, matching
+// fmt()'s "-$500" convention rather than "$-500".
 function formatAxisDollars(v: number): string {
-  if (Math.abs(v) < 1000) return `$${Math.round(v)}`;
-  const k = v / 1000;
-  return `$${k.toFixed(Math.abs(v) < 10000 ? 1 : 0)}k`;
+  const sign = v < 0 ? "-" : "";
+  const abs = Math.abs(v);
+  if (abs < 1000) return `${sign}$${Math.round(abs)}`;
+  const k = abs / 1000;
+  const decimals = k < 10 ? 1 : 0;
+  const rounded = k.toFixed(decimals);
+  // toFixed(1) can round a value just under 10 up to "10.0" (e.g. 9999 ->
+  // 9.999k) -- once the rounded string reaches 10, use the >=10k format
+  // instead of rendering the misleading "$10.0k".
+  if (decimals === 1 && parseFloat(rounded) >= 10) return `${sign}$${Math.round(k)}k`;
+  return `${sign}$${rounded}k`;
 }
 
 export default function Spending() {
@@ -242,6 +251,28 @@ export default function Spending() {
   // filter param, so this panel always reflects all sources -- the "All
   // accounts" note below tells the user when that differs from the page's filter.
   const [drillCat, setDrillCat] = useState<{ categoryId: number; categoryName: string; month: string } | null>(null);
+
+  // Any control that changes what the chart shows invalidates whatever bar
+  // was clicked under the old view -- without this the panel could sit open
+  // showing one category/month while the chart itself has moved on to a
+  // different range or filter entirely.
+  useEffect(() => {
+    setDrillCat(null);
+  }, [start, end, selectedAccountId, selectedCardId, catFilter]);
+
+  // Belt-and-suspenders for cases the filter-change effect above doesn't
+  // cover directly (e.g. a data refetch that drops the drilled month/category
+  // without any filter changing): if the drilled (category, month) no longer
+  // appears in the current chart data, or its category got hidden via its
+  // chip, close the panel rather than show stale numbers.
+  useEffect(() => {
+    if (!drillCat) return;
+    const monthRow = monthlyByCat.find((r: any) => r.month === drillCat.month);
+    const stillPresent = monthRow?.categories?.some((c: any) => c.category_id === drillCat.categoryId);
+    if (!stillPresent || !visibleCatIds.has(drillCat.categoryId)) {
+      setDrillCat(null);
+    }
+  }, [drillCat, monthlyByCat, visibleCatIds]);
 
   const { data: drillCatMerchants = [] } = useQuery<any[]>({
     queryKey: ["category-breakdown", drillCat?.categoryId, drillCat?.month],
@@ -694,12 +725,12 @@ export default function Spending() {
                 <div className="flex flex-wrap gap-1.5 ml-auto">
                   {allTopCats.map(cat => {
                     const on = visibleCatIds.has(cat.id);
-                    const avg = on ? visibleCatAverages.get(cat.id) ?? null : null;
+                    const catAvg = on ? visibleCatAverages.get(cat.id) ?? null : null;
                     return (
                       <button
                         key={cat.id}
                         onClick={() => toggleCat(cat.id)}
-                        aria-label={`Toggle ${cat.name} category${avg !== null ? `, average ${fmt(avg)} per month` : ""}`}
+                        aria-label={`Toggle ${cat.name} category${catAvg !== null ? `, average ${fmt(catAvg)} per month` : ""}`}
                         className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
                           on
                             ? "border-transparent opacity-95 hover:opacity-100"
@@ -709,7 +740,7 @@ export default function Spending() {
                       >
                         <span className="w-2 h-2 rounded-full shrink-0" style={{ background: on ? "currentColor" : cat.color, opacity: on ? 0.55 : 1 }} />
                         {cat.name}
-                        {avg !== null && <span className="opacity-75 font-normal">avg {fmt(avg)}/mo</span>}
+                        {catAvg !== null && <span className="opacity-75 font-normal">avg {fmt(catAvg)}/mo</span>}
                       </button>
                     );
                   })}
@@ -732,8 +763,8 @@ export default function Spending() {
                       fill={cat.color}
                       name={cat.name}
                       className="cursor-pointer"
-                      onClick={(barData: any) => {
-                        const month = barData?.payload?.month;
+                      onClick={(seg: any) => {
+                        const month = seg?.payload?.month;
                         if (!month) return;
                         setDrillCat(prev =>
                           prev && prev.categoryId === cat.id && prev.month === month
