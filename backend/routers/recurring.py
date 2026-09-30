@@ -10,6 +10,11 @@ from backend.services.recurring_math import monthly_equivalent as _monthly_equiv
 router = APIRouter(prefix="/recurring", tags=["recurring"])
 
 
+def _today() -> date:
+    # Indirection so tests can pin "today" without patching the date class.
+    return date.today()
+
+
 def _months_until(today: date, end: date) -> int:
     """Whole months from today to `end`, floored at 0 once it has passed.
 
@@ -239,6 +244,15 @@ def get_breakdown(
         income_monthly=income_monthly, expense_monthly=expense_monthly,
         by_category=by_category,
     )
+
+
+@router.get("/bills-to-confirm", response_model=list[schemas.BillToConfirmOut])
+def get_bills_to_confirm(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    from backend.services.bill_prompts import bills_to_confirm
+    return bills_to_confirm(db, user.id, _today())
 
 
 @router.get("/{item_id}", response_model=schemas.RecurringOut)
