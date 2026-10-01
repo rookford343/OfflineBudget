@@ -6,17 +6,15 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
+# _clear_pending_if_balance_due_changed now lives in statement_reconcile.py
+# so both this router's hand-edit paths and the auto-clear service share one
+# copy -- see that module's docstring on the function.
+from backend.services.statement_reconcile import (
+    _clear_pending_if_balance_due_changed,
+    statement_stale_reason,
+)
 
 router = APIRouter(prefix="/credit-cards", tags=["credit-cards"])
-
-
-def _clear_pending_if_balance_due_changed(card: models.CreditCard, previous_balance_due: Decimal) -> None:
-    """A changed balance_due can only mean fresher data arrived -- whatever
-    the new value now is, it makes the manual payment_sent_amount snapshot
-    stale. No exact-amount agreement required, unlike transaction dedup."""
-    if card.payment_sent_pending_sync and card.balance_due != previous_balance_due:
-        card.payment_sent_pending_sync = False
-        card.payment_sent_amount = None
 
 
 def _stamp_pending_charges_freshness(card: models.CreditCard, previous_pending_charges: Decimal) -> None:
@@ -302,4 +300,5 @@ def _enrich(card: models.CreditCard) -> schemas.CreditCardOut:
     out = schemas.CreditCardOut.model_validate(card)
     if card.credit_limit and card.credit_limit > 0:
         out.utilization_pct = round(float(card.current_balance) / float(card.credit_limit) * 100, 1)
+    out.statement_stale_reason = statement_stale_reason(card, date.today())
     return out
