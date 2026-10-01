@@ -1551,6 +1551,21 @@ class SpendingLineItem(BaseModel):
     source: str  # "checking" | "card"
 
 
+class RecentActivityItem(BaseModel):
+    """One row for the Dashboard's 'Recent transactions' card -- a newest-
+    first merge of checking + card activity. Same transfer/card-payoff
+    exclusions as the Spending page (filter_real_spend, is_card_payment) so
+    this list never shows something the Spending page would call noise."""
+    id: int
+    uid: str  # "checking-12" / "card-7" -- stable React key across sources
+    date: date_type
+    description: str
+    amount: Decimal  # signed: spending negative, income/refunds positive
+    category_name: Optional[str] = None
+    source: str  # "checking" | "card"
+    source_name: str  # the account or card name
+
+
 class WeeklyDigestCategory(BaseModel):
     category_id: int
     category_name: str
