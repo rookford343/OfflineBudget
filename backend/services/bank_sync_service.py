@@ -15,6 +15,13 @@ from backend.services.import_service import build_preview, run_import
 from backend.services.simplefin_client import fetch_transactions
 from backend.services.statement_reconcile import reconcile_statement_payment
 
+# Off until the posting-lag case is closed: a manual partial payment
+# (record_payment) whose bank copy posts a day or two later is still counted
+# toward the REDUCED balance_due and would clear a real unpaid remainder.
+# Found in the v2 review, 2026-09-30. The stale-statement warning and the
+# one-time reconcile_all_cards catch-up stay available meanwhile.
+AUTO_CLEAR_STATEMENTS_IN_SYNC = False
+
 logger = logging.getLogger(__name__)
 
 _INITIAL_LOOKBACK_DAYS = 30  # first sync for a newly-linked account
@@ -241,8 +248,9 @@ def _sync_link(
                 # writes. Without it, a failed flush leaves the whole
                 # session needing a rollback, and the commit below would
                 # throw away this sync's current_balance/last_synced_at too.
-                with db.begin_nested():
-                    reconcile_statement_payment(db, card, date.today())
+                if AUTO_CLEAR_STATEMENTS_IN_SYNC:
+                    with db.begin_nested():
+                        reconcile_statement_payment(db, card, date.today())
             except Exception as exc:  # noqa: BLE001 -- isolate this card's reconcile
                 # attempt from the sync it rides along with.
                 logger.error(
