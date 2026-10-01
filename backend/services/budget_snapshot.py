@@ -17,7 +17,6 @@ from backend.services.forecast_engine import build_forecast, ScenarioProposal
 from backend.services.card_matching import card_matches_description
 from backend.services.spendable_pacer import compute_weekly_spendable
 from backend.services.spending_helpers import category_totals_for_range, merchant_totals
-from backend.services.statement_reconcile import statement_stale_reason
 
 
 def _monthly_income(
@@ -416,13 +415,6 @@ def compute_budget_snapshot(
         (c, c.current_balance - c.balance_due + c.pending_charges) for c in active_cards
     ]
     new_spending_total = sum((amount for _c, amount in card_new_spending), Decimal("0"))
-    # Computed once per card, with real wall-clock "today" (not `as_of`,
-    # which can be a past date a scenario or the weekly email is replaying)
-    # -- matches CreditCardOut.statement_stale_reason exactly, and feeds
-    # both the CardSnapshot list and the Left to Spend note below so they
-    # can never disagree about which cards look stale.
-    stale_today = date.today()
-    card_stale_reasons = {c.id: statement_stale_reason(c, stale_today) for c in active_cards}
     charged_so_far = _charged_so_far(db, user.id, as_of)
     cc_budget_total = _cc_budget_total(db, user.id, as_of)
 
@@ -544,7 +536,6 @@ def compute_budget_snapshot(
             pending_charges=c.pending_charges, credit_limit=c.credit_limit,
             utilization_pct=round(float(c.current_balance) / float(c.credit_limit) * 100, 1) if c.credit_limit else 0.0,
             due_day=c.due_day,
-            statement_stale_reason=card_stale_reasons[c.id],
         )
         for c in active_cards
     ]
@@ -583,17 +574,12 @@ def compute_budget_snapshot(
     # Static text, no amounts: the frontend renders ExplainChild.note
     # unmasked (maskIfHidden only ever wraps `amount`), so a note built from
     # the card's own numbers would leak a hidden balance straight through
-    # the dialog. A stale card (see card_stale_reasons above) swaps in the
-    # warning note instead -- still digit-free.
+    # the dialog.
     card_children = [
         ExplainChild(
             label=c.name,
             amount=amount,
-            note=(
-                "statement looks stale, update it on Credit Cards"
-                if card_stale_reasons[c.id]
-                else "current balance − last statement + pending charges"
-            ),
+            note="current balance − last statement + pending charges",
         )
         for c, amount in card_new_spending
     ]
