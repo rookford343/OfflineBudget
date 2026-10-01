@@ -770,6 +770,11 @@ class CreditCardOut(BaseModel):
     payment_sent_amount: Optional[Decimal] = None
     pending_charges_updated_at: Optional[datetime] = None
     balance_due_updated_at: Optional[datetime] = None
+    # Why balance_due looks like it was probably already paid but couldn't
+    # be auto-cleared (see services/statement_reconcile.py's
+    # statement_stale_reason) -- None when nothing looks off. Computed with
+    # date.today() at response time, not persisted.
+    statement_stale_reason: Optional[str] = None
 
 
 class CreditCardPaymentCreate(BaseModel):
@@ -1565,6 +1570,10 @@ class CardSnapshot(BaseModel):
     credit_limit: Decimal
     utilization_pct: float
     due_day: int
+    # See CreditCardOut.statement_stale_reason -- same meaning, computed the
+    # same way (date.today()), surfaced here too so the daily/weekly email
+    # can carry the same warning the Dashboard shows.
+    statement_stale_reason: Optional[str] = None
 
 
 class BudgetSnapshot(BaseModel):
