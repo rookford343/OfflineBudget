@@ -7,7 +7,8 @@ page about what counts as a transfer, a card payoff, or real spend -- same
 class of drift spending_helpers' own docstrings warn about (see
 filter_real_spend / is_real_checking_spend).
 """
-from sqlalchemy.orm import Session, joinedload
+from decimal import Decimal
+from sqlalchemy.orm import Session, joinedload, contains_eager
 from backend import models
 from backend import schemas
 from backend.services.spending_helpers import filter_real_spend, is_card_payment
@@ -27,10 +28,16 @@ def get_recent_activity(db: Session, user_id: int, limit: int = 10) -> list[sche
 
     checking_rows = (
         db.query(models.Transaction)
-        .options(joinedload(models.Transaction.account), joinedload(models.Transaction.category))
+        .join(models.Account, models.Transaction.account_id == models.Account.id)
+        .options(contains_eager(models.Transaction.account), joinedload(models.Transaction.category))
         .filter(
             models.Transaction.user_id == user_id,
             models.Transaction.is_actual == True,
+            # Bank sync writes rows for every linked account, not just
+            # checking -- a savings/money-market row (e.g. "Interest paid")
+            # is real activity on that account but not what this card means
+            # by "recent transactions", which is scoped to checking + card.
+            models.Account.type == models.AccountType.checking,
         )
         .order_by(models.Transaction.date.desc(), models.Transaction.id.desc())
         .limit(candidate_n)
@@ -68,7 +75,11 @@ def get_recent_activity(db: Session, user_id: int, limit: int = 10) -> list[sche
             uid=f"card-{t.id}",
             date=t.date,
             description=display_name(t.merchant, alias_map),
-            amount=-t.amount,  # card stores charges positive; flip to match checking's convention
+            # card stores charges positive; flip to match checking's
+            # convention. `or Decimal("0")` normalizes the -0.00 a zero-amount
+            # row would otherwise negate to -- Decimal treats any zero as
+            # falsy regardless of sign, so this swaps it for a clean 0.
+            amount=-t.amount or Decimal("0"),
             category_name=t.category.name if t.category else None,
             source="card",
             source_name=t.card.name if t.card else "",

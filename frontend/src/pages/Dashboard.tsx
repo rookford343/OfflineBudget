@@ -21,7 +21,7 @@ const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your fin
 
 Key sections:
 • Available to Spend — income minus bills minus what you've already spent
-• Account balances — all checking and savings accounts
+• Recent transactions — latest checking and card activity, transfers and card payments left out
 • Credit card balances and amounts due
 • Monthly narrative summary — plain-English recap
 • Upcoming bills — items due in the next 30 days`;
