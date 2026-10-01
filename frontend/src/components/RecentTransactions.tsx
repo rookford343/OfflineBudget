@@ -35,7 +35,7 @@ const TAG_CLASS = "text-[10px] uppercase tracking-wide px-1 rounded bg-gray-100 
 export default function RecentTransactions() {
   const navigate = useNavigate();
   const balancesHidden = useBalancesHidden();
-  const { data: items = [], isLoading } = useQuery<RecentActivityItem[]>({
+  const { data: items = [], isLoading, isError } = useQuery<RecentActivityItem[]>({
     queryKey: ["recent-activity"],
     queryFn: () => spendingApi.recent(10),
   });
@@ -51,15 +51,22 @@ export default function RecentTransactions() {
 
       {isLoading && <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">Loading…</p>}
 
-      {!isLoading && items.length === 0 && (
+      {!isLoading && isError && (
+        <p className="text-sm text-red-500 dark:text-red-400 text-center py-4">Couldn't load recent transactions</p>
+      )}
+
+      {!isLoading && !isError && items.length === 0 && (
         <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">No recent transactions</p>
       )}
 
-      {!isLoading && items.length > 0 && (
+      {!isLoading && !isError && items.length > 0 && (
         <div className="divide-y divide-gray-100 dark:divide-gray-700 max-h-80 overflow-y-auto pr-1">
           {items.map((item) => {
             const amount = typeof item.amount === "string" ? parseFloat(item.amount) : item.amount;
-            const positive = amount >= 0;
+            // Zero (e.g. a $0 authorization) is neither spend nor income --
+            // no sign, default color, same as a negative amount's color.
+            const sign = amount > 0 ? "+" : amount < 0 ? "−" : "";
+            const colorClass = amount > 0 ? "text-green-600 dark:text-green-400" : "text-gray-900 dark:text-gray-100";
             return (
               <div key={item.uid} className="flex items-center justify-between gap-4 py-3">
                 <div className="min-w-0">
@@ -72,12 +79,8 @@ export default function RecentTransactions() {
                     <span className={TAG_CLASS}>{item.source_name}</span>
                   </div>
                 </div>
-                <span
-                  className={`text-sm font-bold tabular-nums shrink-0 ${
-                    positive ? "text-green-600 dark:text-green-400" : "text-gray-900 dark:text-gray-100"
-                  }`}
-                >
-                  {maskIfHidden(balancesHidden, `${positive ? "+" : "−"}${fmt(Math.abs(amount))}`)}
+                <span className={`text-sm font-bold tabular-nums shrink-0 ${colorClass}`}>
+                  {maskIfHidden(balancesHidden, `${sign}${fmt(Math.abs(amount))}`)}
                 </span>
               </div>
             );
