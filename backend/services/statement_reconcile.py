@@ -74,8 +74,8 @@ def reconcile_statement_payment(db: Session, card: models.CreditCard, today: dat
     this card's own transaction history proves the last statement was paid
     in full. Returns True if it cleared anything.
 
-    Only counts credits that are (a) after the statement close and (b) on or
-    after the day balance_due was last entered/changed. Anything earlier is
+    Only counts credits that are (a) after the statement close and (b)
+    strictly after the day balance_due was last entered/changed. Anything earlier is
     assumed to already be reflected in the entered figure -- otherwise a
     record_payment reduction, or a statement re-entered right after a clear,
     would get the same payment counted against it a second time.
@@ -106,7 +106,11 @@ def reconcile_statement_payment(db: Session, card: models.CreditCard, today: dat
         models.CreditCardTransaction.date <= today,
     ]
     if card.balance_due_updated_at is not None:
-        filters.append(models.CreditCardTransaction.date >= card.balance_due_updated_at.date())
+        # Strict: a credit dated the same day the statement was entered may
+        # already be reflected in it (e.g. a record_payment and the bank's
+        # copy of it). Excluding it is the fail-safe side -- the stale
+        # warning covers a real same-day payment.
+        filters.append(models.CreditCardTransaction.date > card.balance_due_updated_at.date())
 
     credits = db.query(func.sum(-models.CreditCardTransaction.amount)).filter(*filters).scalar() or Decimal("0")
     credits = Decimal(str(credits))
