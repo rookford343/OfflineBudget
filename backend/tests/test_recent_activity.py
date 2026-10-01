@@ -75,8 +75,8 @@ def test_merge_order_newest_first_across_sources_with_tiebreak(db_session):
 
 def test_transfer_excluded_both_directions(db_session):
     user, account, card = _setup(db_session)
-    _txn(db_session, user, account, "Online Transfer to SAV ...8452", "-500.00", date(2026, 9, 20))
-    _txn(db_session, user, account, "Online Transfer from SAV ...8452", "500.00", date(2026, 9, 19))
+    _txn(db_session, user, account, "Online Transfer to SAV ...XXXX0000", "-500.00", date(2026, 9, 20))
+    _txn(db_session, user, account, "Online Transfer from SAV ...XXXX0000", "500.00", date(2026, 9, 19))
     kept = _txn(db_session, user, account, "KROGER #5001", "-50.00", date(2026, 9, 18))
     db_session.commit()
 
@@ -87,13 +87,31 @@ def test_transfer_excluded_both_directions(db_session):
 
 def test_card_payoff_excluded(db_session):
     user, account, card = _setup(db_session)
-    _card_txn(db_session, user, card, "AUTOMATIC PAYMENT - THANK", "9842.05", date(2026, 9, 20))
+    _card_txn(db_session, user, card, "AUTOMATIC PAYMENT - THANK", "1074.64", date(2026, 9, 20))
     kept = _card_txn(db_session, user, card, "COSTCO WHSE", "80.00", date(2026, 9, 19))
     db_session.commit()
 
     rows = get_recent_activity(db_session, user.id, limit=10)
 
     assert [r.uid for r in rows] == [f"card-{kept.id}"]
+
+
+def test_savings_account_row_excluded(db_session):
+    """Bank sync writes rows for every linked account, not just checking --
+    a savings/money-market row is real activity on that account but out of
+    scope for this feed, which is checking + card only."""
+    user, account, card = _setup(db_session)
+    savings = models.Account(user_id=user.id, name="Savings", type=models.AccountType.savings,
+                              current_balance=Decimal("1000"))
+    db_session.add(savings)
+    db_session.flush()
+    _txn(db_session, user, savings, "Interest paid", "5.00", date(2026, 9, 20))
+    kept = _txn(db_session, user, account, "KROGER #5001", "-50.00", date(2026, 9, 19))
+    db_session.commit()
+
+    rows = get_recent_activity(db_session, user.id, limit=10)
+
+    assert [r.uid for r in rows] == [f"checking-{kept.id}"]
 
 
 # --- Signs ---------------------------------------------------------------
@@ -120,6 +138,22 @@ def test_card_charges_come_out_negative(db_session):
     assert len(rows) == 1
     assert rows[0].amount == Decimal("-80.00")
     assert rows[0].source == "card"
+
+
+def test_zero_amount_card_row_is_not_negative_zero(db_session):
+    """-Decimal("0.00") == Decimal("0.00") but prints as "-0.00" -- a $0
+    card row (e.g. an authorization hold that settled at $0) must come out
+    as a plain zero, not a negative-looking one the frontend would render
+    with a spurious sign."""
+    user, account, card = _setup(db_session)
+    _card_txn(db_session, user, card, "ZERO DOLLAR AUTH", "0.00", date(2026, 9, 20))
+    db_session.commit()
+
+    rows = get_recent_activity(db_session, user.id, limit=10)
+
+    assert len(rows) == 1
+    assert rows[0].amount == Decimal("0")
+    assert not rows[0].amount.is_signed(), f"expected a non-negative zero, got {rows[0].amount!r}"
 
 
 # --- Limit / candidate over-fetch -----------------------------------------
