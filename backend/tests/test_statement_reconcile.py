@@ -399,8 +399,8 @@ def test_bank_sync_survives_a_reconcile_failure(db_session):
 # v1 counted every credit after the statement close. That double-counts a
 # payment already reflected in a hand-entered (or record_payment-reduced)
 # balance_due, and can wipe a freshly re-entered statement using the
-# previous statement's late-posting payment. v2 only counts credits on or
-# after the statement was last entered, refuses stale due dates, and keeps
+# previous statement's late-posting payment. v2 only counts credits dated
+# after the day the statement was last entered, refuses stale due dates, and keeps
 # the advanced due date from landing in the past.
 
 from datetime import timedelta
@@ -414,8 +414,8 @@ from backend.services.forecast_engine import _next_occurrence_on_or_after
 
 
 def test_chase_live_case_with_freshness_stamp_still_clears(db_session):
-    """Statement entered 9/02; refund 9/04 and autopay 9/25 both land on or
-    after that, so they still prove full payment."""
+    """Statement entered 9/02; refund 9/04 and autopay 9/25 both land after
+    that day, so they still prove full payment."""
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
         next_payment_date=date(2026, 9, 25), balance_due=Decimal("6945.00"),
@@ -447,8 +447,10 @@ def test_credit_before_the_statement_was_entered_does_not_count(db_session):
     assert card.balance_due == Decimal("6945.00")
 
 
-def test_credit_on_the_day_the_statement_was_entered_counts(db_session):
-    """Rule 1 boundary: date >= balance_due_updated_at.date() counts."""
+def test_credit_on_the_day_the_statement_was_entered_does_not_count(db_session):
+    """Rule 1 boundary is strict: date > balance_due_updated_at.date(). A
+    same-day credit may already be reflected in the entered figure, so it's
+    excluded (fail-safe); the stale warning covers a real same-day payment."""
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
         next_payment_date=date(2026, 9, 25), balance_due=Decimal("500.00"),
@@ -457,7 +459,9 @@ def test_credit_on_the_day_the_statement_was_entered_counts(db_session):
     _credit(db_session, card, user.id, amount=Decimal("-500.00"), on=date(2026, 9, 10))
     db_session.commit()
 
-    assert reconcile_statement_payment(db_session, card, date(2026, 9, 30)) is True
+    assert reconcile_statement_payment(db_session, card, date(2026, 9, 30)) is False
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("500.00")
 
 
 def test_stale_due_date_never_clears_even_with_ample_credits(db_session):
@@ -728,3 +732,36 @@ def test_reconcile_db_failure_isolated_when_nothing_else_was_written_first(db_se
     card = db_session.get(models.CreditCard, card.id)
     assert card.name == "Visa"
     assert card.current_balance == Decimal("0.00")
+
+
+def test_c2_same_day_record_payment_and_synced_copy_does_not_clear(cards_client, db_session):
+    """C2 on a single day: record_payment of $600 today against $1000 leaves
+    $400; the bank's copy of that $600 is also dated today. It's already in
+    the $400, so reconcile must not clear. Uses the UTC date for "today"
+    because that's the date record_payment's utcnow() stamp carries."""
+    client, user = cards_client
+    today = datetime.utcnow().date()
+    npd = today + timedelta(days=5)
+    checking = models.Account(
+        user_id=user.id, name="Checking", type=models.AccountType.checking,
+        current_balance=Decimal("5000.00"),
+    )
+    card = models.CreditCard(
+        user_id=user.id, name="Visa", credit_limit=Decimal("5000"),
+        statement_day=(today - timedelta(days=15)).day, due_day=npd.day,
+        current_balance=Decimal("1000.00"), balance_due=Decimal("1000.00"),
+        next_payment_date=npd,
+    )
+    db_session.add_all([checking, card])
+    db_session.commit()
+
+    resp = client.post(f"/credit-cards/{card.id}/payment", json={
+        "checking_account_id": checking.id, "amount": "600.00", "date": today.isoformat(),
+    })
+    assert resp.status_code == 201
+    _credit(db_session, card, user.id, amount=Decimal("-600.00"), on=today)
+    db_session.commit()
+
+    assert reconcile_statement_payment(db_session, card, today) is False
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("400.00")

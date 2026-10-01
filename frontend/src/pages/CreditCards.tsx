@@ -81,6 +81,14 @@ export default function CreditCards() {
     },
   });
 
+  // Re-saves the card's current balance_due unchanged: the deliberate way to
+  // confirm "no new amount to enter" and dismiss the new_statement_due notice
+  // (the backend stamps freshness on any PATCH that includes balance_due).
+  const confirmStatementMut = useMutation({
+    mutationFn: (c: Card) => cardsApi.update(c.id, { balance_due: parseFloat(c.balance_due) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); },
+  });
+
   function openNew() { setForm({ ...emptyCard }); setEditCard(null); setShowForm(true); }
   function openEdit(c: Card) { setEditCard(c); setForm({ name: c.name, last_four: c.last_four || "", credit_limit: c.credit_limit, statement_day: String(c.statement_day), due_day: String(c.due_day), current_balance: c.current_balance, balance_due: c.balance_due, next_payment_date: c.next_payment_date || "", monthly_spend_estimate: c.monthly_spend_estimate || "", pending_charges: c.pending_charges || "0", notes: c.notes || "" }); setShowForm(true); }
   function close() { setShowForm(false); setEditCard(null); }
@@ -98,8 +106,15 @@ export default function CreditCards() {
       monthly_spend_estimate: form.monthly_spend_estimate ? parseFloat(form.monthly_spend_estimate) : null,
       pending_charges: form.pending_charges ? parseFloat(form.pending_charges) : 0,
     };
-    if (editCard) updateMut.mutate({ id: editCard.id, data });
-    else createMut.mutate(data);
+    if (editCard) {
+      // The backend stamps balance_due_updated_at whenever a PATCH includes
+      // balance_due, even unchanged (that's how a statement gets confirmed).
+      // So only send it when it was actually edited -- otherwise saving an
+      // unrelated field like notes would silently re-confirm the statement.
+      const payload: Record<string, unknown> = { ...data };
+      if (parseFloat(form.balance_due) === parseFloat(editCard.balance_due)) delete payload.balance_due;
+      updateMut.mutate({ id: editCard.id, data: payload });
+    } else createMut.mutate(data);
   }
 
   function submitPayment(e: React.FormEvent) {
@@ -189,7 +204,23 @@ export default function CreditCards() {
               {c.statement_stale_reason && (
                 <div className="flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400 justify-end text-right">
                   <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-                  <span>{STALE_REASON_TEXT[c.statement_stale_reason] || "The statement looks out of date. Update it."}</span>
+                  <span>
+                    {STALE_REASON_TEXT[c.statement_stale_reason] || "The statement looks out of date. Update it."}
+                    {c.statement_stale_reason === "new_statement_due" && (
+                      <>
+                        {" "}
+                        <button
+                          type="button"
+                          onClick={() => confirmStatementMut.mutate(c)}
+                          disabled={confirmStatementMut.isPending}
+                          className="underline font-medium hover:text-amber-700 dark:hover:text-amber-300 disabled:opacity-50"
+                          title="Keep the current amount due and mark the statement as confirmed"
+                        >
+                          Confirm statement
+                        </button>
+                      </>
+                    )}
+                  </span>
                 </div>
               )}
               <div className="flex justify-between text-sm">
