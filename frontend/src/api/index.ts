@@ -192,6 +192,8 @@ export const spendingApi = {
     api.get("/spending/by-merchant", { params: { start, end, account_id: accountId, card_id: cardId, limit } }).then((r) => r.data),
   lineItems: (start: string, end: string, accountId?: number, cardId?: number, limit = 25) =>
     api.get("/spending/transactions", { params: { start, end, account_id: accountId, card_id: cardId, limit } }).then((r) => r.data),
+  recent: (limit = 10) =>
+    api.get("/spending/recent", { params: { limit } }).then((r) => r.data),
   taxEstimate: (year: number) => api.get("/spending/tax-estimate", { params: { year } }).then((r) => r.data),
   taxSummaryUrl: (year: number) => `/spending/tax-summary?year=${year}&format=csv`,
 };

@@ -46,6 +46,9 @@ export default function AccountsTab() {
       // codebase uses for credit cards.
       qc.invalidateQueries({ queryKey: ["credit-cards"] });
       qc.invalidateQueries({ queryKey: ["cards"] });
+      // New synced rows can reorder/replace what the Dashboard's Recent
+      // transactions card shows, same as accounts/credit-cards above.
+      qc.invalidateQueries({ queryKey: ["recent-activity"] });
       setSyncResult(data);
       setTimeout(() => setSyncResult(null), 6000);
     },
