@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -24,6 +24,8 @@ def _client(db, user):
 
 
 def test_rolling_monthly_splits_checking_and_cards(db_session):
+    # Last month, so the rows stay inside the 2-month window whatever today is.
+    last_month = (date.today().replace(day=1) - timedelta(days=1)).replace(day=5)
     user = _make_user(db_session)
     account = models.Account(
         user_id=user.id, name="Checking", type=models.AccountType.checking,
@@ -38,11 +40,11 @@ def test_rolling_monthly_splits_checking_and_cards(db_session):
     db_session.add(card)
     db_session.flush()
     db_session.add(models.Transaction(
-        user_id=user.id, account_id=account.id, date=date(2026, 8, 5),
+        user_id=user.id, account_id=account.id, date=last_month,
         amount=Decimal("-100.00"), description="Mortgage", is_actual=True,
     ))
     db_session.add(models.CreditCardTransaction(
-        card_id=card.id, user_id=user.id, date=date(2026, 8, 6),
+        card_id=card.id, user_id=user.id, date=last_month + timedelta(days=1),
         amount=Decimal("40.00"), merchant="Coffee Shop",
     ))
     db_session.commit()
@@ -52,7 +54,7 @@ def test_rolling_monthly_splits_checking_and_cards(db_session):
 
     assert resp.status_code == 200
     rows = {r["month"]: r for r in resp.json()}
-    row = rows["2026-08"]
+    row = rows[last_month.strftime("%Y-%m")]
     assert Decimal(row["checking"]) == Decimal("100.00")
     assert Decimal(row["cards"]) == Decimal("40.00")
     assert Decimal(row["total"]) == Decimal("140.00")
