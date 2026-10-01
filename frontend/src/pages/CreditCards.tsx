@@ -21,12 +21,14 @@ function daysAgo(iso: string): number {
 }
 
 // Human text for backend/services/statement_reconcile.py's
-// statement_stale_reason codes -- a statement that LOOKS paid (either
-// signal) but couldn't be auto-cleared because full payment isn't proven
-// yet from this card's own transaction history.
+// statement_stale_reason codes. Each is a full sentence telling Dan what to
+// do: either the entered statement looks paid but couldn't be auto-cleared
+// (full payment isn't proven from this card's own transactions), or a new
+// statement closed after the last one was cleared/entered.
 const STALE_REASON_TEXT: Record<string, string> = {
-  balance_below_statement: "current balance is below the last statement, so it was probably paid",
-  due_date_passed: "the due date already passed, so it was probably paid",
+  balance_below_statement: "The current balance is below the last statement, so it was probably paid. Update the statement.",
+  due_date_passed: "The due date has passed. It was either paid or is overdue, so update the statement.",
+  new_statement_due: "A new statement has closed since this was last updated. Enter it.",
 };
 
 interface Card {
@@ -185,9 +187,9 @@ export default function CreditCards() {
                 )
               )}
               {c.statement_stale_reason && (
-                <div className="flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400 justify-end text-right" title="Not auto-cleared yet -- a synced payment or refund didn't fully cover this statement">
+                <div className="flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400 justify-end text-right">
                   <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-                  <span>Statement looks stale — {STALE_REASON_TEXT[c.statement_stale_reason] || "it looks like it was paid"}. Update the balance due if so.</span>
+                  <span>{STALE_REASON_TEXT[c.statement_stale_reason] || "The statement looks out of date. Update it."}</span>
                 </div>
               )}
               <div className="flex justify-between text-sm">
