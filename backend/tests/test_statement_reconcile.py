@@ -27,6 +27,12 @@ from backend.services.statement_reconcile import (
 )
 
 
+
+def _enable_sync_auto_clear(monkeypatch):
+    """The sync hook ships disabled (bank_sync_service.AUTO_CLEAR_STATEMENTS_IN_SYNC);
+    these tests exercise the wiring itself, so they switch it on."""
+    monkeypatch.setattr("backend.services.bank_sync_service.AUTO_CLEAR_STATEMENTS_IN_SYNC", True)
+
 def _fake_quarter_min(amount: str, on: date):
     """Stands in for build_forecast() -- isolates these tests from
     forecast_engine's own correctness (its own suite covers that)."""
@@ -344,11 +350,12 @@ def _make_card_connection(db, username="danreconcile"):
     return user, card, connection, link
 
 
-def test_bank_sync_calls_reconcile_after_a_card_sync(db_session):
+def test_bank_sync_calls_reconcile_after_a_card_sync(db_session, monkeypatch):
     """Wiring: a card sync that brings in real activity should attempt
     reconciliation. A full-coverage payment already sitting in
     CreditCardTransaction history (from a prior import) clears balance_due
     as a side effect of this sync."""
+    _enable_sync_auto_clear(monkeypatch)
     # The sync reconciles against the real date.today(), so the card's dates
     # are relative to it (v1 hard-coded 9/25, which rule 2 would start
     # refusing as stale once the real clock passed late October).
@@ -377,9 +384,10 @@ def test_bank_sync_calls_reconcile_after_a_card_sync(db_session):
     assert card.next_payment_date == _next_occurrence_on_or_after(npd.day, npd + timedelta(days=1))
 
 
-def test_bank_sync_survives_a_reconcile_failure(db_session):
+def test_bank_sync_survives_a_reconcile_failure(db_session, monkeypatch):
     """A reconcile_statement_payment exception must be logged and swallowed
     -- it must never fail the sync it rides along with."""
+    _enable_sync_auto_clear(monkeypatch)
     user, card, connection, link = _make_card_connection(db_session)
     txns = [SimpleFinTransaction(id="c1", posted=datetime(2026, 9, 11), amount=Decimal("-4.50"), description="Starbucks")]
 
@@ -576,12 +584,13 @@ def _card_sync_fixture(db, user, card):
     return connection
 
 
-def test_c2_record_payment_then_synced_copy_does_not_clear_the_remainder(cards_client, db_session):
+def test_c2_record_payment_then_synced_copy_does_not_clear_the_remainder(cards_client, db_session, monkeypatch):
     """Reviewer C2. A manual record_payment reduces balance_due; the bank
     later syncs the same payment in as a card credit. That credit is already
     reflected in the reduced balance_due, so it must not clear the rest.
     Dates are relative to the real clock because record_payment stamps
     utcnow() and the sync reconciles against date.today()."""
+    _enable_sync_auto_clear(monkeypatch)
     client, user = cards_client
     today = date.today()
     npd = today + timedelta(days=5)
@@ -622,11 +631,12 @@ def test_c2_record_payment_then_synced_copy_does_not_clear_the_remainder(cards_c
     assert card.next_payment_date == npd
 
 
-def test_reconcile_db_failure_rolls_back_only_the_reconcile(db_session):
+def test_reconcile_db_failure_rolls_back_only_the_reconcile(db_session, monkeypatch):
     """Rule 4. A DB-level failure inside reconcile (here a failed flush,
     which on its own would leave the session needing a rollback) must roll
     back only the reconcile's writes. The sync's imported transaction,
     current_balance and last_synced_at still commit."""
+    _enable_sync_auto_clear(monkeypatch)
     user, card, connection, link = _make_card_connection(db_session, username="danisolate")
 
     def _failing_reconcile(db, c, today):
@@ -707,12 +717,13 @@ def test_resaving_unchanged_zero_balance_due_dismisses_new_statement_due(cards_c
     assert resp.json()["statement_stale_reason"] is None
 
 
-def test_reconcile_db_failure_isolated_when_nothing_else_was_written_first(db_session):
+def test_reconcile_db_failure_isolated_when_nothing_else_was_written_first(db_session, monkeypatch):
     """Same as above, but the sync writes nothing before the savepoint opens
     (no new transactions, and a stale card balance feed that's ignored).
     pysqlite only auto-BEGINs before DML, so the SAVEPOINT is the first
     statement of the transaction -- the rollback must still leave the
     connection usable and the sync's own bookkeeping committed."""
+    _enable_sync_auto_clear(monkeypatch)
     user, card, connection, link = _make_card_connection(db_session, username="danisolate2")
     card.balance_as_of = datetime(2026, 9, 20)
     db_session.commit()
@@ -765,3 +776,34 @@ def test_c2_same_day_record_payment_and_synced_copy_does_not_clear(cards_client,
     assert reconcile_statement_payment(db_session, card, today) is False
     db_session.refresh(card)
     assert card.balance_due == Decimal("400.00")
+
+
+def test_sync_hook_is_off_by_default_and_never_clears(db_session):
+    """Shipped state: AUTO_CLEAR_STATEMENTS_IN_SYNC is False until the
+    posting-lag case (a manual partial payment whose bank copy posts a day
+    later) is closed, so a sync must leave balance_due alone even when credits
+    on file would fully cover it."""
+    from datetime import timedelta
+    from backend.services import bank_sync_service
+    assert bank_sync_service.AUTO_CLEAR_STATEMENTS_IN_SYNC is False
+    user, card, connection, link = _make_card_connection(db_session)
+    today = date.today()
+    npd = today + timedelta(days=3)
+    card.next_payment_date = npd
+    card.due_day = npd.day
+    card.statement_day = (today - timedelta(days=20)).day
+    db_session.add(models.CreditCardTransaction(
+        card_id=card.id, user_id=user.id, date=today - timedelta(days=5),
+        amount=Decimal("-500.00"), merchant="Payment",
+    ))
+    db_session.commit()
+    before = card.balance_due
+
+    txns = [SimpleFinTransaction(id="c1", posted=datetime.combine(today, datetime.min.time()), amount=Decimal("-4.50"), description="Starbucks")]
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(txns, Decimal("4.50"), None)):
+        sync_connection(db_session, connection)
+
+    db_session.refresh(card)
+    assert before > 0
+    assert card.balance_due == before
