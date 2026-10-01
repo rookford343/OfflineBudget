@@ -13,7 +13,6 @@ from backend.services.csv_parser import ParsedRow
 from backend.services.forecast_engine import has_unsettled_projection
 from backend.services.import_service import build_preview, run_import
 from backend.services.simplefin_client import fetch_transactions
-from backend.services.statement_reconcile import reconcile_statement_payment
 
 logger = logging.getLogger(__name__)
 
@@ -227,20 +226,6 @@ def _sync_link(
                 # Left to Spend until something real actually supersedes it.
                 card.pending_charges = Decimal("0")
                 card.pending_charges_updated_at = None
-
-            try:
-                # Proves full payment from this card's own transaction
-                # history (payments/refunds import as negative amounts) and
-                # clears a stale balance_due the moment it's provable --
-                # see statement_reconcile.py. Never allowed to fail the
-                # sync it rides along with: a reconcile bug must not take
-                # down the transaction import it has nothing to do with.
-                reconcile_statement_payment(db, card, date.today())
-            except Exception as exc:  # noqa: BLE001 -- isolate this card's reconcile
-                # attempt from the sync it rides along with.
-                logger.error(
-                    "Statement reconcile failed for card %s: %s", card.id, exc,
-                )
 
     link.last_synced_at = datetime.utcnow()
     db.commit()
