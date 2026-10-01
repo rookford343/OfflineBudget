@@ -107,9 +107,14 @@ def test_creating_a_card_with_no_balance_due_leaves_the_timestamp_null(client, d
     assert card.balance_due_updated_at is None
 
 
-def test_repatching_the_same_balance_due_value_does_not_restamp(client, db_session):
-    """Re-sending the same value (a no-op edit) is not a fresh signal --
-    only a real change updates the timestamp."""
+def test_repatching_the_same_balance_due_value_restamps(client, db_session):
+    """Rule changed (statement auto-clear v2, 2026-09-30): this used to pin
+    "same value -> no restamp". Now saving balance_due always counts as
+    confirming the statement as of now, even unchanged -- it's how the user
+    dismisses the "new_statement_due" prompt by re-entering $0, and it moves
+    statement_reconcile's credit window past payments already reflected in
+    the entered figure. Edits that don't send balance_due still don't stamp
+    (test_patching_an_unrelated_field_does_not_stamp_balance_due)."""
     test_client, user, card = client
     card.balance_due = Decimal("6945.00")
     from datetime import datetime, timedelta
@@ -121,4 +126,4 @@ def test_repatching_the_same_balance_due_value_does_not_restamp(client, db_sessi
     assert resp.status_code == 200
 
     db_session.refresh(card)
-    assert abs((card.balance_due_updated_at - old_stamp).total_seconds()) < 1
+    assert card.balance_due_updated_at > old_stamp + timedelta(days=2)
