@@ -20,11 +20,21 @@ function daysAgo(iso: string): number {
   return Math.floor((Date.now() - new Date(iso).getTime()) / (1000 * 60 * 60 * 24));
 }
 
+// Human text for backend/services/statement_reconcile.py's
+// statement_stale_reason codes -- a statement that LOOKS paid (either
+// signal) but couldn't be auto-cleared because full payment isn't proven
+// yet from this card's own transaction history.
+const STALE_REASON_TEXT: Record<string, string> = {
+  balance_below_statement: "current balance is below the last statement, so it was probably paid",
+  due_date_passed: "the due date already passed, so it was probably paid",
+};
+
 interface Card {
   id: number; name: string; last_four?: string; credit_limit: string;
   statement_day: number; due_day: number; current_balance: string;
   balance_due: string; next_payment_date?: string; monthly_spend_estimate?: string; pending_charges?: string; is_active: boolean; notes?: string; utilization_pct: number;
   balance_due_updated_at?: string | null;
+  statement_stale_reason?: string | null;
   payment_sent_pending_sync?: boolean; payment_sent_amount?: string;
 }
 
@@ -173,6 +183,12 @@ export default function CreditCards() {
                     Never confirmed
                   </div>
                 )
+              )}
+              {c.statement_stale_reason && (
+                <div className="flex items-start gap-1 text-xs text-amber-600 dark:text-amber-400 justify-end text-right" title="Not auto-cleared yet -- a synced payment or refund didn't fully cover this statement">
+                  <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                  <span>Statement looks stale — {STALE_REASON_TEXT[c.statement_stale_reason] || "it looks like it was paid"}. Update the balance due if so.</span>
+                </div>
               )}
               <div className="flex justify-between text-sm">
                 <span className="text-gray-500">Limit</span>
