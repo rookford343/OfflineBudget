@@ -15,6 +15,7 @@ import { RiskBanner } from "../components/RiskBanner";
 import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
 import BillsToConfirm from "../components/BillsToConfirm";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
+import RecentTransactions from "../components/RecentTransactions";
 
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
 
@@ -614,27 +615,7 @@ export default function Dashboard() {
             </div>
           )}
         </div>
-      {accounts.length > 0 && (
-        <div className="card md:col-span-2 2xl:col-span-1">
-          <h3 className="font-semibold text-gray-900 mb-4">All Accounts</h3>
-          <div className="divide-y divide-gray-100 max-h-80 overflow-y-auto pr-1">
-            {accounts.map((a: any) => (
-              <div key={a.id} className="flex items-center justify-between gap-4 py-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{a.name}</p>
-                  <p className="text-xs text-gray-500 capitalize">{a.type.replace("_", " ")}</p>
-                </div>
-                <span className={`text-sm font-bold tabular-nums shrink-0 ${parseFloat(a.current_balance) >= 0 ? "text-gray-900" : "text-red-600"}`}>
-                  {a.low_balance_threshold != null && parseFloat(a.current_balance) < parseFloat(a.low_balance_threshold) && (
-                    <AlertTriangle size={14} className="text-amber-500 inline mr-1" />
-                  )}
-                  {maskIfHidden(balancesHidden, fmt(a.current_balance))}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <RecentTransactions />
       </div>
 
       {/* Empty state for new users */}
