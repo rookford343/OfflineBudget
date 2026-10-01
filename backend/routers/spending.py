@@ -12,6 +12,7 @@ from backend.services.spending_helpers import filter_real_spend, is_card_payment
 from backend.services.budget_buckets import assignable_category_ids, drop_uncarried_defaults
 from backend.services.summary_generator import generate_weekly_digest
 from backend.services.budget_snapshot import compute_budget_snapshot
+from backend.services.recent_activity import get_recent_activity
 
 # Bands on the stacked monthly chart before the tail collapses into "Other".
 _MAX_STACK_CATEGORIES = 8
@@ -141,6 +142,17 @@ def spending_line_items(
 
     items.sort(key=lambda i: i.amount, reverse=True)
     return items[:limit]
+
+
+@router.get("/recent", response_model=list[schemas.RecentActivityItem])
+def spending_recent(
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """The Dashboard's 'Recent transactions' card: newest checking + card
+    activity merged into one feed, same exclusions as the Spending page."""
+    return get_recent_activity(db, user.id, limit)
 
 
 @router.get("/monthly-by-category", response_model=list[schemas.MonthlyCategoryRow])
