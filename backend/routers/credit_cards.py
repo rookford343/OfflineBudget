@@ -210,7 +210,7 @@ def record_payment(
     _clear_pending_if_balance_due_changed(card, Decimal(str(card.balance_due)) + body.amount)
     # Stamp it: the reduced balance_due already reflects this payment, so
     # statement_reconcile must not count the bank's later synced copy of it
-    # again (it only counts credits on/after balance_due_updated_at).
+    # again (it only counts credits dated after balance_due_updated_at).
     _stamp_balance_due_freshness(card, pre_payment_balance_due)
     # Record as a checking Transaction so it appears in the transaction list
     txn = models.Transaction(
