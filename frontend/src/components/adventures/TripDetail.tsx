@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2, X } from "lucide-react";
 import { adventuresApi, cardsApi } from "../../api";
-import { fmt } from "../../lib/utils";
+import { errText, fmt } from "../../lib/utils";
 import { maskIfHidden, useBalancesHidden } from "../../store/balanceVisibility";
 import HowCalculated, { type Explanation } from "../HowCalculated";
 import {
@@ -20,7 +20,7 @@ function ItemRow({ trip, item, programs, onChange }: {
   const save = useMutation({
     mutationFn: (data: object) => adventuresApi.updateItem(trip.id, item.id, data),
     onSuccess: (d) => { setErr(null); onChange(d); },
-    onError: (e: any) => setErr(e?.response?.data?.detail ?? "Couldn't save"),
+    onError: (e: any) => setErr(errText(e)),
   });
   const remove = useMutation({
     mutationFn: (fromTemplate: boolean) => adventuresApi.removeItem(trip.id, item.id, fromTemplate),
@@ -38,6 +38,11 @@ function ItemRow({ trip, item, programs, onChange }: {
   const blurNum = (field: string, current: string | number | null) => (e: React.FocusEvent<HTMLInputElement>) => {
     const v = e.target.value.trim();
     if (v === String(current ?? "")) return;
+    if (v !== "") {
+      const n = Number(v);
+      if (!Number.isFinite(n)) { setErr("Enter a number"); return; }
+      if ((field === "points_price" || field === "transfer_points") && !Number.isInteger(n)) { setErr("Enter a number"); return; }
+    }
     save.mutate({ [field]: v === "" ? null : v });
   };
   return (
@@ -51,7 +56,7 @@ function ItemRow({ trip, item, programs, onChange }: {
           ))}
         </div>
         <label className="text-xs text-gray-500 flex items-center gap-1">$
-          <input className="input py-0.5 w-24 text-xs" disabled={done} defaultValue={item.unit_cash ?? ""}
+          <input key={`unit-${item.unit_cash}`} className="input py-0.5 w-24 text-xs" disabled={done} defaultValue={item.unit_cash ?? ""}
             placeholder={item.is_auto_buffer ? "10% auto" : "0"} onBlur={blurNum("unit_cash", item.unit_cash)} />
           {PRICING_HINT[item.pricing] && <span>{PRICING_HINT[item.pricing]} ×{item.multiplier}</span>}
         </label>
@@ -62,17 +67,21 @@ function ItemRow({ trip, item, programs, onChange }: {
               {programs.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
             <label className="text-xs text-gray-500 flex items-center gap-1">pts
-              <input className="input py-0.5 w-24 text-xs" disabled={done} defaultValue={item.points_price ?? ""}
+              <input key={`points-${item.points_price}`} className="input py-0.5 w-24 text-xs" disabled={done} defaultValue={item.points_price ?? ""}
                 onBlur={blurNum("points_price", item.points_price)} /></label>
             <label className="text-xs text-gray-500 flex items-center gap-1">taxes $
-              <input className="input py-0.5 w-20 text-xs" disabled={done} defaultValue={item.cash_copay}
+              <input key={`copay-${item.cash_copay}`} className="input py-0.5 w-20 text-xs" disabled={done} defaultValue={item.cash_copay}
                 onBlur={blurNum("cash_copay", item.cash_copay)} /></label>
             {item.payment === "mix" && (
               <label className="text-xs text-gray-500 flex items-center gap-1">+ cash $
-                <input className="input py-0.5 w-20 text-xs" disabled={done} defaultValue={item.mix_cash ?? ""}
+                <input key={`mix-${item.mix_cash}`} className="input py-0.5 w-20 text-xs" disabled={done} defaultValue={item.mix_cash ?? ""}
                   onBlur={blurNum("mix_cash", item.mix_cash)} /></label>
             )}
-            {item.value_cpp && <span className="badge-blue">{item.value_cpp}¢/pt</span>}
+            {(item.points_price ?? 0) > 1 ? (
+              item.value_cpp && <span className="badge-blue">{item.value_cpp}¢/pt</span>
+            ) : (
+              <span className="text-xs text-gray-400">enter points price</span>
+            )}
           </>
         )}
         <span className="ml-auto font-semibold tabular-nums">{maskIfHidden(hidden, fmt(item.cash_owed))}</span>
@@ -130,34 +139,58 @@ export default function TripDetail({ tripId, onClose }: { tripId: number; onClos
   const { data: programs = [] } = useQuery<WalletRow[]>({ queryKey: ["adventures", "wallet"], queryFn: adventuresApi.wallet });
   const { data: cards = [] } = useQuery<any[]>({ queryKey: ["credit-cards"], queryFn: cardsApi.list });
   const [err, setErr] = useState<string | null>(null);
+  // The real query keys that cover anything Adventures can move -- Forecast
+  // (forecast-quarters, forecast-multi-year, forecast-risk, ...), the
+  // Planned One-Offs list (planned-expenses, planned-transfers), and the
+  // Dashboard budget snapshot (budget-snapshot, budget-overview, ...).
+  // A literal ["forecast"] key never matched any of those and invalidated
+  // nothing; this predicate catches the family by name instead.
+  const invalidateForecast = () =>
+    qc.invalidateQueries({
+      predicate: (q) => typeof q.queryKey[0] === "string" && /forecast|planned|snapshot|budget/i.test(q.queryKey[0] as string),
+    });
   const onChange = (d: TripDetailData) => {
     qc.setQueryData(key, d);
     qc.invalidateQueries({ queryKey: ["adventures", "trips"] });
     qc.invalidateQueries({ queryKey: ["adventures", "wallet"] });
-    qc.invalidateQueries({ queryKey: ["forecast"] });
+    invalidateForecast();
     qc.invalidateQueries({ queryKey: ["goals"] });
   };
   const act = useMutation({
     mutationFn: (fn: () => Promise<TripDetailData>) => fn(),
     onSuccess: (d) => { setErr(null); onChange(d); },
-    onError: (e: any) => setErr(e?.response?.data?.detail ?? "Something went wrong"),
+    onError: (e: any) => setErr(errText(e, "Something went wrong")),
   });
   const del = useMutation({
     mutationFn: () => adventuresApi.removeTrip(tripId),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["adventures"] }); qc.invalidateQueries({ queryKey: ["forecast"] }); onClose(); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["adventures"] }); invalidateForecast(); onClose(); },
   });
   if (!trip) return <div className="card text-sm text-gray-400">Loading…</div>;
 
   const owing = trip.items.filter((i) => parseFloat(i.cash_owed) > 0 && !i.is_paid).length;
   const finish = async () => {
-    const plan: Record<string, number> = await adventuresApi.finishPlan(trip.id);
-    const lines = Object.entries(plan).map(([pid, d]) => `${programs.find((p) => String(p.id) === pid)?.name}: ${d > 0 ? "+" : ""}${pts(d)}`);
+    setErr(null);
+    let plan: Record<string, number>;
+    try {
+      plan = await adventuresApi.finishPlan(trip.id);
+    } catch (e: any) {
+      setErr(errText(e, "Couldn't finish"));
+      return;
+    }
+    const lines = Object.entries(plan).map(([pid, d]) =>
+      `${programs.find((p) => String(p.id) === pid)?.name}: ${maskIfHidden(hidden, `${d > 0 ? "+" : ""}${pts(d)}`)}`);
     if (!window.confirm(`Finish this trip and update balances?\n\n${lines.join("\n") || "No points change."}`)) return;
     try {
       onChange(await adventuresApi.finish(trip.id, {}));
     } catch (e: any) {
-      const msg = e?.response?.data?.detail ?? "Couldn't finish";
-      if (window.confirm(`${msg}\n\nFinish anyway and allow a negative balance?`)) onChange(await adventuresApi.finish(trip.id, { force: true }));
+      const msg = errText(e, "Couldn't finish");
+      if (window.confirm(`${msg}\n\nFinish anyway and allow a negative balance?`)) {
+        try {
+          onChange(await adventuresApi.finish(trip.id, { force: true }));
+        } catch (e2: any) {
+          setErr(errText(e2, "Couldn't finish"));
+        }
+      }
     }
   };
   const cashExplain: Explanation = {
@@ -232,7 +265,7 @@ export default function TripDetail({ tripId, onClose }: { tripId: number; onClos
         return (
           <div key={cat}>
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">{CATEGORY_LABEL[cat]}</p>
-            {items.map((i) => <ItemRow key={`${i.id}-${i.payment}-${i.unit_cash}-${i.points_price}`} trip={trip} item={i} programs={programs} onChange={onChange} />)}
+            {items.map((i) => <ItemRow key={i.id} trip={trip} item={i} programs={programs} onChange={onChange} />)}
             <AddItem trip={trip} category={cat} onChange={onChange} />
           </div>
         );

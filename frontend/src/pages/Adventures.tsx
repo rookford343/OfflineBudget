@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plane, Plus } from "lucide-react";
 import { adventuresApi, cardsApi } from "../api";
-import { fmt } from "../lib/utils";
+import { errText, fmt } from "../lib/utils";
 import { maskIfHidden, useBalancesHidden } from "../store/balanceVisibility";
 import WalletStrip from "../components/adventures/WalletStrip";
 import TripDetail from "../components/adventures/TripDetail";
@@ -25,7 +25,7 @@ function NewTripForm({ onCreated }: { onCreated: (id: number) => void }) {
       travelers: parseInt(f.travelers || "1", 10), default_card_id: f.default_card_id ? Number(f.default_card_id) : null,
     }),
     onSuccess: (trip) => { qc.invalidateQueries({ queryKey: ["adventures"] }); setError(null); onCreated(trip.id); },
-    onError: (e: any) => setError(e?.response?.data?.detail ?? "Couldn't save"),
+    onError: (e: any) => setError(errText(e)),
   });
   const ok = f.name && f.start_date && f.end_date && f.end_date >= f.start_date;
   return (

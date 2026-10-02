@@ -41,6 +41,25 @@ export function cx(...classes: (string | undefined | null | false)[]): string {
   return classes.filter(Boolean).join(" ");
 }
 
+/**
+ * FastAPI returns `detail` as a plain string for most errors, but as an
+ * array of { loc, msg, type } objects for 422 Pydantic validation failures
+ * (e.g. sending a non-numeric string to a Decimal field). Rendering that
+ * array directly as `{err}` throws "Objects are not valid as a React
+ * child" -- this normalizes either shape down to one display string.
+ */
+export function errText(e: any, fallback = "Couldn't save"): string {
+  const detail = e?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail
+      .map((d: any) => (d && typeof d === "object" ? d.msg : d))
+      .filter((m: any) => typeof m === "string" && m);
+    if (msgs.length) return msgs.join("; ");
+  }
+  return fallback;
+}
+
 export function utilColor(pct: number): string {
   if (pct < 30) return "text-green-600";
   if (pct < 70) return "text-amber-600";
