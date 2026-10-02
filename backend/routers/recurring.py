@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -253,6 +253,67 @@ def get_bills_to_confirm(
 ):
     from backend.services.bill_prompts import bills_to_confirm
     return bills_to_confirm(db, user.id, _today())
+
+
+# Declared BEFORE /{item_id} on purpose: FastAPI matches routes in
+# declaration order, so the other way round "upcoming" is read as an
+# item_id and this endpoint 422s instead of answering.
+@router.get("/upcoming", response_model=list[schemas.UpcomingBillOut])
+def get_upcoming(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Bills due within [today, today+days] -- the Dashboard's Upcoming
+    Bills card.
+
+    The Dashboard used to build this list itself from the raw `recurring`
+    list: it read r.amount directly (ignoring any confirmed
+    BillAmountOverride actual, so a bill with a known statement still showed
+    its planning estimate) and matched only on day_of_month (so a
+    yearly/quarterly item looked due every month). Both are fixed here by
+    reusing the same two sources of truth the rest of the app already
+    depends on: summary_generator._next_fire_date for the real next
+    occurrence (frequency/start/end/month_of_year aware -- the daily email's
+    own Upcoming list uses it), and the (recurring_item_id, due_date)-keyed
+    override lookup forecast_engine.py's bill_actuals dict uses.
+    """
+    from backend.services.summary_generator import _next_fire_date
+
+    today = _today()
+    items = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user.id,
+        models.RecurringItem.is_active == True,
+        models.RecurringItem.type == models.RecurringType.expense,
+    ).all()
+
+    due: list[tuple[models.RecurringItem, date]] = [
+        (item, d) for item in items if (d := _next_fire_date(item, today, days)) is not None
+    ]
+
+    overrides: dict[tuple[int, date], Decimal] = {
+        (o.recurring_item_id, o.due_date): o.actual_amount
+        for o in db.query(models.BillAmountOverride).filter(
+            models.BillAmountOverride.user_id == user.id,
+            models.BillAmountOverride.due_date >= today,
+            models.BillAmountOverride.due_date <= today + timedelta(days=days),
+        ).all()
+    }
+
+    rows = [
+        schemas.UpcomingBillOut(
+            recurring_item_id=item.id,
+            name=item.name,
+            due_date=d,
+            amount=overrides.get((item.id, d), item.amount),
+            estimated_amount=item.amount,
+            is_actual=(item.id, d) in overrides,
+            card_id=item.card_id,
+        )
+        for item, d in due
+    ]
+    rows.sort(key=lambda r: (r.due_date, r.name))
+    return rows
 
 
 # Declared BEFORE /{item_id} on purpose: FastAPI matches routes in
