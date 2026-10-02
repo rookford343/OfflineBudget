@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { ArrowRightLeft, ChevronDown, ChevronUp, X } from "lucide-react";
 import { adventuresApi } from "../../api";
+import { errText } from "../../lib/utils";
 import { maskIfHidden, useBalancesHidden } from "../../store/balanceVisibility";
 import { type PartnerRow, type WalletRow, pts } from "./types";
 
@@ -15,7 +16,7 @@ function ProgramChip({ p }: { p: WalletRow }) {
   const save = useMutation({
     mutationFn: (balance: number) => adventuresApi.updateProgram(p.id, { balance }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["adventures"] }); setEditing(false); setError(null); },
-    onError: (e: any) => setError(e?.response?.data?.detail ?? "Couldn't save"),
+    onError: (e: any) => setError(errText(e)),
   });
   const submitBalance = () => {
     const n = parseInt(value || "0", 10);
@@ -61,20 +62,20 @@ function PartnersDialog({ programs }: { programs: WalletRow[] }) {
     mutationFn: ({ id, data }: { id: number; data: object }) => adventuresApi.updatePartner(id, data),
     onSuccess: (_data, variables) => { qc.invalidateQueries({ queryKey: ["adventures"] }); clearRowError(variables.id); },
     onError: (e: any, variables) =>
-      setRowErrors((prev) => ({ ...prev, [variables.id]: e?.response?.data?.detail ?? "Couldn't save" })),
+      setRowErrors((prev) => ({ ...prev, [variables.id]: errText(e) })),
   });
   const remove = useMutation({
     mutationFn: (id: number) => adventuresApi.removePartner(id),
     onSuccess: (_data, id) => { qc.invalidateQueries({ queryKey: ["adventures"] }); clearRowError(id); },
     onError: (e: any, id) =>
-      setRowErrors((prev) => ({ ...prev, [id]: e?.response?.data?.detail ?? "Couldn't remove" })),
+      setRowErrors((prev) => ({ ...prev, [id]: errText(e, "Couldn't remove") })),
   });
   const [from, setFrom] = useState(""); const [to, setTo] = useState(""); const [ratio, setRatio] = useState("1");
   const [addError, setAddError] = useState<string | null>(null);
   const add = useMutation({
     mutationFn: () => adventuresApi.createPartner({ from_program_id: Number(from), to_program_id: Number(to), ratio }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["adventures"] }); setTo(""); setAddError(null); },
-    onError: (e: any) => setAddError(e?.response?.data?.detail ?? "Couldn't add partner"),
+    onError: (e: any) => setAddError(errText(e, "Couldn't add partner")),
   });
   return (
     <Dialog.Root>
