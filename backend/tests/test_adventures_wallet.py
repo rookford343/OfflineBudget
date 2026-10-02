@@ -133,3 +133,26 @@ def test_suggest_transfer_with_overlap_program_direct_and_source(db_session):
     s = suggest_transfer(db_session, item2, trip, TODAY)
     assert s == {"from_program_id": x.id, "from_program_name": "X",
                  "source_points": 70000, "partner_points": 70000, "bonus_pct": None}
+
+
+def test_suggest_transfer_else_branch_source_reserved_by_other_trip(db_session):
+    """Source program X is not used in this trip but is reserved by another open trip."""
+    u = _user(db_session)
+    x = _prog(db_session, u, "X", 100000, models.LoyaltyKind.bank)
+    air = _prog(db_session, u, "Air", 0)
+    db_session.add(models.TransferPartner(user_id=u.id, from_program_id=x.id,
+                                          to_program_id=air.id, ratio=Decimal("1")))
+    # Other trip (planning): uses X directly for 50000 (reserves 50000 of X)
+    other = _trip(db_session, u, name="Other")
+    _pts_item(db_session, other, x, 50000)
+    # This trip (planning): needs 70000 Air, doesn't use X
+    trip = _trip(db_session, u, name="This")
+    item = _pts_item(db_session, trip, air, 70000)
+    # X has 50000 reserved by Other, leaving 50000 available; not enough for 70000 shortfall
+    assert suggest_transfer(db_session, item, trip, TODAY) is None
+    # Mark Other as done; X is no longer reserved
+    other.status = models.TripStatus.done
+    db_session.flush()
+    s = suggest_transfer(db_session, item, trip, TODAY)
+    assert s == {"from_program_id": x.id, "from_program_name": "X",
+                 "source_points": 70000, "partner_points": 70000, "bonus_pct": None}
