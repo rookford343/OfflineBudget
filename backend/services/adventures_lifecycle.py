@@ -45,13 +45,23 @@ def create_trip_from_template(db: Session, user_id: int, *, name: str, destinati
     return trip
 
 
-def _unlink_and_delete(db: Session, item: models.TripItem, *, keep_settled: bool = True) -> None:
+def _unlink_and_delete(db: Session, item: models.TripItem, *, keep_link_if_settled: bool = False) -> None:
+    """Delete the item's linked PlannedExpense, unless it's settled (kept as
+    history). By default the link is nulled either way -- delete_trip/delete_item
+    call this right before the trip/item itself goes away, so the link has to
+    go regardless of settled status, which the FK requires. uncommit_trip
+    passes keep_link_if_settled=True instead: a settled row is left fully
+    linked so sync/set_item_paid find it again on recommit, rather than
+    orphaning it and letting sync create a duplicate."""
     if item.planned_expense_id is None:
         return
     pe = db.get(models.PlannedExpense, item.planned_expense_id)
+    settled = pe is not None and pe.settled_on is not None
+    if settled and keep_link_if_settled:
+        return
     item.planned_expense_id = None
     db.flush()
-    if pe is not None and not (keep_settled and pe.settled_on is not None):
+    if pe is not None and not settled:
         db.delete(pe)
         db.flush()
 
@@ -68,7 +78,10 @@ def sync_trip_planned_expenses(db: Session, trip: models.Trip) -> None:
         if pe is not None and pe.settled_on is not None:
             # Settled directly from the Planned page (e.g. reconciled while
             # the Adventures item was still marked unpaid) is history now --
-            # sync must not rewrite or delete it.
+            # sync must not rewrite or delete it. Bring the item's own paid
+            # flag in line with it so a later un-pay finds this exact row
+            # instead of sync creating a duplicate on the next commit.
+            item.is_paid = True
             continue
         owed = cash_owed(item, trip)
         if owed <= 0:
@@ -101,7 +114,7 @@ def uncommit_trip(db: Session, trip: models.Trip) -> None:
     if trip.status != models.TripStatus.committed:
         raise LifecycleError("only a committed trip can go back to planning")
     for item in trip.items:
-        _unlink_and_delete(db, item)
+        _unlink_and_delete(db, item, keep_link_if_settled=True)
     trip.status = models.TripStatus.planning
     db.flush()
 
