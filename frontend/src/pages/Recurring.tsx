@@ -72,6 +72,10 @@ export default function Recurring() {
     // real amount for its one occurrence, which the summary strip's month
     // totals read directly.
     qc.invalidateQueries({ queryKey: ["recurring-month-summary"] });
+    // The Dashboard's Upcoming Bills card reads actuals through this same
+    // endpoint, so without this it would keep showing the old estimate
+    // until something else happened to refetch it.
+    qc.invalidateQueries({ queryKey: ["recurring-upcoming"] });
   };
   const linkMut = useMutation({
     mutationFn: ({ itemId, pattern }: { itemId: number; pattern: string }) =>

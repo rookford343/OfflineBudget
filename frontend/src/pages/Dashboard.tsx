@@ -9,6 +9,7 @@ import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, Hel
 import { AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import HelpPanel from "../components/HelpPanel";
 import HowCalculated from "../components/HowCalculated";
+import type { Explanation } from "../components/HowCalculated";
 import { TrendBadge } from "../components/TrendBadge";
 import { SparkLine } from "../components/SparkLine";
 import { RiskBanner } from "../components/RiskBanner";
@@ -16,6 +17,7 @@ import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
 import BillsToConfirm from "../components/BillsToConfirm";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
 import RecentTransactions from "../components/RecentTransactions";
+import CreditCardsDue from "../components/CreditCardsDue";
 
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
 
@@ -29,6 +31,8 @@ Key sections:
 const SPENDABLE_HELP = "How much you can spend on everyday things (groceries, eating out, shopping) between now and the end of the week, after bills, savings, and tithing are already set aside.\n\nGoes down as you spend. If it's negative, you've spent more than this week's share — it'll say \"over pace\" and show what to pull back.";
 
 const MARGIN_HELP = "The lowest your checking account is projected to go over the next 3 months, after also setting aside the credit card bills still coming due this month.\n\nPositive means that's how much room you have above $0 before you'd need to pull from savings. Negative means the plan already dips into savings, even before anything unexpected happens — worth a closer look before a big purchase.";
+
+const NET_POSITION_HELP = "What's left in checking right now after this month's credit card statements leave. Positive means checking covers everything already billed on your cards; negative means the cards owe more than checking currently holds.";
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -62,6 +66,15 @@ export default function Dashboard() {
   const checkingAccounts = accounts.filter((a) => a.type === "checking");
   const { data: cards = [] } = useQuery<any[]>({ queryKey: ["credit-cards"], queryFn: cardsApi.list });
   const { data: recurring = [] } = useQuery<any[]>({ queryKey: ["recurring"], queryFn: () => recurringApi.list(true) });
+  // Real next-fire date (frequency/start/end/month_of_year aware) and any
+  // confirmed BillAmountOverride actual for that date -- replaces building
+  // this client-side from `recurring`, which read r.amount directly (missing
+  // actuals) and matched on day_of_month alone (showing yearly/quarterly
+  // items as due every month).
+  const { data: upcomingBills = [] } = useQuery<any[]>({
+    queryKey: ["recurring-upcoming"],
+    queryFn: () => recurringApi.upcoming(30),
+  });
   const { data: ats } = useQuery<any>({ queryKey: ["available-to-spend"], queryFn: analyticsApi.availableToSpend });
   const { data: summary } = useQuery<any>({
     queryKey: ["monthly-summary", summaryYear, summaryMonth],
@@ -140,18 +153,32 @@ export default function Dashboard() {
   );
   const totalCardsDue = cards.reduce((s: number, c: any) => s + parseFloat(c.balance_due), 0);
 
-  // Upcoming bills in next 30 days
+  // Net Position's receipt, built client-side from data the Dashboard
+  // already fetched (unlike the backend-built explains above, which replay
+  // from the same variables the server used) -- there's no server endpoint
+  // for this card's own arithmetic to source from.
+  const netPosition = totalChecking - totalCardsDue;
+  const netPositionExplain: Explanation = {
+    title: "Net Position",
+    result: String(netPosition),
+    rows: [
+      {
+        op: "start",
+        label: "Checking",
+        amount: String(totalChecking),
+        children: checkingAccounts.map((a: any) => ({ label: a.name, amount: String(parseFloat(a.current_balance)) })),
+      },
+      {
+        op: "subtract",
+        label: "Card statements due",
+        amount: String(totalCardsDue),
+        children: cards.map((c: any) => ({ label: c.name, amount: String(parseFloat(c.balance_due)) })),
+      },
+      { op: "result", label: "Net Position", amount: String(netPosition) },
+    ],
+  };
+
   const todayDate = new Date();
-  const upcoming = recurring
-    .filter((r) => r.type === "expense")
-    .map((r: any) => {
-      const dom = r.day_of_month === 0 ? new Date(todayDate.getFullYear(), todayDate.getMonth() + 1, 0).getDate() : r.day_of_month;
-      const next = new Date(todayDate.getFullYear(), todayDate.getMonth(), dom);
-      if (next < todayDate) next.setMonth(next.getMonth() + 1);
-      return { ...r, next_date: next };
-    })
-    .filter((r) => (r.next_date.getTime() - todayDate.getTime()) / 86400000 <= 30)
-    .sort((a, b) => a.next_date.getTime() - b.next_date.getTime());
 
 
   // Sparkline + month-over-month % for the Net Position card.
@@ -337,15 +364,21 @@ export default function Dashboard() {
           as a single number anywhere else, so it stays -- as the narrow
           bookend on the far right of this row rather than its own. */}
       <div className={`stat-card animate-fade-slide-up animate-delay-100 ${totalChecking - totalCardsDue >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
-        <span className="stat-label">Net Position</span>
+        <span className="stat-label flex items-center gap-1">
+          Net Position
+          <HowCalculated title="Net Position" explanations={[netPositionExplain]} helpText={NET_POSITION_HELP} />
+        </span>
         <span className={`stat-value ${totalChecking - totalCardsDue >= 0 ? "text-green-600" : "text-red-600"}`}>
           {anyBelowThreshold && <AlertTriangle size={18} className="text-amber-500 inline mr-1" />}
           {maskIfHidden(balancesHidden, fmt(totalChecking - totalCardsDue))}
         </span>
         <span className="text-xs text-gray-500">checking minus due</span>
         <div className="flex items-center justify-between mt-1">
-          <TrendBadge pct={momPct} inverse />
-          <SparkLine data={sparkData} color={totalChecking - totalCardsDue >= 0 ? "#22c55e" : "#ef4444"} />
+          <span className="text-[10px] text-gray-400">spending vs last month</span>
+          <div className="flex items-center gap-2">
+            <TrendBadge pct={momPct} inverse />
+            <SparkLine data={sparkData} color={totalChecking - totalCardsDue >= 0 ? "#22c55e" : "#ef4444"} />
+          </div>
         </div>
       </div>
         </div>
@@ -584,31 +617,38 @@ export default function Dashboard() {
           )}
         </div>
 
+        <CreditCardsDue />
+
         {/* Upcoming bills */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Calendar size={16} /> Upcoming Bills</h3>
             <button onClick={() => navigate("/recurring")} className="text-xs text-indigo-600 hover:underline">Manage →</button>
           </div>
-          {upcoming.length === 0 ? (
+          {upcomingBills.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">No recurring bills set up</p>
           ) : (
             <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-              {upcoming.slice(0, 8).map((r: any) => {
-                const daysUntil = Math.ceil((r.next_date.getTime() - todayDate.getTime()) / 86400000);
+              {upcomingBills.slice(0, 8).map((r: any) => {
+                const [y, m, d] = r.due_date.split("-").map(Number);
+                const dueDate = new Date(y, m - 1, d);
+                const daysUntil = Math.ceil((dueDate.getTime() - todayDate.getTime()) / 86400000);
                 return (
-                  <div key={r.id} className="flex items-center justify-between py-1">
+                  <div key={`${r.recurring_item_id}-${r.due_date}`} className="flex items-center justify-between py-1">
                     <div>
                       <p className="text-sm font-medium text-gray-900">{r.name}</p>
                       <p className="text-xs text-gray-500">
-                        {r.next_date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        {dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                         {" · "}
                         <span className={daysUntil <= 3 ? "text-red-600 font-medium" : "text-gray-400"}>
                           {daysUntil === 0 ? "Today" : daysUntil === 1 ? "Tomorrow" : `${daysUntil} days`}
                         </span>
                       </p>
                     </div>
-                    <span className="text-sm font-semibold text-red-600 tabular-nums">{fmt(r.amount)}</span>
+                    <span className="text-sm font-semibold text-red-600 tabular-nums">
+                      {fmt(r.amount)}
+                      {r.is_actual && <span className="ml-1 text-[10px] font-normal text-gray-400 align-middle">actual</span>}
+                    </span>
                   </div>
                 );
               })}
