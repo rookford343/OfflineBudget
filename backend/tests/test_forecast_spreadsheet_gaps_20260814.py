@@ -569,6 +569,59 @@ def test_the_cycle_after_a_locked_payoff_uses_the_carried_balance(db_session):
     )
 
 
+def test_safety_floor_leaves_unbilled_card_bills_out_of_the_carried_cycle(db_session):
+    """Safety Margin subtracts this month's card bills itself (Dan's sheet,
+    '2026 Overview'!B18), so the floor's walk must not ALSO fold them into the
+    carried cycle's payoff -- that charged them twice (found live
+    2026-10-01). Same scenario as above: the carried cycle is $1,000, not
+    $1,100, when the caller opts out. Later cycles are untouched."""
+    from backend.services import budget_snapshot
+
+    today = date.today()
+    close_date = today + timedelta(days=14)
+    sub_date = today + timedelta(days=6)
+    due_day = (close_date + timedelta(days=3)).day
+    user = _user(db_session, username="nodouble")
+    account = _checking(db_session, user, balance="60000.00")
+    card = _card(db_session, user, name="Chase", statement_day=close_date.day, due_day=due_day,
+                 current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
+                 pending_charges=Decimal("0"),
+                 next_payment_date=today + timedelta(days=200),
+                 monthly_spend_estimate=Decimal("15000.00"))
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=account.id, card_id=card.id, name="Sub",
+        amount=Decimal("100.00"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly,
+        day_of_month=sub_date.day, start_date=date(2026, 1, 1),
+    ))
+    db_session.commit()
+
+    entries = build_forecast(
+        db_session, user.id, account.id, today, today + timedelta(days=120),
+        include_unbilled_card_bills=False,
+    )
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+    next_cycle = [amt for d, amt in estimates.items() if close_date <= d < close_date + timedelta(days=32)]
+    assert next_cycle == [Decimal("-1000.00")], next_cycle
+    later = [amt for d, amt in estimates.items() if d >= close_date + timedelta(days=32)]
+    assert later and all(a == Decimal("-15000.00") for a in later), later
+
+    # And the snapshot's floor is the caller that opts out.
+    seen = {}
+    real = budget_snapshot.build_forecast
+
+    def spy(*args, **kwargs):
+        seen.update(kwargs)
+        return real(*args, **kwargs)
+
+    budget_snapshot.build_forecast = spy
+    try:
+        budget_snapshot._lookahead_minimum(db_session, user.id, account.id, today)
+    finally:
+        budget_snapshot.build_forecast = real
+    assert seen.get("include_unbilled_card_bills") is False
+
+
 # --- 4. A statement close that already passed but hasn't billed yet -------
 
 def test_a_just_passed_close_still_carries_the_right_due_date(db_session):
