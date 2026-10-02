@@ -43,6 +43,8 @@ Everything lives in `data/budget.db` (SQLite). That includes accounts and
 balances, transactions and merchants, credit cards, recurring items, budgets,
 forecasts, and your user record.
 
+**Adventures:** trips, checklist items, loyalty-program balances and transfer partners you enter. Stored only in the local database; nothing is looked up online.
+
 **Encrypted at rest** (Fernet, keyed by `APP_ENCRYPTION_KEY`):
 
 - Your SimpleFIN access URL — the credential that can read your bank data

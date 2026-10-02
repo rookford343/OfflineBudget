@@ -308,3 +308,94 @@ automatically from raw bank descriptors, which are noisy — store numbers,
 transaction ids, payment references. Hover any row on the Merchants tab and
 click the pencil to rename it, or type an existing merchant's name to merge
 the two together.
+
+---
+
+## 11. Adventures (trip planning with points)
+
+Use Adventures to plan and track trips that you're paying for with a mix of cash and loyalty points. Track each item's cost (cash + points), set transfer hints for when you're short on points, and forecast the trip as part of your budget.
+
+### The points wallet
+
+Enter your current loyalty-program balances by hand under **Settings → Adventures → Points Wallet**. Each balance shows "updated N days ago" in gray; the label turns amber if a balance hasn't been updated in 30 days.
+
+Loyalty programs you don't actively use are collapsed by default under "Other programs" — expand to add or remove any program.
+
+### Partners and bonuses
+
+Each loyalty program can have a transfer ratio and optional bonuses:
+
+- **Ratio** — how many points of Program A equal 1 point in Program B (e.g., 1:1.25).
+- **Bonus** — an optional percent boost that applies through a specific end date (e.g., "+25% until Dec 31"). Once the date passes, the bonus no longer applies. Bonuses with no end date stay active until you manually remove them.
+
+Edit these under **Settings → Adventures → Partners & Bonuses**.
+
+### Starting a new adventure
+
+When you create a new trip, it starts with a copy of your Adventure checklist template:
+
+1. Go to **Adventures → Create Trip**
+2. Enter the trip name, start and end dates, and your travelers
+3. The template checklist populates automatically with items like "Flights", "Hotel", "Ground transport", and a Buffer for incidentals
+
+**Editing the checklist:**
+
+- Remove an item from the trip only — click the item's delete icon
+- Remove from both the trip *and* the template for future trips — the app asks which you mean
+
+**Scaling:** per-day items (e.g., meals) and per-person items (e.g., park tickets) scale automatically based on your trip dates and number of travelers.
+
+### Paying for items with cash, points, or a mix
+
+Each item can be split between cash and loyalty points:
+
+- Enter the total cash price and the points you want to spend
+- **Taxes and fees on award bookings count as cash**, not points — if an award flight costs 50,000 points plus $75 in taxes, enter 50,000 points and $75 cash
+- The **¢/pt ratio** (cost per point) is calculated as: `(cash price − taxes) ÷ points`
+
+### Transfer suggestions
+
+When you're short on points for an item:
+
+1. The app shows a suggestion for the cheapest transfer — it picks the source program and uses any active bonus to minimize the cost
+2. Click **Attach** to lock in that transfer as part of your trip plan
+3. The transfer count and bonus details appear on the item
+
+### Committing to your forecast
+
+**Commit to Forecast** turns each unpaid item that still owes cash into a Planned One-Off on the app's forecast. The one-off:
+
+- Uses the **trip start date** as its charge date (or a date you set per item)
+- Charges to the **card** you selected for the trip
+- Appears on your Forecast and daily balance projection
+
+**Editing a committed trip:** changes to item amounts, dates, or cards automatically update the corresponding one-offs.
+
+**Back to Planning:** removes all unpaid one-offs, letting you edit the trip without affecting your forecast.
+
+### Marking items as paid
+
+Once you've paid for an item (swiped your card, confirmed a bank transaction), click **Mark Paid**. This:
+
+- Settles the item's planned one-off in the forecast
+- Updates the points balance for any transfer attached to that item
+- Moves the item to the "Paid" section
+
+### Done with your trip
+
+When all items are paid, click **Done**. The app shows a summary of how many points you spent from each program. Confirm, and:
+
+- Points balances update permanently
+- The trip moves to your history
+
+If you delete a trip, only the unpaid one-offs are removed; paid items stay as history.
+
+### Trip fund (optional)
+
+Set up an optional Goal for trip savings. When you create or edit a trip:
+
+1. Choose a Goal to track trip savings
+2. The app targets it to **7 days before the trip start** — the final payment date
+3. Click **Update Fund Target** to sync the goal's target amount with your trip's remaining balance
+
+This works best if the Goal already exists — create it first under **Money → Goals**, then link it when you set up the trip.
