@@ -92,6 +92,15 @@ def delete_goal(
     ).first()
     if not goal:
         raise HTTPException(404, "Goal not found")
+    # An Adventures trip can link to this goal via Trip.fund_goal_id. The FK
+    # has no ondelete, so null the link before deleting or SQLite raises an
+    # IntegrityError.
+    for trip in db.query(models.Trip).filter(
+        models.Trip.fund_goal_id == goal.id,
+        models.Trip.user_id == user.id,
+    ).all():
+        trip.fund_goal_id = None
+    db.flush()
     db.delete(goal)
     db.commit()
     return {"ok": True}

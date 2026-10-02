@@ -64,8 +64,13 @@ def sync_trip_planned_expenses(db: Session, trip: models.Trip) -> None:
     for item in trip.items:
         if item.is_paid:
             continue
-        owed = cash_owed(item, trip)
         pe = db.get(models.PlannedExpense, item.planned_expense_id) if item.planned_expense_id else None
+        if pe is not None and pe.settled_on is not None:
+            # Settled directly from the Planned page (e.g. reconciled while
+            # the Adventures item was still marked unpaid) is history now --
+            # sync must not rewrite or delete it.
+            continue
+        owed = cash_owed(item, trip)
         if owed <= 0:
             _unlink_and_delete(db, item)
             continue
