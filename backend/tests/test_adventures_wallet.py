@@ -111,3 +111,25 @@ def test_wallet_is_user_scoped(db_session):
     a, b = _user(db_session, "a"), _user(db_session, "b")
     _prog(db_session, b, "Theirs", 5)
     assert wallet(db_session, a.id, TODAY) == []
+
+
+def test_suggest_transfer_with_overlap_program_direct_and_source(db_session):
+    """Program X is both used directly (item1) and as a transfer source (item2)."""
+    u = _user(db_session)
+    x = _prog(db_session, u, "X", 100000, models.LoyaltyKind.bank)
+    air = _prog(db_session, u, "Air", 0)
+    db_session.add(models.TransferPartner(user_id=u.id, from_program_id=x.id,
+                                          to_program_id=air.id, ratio=Decimal("1")))
+    trip = _trip(db_session, u)
+    # item1: uses X directly for 60000 points (reserves 60000 of X)
+    _pts_item(db_session, trip, x, 60000)
+    # item2: needs 70000 Air points, only source is X; X has 100000 - 60000 = 40000 left
+    item2 = _pts_item(db_session, trip, air, 70000)
+    # Not enough X available for the 70000 needed
+    assert suggest_transfer(db_session, item2, trip, TODAY) is None
+    # Raise X balance to 140000, now 140000 - 60000 = 80000 available, enough for 70000
+    x.balance = 140000
+    db_session.flush()
+    s = suggest_transfer(db_session, item2, trip, TODAY)
+    assert s == {"from_program_id": x.id, "from_program_name": "X",
+                 "source_points": 70000, "partner_points": 70000, "bonus_pct": None}
