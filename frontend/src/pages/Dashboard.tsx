@@ -626,7 +626,7 @@ export default function Dashboard() {
             <button onClick={() => navigate("/recurring")} className="text-xs text-indigo-600 hover:underline">Manage →</button>
           </div>
           {upcomingBills.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-4">No recurring bills set up</p>
+            <p className="text-sm text-gray-400 text-center py-4">{recurring.length === 0 ? "No recurring bills set up" : "No bills due in the next 30 days"}</p>
           ) : (
             <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
               {upcomingBills.slice(0, 8).map((r: any) => {
