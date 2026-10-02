@@ -293,8 +293,7 @@ When you're short on points for an item:
 
 **Commit to Forecast** turns each unpaid item that still owes cash into a Planned One-Off on the app's forecast. The one-off:
 
-- Uses the **trip start date** as its charge date (or a date you set per item)
-- Charges to the **card** you selected for the trip
+- Lands on the **trip start date**, charged to the **card** you selected for the trip
 - Appears on your Forecast and daily balance projection
 
 **Editing a committed trip:** changes to item amounts, dates, or cards automatically update the corresponding one-offs.

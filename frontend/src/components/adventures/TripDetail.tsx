@@ -179,7 +179,11 @@ export default function TripDetail({ tripId, onClose }: { tripId: number; onClos
     }
     const lines = Object.entries(plan).map(([pid, d]) =>
       `${programs.find((p) => String(p.id) === pid)?.name}: ${maskIfHidden(hidden, `${d > 0 ? "+" : ""}${pts(d)}`)}`);
-    if (!window.confirm(`Finish this trip and update balances?\n\n${lines.join("\n") || "No points change."}`)) return;
+    let msg = `Finish this trip and update balances?\n\n${lines.join("\n") || "No points change."}`;
+    if (owing > 0) {
+      msg += `\n\n${owing} unpaid one-off${owing === 1 ? "" : "s"} stay on the Forecast. Settle them on the Planned page when they're charged.`;
+    }
+    if (!window.confirm(msg)) return;
     try {
       onChange(await adventuresApi.finish(trip.id, {}));
     } catch (e: any) {
