@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi, dayCheckpointsApi, transactionsApi, categoriesApi, plannedTransfersApi } from "../api";
 import { fmt, today } from "../lib/utils";
@@ -62,6 +62,14 @@ export default function Forecast() {
   // Q1 2027 are both "1"), and a bare-number key would highlight/expand
   // both at once.
   const [expandedQ, setExpandedQ] = useState<string | null>(null);
+  // On one-column (phone) layouts the detail panel sits below every tile, so
+  // bring it into view when a quarter is picked.
+  const detailRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (expandedQ && window.innerWidth < 1024) {
+      detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [expandedQ]);
   const [scenarioId, setScenarioId] = useState<number | null>(null);
   const [chartView, setChartView] = useState<"balance" | "net">("balance");
   const [showHelp, setShowHelp] = useState(false);
@@ -721,7 +729,9 @@ export default function Forecast() {
       )}
 
       {/* Credit Cards Due and Planned One-Offs side by side on wide screens */}
-      <div className="grid lg:grid-cols-2 gap-4 items-start">
+      {/* Only a grid when both cards render, so Planned One-Offs keeps the full
+          width when no card payments are due. */}
+      <div className={(upcomingDue as any[]).length > 0 ? "grid lg:grid-cols-2 gap-4 items-start" : ""}>
       {/* Credit Cards Due */}
       {(upcomingDue as any[]).length > 0 && (
         <div className="card">
@@ -1115,10 +1125,10 @@ export default function Forecast() {
       {selectedQuarter && (() => {
         const q = selectedQuarter;
         return (
-          <div className="card">
+          <div className="card" ref={detailRef}>
             <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-100 dark:border-gray-700">
               <h3 className="font-bold text-gray-900">Q{q.quarter} {q.year} — detail</h3>
-              <button onClick={() => setExpandedQ(null)} className="text-gray-400 hover:text-gray-600">
+              <button onClick={() => setExpandedQ(null)} aria-label="Close quarter detail" className="text-gray-400 hover:text-gray-600">
                 <X size={18} />
               </button>
             </div>
