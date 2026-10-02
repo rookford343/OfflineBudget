@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from backend import models
+import backend.services.summary_generator as summary_generator_module
 from backend.services.summary_generator import generate_daily_summary
 
 
@@ -81,3 +82,55 @@ def test_cycle_spend_going_negative_shows_zero_and_flags_stale_statement(db_sess
     for body in (html, text):
         assert "-$120.82" not in body and "−$120.82" not in body, "never render the negative"
         assert "stale" in body.lower(), "flag the stale statement figure"
+
+
+def _with_today(monkeypatch, fixed_today: date):
+    """Pins summary_generator's `today = date.today()` to a fixed date, the
+    same pattern test_email_scheduling.py uses for main.py."""
+    class _FakeDate(date):
+        @classmethod
+        def today(cls):
+            return fixed_today
+    monkeypatch.setattr(summary_generator_module, "date", _FakeDate)
+
+
+def test_due_in_days_matches_due_date_on_a_short_month(db_session, monkeypatch):
+    """due_day 31 on Sep 30 (a 30-day month): the due date clamps to Sep 30
+    (_next_occurrence_on_or_after's min(due_day, last-day-of-month)), so "due
+    in Nd" must agree and read 0 days/"due today" -- not the old modulo
+    math's "due in 1d", which disagreed with the "due Sep 30" shown right
+    next to it."""
+    _with_today(monkeypatch, date(2026, 9, 30))
+    user, account = _user_with_checking(db_session, username="shortmonthuser")
+    db_session.add(models.CreditCard(
+        user_id=user.id, name="Discover", credit_limit=Decimal("8000.00"),
+        statement_day=28, due_day=31,
+        current_balance=Decimal("500.00"), balance_due=Decimal("500.00"),
+        pending_charges=Decimal("0"),
+    ))
+    db_session.commit()
+
+    html, _ = generate_daily_summary(db_session, user)
+
+    assert "due today" in html
+    assert "due in 1d" not in html
+    assert "due Sep 30" in html
+
+
+def test_due_in_days_ordinary_case(db_session, monkeypatch):
+    """A due date well within the current month: days-out is a simple
+    calendar subtraction with no short-month clamping involved."""
+    _with_today(monkeypatch, date(2026, 9, 20))
+    user, account = _user_with_checking(db_session, username="ordinarydueuser")
+    db_session.add(models.CreditCard(
+        user_id=user.id, name="Amex", credit_limit=Decimal("12000.00"),
+        statement_day=28, due_day=25,
+        current_balance=Decimal("300.00"), balance_due=Decimal("300.00"),
+        pending_charges=Decimal("0"),
+    ))
+    db_session.commit()
+
+    html, _ = generate_daily_summary(db_session, user)
+
+    assert "due in 5d" in html
+    assert "due Sep 25" in html
