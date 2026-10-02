@@ -57,7 +57,11 @@ export default function Forecast() {
   const [accountId, setAccountId] = useState<number | null>(null);
   const [year, setYear] = useState(new Date().getFullYear());
   const [forecastYears, setForecastYears] = useState(1);
-  const [expandedQ, setExpandedQ] = useState<number | null>(null);
+  // Keyed `${year}-${quarter}`, not just the quarter number -- with
+  // forecastYears > 1, quarter numbers repeat across years (Q1 2026 and
+  // Q1 2027 are both "1"), and a bare-number key would highlight/expand
+  // both at once.
+  const [expandedQ, setExpandedQ] = useState<string | null>(null);
   const [scenarioId, setScenarioId] = useState<number | null>(null);
   const [chartView, setChartView] = useState<"balance" | "net">("balance");
   const [showHelp, setShowHelp] = useState(false);
@@ -466,6 +470,10 @@ export default function Forecast() {
     return null;
   };
 
+  // `expandedQ` is keyed `${year}-${quarter}` (see its declaration) so this
+  // lookup can't match the wrong year's same-numbered quarter.
+  const selectedQuarter = (quarters as any[]).find((q: any) => `${q.year}-${q.quarter}` === expandedQ);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -697,25 +705,23 @@ export default function Forecast() {
         </div>
       )}
 
-      {/* SS Tax Info */}
+      {/* SS Tax Info -- a slim one-line banner, not a full card */}
       {ssConfigured && ssLimitMonth && (
-        <div className="card bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800">
-          <div className="flex items-start gap-3">
-            <TrendingUp size={18} className="text-green-600 mt-0.5 shrink-0" />
-            <div>
-              <p className="font-semibold text-green-800 dark:text-green-300 text-sm">Social Security Wage Base</p>
-              <p className="text-sm text-green-700 dark:text-green-400 mt-1">
-                Estimated SS limit reached: <strong>{ssLimitMonth}</strong>
-                {ssPerPaycheckIncrease !== null && (
-                  <> · Paycheck increases by ~<strong>{fmt(ssPerPaycheckIncrease)}</strong> after that</>
-                )}
-              </p>
-              <p className="text-xs text-green-600 dark:text-green-500 mt-0.5">Based on ${ssGross?.toLocaleString()}/paycheck gross · from your actual forecast, not estimated</p>
-            </div>
-          </div>
+        <div className="card py-2 px-3 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800 flex items-center gap-2">
+          <TrendingUp size={14} className="text-green-600 shrink-0" />
+          <p className="text-xs text-green-700 dark:text-green-400">
+            <strong className="text-green-800 dark:text-green-300">SS Wage Base:</strong>{" "}
+            Estimated limit reached <strong>{ssLimitMonth}</strong>
+            {ssPerPaycheckIncrease !== null && (
+              <> · Paycheck increases ~<strong>{fmt(ssPerPaycheckIncrease)}</strong> after that</>
+            )}
+            {" "}· based on ${ssGross?.toLocaleString()}/paycheck gross
+          </p>
         </div>
       )}
 
+      {/* Credit Cards Due and Planned One-Offs side by side on wide screens */}
+      <div className="grid lg:grid-cols-2 gap-4 items-start">
       {/* Credit Cards Due */}
       {(upcomingDue as any[]).length > 0 && (
         <div className="card">
@@ -1011,9 +1017,13 @@ export default function Forecast() {
           </div>
         )}
       </div>
+      </div>
 
-      {/* Quarter summaries */}
-      <div className="space-y-3">
+      {/* Quarter summaries -- collapsed tiles in a 2x2 grid (Q1|Q2 on row
+          one, Q3|Q4 on row two; with 2 years selected, 4 rows of 2).
+          Clicking a tile selects it; the full detail for the selected
+          quarter renders once, below the grid, instead of inline. */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         {(quarters as any[]).map((q: any) => {
           const qKey = `${q.year}-${q.quarter}`;
           const qEndDate = quarterEndDates[q.quarter];
@@ -1027,36 +1037,40 @@ export default function Forecast() {
             const d = quarterEndDates[q.quarter];
             return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
           })();
+          const isSelected = expandedQ === qKey;
 
           return (
-          <div key={qKey} className="card">
+          <div key={qKey} className={`card ${isSelected ? "ring-2 ring-indigo-500" : ""}`}>
             <button
-              className="w-full flex items-center justify-between"
-              onClick={() => setExpandedQ(expandedQ === q.quarter && forecastYears === 1 ? null : (expandedQ === q.quarter ? null : q.quarter))}
+              className="w-full text-left"
+              onClick={() => setExpandedQ(isSelected ? null : qKey)}
             >
-              <div className="flex items-center gap-4">
+              <div className="flex items-center justify-between">
                 <span className="font-bold text-gray-900">Q{q.quarter} {q.year}</span>
-                <span className={`text-sm font-semibold ${parseFloat(q.net) >= 0 ? "text-green-600" : "text-red-600"}`}>
-                  {parseFloat(q.net) >= 0 ? "+" : ""}{fmt(q.net)} net
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-semibold ${parseFloat(q.net) >= 0 ? "text-green-600" : "text-red-600"}`}>
+                    {parseFloat(q.net) >= 0 ? "+" : ""}{fmt(q.net)} net
+                  </span>
+                  {isSelected ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+                </div>
               </div>
-              <div className="flex items-center gap-6 text-sm text-gray-600">
-                <span>Open: <strong className="text-gray-900">{fmt(q.open_balance)}</strong></span>
-                <span>Close: {lowBalanceThreshold !== null && parseFloat(q.close_balance) < lowBalanceThreshold && <AlertTriangle size={12} className="inline mr-1 text-amber-500" />}<strong className={parseFloat(q.close_balance) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600"}>{fmt(q.close_balance)}</strong></span>
-                {expandedQ === q.quarter ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              <div className="mt-1 text-sm text-gray-600">
+                Open: <strong className="text-gray-900">{fmt(q.open_balance)}</strong>
+                {" → "}
+                Close: {lowBalanceThreshold !== null && parseFloat(q.close_balance) < lowBalanceThreshold && <AlertTriangle size={12} className="inline mr-1 text-amber-500" />}<strong className={parseFloat(q.close_balance) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600"}>{fmt(q.close_balance)}</strong>
               </div>
             </button>
 
             {/* Quarter-end balance anchor — uses unified day-checkpoint system */}
             {isPastQuarter && (
-              <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700 flex flex-wrap items-center gap-3">
-                <span className="text-xs text-gray-500 dark:text-gray-400">Q{q.quarter} actual close:</span>
+              <div className="mt-2 pt-2 border-t border-gray-100 dark:border-gray-700 flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-gray-500 dark:text-gray-400">Q{q.quarter} actual close:</span>
                 {dayCheckpoint?.date === qLastDay ? (
                   <div className="flex items-center gap-2">
                     <input
                       type="number"
                       step="0.01"
-                      className="input py-1 w-32 text-sm"
+                      className="input py-1 w-28 text-xs"
                       value={dayCheckpoint.value}
                       onChange={e => setDayCheckpoint({ date: qLastDay, value: e.target.value })}
                       autoFocus
@@ -1076,13 +1090,13 @@ export default function Forecast() {
                 ) : (
                   <button
                     onClick={() => setDayCheckpoint({ date: qLastDay, value: savedBalance !== undefined ? String(savedBalance) : "" })}
-                    className="text-xs text-indigo-500 hover:text-indigo-700 underline"
+                    className="text-indigo-500 hover:text-indigo-700 underline"
                   >
                     {savedBalance !== undefined ? fmt(savedBalance) : "Enter actual balance"}
                   </button>
                 )}
                 {hasConflict && (
-                  <span className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                  <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
                     <AlertTriangle size={12} />
                     {delta! > 0 ? "+" : ""}{fmt(delta!)} vs forecast ·{" "}
                     <Link to="/transactions" className="underline hover:text-amber-700">Reconcile</Link>
@@ -1090,137 +1104,149 @@ export default function Forecast() {
                 )}
               </div>
             )}
-
-            {expandedQ === q.quarter && (
-              <div className="mt-4 border-t border-gray-100 pt-4">
-                <div className="grid grid-cols-2 gap-4 mb-4">
-                  <div className="text-sm"><span className="text-gray-500">Total Income:</span> <strong className="text-green-600">{fmt(q.total_income)}</strong></div>
-                  <div className="text-sm"><span className="text-gray-500">Total Expenses:</span> <strong className="text-red-600">{fmt(q.total_expenses)}</strong></div>
-                </div>
-
-                {/* Monthly accuracy panel — past months only */}
-                {(() => {
-                  const startMonth = (q.quarter - 1) * 3 + 1;
-                  const monthsInQ = [startMonth, startMonth + 1, startMonth + 2];
-                  const pastMonths = monthsInQ.filter(m => {
-                    const lastDay = new Date(q.year, m, 0); // last day of month m
-                    return lastDay < today_date;
-                  });
-                  if (pastMonths.length === 0) return null;
-                  return (
-                    <div className="mb-4 rounded-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
-                      <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-100 dark:border-gray-700">
-                        <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Monthly Forecast Accuracy</p>
-                      </div>
-                      <div className="px-3 divide-y divide-gray-100 dark:divide-gray-700">
-                        {pastMonths.map(m => (
-                          <MonthlyAccuracyRow key={m} accountId={activeAccountId} year={q.year} month={m} />
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-gray-100">
-                        <th className="text-left py-2 text-gray-500 font-medium">Date</th>
-                        <th className="text-left py-2 text-gray-500 font-medium">Transactions</th>
-                        <th className="text-right py-2 text-gray-500 font-medium">Balance</th>
-                        <th className="w-16"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {q.days.filter((d: any) => d.transactions.length > 0 || dayCheckpointMap[d.date] !== undefined).map((d: any) => {
-                        const hasCp = dayCheckpointMap[d.date] !== undefined;
-                        return (
-                        <tr key={d.date} className={`border-b border-gray-50 dark:border-gray-800 group hover:bg-gray-50 dark:hover:bg-gray-800/40 ${hasCp ? "bg-indigo-50/30 dark:bg-indigo-900/10" : ""}`}>
-                          <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">
-                            {new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                            {hasCp && <span className="ml-1 text-indigo-400" title="Balance checkpoint">⚓</span>}
-                          </td>
-                          <td className="py-2 pr-4">
-                            {d.transactions.map((t: any, i: number) => (
-                              <div key={i} className="flex items-center gap-2">
-                                <span className={t.amount > 0 ? "text-green-600" : "text-red-600"}>
-                                  {t.amount > 0 ? "+" : ""}{fmt(t.amount)}
-                                </span>
-                                <span className="text-gray-600">{t.name}</span>
-                                {t.is_actual && <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">actual</span>}
-                                {!t.is_actual && !t.is_planned && <span className="badge-blue">projected</span>}
-                                {t.is_planned && <span className="px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">planned</span>}
-                                {t.is_transfer && <span className="px-1.5 py-0.5 rounded text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">transfer</span>}
-                              </div>
-                            ))}
-                            {hasCp && (
-                              <div className="text-xs text-indigo-500 dark:text-indigo-300 mt-1">
-                                Balance snapped to {fmt(dayCheckpointMap[d.date])}
-                              </div>
-                            )}
-                            {/* Day checkpoint inline editor */}
-                            {dayCheckpoint?.date === d.date ? (
-                              <div className="flex items-center gap-1 mt-1">
-                                <input
-                                  type="number" step="0.01"
-                                  className="input py-0.5 w-28 text-xs"
-                                  placeholder="Actual balance"
-                                  value={dayCheckpoint.value}
-                                  autoFocus
-                                  onChange={e => setDayCheckpoint({ date: d.date, value: e.target.value })}
-                                  onKeyDown={e => {
-                                    if (e.key === "Enter" && dayCheckpoint.value)
-                                      saveDayCheckpointMut.mutate({ date: d.date, actual_balance: parseFloat(dayCheckpoint.value) });
-                                    if (e.key === "Escape") setDayCheckpoint(null);
-                                  }}
-                                />
-                                <button onClick={() => saveDayCheckpointMut.mutate({ date: d.date, actual_balance: parseFloat(dayCheckpoint.value) })}
-                                  disabled={!dayCheckpoint.value || saveDayCheckpointMut.isPending}
-                                  className="btn-primary text-xs px-2 py-0.5">Save</button>
-                                {hasCp && (
-                                  <button onClick={() => deleteDayCheckpointMut.mutate(d.date)}
-                                    className="text-xs text-red-500 hover:text-red-700 px-1">Clear</button>
-                                )}
-                                <button onClick={() => setDayCheckpoint(null)} className="btn-secondary text-xs px-2 py-0.5">Cancel</button>
-                              </div>
-                            ) : null}
-                          </td>
-                          <td className="py-2 text-right font-semibold tabular-nums whitespace-nowrap">
-                            {lowBalanceThreshold !== null && parseFloat(d.projected_balance) < lowBalanceThreshold && (
-                              <AlertTriangle size={12} className="text-amber-500 inline mr-1" />
-                            )}
-                            {fmt(d.projected_balance)}
-                          </td>
-                          <td className="py-2 pl-2">
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button
-                                title="Set actual balance for this date"
-                                onClick={() => setDayCheckpoint({ date: d.date, value: hasCp ? String(dayCheckpointMap[d.date]) : "" })}
-                                className="p-1 text-gray-400 hover:text-indigo-500 rounded"
-                              >
-                                <Pencil size={12} />
-                              </button>
-                              <button
-                                title="Add transaction on this date"
-                                onClick={() => { setAddTxnDate(d.date); setAddTxnForm({ description: "", amount: "", category_id: "" }); }}
-                                className="p-1 text-gray-400 hover:text-green-500 rounded"
-                              >
-                                <Plus size={12} />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
           </div>
           );
         })}
       </div>
+
+      {/* Full-width detail panel for the selected quarter -- moved as-is
+          from the old inline-expand block, just relocated out from under
+          the grid. */}
+      {selectedQuarter && (() => {
+        const q = selectedQuarter;
+        return (
+          <div className="card">
+            <div className="flex items-center justify-between mb-4 pb-4 border-b border-gray-100 dark:border-gray-700">
+              <h3 className="font-bold text-gray-900">Q{q.quarter} {q.year} — detail</h3>
+              <button onClick={() => setExpandedQ(null)} className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div className="text-sm"><span className="text-gray-500">Total Income:</span> <strong className="text-green-600">{fmt(q.total_income)}</strong></div>
+              <div className="text-sm"><span className="text-gray-500">Total Expenses:</span> <strong className="text-red-600">{fmt(q.total_expenses)}</strong></div>
+            </div>
+
+            {/* Monthly accuracy panel — past months only */}
+            {(() => {
+              const startMonth = (q.quarter - 1) * 3 + 1;
+              const monthsInQ = [startMonth, startMonth + 1, startMonth + 2];
+              const pastMonths = monthsInQ.filter(m => {
+                const lastDay = new Date(q.year, m, 0); // last day of month m
+                return lastDay < today_date;
+              });
+              if (pastMonths.length === 0) return null;
+              return (
+                <div className="mb-4 rounded-lg border border-gray-100 dark:border-gray-700 overflow-hidden">
+                  <div className="px-3 py-2 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-100 dark:border-gray-700">
+                    <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Monthly Forecast Accuracy</p>
+                  </div>
+                  <div className="px-3 divide-y divide-gray-100 dark:divide-gray-700">
+                    {pastMonths.map(m => (
+                      <MonthlyAccuracyRow key={m} accountId={activeAccountId} year={q.year} month={m} />
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100">
+                    <th className="text-left py-2 text-gray-500 font-medium">Date</th>
+                    <th className="text-left py-2 text-gray-500 font-medium">Transactions</th>
+                    <th className="text-right py-2 text-gray-500 font-medium">Balance</th>
+                    <th className="w-16"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {q.days.filter((d: any) => d.transactions.length > 0 || dayCheckpointMap[d.date] !== undefined).map((d: any) => {
+                    const hasCp = dayCheckpointMap[d.date] !== undefined;
+                    return (
+                    <tr key={d.date} className={`border-b border-gray-50 dark:border-gray-800 group hover:bg-gray-50 dark:hover:bg-gray-800/40 ${hasCp ? "bg-indigo-50/30 dark:bg-indigo-900/10" : ""}`}>
+                      <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">
+                        {new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                        {hasCp && <span className="ml-1 text-indigo-400" title="Balance checkpoint">⚓</span>}
+                      </td>
+                      <td className="py-2 pr-4">
+                        {d.transactions.map((t: any, i: number) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className={t.amount > 0 ? "text-green-600" : "text-red-600"}>
+                              {t.amount > 0 ? "+" : ""}{fmt(t.amount)}
+                            </span>
+                            <span className="text-gray-600">{t.name}</span>
+                            {t.is_actual && <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">actual</span>}
+                            {!t.is_actual && !t.is_planned && <span className="badge-blue">projected</span>}
+                            {t.is_planned && <span className="px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">planned</span>}
+                            {t.is_transfer && <span className="px-1.5 py-0.5 rounded text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">transfer</span>}
+                          </div>
+                        ))}
+                        {hasCp && (
+                          <div className="text-xs text-indigo-500 dark:text-indigo-300 mt-1">
+                            Balance snapped to {fmt(dayCheckpointMap[d.date])}
+                          </div>
+                        )}
+                        {/* Day checkpoint inline editor */}
+                        {dayCheckpoint?.date === d.date ? (
+                          <div className="flex items-center gap-1 mt-1">
+                            <input
+                              type="number" step="0.01"
+                              className="input py-0.5 w-28 text-xs"
+                              placeholder="Actual balance"
+                              value={dayCheckpoint.value}
+                              autoFocus
+                              onChange={e => setDayCheckpoint({ date: d.date, value: e.target.value })}
+                              onKeyDown={e => {
+                                if (e.key === "Enter" && dayCheckpoint.value)
+                                  saveDayCheckpointMut.mutate({ date: d.date, actual_balance: parseFloat(dayCheckpoint.value) });
+                                if (e.key === "Escape") setDayCheckpoint(null);
+                              }}
+                            />
+                            <button onClick={() => saveDayCheckpointMut.mutate({ date: d.date, actual_balance: parseFloat(dayCheckpoint.value) })}
+                              disabled={!dayCheckpoint.value || saveDayCheckpointMut.isPending}
+                              className="btn-primary text-xs px-2 py-0.5">Save</button>
+                            {hasCp && (
+                              <button onClick={() => deleteDayCheckpointMut.mutate(d.date)}
+                                className="text-xs text-red-500 hover:text-red-700 px-1">Clear</button>
+                            )}
+                            <button onClick={() => setDayCheckpoint(null)} className="btn-secondary text-xs px-2 py-0.5">Cancel</button>
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="py-2 text-right font-semibold tabular-nums whitespace-nowrap">
+                        {lowBalanceThreshold !== null && parseFloat(d.projected_balance) < lowBalanceThreshold && (
+                          <AlertTriangle size={12} className="text-amber-500 inline mr-1" />
+                        )}
+                        {fmt(d.projected_balance)}
+                      </td>
+                      <td className="py-2 pl-2">
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            title="Set actual balance for this date"
+                            onClick={() => setDayCheckpoint({ date: d.date, value: hasCp ? String(dayCheckpointMap[d.date]) : "" })}
+                            className="p-1 text-gray-400 hover:text-indigo-500 rounded"
+                          >
+                            <Pencil size={12} />
+                          </button>
+                          <button
+                            title="Add transaction on this date"
+                            onClick={() => { setAddTxnDate(d.date); setAddTxnForm({ description: "", amount: "", category_id: "" }); }}
+                            className="p-1 text-gray-400 hover:text-green-500 rounded"
+                          >
+                            <Plus size={12} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
 
       {isLoading && <div className="text-gray-400 text-sm text-center py-8">Building forecast…</div>}
 
