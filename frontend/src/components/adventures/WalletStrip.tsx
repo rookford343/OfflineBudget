@@ -101,18 +101,21 @@ function PartnersDialog({ programs }: { programs: WalletRow[] }) {
                     <tr className="border-b border-gray-50 dark:border-gray-800">
                       <td className="py-1 pr-2">{p.from_program_name} → {p.to_program_name}</td>
                       <td><input className="input py-0.5 w-16 text-xs" defaultValue={p.ratio}
-                        onBlur={(e) => e.target.value !== p.ratio && update.mutate({ id: p.id, data: { ratio: e.target.value } })} /></td>
+                        onBlur={(e) => {
+                          if (e.target.value === p.ratio) { clearRowError(p.id); return; }
+                          update.mutate({ id: p.id, data: { ratio: e.target.value } });
+                        }} /></td>
                       <td><input className={`input py-0.5 w-16 text-xs ${p.bonus_pct && !p.bonus_active ? "line-through text-gray-400" : ""}`}
                         defaultValue={p.bonus_pct ?? ""} placeholder="—"
                         onBlur={(e) => {
                           const v = e.target.value;
-                          if (v === (p.bonus_pct ?? "")) return;
+                          if (v === (p.bonus_pct ?? "")) { clearRowError(p.id); return; }
                           update.mutate({ id: p.id, data: { bonus_pct: v === "" ? null : v } });
                         }} /></td>
                       <td><input className="input py-0.5 text-xs" type="date" defaultValue={p.bonus_ends_on ?? ""}
                         onBlur={(e) => {
                           const v = e.target.value;
-                          if (v === (p.bonus_ends_on ?? "")) return;
+                          if (v === (p.bonus_ends_on ?? "")) { clearRowError(p.id); return; }
                           update.mutate({ id: p.id, data: { bonus_ends_on: v === "" ? null : v } });
                         }} /></td>
                       <td><button aria-label="Remove partner" className="text-gray-400 hover:text-red-500 px-1" onClick={() => remove.mutate(p.id)}><X size={14} /></button></td>
