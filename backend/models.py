@@ -1048,3 +1048,133 @@ class SchedulerRun(Base):
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_error: Mapped[str | None] = mapped_column(Text)
+
+
+# ── Adventures (trip planning with points) ───────────────────────────────────
+# All additive tables, created by create_all: no existing table is altered.
+# A committed trip's cash cost reaches the Forecast as ordinary PlannedExpense
+# rows (linked from TripItem.planned_expense_id), so forecast_engine is
+# untouched. Spec: docs/superpowers/specs/2026-10-01-adventures-design.md
+
+
+class LoyaltyKind(str, PyEnum):
+    bank = "bank"
+    airline = "airline"
+    hotel = "hotel"
+    other = "other"
+
+
+class TripStatus(str, PyEnum):
+    planning = "planning"
+    committed = "committed"
+    done = "done"
+
+
+class TripCategory(str, PyEnum):
+    getting_there = "getting_there"
+    staying = "staying"
+    daily = "daily"
+    before = "before"
+    while_there = "while_there"
+
+
+class TripPricing(str, PyEnum):
+    flat = "flat"
+    per_day = "per_day"
+    per_night = "per_night"
+    per_person = "per_person"
+    per_person_day = "per_person_day"
+
+
+class TripPayment(str, PyEnum):
+    cash = "cash"
+    points = "points"
+    mix = "mix"
+
+
+class LoyaltyProgram(Base):
+    __tablename__ = "loyalty_programs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[LoyaltyKind] = mapped_column(Enum(LoyaltyKind), nullable=False)
+    balance: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    balance_updated_at: Mapped[datetime | None] = mapped_column(DateTime)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class TransferPartner(Base):
+    __tablename__ = "transfer_partners"
+    __table_args__ = (UniqueConstraint("user_id", "from_program_id", "to_program_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    from_program_id: Mapped[int] = mapped_column(Integer, ForeignKey("loyalty_programs.id"), nullable=False)
+    to_program_id: Mapped[int] = mapped_column(Integer, ForeignKey("loyalty_programs.id"), nullable=False)
+    ratio: Mapped[Decimal] = mapped_column(Numeric(8, 4), default=Decimal("1"), nullable=False)
+    bonus_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 2))
+    bonus_ends_on: Mapped[date | None] = mapped_column(Date)
+
+    from_program: Mapped[LoyaltyProgram] = relationship(foreign_keys=[from_program_id])
+    to_program: Mapped[LoyaltyProgram] = relationship(foreign_keys=[to_program_id])
+
+
+class Trip(Base):
+    __tablename__ = "trips"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    destination: Mapped[str | None] = mapped_column(String(128))
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    travelers: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[TripStatus] = mapped_column(Enum(TripStatus), default=TripStatus.planning, nullable=False)
+    default_card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
+    fund_goal_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("savings_goals.id"))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    items: Mapped[list["TripItem"]] = relationship(
+        back_populates="trip", cascade="all, delete-orphan", order_by="TripItem.sort_order",
+    )
+
+
+class TripItem(Base):
+    __tablename__ = "trip_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    trip_id: Mapped[int] = mapped_column(Integer, ForeignKey("trips.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    category: Mapped[TripCategory] = mapped_column(Enum(TripCategory), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    pricing: Mapped[TripPricing] = mapped_column(Enum(TripPricing), default=TripPricing.flat, nullable=False)
+    unit_cash: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    payment: Mapped[TripPayment] = mapped_column(Enum(TripPayment), default=TripPayment.cash, nullable=False)
+    points_program_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("loyalty_programs.id"))
+    points_price: Mapped[int | None] = mapped_column(Integer)
+    cash_copay: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    mix_cash: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    charge_date: Mapped[date | None] = mapped_column(Date)
+    card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
+    transfer_from_program_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("loyalty_programs.id"))
+    transfer_points: Mapped[int | None] = mapped_column(Integer)
+    is_paid: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    planned_expense_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("planned_expenses.id"))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    trip: Mapped[Trip] = relationship(back_populates="items")
+
+
+class ChecklistTemplateItem(Base):
+    __tablename__ = "checklist_template_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    category: Mapped[TripCategory] = mapped_column(Enum(TripCategory), nullable=False)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    pricing: Mapped[TripPricing] = mapped_column(Enum(TripPricing), default=TripPricing.flat, nullable=False)
+    unit_cash: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
