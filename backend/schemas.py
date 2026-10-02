@@ -1,7 +1,8 @@
 from datetime import date, date as date_type, datetime
 from decimal import Decimal
 from typing import Literal, Optional
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from backend import models
 from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus, PlannedTransferStatus, VerificationFeature, VerificationFlagStatus, PlannedDirection
 
 
@@ -1904,3 +1905,184 @@ class ForecastBaselineOut(BaseModel):
     month: int
     taken_on: date
     points: list[ForecastBaselinePoint]
+
+
+# ── Adventures ───────────────────────────────────────────────────────────────
+
+class WalletRow(BaseModel):
+    id: int
+    name: str
+    kind: str
+    balance: int
+    reserved: int
+    available: int
+    balance_updated_at: datetime | None
+    age_days: int | None
+    is_active: bool
+    sort_order: int
+
+
+class ProgramCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    kind: models.LoyaltyKind
+
+
+class ProgramUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    balance: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
+    sort_order: int | None = None
+
+
+class PartnerIn(BaseModel):
+    from_program_id: int
+    to_program_id: int
+    ratio: Decimal = Field(default=Decimal("1"), gt=0)
+    bonus_pct: Decimal | None = Field(default=None, ge=0)
+    bonus_ends_on: date | None = None
+
+
+class PartnerUpdate(BaseModel):
+    ratio: Decimal | None = Field(default=None, gt=0)
+    bonus_pct: Decimal | None = Field(default=None, ge=0)
+    bonus_ends_on: date | None = None
+
+
+class PartnerOut(BaseModel):
+    id: int
+    from_program_id: int
+    from_program_name: str
+    to_program_id: int
+    to_program_name: str
+    ratio: Decimal
+    bonus_pct: Decimal | None
+    bonus_ends_on: date | None
+    bonus_active: bool
+
+
+class TemplateItemIn(BaseModel):
+    category: models.TripCategory
+    name: str = Field(min_length=1, max_length=128)
+    pricing: models.TripPricing = models.TripPricing.flat
+    unit_cash: Decimal | None = Field(default=None, ge=0)
+
+
+class TemplateItemOut(TemplateItemIn):
+    id: int
+    sort_order: int
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TripCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    destination: str | None = Field(default=None, max_length=128)
+    start_date: date
+    end_date: date
+    travelers: int = Field(default=1, ge=1, le=20)
+    default_card_id: int | None = None
+
+
+class TripUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    destination: str | None = Field(default=None, max_length=128)
+    start_date: date | None = None
+    end_date: date | None = None
+    travelers: int | None = Field(default=None, ge=1, le=20)
+    default_card_id: int | None = None
+    notes: str | None = None
+
+
+class TripItemIn(BaseModel):
+    category: models.TripCategory | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    pricing: models.TripPricing | None = None
+    unit_cash: Decimal | None = Field(default=None, ge=0)
+    payment: models.TripPayment | None = None
+    points_program_id: int | None = None
+    points_price: int | None = Field(default=None, ge=0)
+    cash_copay: Decimal | None = Field(default=None, ge=0)
+    mix_cash: Decimal | None = Field(default=None, ge=0)
+    charge_date: date | None = None
+    card_id: int | None = None
+    transfer_from_program_id: int | None = None
+    transfer_points: int | None = Field(default=None, ge=0)
+    is_paid: bool | None = None
+
+
+class TransferSuggestion(BaseModel):
+    from_program_id: int
+    from_program_name: str
+    source_points: int
+    partner_points: int
+    bonus_pct: Decimal | None
+
+
+class TripItemOut(BaseModel):
+    id: int
+    category: models.TripCategory
+    name: str
+    pricing: models.TripPricing
+    unit_cash: Decimal | None
+    payment: models.TripPayment
+    points_program_id: int | None
+    points_price: int | None
+    cash_copay: Decimal
+    mix_cash: Decimal | None
+    charge_date: date | None
+    card_id: int | None
+    transfer_from_program_id: int | None
+    transfer_points: int | None
+    is_paid: bool
+    planned_expense_id: int | None
+    sort_order: int
+    multiplier: int
+    is_auto_buffer: bool
+    cash_price: Decimal
+    cash_owed: Decimal
+    points_used: int
+    value_cpp: Decimal | None
+    suggestion: TransferSuggestion | None
+
+
+class PointsSummaryRow(BaseModel):
+    program_id: int
+    name: str
+    needed: int
+    available: int
+    incoming: int
+    shortfall: int
+
+
+class TripSummary(BaseModel):
+    id: int
+    name: str
+    destination: str | None
+    start_date: date
+    end_date: date
+    travelers: int
+    status: models.TripStatus
+    cash_total: Decimal
+    cash_remaining: Decimal
+    points_by_program: dict[int, int]
+    fund_goal_id: int | None
+    fund_current: Decimal | None
+    fund_target: Decimal | None
+
+
+class TripDetail(TripSummary):
+    default_card_id: int | None
+    notes: str | None
+    items: list[TripItemOut]
+    points_summary: list[PointsSummaryRow]
+
+
+class FinishRequest(BaseModel):
+    points_used_by_program: dict[int, int] | None = None
+    force: bool = False
+
+    @field_validator("points_used_by_program")
+    @classmethod
+    def _no_negative_confirmed_points(cls, v):
+        if v is not None and any(amount < 0 for amount in v.values()):
+            raise ValueError("points_used_by_program values must be >= 0")
+        return v
