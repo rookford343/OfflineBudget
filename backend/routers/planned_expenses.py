@@ -83,6 +83,15 @@ def delete_planned_expense(
     ).first()
     if not expense:
         raise HTTPException(status_code=404, detail="Planned expense not found")
+    # An Adventures trip item can link to this one-off via
+    # TripItem.planned_expense_id. The FK has no ondelete, so null the link
+    # before deleting or SQLite raises an IntegrityError.
+    for item in db.query(models.TripItem).filter(
+        models.TripItem.planned_expense_id == expense.id,
+        models.TripItem.user_id == user.id,
+    ).all():
+        item.planned_expense_id = None
+    db.flush()
     db.delete(expense)
     db.commit()
 

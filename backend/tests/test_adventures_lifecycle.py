@@ -83,6 +83,28 @@ def test_sync_after_edit_is_idempotent_and_removes_zeroed_items(db_session):
     assert _pes(db_session, u) == [] and lodging.planned_expense_id is None
 
 
+def test_sync_leaves_a_settled_planned_expense_untouched(db_session):
+    """Settling from the Planned page can happen while item.is_paid is still
+    False -- sync must not rewrite or delete that row."""
+    u, _, card, trip = _setup(db_session)
+    lodging = _by_name(trip, "Lodging"); lodging.unit_cash = Decimal("200.00")
+    commit_trip(db_session, trip)
+    pe = db_session.get(models.PlannedExpense, lodging.planned_expense_id)
+    pe.settled_on = TODAY
+    pe.actual_amount = Decimal("800.00")
+    db_session.flush()
+    orig_amount, orig_date, orig_card = pe.amount, pe.expected_date, pe.card_id
+
+    lodging.unit_cash = Decimal("500.00")   # would bump the amount if sync touched it
+    sync_trip_planned_expenses(db_session, trip)
+
+    assert pe.amount == orig_amount
+    assert pe.expected_date == orig_date
+    assert pe.card_id == orig_card
+    assert pe.settled_on == TODAY and pe.actual_amount == Decimal("800.00")
+    assert lodging.planned_expense_id == pe.id
+
+
 def test_mark_paid_settles_and_forecast_drops_it(db_session):
     u, acct, _, trip = _setup(db_session)
     trip.default_card_id = None   # straight to checking so the forecast effect is direct
