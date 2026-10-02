@@ -141,3 +141,54 @@ def test_finish_rejects_negative_confirmed_points(db_session):
     pid = c.get("/adventures/wallet").json()[0]["id"]
     r = c.post(f"/adventures/trips/{t['id']}/finish", json={"points_used_by_program": {str(pid): -1}})
     assert r.status_code == 422, r.text
+
+
+# ── Fix round 1 ──────────────────────────────────────────────────────────────
+
+def test_add_item_with_cash_copay_does_not_500(db_session):
+    """I1: TripItem(..., cash_copay=Decimal('0'), **data) used to blow up with
+    'multiple values for keyword argument cash_copay' whenever the POST body
+    included cash_copay -- a 500, not a validation error."""
+    c = _client(db_session, _user(db_session))
+    wallet = c.get("/adventures/wallet").json()
+    virgin = next(r for r in wallet if r["name"] == "Virgin Atlantic Flying Club")
+    t = _new_trip(c)
+
+    r = c.post(f"/adventures/trips/{t['id']}/items", json={
+        "category": "while_there", "name": "Extra flight", "payment": "points",
+        "points_program_id": virgin["id"], "points_price": 10000, "cash_copay": "12.50",
+    })
+    assert r.status_code == 201, r.text
+    item = next(i for i in r.json()["items"] if i["name"] == "Extra flight")
+    assert Decimal(item["cash_owed"]) == Decimal("12.50")
+
+    r2 = c.post(f"/adventures/trips/{t['id']}/items", json={
+        "category": "while_there", "name": "Snacks", "unit_cash": "5.00",
+    })
+    assert r2.status_code == 201, r2.text
+    assert any(i["name"] == "Snacks" for i in r2.json()["items"])
+
+
+def test_patch_rejects_explicit_null_on_required_fields(db_session):
+    """I2: an explicit JSON null on a NOT NULL field used to sail through the
+    setattr loop and blow up as a 500 at commit (IntegrityError) instead of a
+    422. Checks trip/item/program, then proves nothing lingered in the
+    session by making a valid patch on the same trip right after."""
+    c = _client(db_session, _user(db_session))
+    wallet = c.get("/adventures/wallet").json()
+    t = _new_trip(c)
+
+    r = c.patch(f"/adventures/trips/{t['id']}", json={"start_date": None})
+    assert r.status_code == 422, r.text
+
+    item = t["items"][0]
+    r = c.patch(f"/adventures/trips/{t['id']}/items/{item['id']}", json={"name": None})
+    assert r.status_code == 422, r.text
+
+    pid = wallet[0]["id"]
+    r = c.patch(f"/adventures/programs/{pid}", json={"balance": None})
+    assert r.status_code == 422, r.text
+
+    r = c.patch(f"/adventures/trips/{t['id']}", json={"name": "Lake House"})
+    assert r.status_code == 200, r.text
+    assert r.json()["name"] == "Lake House"
