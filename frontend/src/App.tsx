@@ -19,6 +19,7 @@ import Goals from "./pages/Goals";
 import NetWorth from "./pages/NetWorth";
 import AccountDetail from "./pages/AccountDetail";
 import Scenarios from "./pages/Scenarios";
+import Adventures from "./pages/Adventures";
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;
@@ -47,6 +48,7 @@ export default function App() {
           <Route path="credit-cards" element={<CreditCards />} />
           <Route path="forecast" element={<Forecast />} />
           <Route path="scenarios" element={<Scenarios />} />
+          <Route path="adventures" element={<Adventures />} />
           <Route path="spending" element={<Spending />} />
           <Route path="tax" element={<TaxExport />} />
           <Route path="recurring" element={<Recurring />} />
