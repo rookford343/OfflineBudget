@@ -17,7 +17,31 @@ import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
 import BillsToConfirm from "../components/BillsToConfirm";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
 import RecentTransactions from "../components/RecentTransactions";
-import CreditCardsDue from "../components/CreditCardsDue";
+
+/** The next date on/after `today` whose day-of-month is `dueDay` (clamped to
+ *  the month's last day), plus the day-count to reach it -- both derived
+ *  from the SAME candidate date so "due in Nd" and "due Mon D" never
+ *  disagree (e.g. due_day 31 in a 30-day month used to show "due in 1d"
+ *  next to "due Sep 30", a day apart from what the modulo math implied).
+ *  Mirrors backend/services/forecast_engine.py's _next_occurrence_on_or_after
+ *  (via summary_generator.py's _due_label/_card_row), so the dashboard and
+ *  the daily email never disagree either. */
+function nextCardDueOccurrence(dueDay: number, today: Date): { date: Date; days: number } {
+  const lastDayOfMonth = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
+  const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  let y = todayMidnight.getFullYear();
+  let m = todayMidnight.getMonth();
+  let day = Math.min(dueDay, lastDayOfMonth(y, m));
+  let candidate = new Date(y, m, day);
+  if (candidate < todayMidnight) {
+    m += 1;
+    if (m > 11) { m = 0; y += 1; }
+    day = Math.min(dueDay, lastDayOfMonth(y, m));
+    candidate = new Date(y, m, day);
+  }
+  const days = Math.round((candidate.getTime() - todayMidnight.getTime()) / 86400000);
+  return { date: candidate, days };
+}
 
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
 
@@ -569,55 +593,70 @@ export default function Dashboard() {
             <p className="text-sm text-gray-400 text-center py-4">No credit cards added yet</p>
           ) : (
             <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-              {cards.map((c: any) => (
-                <div key={c.id} className="flex items-center justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{c.name}</p>
-                    <p className="text-xs text-gray-500">
-                      {c.last_four && `••• ${maskIfHidden(balancesHidden, c.last_four)} · `}Due day {c.due_day}
-                    </p>
-                    <div className="mt-1 w-32">
-                      <div className="progress-bar">
-                        <div
-                          className={`progress-fill ${utilBg(c.utilization_pct)}`}
-                          style={{ width: `${Math.min(100, c.utilization_pct)}%` }}
-                        />
+              {cards.map((c: any) => {
+                const due = nextCardDueOccurrence(c.due_day, todayDate);
+                const dueInLabel = due.days === 0 ? "due today" : `due in ${due.days}d`;
+                const dueDateLabel = due.date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                const currentBalance = parseFloat(String(c.current_balance));
+                const balanceDue = parseFloat(String(c.balance_due));
+                const pendingCharges = parseFloat(String(c.pending_charges ?? 0)) || 0;
+                const cycleSpend = Math.max(0, currentBalance - balanceDue + pendingCharges);
+                return (
+                  <div key={c.id} className="flex items-center justify-between">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate">{c.name}</p>
+                      <p className="text-xs text-gray-500">
+                        {c.last_four && `••• ${maskIfHidden(balancesHidden, c.last_four)} · `}{dueInLabel}
+                      </p>
+                      <p className="text-xs text-gray-400">
+                        {maskIfHidden(balancesHidden, fmt(balanceDue))} due {dueDateLabel}
+                        {" · "}
+                        {maskIfHidden(balancesHidden, fmt(cycleSpend))} spent this cycle
+                      </p>
+                      {c.statement_stale_reason && (
+                        <p className="text-[11px] text-amber-600 mt-0.5">statement figure may be stale</p>
+                      )}
+                      <div className="mt-1 w-32">
+                        <div className="progress-bar">
+                          <div
+                            className={`progress-fill ${utilBg(c.utilization_pct)}`}
+                            style={{ width: `${Math.min(100, c.utilization_pct)}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {editingPending === c.id ? (
+                          <span className="inline-flex items-center gap-1">
+                            Pending:
+                            <input
+                              type="number" step="0.01" autoFocus
+                              className="input !w-20 !py-0.5 !text-xs"
+                              value={pendingValue}
+                              onChange={(e) => setPendingValue(e.target.value)}
+                              onBlur={() => updatePendingMut.mutate({ id: c.id, data: { pending_charges: parseFloat(pendingValue) || 0 } })}
+                              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                            />
+                          </span>
+                        ) : (
+                          <button
+                            className="hover:underline"
+                            onClick={() => { setEditingPending(c.id); setPendingValue(c.pending_charges || "0"); }}
+                          >
+                            Pending: {maskIfHidden(balancesHidden, fmt(c.pending_charges || 0))} ✎
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      {editingPending === c.id ? (
-                        <span className="inline-flex items-center gap-1">
-                          Pending:
-                          <input
-                            type="number" step="0.01" autoFocus
-                            className="input !w-20 !py-0.5 !text-xs"
-                            value={pendingValue}
-                            onChange={(e) => setPendingValue(e.target.value)}
-                            onBlur={() => updatePendingMut.mutate({ id: c.id, data: { pending_charges: parseFloat(pendingValue) || 0 } })}
-                            onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                          />
-                        </span>
-                      ) : (
-                        <button
-                          className="hover:underline"
-                          onClick={() => { setEditingPending(c.id); setPendingValue(c.pending_charges || "0"); }}
-                        >
-                          Pending: {fmt(c.pending_charges || 0)} ✎
-                        </button>
-                      )}
+                    <div className="text-right shrink-0 ml-4">
+                      <p className={`text-sm font-bold tabular-nums ${utilColor(c.utilization_pct)}`}>{maskIfHidden(balancesHidden, fmt(c.current_balance))}</p>
+                      <p className="text-xs text-gray-500">{c.utilization_pct}% of {maskIfHidden(balancesHidden, fmt(c.credit_limit))}</p>
                     </div>
                   </div>
-                  <div className="text-right shrink-0 ml-4">
-                    <p className={`text-sm font-bold tabular-nums ${utilColor(c.utilization_pct)}`}>{maskIfHidden(balancesHidden, fmt(c.current_balance))}</p>
-                    <p className="text-xs text-gray-500">{c.utilization_pct}% of {maskIfHidden(balancesHidden, fmt(c.credit_limit))}</p>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
-
-        <CreditCardsDue />
 
         {/* Upcoming bills */}
         <div className="card">

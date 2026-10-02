@@ -256,7 +256,12 @@ def generate_daily_summary(
         pending_html = f" <span style='color:#9ca3af'>(+{fmt(pending)} pending)</span>" if pending else ""
         due_in = None
         if c.due_day:
-            days_out = (c.due_day - today.day) % calendar.monthrange(today.year, today.month)[1]
+            # Same next-occurrence helper _due_label uses below, so "due in
+            # Nd" and "due Mon D" can never disagree about which date is
+            # next (the old modulo-days-in-month math clamped differently
+            # than the date itself near short months -- e.g. due_day 31 on
+            # Sep 30 said "due in 1d" next to "due Sep 30").
+            days_out = (_next_occurrence_on_or_after(c.due_day, today) - today).days
             due_in = "due today" if days_out == 0 else f"due in {days_out}d"
         balance_due, cycle_spend, stale = _cycle_breakdown(c)
         breakdown = (
