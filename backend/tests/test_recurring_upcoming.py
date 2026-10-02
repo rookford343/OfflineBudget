@@ -201,3 +201,10 @@ def test_card_paid_bill_still_listed_with_card_id(db_session):
     rows = resp.json()
     assert len(rows) == 1
     assert rows[0]["card_id"] == card.id
+
+
+def test_days_window_is_bounded(db_session):
+    user = _user(db_session)
+    c = _client(db_session, user)
+    assert c.get("/recurring/upcoming", params={"days": 367}).status_code == 422
+    assert c.get("/recurring/upcoming", params={"days": -1}).status_code == 422

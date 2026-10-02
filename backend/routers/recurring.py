@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
@@ -260,7 +260,7 @@ def get_bills_to_confirm(
 # item_id and this endpoint 422s instead of answering.
 @router.get("/upcoming", response_model=list[schemas.UpcomingBillOut])
 def get_upcoming(
-    days: int = 30,
+    days: int = Query(30, ge=0, le=366),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
