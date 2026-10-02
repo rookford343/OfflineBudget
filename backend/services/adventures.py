@@ -183,3 +183,108 @@ def ensure_adventures_seeded(db: Session, user_id: int) -> None:
             db.add(models.ChecklistTemplateItem(user_id=user_id, category=category, name=name,
                                                 pricing=pricing, unit_cash=None, sort_order=i))
     db.flush()
+
+
+# ── Wallet math ──────────────────────────────────────────────────────────────
+
+_OPEN = (models.TripStatus.planning, models.TripStatus.committed)
+
+
+def reserved_by_program(db: Session, user_id: int, exclude_trip_id: int | None = None) -> dict[int, int]:
+    """Points spoken for by open (planning/committed) trips: each item's own
+    points, plus source points of any attached transfer."""
+    q = db.query(models.Trip).filter(models.Trip.user_id == user_id, models.Trip.status.in_(_OPEN))
+    if exclude_trip_id is not None:
+        q = q.filter(models.Trip.id != exclude_trip_id)
+    out: dict[int, int] = {}
+    for trip in q.all():
+        for it in trip.items:
+            used = points_used(it)
+            if used and it.points_program_id:
+                out[it.points_program_id] = out.get(it.points_program_id, 0) + used
+            if it.transfer_from_program_id and it.transfer_points:
+                out[it.transfer_from_program_id] = out.get(it.transfer_from_program_id, 0) + int(it.transfer_points)
+    return out
+
+
+def wallet(db: Session, user_id: int, today: date) -> list[dict]:
+    reserved = reserved_by_program(db, user_id)
+    rows = []
+    for p in db.query(models.LoyaltyProgram).filter(
+            models.LoyaltyProgram.user_id == user_id).order_by(
+            models.LoyaltyProgram.sort_order, models.LoyaltyProgram.id).all():
+        r = reserved.get(p.id, 0)
+        rows.append({
+            "id": p.id, "name": p.name, "kind": p.kind.value, "balance": p.balance,
+            "reserved": r, "available": p.balance - r,
+            "balance_updated_at": p.balance_updated_at,
+            "age_days": (today - p.balance_updated_at.date()).days if p.balance_updated_at else None,
+            "is_active": p.is_active, "sort_order": p.sort_order,
+        })
+    return rows
+
+
+def _partner_for(db: Session, user_id: int, from_id: int, to_id: int) -> models.TransferPartner | None:
+    return db.query(models.TransferPartner).filter(
+        models.TransferPartner.user_id == user_id,
+        models.TransferPartner.from_program_id == from_id,
+        models.TransferPartner.to_program_id == to_id).first()
+
+
+def trip_points_summary(db: Session, trip: models.Trip, today: date) -> dict[int, dict]:
+    """Per program this trip touches: points needed (items' own points plus
+    transfer source points), what's available after OTHER open trips,
+    partner points arriving from attached transfers, and the shortfall."""
+    others = reserved_by_program(db, trip.user_id, exclude_trip_id=trip.id)
+    needed: dict[int, int] = {}
+    incoming: dict[int, int] = {}
+    for it in trip.items:
+        used = points_used(it)
+        if used and it.points_program_id:
+            needed[it.points_program_id] = needed.get(it.points_program_id, 0) + used
+        if it.transfer_from_program_id and it.transfer_points:
+            src = it.transfer_from_program_id
+            needed[src] = needed.get(src, 0) + int(it.transfer_points)
+            if used and it.points_program_id:
+                partner = _partner_for(db, trip.user_id, src, it.points_program_id)
+                if partner:
+                    got = partner_points_received(partner, int(it.transfer_points), today)
+                    incoming[it.points_program_id] = incoming.get(it.points_program_id, 0) + got
+    out: dict[int, dict] = {}
+    for pid in needed:
+        prog = db.get(models.LoyaltyProgram, pid)
+        if prog is None or prog.user_id != trip.user_id:
+            continue
+        avail = prog.balance - others.get(pid, 0)
+        inc = incoming.get(pid, 0)
+        out[pid] = {"program_id": pid, "name": prog.name, "needed": needed[pid],
+                    "available": avail, "incoming": inc,
+                    "shortfall": max(needed[pid] - avail - inc, 0)}
+    return out
+
+
+def suggest_transfer(db: Session, item: models.TripItem, trip: models.Trip, today: date) -> dict | None:
+    if points_used(item) <= 0 or not item.points_program_id or item.transfer_from_program_id:
+        return None
+    summary = trip_points_summary(db, trip, today)
+    short = summary.get(item.points_program_id, {}).get("shortfall", 0)
+    if short <= 0:
+        return None
+    best = None
+    for partner in db.query(models.TransferPartner).filter(
+            models.TransferPartner.user_id == trip.user_id,
+            models.TransferPartner.to_program_id == item.points_program_id).all():
+        src = partner.from_program
+        if src is None or not src.is_active:
+            continue
+        need = source_points_needed(partner, short, today)
+        src_left = summary[src.id]["available"] - summary[src.id]["needed"] if src.id in summary \
+            else src.balance - reserved_by_program(db, trip.user_id).get(src.id, 0)
+        if src_left < need:
+            continue
+        if best is None or need < best["source_points"]:
+            best = {"from_program_id": src.id, "from_program_name": src.name,
+                    "source_points": need,
+                    "partner_points": partner_points_received(partner, need, today),
+                    "bonus_pct": Decimal(partner.bonus_pct).quantize(CENT) if bonus_active(partner, today) else None}
+    return best
