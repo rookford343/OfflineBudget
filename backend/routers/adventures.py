@@ -92,6 +92,15 @@ def _check_refs(db, user, *, program_ids=(), card_ids=()):
                 raise HTTPException(status_code=422, detail="Unknown card")
 
 
+def _reject_nulls(data: dict, required: set[str]):
+    """422s an explicit JSON null on a field the model stores NOT NULL. Without
+    this, the setattr loops write None straight through and the eventual
+    commit surfaces as an IntegrityError (500) instead of a validation error."""
+    for key in required:
+        if key in data and data[key] is None:
+            raise HTTPException(status_code=422, detail=f"{key} can't be empty")
+
+
 # ── Wallet / programs ────────────────────────────────────────────────────────
 
 @router.get("/wallet", response_model=list[schemas.WalletRow])
@@ -115,6 +124,7 @@ def update_program(program_id: int, body: schemas.ProgramUpdate, db: Session = D
                    user: models.User = Depends(get_current_user)):
     p = _own(db, models.LoyaltyProgram, program_id, user)
     data = body.model_dump(exclude_unset=True)
+    _reject_nulls(data, {"name", "balance", "is_active", "sort_order"})
     for k, v in data.items():
         setattr(p, k, v)
     if "balance" in data:
@@ -168,7 +178,9 @@ def create_partner(body: schemas.PartnerIn, db: Session = Depends(get_db),
 def update_partner(partner_id: int, body: schemas.PartnerUpdate, db: Session = Depends(get_db),
                    user: models.User = Depends(get_current_user)):
     p = _own(db, models.TransferPartner, partner_id, user)
-    for k, v in body.model_dump(exclude_unset=True).items():
+    data = body.model_dump(exclude_unset=True)
+    _reject_nulls(data, {"ratio"})
+    for k, v in data.items():
         setattr(p, k, v)
     db.commit(); db.refresh(p)
     return _partner_out(p)
@@ -251,10 +263,12 @@ def update_trip(trip_id: int, body: schemas.TripUpdate, db: Session = Depends(ge
     trip = _own(db, models.Trip, trip_id, user)
     _not_done(trip)
     data = body.model_dump(exclude_unset=True)
+    _reject_nulls(data, {"name", "start_date", "end_date", "travelers"})
     _check_refs(db, user, card_ids=(data.get("default_card_id"),))
     for k, v in data.items():
         setattr(trip, k, v)
     if trip.end_date < trip.start_date:
+        db.rollback()
         raise HTTPException(status_code=422, detail="end date is before start date")
     life.sync_trip_planned_expenses(db, trip)
     db.commit(); db.refresh(trip)
@@ -290,7 +304,8 @@ def add_item(trip_id: int, body: schemas.TripItemIn, db: Session = Depends(get_d
         raise HTTPException(status_code=422, detail="category and name are required")
     _check_refs(db, user, program_ids=(data.get("points_program_id"), data.get("transfer_from_program_id")),
                 card_ids=(data.get("card_id"),))
-    item = models.TripItem(user_id=user.id, cash_copay=Decimal("0"), is_paid=False,
+    data["cash_copay"] = data.get("cash_copay") or Decimal("0")
+    item = models.TripItem(user_id=user.id, is_paid=False,
                            sort_order=len(trip.items), **data)
     _validate_item(db, item)
     trip.items.append(item)
@@ -310,6 +325,7 @@ def update_item(trip_id: int, item_id: int, body: schemas.TripItemIn, db: Sessio
     _not_done(trip)
     data = body.model_dump(exclude_unset=True)
     paid = data.pop("is_paid", None)
+    _reject_nulls(data, {"category", "name", "pricing", "payment"})
     _check_refs(db, user, program_ids=(data.get("points_program_id"), data.get("transfer_from_program_id")),
                 card_ids=(data.get("card_id"),))
     for k, v in data.items():
