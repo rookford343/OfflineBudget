@@ -279,6 +279,9 @@ def _lookahead_minimum(
     days = build_forecast(
         db, user_id, account_id, as_of - timedelta(days=45), end,
         overrides=overrides, proposal=proposal,
+        # Safety Margin subtracts this month's card bills itself, so the
+        # walk must not also fold them into the carried cycle's payoff.
+        include_unbilled_card_bills=False,
     )
     if not days:
         return Decimal("0"), None

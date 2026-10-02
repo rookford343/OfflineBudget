@@ -311,6 +311,7 @@ def build_forecast(
     overrides: list[dict] | None = None,
     apply_buffer_transfers: bool = True,
     proposal: ScenarioProposal | None = None,
+    include_unbilled_card_bills: bool = True,
 ) -> list[ForecastEntry]:
     account: models.Account = db.query(models.Account).filter(
         models.Account.id == account_id,
@@ -643,7 +644,11 @@ def build_forecast(
                     if _fires_on(item, cursor):
                         upcoming += item.amount
                 cursor += timedelta(days=1)
-            derived_amount = carried + upcoming
+            # The Safety Margin floor opts out of `upcoming`: it subtracts this
+            # month's card bills on its own (the user's sheet, '2026 Overview'!B18),
+            # and counting them here as well charged them twice (found live
+            # 2026-10-01). The Forecast page keeps them in the payoff.
+            derived_amount = carried + (upcoming if include_unbilled_card_bills else Decimal("0"))
 
         # Second hop: the cycle right after the one just derived above.
         # There is no "carried" real balance signal for it yet -- that
