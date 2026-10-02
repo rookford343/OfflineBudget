@@ -100,6 +100,7 @@ export const recurringApi = {
   billsToConfirm: () => api.get("/recurring/bills-to-confirm").then((r) => r.data),
   monthSummary: (year: number, month: number) =>
     api.get("/recurring/month-summary", { params: { year, month } }).then((r) => r.data),
+  upcoming: (days = 30) => api.get("/recurring/upcoming", { params: { days } }).then((r) => r.data),
 };
 
 // ── Forecast ──────────────────────────────────────────────────────────────────
