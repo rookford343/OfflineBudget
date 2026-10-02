@@ -169,6 +169,34 @@ def test_add_item_with_cash_copay_does_not_500(db_session):
     assert any(i["name"] == "Snacks" for i in r2.json()["items"])
 
 
+def test_delete_partner_used_by_an_attached_transfer_is_409(db_session):
+    """I3: mirrors delete_program -- a partner an item's attached transfer
+    points at (transfer_from_program_id -> points_program_id) can't be
+    deleted out from under that item. An unused partner still deletes fine."""
+    c = _client(db_session, _user(db_session))
+    wallet = c.get("/adventures/wallet").json()
+    chase = next(r for r in wallet if r["name"] == "Chase Ultimate Rewards")
+    virgin = next(r for r in wallet if r["name"] == "Virgin Atlantic Flying Club")
+    hyatt = next(r for r in wallet if r["name"] == "World of Hyatt")
+    partners = c.get("/adventures/partners").json()
+    used_partner = next(p for p in partners if p["from_program_id"] == chase["id"] and p["to_program_id"] == virgin["id"])
+    unused_partner = next(p for p in partners if p["from_program_id"] == chase["id"] and p["to_program_id"] == hyatt["id"])
+
+    t = _new_trip(c)
+    flights = next(i for i in t["items"] if i["name"] == "Flights")
+    r = c.patch(f"/adventures/trips/{t['id']}/items/{flights['id']}",
+                json={"payment": "points", "points_program_id": virgin["id"], "points_price": 70000,
+                      "unit_cash": "600.00", "transfer_from_program_id": chase["id"], "transfer_points": 70000})
+    assert r.status_code == 200, r.text
+
+    bad = c.delete(f"/adventures/partners/{used_partner['id']}")
+    assert bad.status_code == 409, bad.text
+    assert bad.json()["detail"] == "Partner is used by a trip item's transfer"
+
+    ok = c.delete(f"/adventures/partners/{unused_partner['id']}")
+    assert ok.status_code == 204, ok.text
+
+
 def test_patch_rejects_explicit_null_on_required_fields(db_session):
     """I2: an explicit JSON null on a NOT NULL field used to sail through the
     setattr loop and blow up as a 500 at commit (IntegrityError) instead of a

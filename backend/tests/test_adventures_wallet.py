@@ -2,7 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from backend import models
 from backend.services.adventures import (
-    reserved_by_program, wallet, trip_points_summary, suggest_transfer,
+    reserved_by_program, wallet, trip_points_summary, suggest_transfer, partner_points_received,
 )
 
 TODAY = date(2027, 1, 10)
@@ -49,9 +49,42 @@ def test_transfer_points_reserve_the_source_program(db_session):
     u = _user(db_session)
     bank = _prog(db_session, u, "Bank", 80000, models.LoyaltyKind.bank)
     air = _prog(db_session, u, "Air", 0)
+    partner = models.TransferPartner(user_id=u.id, from_program_id=bank.id,
+                                     to_program_id=air.id, ratio=Decimal("1"))
+    db_session.add(partner); db_session.flush()
     _pts_item(db_session, _trip(db_session, u), air, 70000,
               transfer_from=bank.id, transfer_points=53847)
-    assert reserved_by_program(db_session, u.id) == {air.id: 70000, bank.id: 53847}
+    credited = partner_points_received(partner, 53847, TODAY)   # ratio 1 -> 53847
+    assert reserved_by_program(db_session, u.id, today=TODAY) == {
+        air.id: 70000 - credited, bank.id: 53847,
+    }
+
+
+def test_second_trip_shortfall_not_inflated_by_first_trips_credited_transfer(db_session):
+    """Chase 100k, Virgin 0; trip1 needs 70k Virgin with a 70k Chase transfer
+    attached (the spec's example). Before crediting the partner side back,
+    trip1 left Virgin showing -70000 available, so a second trip's Virgin
+    shortfall -- and suggest_transfer's suggestion -- were inflated by that
+    phantom deficit instead of reflecting trip2's own, much smaller need."""
+    u = _user(db_session)
+    chase = _prog(db_session, u, "Chase", 100000, models.LoyaltyKind.bank)
+    virgin = _prog(db_session, u, "Virgin", 0)
+    db_session.add(models.TransferPartner(user_id=u.id, from_program_id=chase.id,
+                                          to_program_id=virgin.id, ratio=Decimal("1")))
+    db_session.flush()
+    trip1 = _trip(db_session, u, name="Trip1")
+    _pts_item(db_session, trip1, virgin, 70000, transfer_from=chase.id, transfer_points=70000)
+
+    trip2 = _trip(db_session, u, name="Trip2")
+    item2 = _pts_item(db_session, trip2, virgin, 20000)
+
+    summary = trip_points_summary(db_session, trip2, TODAY)[virgin.id]
+    assert summary["needed"] == 20000
+    assert summary["shortfall"] == 20000   # exactly trip2's own need
+
+    suggestion = suggest_transfer(db_session, item2, trip2, TODAY)
+    assert suggestion == {"from_program_id": chase.id, "from_program_name": "Chase",
+                          "source_points": 20000, "partner_points": 20000, "bonus_pct": None}
 
 
 def test_wallet_age_days(db_session):

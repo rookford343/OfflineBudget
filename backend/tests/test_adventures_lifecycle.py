@@ -137,8 +137,64 @@ def test_uncommit_removes_unsettled_only(db_session):
     uncommit_trip(db_session, trip)
     pes = _pes(db_session, u)
     assert [pe.name for pe in pes] == ["Beach: Lodging"] and pes[0].settled_on == TODAY
-    assert food.planned_expense_id is None and lodging.planned_expense_id is None
+    # I2: the settled row's link is KEPT (not nulled) so recommit finds it
+    # again instead of sync creating a duplicate; only the unsettled Food
+    # link is dropped.
+    assert food.planned_expense_id is None
+    assert lodging.planned_expense_id == pes[0].id
     assert trip.status == models.TripStatus.planning
+
+
+def test_uncommit_recommit_keeps_link_to_settled_one_off_no_duplicate(db_session):
+    """I2 scenario (a): a one-off gets settled directly on the Planned page
+    while its Adventures item is still unpaid. Uncommit then recommit must
+    not create a second, unsettled row for the same item -- and sync should
+    flip the item's is_paid to match the Planned page's settled row."""
+    u, _, _, trip = _setup(db_session)
+    lodging = _by_name(trip, "Lodging"); lodging.unit_cash = Decimal("200.00")
+    _by_name(trip, "Buffer").unit_cash = Decimal("0")
+    commit_trip(db_session, trip)
+    pe = db_session.get(models.PlannedExpense, lodging.planned_expense_id)
+    pe.settled_on = TODAY
+    pe.actual_amount = Decimal("800.00")
+    db_session.flush()
+    assert lodging.is_paid is False   # settled on the Planned page, not via the item
+
+    uncommit_trip(db_session, trip)
+    assert lodging.planned_expense_id == pe.id   # link kept, not dropped
+
+    commit_trip(db_session, trip)   # recommit runs sync again
+    pes = _pes(db_session, u)
+    assert [p.name for p in pes] == ["Beach: Lodging"]   # no duplicate row
+    assert pes[0].id == pe.id and pes[0].settled_on == TODAY
+    assert lodging.is_paid is True   # sync brought the item in line with Planned
+
+
+def test_uncommit_recommit_unpay_reopens_original_row(db_session):
+    """I2 scenario (b): an item is paid, then uncommitted and recommitted.
+    Un-paying it afterward must reopen the SAME settled row (settled_on back
+    to None), not orphan it and create a new one."""
+    u, _, _, trip = _setup(db_session)
+    lodging = _by_name(trip, "Lodging"); lodging.unit_cash = Decimal("200.00")
+    _by_name(trip, "Buffer").unit_cash = Decimal("0")
+    commit_trip(db_session, trip)
+    set_item_paid(db_session, trip, lodging, True, TODAY)
+    pe_id = lodging.planned_expense_id
+    pe = db_session.get(models.PlannedExpense, pe_id)
+    assert pe.settled_on == TODAY
+
+    uncommit_trip(db_session, trip)
+    assert lodging.planned_expense_id == pe_id   # link kept across uncommit
+
+    commit_trip(db_session, trip)
+    assert lodging.planned_expense_id == pe_id   # recommit didn't touch it (is_paid still True)
+
+    set_item_paid(db_session, trip, lodging, False, TODAY)
+    pes = _pes(db_session, u)
+    assert [p.name for p in pes] == ["Beach: Lodging"]   # still exactly one row
+    assert pes[0].id == pe_id   # the ORIGINAL row, not a new one
+    assert pes[0].settled_on is None and pes[0].actual_amount is None
+    assert lodging.planned_expense_id == pe_id
 
 
 def test_delete_item_and_trip_clean_up_one_offs(db_session):

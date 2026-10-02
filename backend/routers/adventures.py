@@ -189,7 +189,15 @@ def update_partner(partner_id: int, body: schemas.PartnerUpdate, db: Session = D
 @router.delete("/partners/{partner_id}", status_code=204)
 def delete_partner(partner_id: int, db: Session = Depends(get_db),
                    user: models.User = Depends(get_current_user)):
-    db.delete(_own(db, models.TransferPartner, partner_id, user)); db.commit()
+    p = _own(db, models.TransferPartner, partner_id, user)
+    used = db.query(models.TripItem).filter(
+        models.TripItem.user_id == user.id,
+        models.TripItem.transfer_from_program_id == p.from_program_id,
+        models.TripItem.points_program_id == p.to_program_id,
+    ).first()
+    if used:
+        raise HTTPException(status_code=409, detail="Partner is used by a trip item's transfer")
+    db.delete(p); db.commit()
     return Response(status_code=204)
 
 

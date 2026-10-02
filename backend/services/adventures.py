@@ -190,9 +190,14 @@ def ensure_adventures_seeded(db: Session, user_id: int) -> None:
 _OPEN = (models.TripStatus.planning, models.TripStatus.committed)
 
 
-def reserved_by_program(db: Session, user_id: int, exclude_trip_id: int | None = None) -> dict[int, int]:
+def reserved_by_program(db: Session, user_id: int, exclude_trip_id: int | None = None,
+                        today: date | None = None) -> dict[int, int]:
     """Points spoken for by open (planning/committed) trips: each item's own
-    points, plus source points of any attached transfer."""
+    points, plus source points of any attached transfer -- net of the partner
+    points that transfer credits to the item's own program. Reserved can go
+    negative for a program that's a net receiver, which means a net credit."""
+    if today is None:
+        today = date.today()
     q = db.query(models.Trip).filter(models.Trip.user_id == user_id, models.Trip.status.in_(_OPEN))
     if exclude_trip_id is not None:
         q = q.filter(models.Trip.id != exclude_trip_id)
@@ -204,11 +209,16 @@ def reserved_by_program(db: Session, user_id: int, exclude_trip_id: int | None =
                 out[it.points_program_id] = out.get(it.points_program_id, 0) + used
             if it.transfer_from_program_id and it.transfer_points:
                 out[it.transfer_from_program_id] = out.get(it.transfer_from_program_id, 0) + int(it.transfer_points)
+                if used and it.points_program_id:
+                    partner = _partner_for(db, user_id, it.transfer_from_program_id, it.points_program_id)
+                    if partner:
+                        got = partner_points_received(partner, int(it.transfer_points), today)
+                        out[it.points_program_id] = out.get(it.points_program_id, 0) - got
     return out
 
 
 def wallet(db: Session, user_id: int, today: date) -> list[dict]:
-    reserved = reserved_by_program(db, user_id)
+    reserved = reserved_by_program(db, user_id, today=today)
     rows = []
     for p in db.query(models.LoyaltyProgram).filter(
             models.LoyaltyProgram.user_id == user_id).order_by(
@@ -235,7 +245,7 @@ def trip_points_summary(db: Session, trip: models.Trip, today: date) -> dict[int
     """Per program this trip touches: points needed (items' own points plus
     transfer source points), what's available after OTHER open trips,
     partner points arriving from attached transfers, and the shortfall."""
-    others = reserved_by_program(db, trip.user_id, exclude_trip_id=trip.id)
+    others = reserved_by_program(db, trip.user_id, exclude_trip_id=trip.id, today=today)
     needed: dict[int, int] = {}
     incoming: dict[int, int] = {}
     for it in trip.items:
@@ -271,7 +281,7 @@ def suggest_transfer(db: Session, item: models.TripItem, trip: models.Trip, toda
     if short <= 0:
         return None
     best = None
-    all_reserved = reserved_by_program(db, trip.user_id)
+    all_reserved = reserved_by_program(db, trip.user_id, today=today)
     for partner in db.query(models.TransferPartner).filter(
             models.TransferPartner.user_id == trip.user_id,
             models.TransferPartner.to_program_id == item.points_program_id).all():
