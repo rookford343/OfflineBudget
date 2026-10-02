@@ -325,6 +325,24 @@ class RecurringOut(BaseModel):
     statement_day: Optional[int] = None
 
 
+class UpcomingBillOut(BaseModel):
+    """One row in the Dashboard's Upcoming Bills card: GET /recurring/upcoming.
+
+    due_date is the item's real next fire date (summary_generator's
+    _next_fire_date, honouring frequency/start/end/month_of_year), not
+    day_of_month alone. amount substitutes the confirmed BillAmountOverride
+    for this exact (item, due_date) pair when one exists -- estimated_amount
+    always stays the item's own planning amount so the UI can show both.
+    """
+    recurring_item_id: int
+    name: str
+    due_date: date
+    amount: Decimal
+    estimated_amount: Decimal
+    is_actual: bool
+    card_id: Optional[int] = None
+
+
 class RecurringBreakdownItem(BaseModel):
     """One recurring item, normalized to what it costs per month."""
     id: int
