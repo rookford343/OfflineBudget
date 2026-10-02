@@ -14,6 +14,115 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend.models import TripCategory as C, TripPricing as P
 
+# Rules: Pure functions for cash/points calculations
+
+CENT = Decimal("0.01")
+
+
+def _q(v: Decimal) -> Decimal:
+    return v.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def nights(trip: models.Trip) -> int:
+    return max((trip.end_date - trip.start_date).days, 0)
+
+
+def days(trip: models.Trip) -> int:
+    return nights(trip) + 1
+
+
+def multiplier(item: models.TripItem, trip: models.Trip) -> int:
+    p = item.pricing
+    if p == models.TripPricing.per_day:
+        return days(trip)
+    if p == models.TripPricing.per_night:
+        return nights(trip)
+    if p == models.TripPricing.per_person:
+        return trip.travelers
+    if p == models.TripPricing.per_person_day:
+        return trip.travelers * days(trip)
+    return 1
+
+
+def is_auto_buffer(item: models.TripItem) -> bool:
+    return (item.name.strip().lower() == "buffer"
+            and item.pricing == models.TripPricing.flat and item.unit_cash is None)
+
+
+def points_used(item: models.TripItem) -> int:
+    if item.payment in (models.TripPayment.points, models.TripPayment.mix):
+        return int(item.points_price or 0)
+    return 0
+
+
+def _raw_cash_price(item: models.TripItem, trip: models.Trip) -> Decimal:
+    return _q(Decimal(item.unit_cash or 0) * multiplier(item, trip))
+
+
+def _owed_from_price(item: models.TripItem, price: Decimal) -> Decimal:
+    copay = Decimal(item.cash_copay or 0)
+    if item.payment == models.TripPayment.points:
+        return _q(copay)
+    if item.payment == models.TripPayment.mix:
+        return _q(Decimal(item.mix_cash or 0) + copay)
+    return price
+
+
+def buffer_amount(trip: models.Trip) -> Decimal:
+    """10% of the cash owed on every non-auto-buffer item (spec Rules)."""
+    others = sum((_owed_from_price(i, _raw_cash_price(i, trip))
+                  for i in trip.items if not is_auto_buffer(i)), Decimal("0"))
+    return _q(others * Decimal("0.10"))
+
+
+def cash_price(item: models.TripItem, trip: models.Trip) -> Decimal:
+    if is_auto_buffer(item):
+        return buffer_amount(trip)
+    return _raw_cash_price(item, trip)
+
+
+def cash_owed(item: models.TripItem, trip: models.Trip) -> Decimal:
+    return _owed_from_price(item, cash_price(item, trip))
+
+
+def trip_cash_total(trip: models.Trip) -> Decimal:
+    return sum((cash_owed(i, trip) for i in trip.items), Decimal("0"))
+
+
+def value_cpp(item: models.TripItem, trip: models.Trip) -> Decimal | None:
+    pts = points_used(item)
+    if pts <= 0:
+        return None
+    numerator = cash_price(item, trip) - Decimal(item.cash_copay or 0)
+    if item.payment == models.TripPayment.mix:
+        numerator -= Decimal(item.mix_cash or 0)
+    if numerator <= 0:
+        return None
+    return _q(numerator / Decimal(pts) * 100)
+
+
+def bonus_active(partner: models.TransferPartner, today: date) -> bool:
+    return partner.bonus_pct is not None and (
+        partner.bonus_ends_on is None or today <= partner.bonus_ends_on)
+
+
+def effective_ratio(partner: models.TransferPartner, today: date) -> Decimal:
+    ratio = Decimal(partner.ratio)
+    if bonus_active(partner, today):
+        ratio = ratio * (1 + Decimal(partner.bonus_pct) / 100)
+    return ratio
+
+
+def source_points_needed(partner: models.TransferPartner, target_points: int, today: date) -> int:
+    """Rounded UP so a transfer is never short (Global Constraints)."""
+    return int((Decimal(target_points) / effective_ratio(partner, today)).to_integral_value(rounding=ROUND_CEILING))
+
+
+def partner_points_received(partner: models.TransferPartner, source_points: int, today: date) -> int:
+    """Rounded DOWN -- programs credit whole points only."""
+    return int((Decimal(source_points) * effective_ratio(partner, today)).to_integral_value(rounding=ROUND_FLOOR))
+
+
 CHASE_UR = "Chase Ultimate Rewards"
 STARTER_AIRLINES = [
     "Aer Lingus AerClub", "Air Canada Aeroplan", "Air France/KLM Flying Blue",
