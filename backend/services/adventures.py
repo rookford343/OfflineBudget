@@ -271,6 +271,7 @@ def suggest_transfer(db: Session, item: models.TripItem, trip: models.Trip, toda
     if short <= 0:
         return None
     best = None
+    all_reserved = reserved_by_program(db, trip.user_id)
     for partner in db.query(models.TransferPartner).filter(
             models.TransferPartner.user_id == trip.user_id,
             models.TransferPartner.to_program_id == item.points_program_id).all():
@@ -278,8 +279,11 @@ def suggest_transfer(db: Session, item: models.TripItem, trip: models.Trip, toda
         if src is None or not src.is_active:
             continue
         need = source_points_needed(partner, short, today)
+        # If src.id is in summary, use that (it has both needed and available computed).
+        # Else use balance - all_reserved, which gives the same answer: a source absent
+        # from needed has no reservation in this trip.
         src_left = summary[src.id]["available"] - summary[src.id]["needed"] if src.id in summary \
-            else src.balance - reserved_by_program(db, trip.user_id).get(src.id, 0)
+            else src.balance - all_reserved.get(src.id, 0)
         if src_left < need:
             continue
         if best is None or need < best["source_points"]:
