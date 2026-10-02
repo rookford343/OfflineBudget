@@ -31,6 +31,7 @@ from backend.routers import verification_flags as verification_flags_router_modu
 from backend.routers import settings as settings_router_module
 from backend.routers import merchants as merchants_router_module
 from backend.routers import bill_overrides as bill_overrides_router_module
+from backend.routers import adventures as adventures_router_module
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +317,7 @@ app.include_router(verification_flags_router_module.router)
 app.include_router(settings_router_module.router)
 app.include_router(merchants_router_module.router)
 app.include_router(bill_overrides_router_module.router)
+app.include_router(adventures_router_module.router)
 
 
 @app.get("/health", tags=["health"])
