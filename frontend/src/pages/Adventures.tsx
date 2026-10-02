@@ -18,12 +18,14 @@ function NewTripForm({ onCreated }: { onCreated: (id: number) => void }) {
   const qc = useQueryClient();
   const { data: cards = [] } = useQuery<any[]>({ queryKey: ["credit-cards"], queryFn: cardsApi.list });
   const [f, setF] = useState({ name: "", destination: "", start_date: "", end_date: "", travelers: "2", default_card_id: "" });
+  const [error, setError] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: () => adventuresApi.createTrip({
       name: f.name, destination: f.destination || null, start_date: f.start_date, end_date: f.end_date,
       travelers: parseInt(f.travelers || "1", 10), default_card_id: f.default_card_id ? Number(f.default_card_id) : null,
     }),
-    onSuccess: (trip) => { qc.invalidateQueries({ queryKey: ["adventures"] }); onCreated(trip.id); },
+    onSuccess: (trip) => { qc.invalidateQueries({ queryKey: ["adventures"] }); setError(null); onCreated(trip.id); },
+    onError: (e: any) => setError(e?.response?.data?.detail ?? "Couldn't save"),
   });
   const ok = f.name && f.start_date && f.end_date && f.end_date >= f.start_date;
   return (
@@ -39,6 +41,7 @@ function NewTripForm({ onCreated }: { onCreated: (id: number) => void }) {
         </select>
       </label>
       <button className="btn-primary md:col-span-1" disabled={!ok || create.isPending} onClick={() => create.mutate()}>Create</button>
+      {error && <p className="text-xs text-red-500 md:col-span-6">{error}</p>}
     </div>
   );
 }
