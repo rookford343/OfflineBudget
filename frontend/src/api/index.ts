@@ -342,6 +342,38 @@ export const exportsApi = {
     api.get("/export/budget-report", { params: { year, month, format }, responseType: "blob" }).then((r) => r.data),
 };
 
+// ── Adventures ───────────────────────────────────────────────────────────────
+export const adventuresApi = {
+  wallet: () => api.get("/adventures/wallet").then((r) => r.data),
+  createProgram: (data: object) => api.post("/adventures/programs", data).then((r) => r.data),
+  updateProgram: (id: number, data: object) => api.patch(`/adventures/programs/${id}`, data).then((r) => r.data),
+  removeProgram: (id: number) => api.delete(`/adventures/programs/${id}`),
+  partners: () => api.get("/adventures/partners").then((r) => r.data),
+  createPartner: (data: object) => api.post("/adventures/partners", data).then((r) => r.data),
+  updatePartner: (id: number, data: object) => api.patch(`/adventures/partners/${id}`, data).then((r) => r.data),
+  removePartner: (id: number) => api.delete(`/adventures/partners/${id}`),
+  template: () => api.get("/adventures/template").then((r) => r.data),
+  resetTemplate: () => api.post("/adventures/template/reset").then((r) => r.data),
+  trips: () => api.get("/adventures/trips").then((r) => r.data),
+  trip: (id: number) => api.get(`/adventures/trips/${id}`).then((r) => r.data),
+  createTrip: (data: object) => api.post("/adventures/trips", data).then((r) => r.data),
+  updateTrip: (id: number, data: object) => api.patch(`/adventures/trips/${id}`, data).then((r) => r.data),
+  removeTrip: (id: number) => api.delete(`/adventures/trips/${id}`),
+  addItem: (id: number, data: object) => api.post(`/adventures/trips/${id}/items`, data).then((r) => r.data),
+  updateItem: (id: number, itemId: number, data: object) =>
+    api.patch(`/adventures/trips/${id}/items/${itemId}`, data).then((r) => r.data),
+  removeItem: (id: number, itemId: number, fromTemplate = false) =>
+    api.delete(`/adventures/trips/${id}/items/${itemId}`, { params: { remove_from_template: fromTemplate } }).then((r) => r.data),
+  commit: (id: number) => api.post(`/adventures/trips/${id}/commit`).then((r) => r.data),
+  uncommit: (id: number) => api.post(`/adventures/trips/${id}/uncommit`).then((r) => r.data),
+  finishPlan: (id: number) => api.get(`/adventures/trips/${id}/finish-plan`).then((r) => r.data),
+  finish: (id: number, data: object) => api.post(`/adventures/trips/${id}/finish`, data).then((r) => r.data),
+  createFund: (id: number) => api.post(`/adventures/trips/${id}/fund`).then((r) => r.data),
+  updateFund: (id: number) => api.post(`/adventures/trips/${id}/fund/update`).then((r) => r.data),
+  removeFund: (id: number, deleteGoal: boolean) =>
+    api.delete(`/adventures/trips/${id}/fund`, { params: { delete_goal: deleteGoal } }).then((r) => r.data),
+};
+
 // ── Verification Flags ──────────────────────────────────────────────────────
 export const verificationFlagsApi = {
   list: (params?: { feature?: string; status?: string }) =>
