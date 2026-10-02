@@ -1029,11 +1029,12 @@ export default function Forecast() {
       </div>
       </div>
 
-      {/* Quarter summaries -- collapsed tiles in a 2x2 grid (Q1|Q2 on row
-          one, Q3|Q4 on row two; with 2 years selected, 4 rows of 2).
-          Clicking a tile selects it; the full detail for the selected
-          quarter renders once, below the grid, instead of inline. */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      {/* Quarter summaries -- collapsed tiles, one row of four on wide
+          screens (Q1|Q2|Q3|Q4; with 2 years selected, two rows), 2x2 on
+          laptop widths, stacked on phones. Clicking a tile selects it; the
+          full detail for the selected quarter renders once, below the row,
+          instead of inline. */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
         {(quarters as any[]).map((q: any) => {
           const qKey = `${q.year}-${q.quarter}`;
           const qEndDate = quarterEndDates[q.quarter];
