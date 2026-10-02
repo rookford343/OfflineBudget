@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Dialog from "@radix-ui/react-dialog";
 import { ArrowRightLeft, ChevronDown, ChevronUp, X } from "lucide-react";
@@ -11,10 +11,18 @@ function ProgramChip({ p }: { p: WalletRow }) {
   const hidden = useBalancesHidden();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(String(p.balance));
+  const [error, setError] = useState<string | null>(null);
   const save = useMutation({
-    mutationFn: () => adventuresApi.updateProgram(p.id, { balance: Math.max(0, parseInt(value || "0", 10)) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["adventures"] }); setEditing(false); },
+    mutationFn: (balance: number) => adventuresApi.updateProgram(p.id, { balance }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["adventures"] }); setEditing(false); setError(null); },
+    onError: (e: any) => setError(e?.response?.data?.detail ?? "Couldn't save"),
   });
+  const submitBalance = () => {
+    const n = parseInt(value || "0", 10);
+    if (Number.isNaN(n)) { setError("Enter a whole number"); return; }
+    setError(null);
+    save.mutate(Math.max(0, n));
+  };
   const stale = p.age_days !== null && p.age_days > 30;
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-700 px-3 py-2 min-w-[180px]">
@@ -23,15 +31,16 @@ function ProgramChip({ p }: { p: WalletRow }) {
         <div className="flex items-center gap-1 mt-1">
           <input className="input py-0.5 w-28 text-sm" type="number" min={0} value={value} autoFocus
             onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") save.mutate(); if (e.key === "Escape") setEditing(false); }} />
-          <button className="btn-primary text-xs px-2 py-0.5" onClick={() => save.mutate()}>Save</button>
+            onKeyDown={(e) => { if (e.key === "Enter") submitBalance(); if (e.key === "Escape") { setEditing(false); setError(null); } }} />
+          <button className="btn-primary text-xs px-2 py-0.5" onClick={submitBalance}>Save</button>
         </div>
       ) : (
         <button className="text-lg font-bold tabular-nums text-gray-900 dark:text-gray-100 hover:text-indigo-600"
-          title="Edit balance" onClick={() => { setValue(String(p.balance)); setEditing(true); }}>
+          title="Edit balance" onClick={() => { setValue(String(p.balance)); setEditing(true); setError(null); }}>
           {maskIfHidden(hidden, pts(p.balance))}
         </button>
       )}
+      {error && <p className="text-xs text-red-500 mt-0.5">{error}</p>}
       <p className="text-xs text-gray-500 dark:text-gray-400">
         {p.reserved > 0 && <>{maskIfHidden(hidden, pts(p.available))} available · </>}
         <span className={stale ? "text-amber-600 dark:text-amber-400" : ""}>
@@ -45,18 +54,27 @@ function ProgramChip({ p }: { p: WalletRow }) {
 function PartnersDialog({ programs }: { programs: WalletRow[] }) {
   const qc = useQueryClient();
   const { data: partners = [] } = useQuery<PartnerRow[]>({ queryKey: ["adventures", "partners"], queryFn: adventuresApi.partners });
+  const [rowErrors, setRowErrors] = useState<Record<number, string>>({});
+  const clearRowError = (id: number) =>
+    setRowErrors((prev) => { if (!(id in prev)) return prev; const next = { ...prev }; delete next[id]; return next; });
   const update = useMutation({
     mutationFn: ({ id, data }: { id: number; data: object }) => adventuresApi.updatePartner(id, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adventures"] }),
+    onSuccess: (_data, variables) => { qc.invalidateQueries({ queryKey: ["adventures"] }); clearRowError(variables.id); },
+    onError: (e: any, variables) =>
+      setRowErrors((prev) => ({ ...prev, [variables.id]: e?.response?.data?.detail ?? "Couldn't save" })),
   });
   const remove = useMutation({
     mutationFn: (id: number) => adventuresApi.removePartner(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["adventures"] }),
+    onSuccess: (_data, id) => { qc.invalidateQueries({ queryKey: ["adventures"] }); clearRowError(id); },
+    onError: (e: any, id) =>
+      setRowErrors((prev) => ({ ...prev, [id]: e?.response?.data?.detail ?? "Couldn't remove" })),
   });
   const [from, setFrom] = useState(""); const [to, setTo] = useState(""); const [ratio, setRatio] = useState("1");
+  const [addError, setAddError] = useState<string | null>(null);
   const add = useMutation({
     mutationFn: () => adventuresApi.createPartner({ from_program_id: Number(from), to_program_id: Number(to), ratio }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["adventures"] }); setTo(""); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["adventures"] }); setTo(""); setAddError(null); },
+    onError: (e: any) => setAddError(e?.response?.data?.detail ?? "Couldn't add partner"),
   });
   return (
     <Dialog.Root>
@@ -79,17 +97,32 @@ function PartnersDialog({ programs }: { programs: WalletRow[] }) {
                 <th className="py-1">From → To</th><th>Ratio</th><th>Bonus %</th><th>Ends</th><th /></tr></thead>
               <tbody>
                 {partners.map((p) => (
-                  <tr key={p.id} className="border-b border-gray-50 dark:border-gray-800">
-                    <td className="py-1 pr-2">{p.from_program_name} → {p.to_program_name}</td>
-                    <td><input className="input py-0.5 w-16 text-xs" defaultValue={p.ratio}
-                      onBlur={(e) => e.target.value !== p.ratio && update.mutate({ id: p.id, data: { ratio: e.target.value } })} /></td>
-                    <td><input className={`input py-0.5 w-16 text-xs ${p.bonus_pct && !p.bonus_active ? "line-through text-gray-400" : ""}`}
-                      defaultValue={p.bonus_pct ?? ""} placeholder="—"
-                      onBlur={(e) => update.mutate({ id: p.id, data: { bonus_pct: e.target.value === "" ? null : e.target.value } })} /></td>
-                    <td><input className="input py-0.5 text-xs" type="date" defaultValue={p.bonus_ends_on ?? ""}
-                      onBlur={(e) => update.mutate({ id: p.id, data: { bonus_ends_on: e.target.value || null } })} /></td>
-                    <td><button aria-label="Remove partner" className="text-gray-400 hover:text-red-500 px-1" onClick={() => remove.mutate(p.id)}><X size={14} /></button></td>
-                  </tr>
+                  <Fragment key={`${p.id}-${p.ratio}-${p.bonus_pct}-${p.bonus_ends_on}`}>
+                    <tr className="border-b border-gray-50 dark:border-gray-800">
+                      <td className="py-1 pr-2">{p.from_program_name} → {p.to_program_name}</td>
+                      <td><input className="input py-0.5 w-16 text-xs" defaultValue={p.ratio}
+                        onBlur={(e) => e.target.value !== p.ratio && update.mutate({ id: p.id, data: { ratio: e.target.value } })} /></td>
+                      <td><input className={`input py-0.5 w-16 text-xs ${p.bonus_pct && !p.bonus_active ? "line-through text-gray-400" : ""}`}
+                        defaultValue={p.bonus_pct ?? ""} placeholder="—"
+                        onBlur={(e) => {
+                          const v = e.target.value;
+                          if (v === (p.bonus_pct ?? "")) return;
+                          update.mutate({ id: p.id, data: { bonus_pct: v === "" ? null : v } });
+                        }} /></td>
+                      <td><input className="input py-0.5 text-xs" type="date" defaultValue={p.bonus_ends_on ?? ""}
+                        onBlur={(e) => {
+                          const v = e.target.value;
+                          if (v === (p.bonus_ends_on ?? "")) return;
+                          update.mutate({ id: p.id, data: { bonus_ends_on: v === "" ? null : v } });
+                        }} /></td>
+                      <td><button aria-label="Remove partner" className="text-gray-400 hover:text-red-500 px-1" onClick={() => remove.mutate(p.id)}><X size={14} /></button></td>
+                    </tr>
+                    {rowErrors[p.id] && (
+                      <tr>
+                        <td colSpan={5} className="pb-1 text-[11px] text-red-500">{rowErrors[p.id]}</td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -103,6 +136,7 @@ function PartnersDialog({ programs }: { programs: WalletRow[] }) {
               <input className="input py-1 w-20 text-sm" value={ratio} onChange={(e) => setRatio(e.target.value)} />
               <button className="btn-primary text-xs" disabled={!from || !to || from === to} onClick={() => add.mutate()}>Add partner</button>
             </div>
+            {addError && <p className="text-xs text-red-500 mt-1">{addError}</p>}
           </div>
         </Dialog.Content>
       </Dialog.Portal>
