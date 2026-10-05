@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.config import settings
 from backend.database import create_tables, upgrade_schema, upgrade_categories
 from backend.middleware import AuditMiddleware
+from backend.services.job_locks import _bank_sync_lock, _daily_summary_lock
 from backend.routers import (
     accounts, auth, budget, categories, credit_cards,
     forecast, recurring, transactions, spending,
@@ -72,6 +73,21 @@ _MISFIRE_GRACE_SECONDS = 12 * 3600
 
 
 def _send_daily_summaries() -> None:
+    # Non-blocking: a concurrent caller (the cron trigger and the sweep's own
+    # retry can both land on this function within the same tick after the
+    # Mac wakes from sleep) finds the lock already held and returns
+    # immediately rather than sending the same report twice. See
+    # job_locks.py and .superpowers/sdd/sync-race/brief.md.
+    if not _daily_summary_lock.acquire(blocking=False):
+        logger.info("Daily summary: already running, skipping")
+        return
+    try:
+        _send_daily_summaries_locked()
+    finally:
+        _daily_summary_lock.release()
+
+
+def _send_daily_summaries_locked() -> None:
     from backend.database import SessionLocal
     from backend import models
     from backend.services.email_service import send_email_via
@@ -174,6 +190,23 @@ def _send_daily_summaries() -> None:
 
 
 def _run_bank_sync() -> None:
+    # Non-blocking: the cron trigger firing on resume (misfire_grace_time)
+    # and the sweep's own due_for_retry catch-up can both call this function
+    # within the same tick. Both running at once is the actual root cause of
+    # the double-inserted transactions this guards against -- each one's
+    # duplicate check in import_service.run_import only sees committed rows,
+    # so a second concurrent run doesn't see the first's still-in-flight
+    # inserts. See job_locks.py and .superpowers/sdd/sync-race/brief.md.
+    if not _bank_sync_lock.acquire(blocking=False):
+        logger.info("Bank sync: already running, skipping")
+        return
+    try:
+        _run_bank_sync_locked()
+    finally:
+        _bank_sync_lock.release()
+
+
+def _run_bank_sync_locked() -> None:
     from backend.database import SessionLocal
     from backend import models
     from backend.services.bank_sync_service import sync_all
