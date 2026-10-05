@@ -9,6 +9,7 @@ from backend.schemas import MonthlySummary, WeeklyDigest, ForecastRisk
 from backend.services.spending_helpers import category_totals_for_range
 from backend.services.forecast_engine import build_forecast, find_balance_risk, _next_occurrence_on_or_after
 from backend.services.budget_snapshot import compute_budget_snapshot
+from backend.services.upcoming_bills import upcoming_bills
 
 _STALE_SYNC_HOURS = 24
 
@@ -125,17 +126,17 @@ def generate_daily_summary(
         models.RecurringItem.user_id == user.id,
         models.RecurringItem.is_active == True,
     ).all()
-    # (item, real fire date) pairs, sorted chronologically by that date --
-    # not by day_of_month, which sorts a window spanning a month boundary
-    # out of order (an item firing 8/30, two days out, would previously sort
-    # AFTER one firing 9/2, five days out, because 30 > 2). The date is also
-    # what the email was missing entirely: the old "Upcoming" list showed a
-    # bare name and amount with no indication of which of the next 7 days it
-    # actually lands on.
-    upcoming = sorted(
-        ((r, d) for r in all_recurring if (d := _next_fire_date(r, today, 7)) is not None),
-        key=lambda pair: pair[1],
-    )
+    # UpcomingBill rows, sorted chronologically by due_date -- not by
+    # day_of_month, which sorts a window spanning a month boundary out of
+    # order (an item firing 8/30, two days out, would previously sort AFTER
+    # one firing 9/2, five days out, because 30 > 2). `types=None` keeps
+    # every recurring type (income alongside expenses), matching this
+    # section's row set from before upcoming_bills() existed -- unlike GET
+    # /recurring/upcoming, which only ever showed expenses. amount already
+    # has upcoming_bills()'s BillAmountOverride substitution applied, which
+    # this list used to skip entirely (it read RecurringItem.amount
+    # directly) -- bug found 2026-10-04, see .superpowers/sdd/sync-race/brief.md.
+    upcoming = sorted(upcoming_bills(db, user.id, today, 7), key=lambda b: b.due_date)
 
     mtd_txns = db.query(models.Transaction).filter(
         models.Transaction.user_id == user.id,
@@ -200,13 +201,15 @@ def generate_daily_summary(
     upcoming_rows = "".join(
         (
             lambda is_income: (
-                f"<tr><td style='padding:6px 12px 6px 0;color:#9ca3af;font-size:12px;white-space:nowrap;vertical-align:top'>{_day_label(d)}</td>"
-                f"<td style='padding:6px 12px 6px 0;color:#374151'>{r.name}</td>"
+                f"<tr><td style='padding:6px 12px 6px 0;color:#9ca3af;font-size:12px;white-space:nowrap;vertical-align:top'>{_day_label(b.due_date)}</td>"
+                f"<td style='padding:6px 12px 6px 0;color:#374151'>{b.name}</td>"
                 f"<td style='padding:6px 0;text-align:right;white-space:nowrap'>"
-                f"<b style='color:{'#059669' if is_income else '#dc2626'}'>{'+' if is_income else '−'}{fmt(r.amount)}</b></td></tr>"
+                f"<b style='color:{'#059669' if is_income else '#dc2626'}'>{'+' if is_income else '−'}{fmt(b.amount)}</b>"
+                + (" <span style='color:#9ca3af;font-size:10px'>actual</span>" if b.is_actual else "")
+                + "</td></tr>"
             )
-        )(r.type == models.RecurringType.income)
-        for r, d in upcoming
+        )(b.type == models.RecurringType.income)
+        for b in upcoming
     ) or "<tr><td style='color:#9ca3af'>None in the next 7 days</td></tr>"
 
     # snap.cards carries utilization_pct and pending_charges already computed
@@ -378,8 +381,9 @@ def generate_daily_summary(
         f"  {a.name}: {fmt(a.current_balance)} ({_last_txn_label(acct_last_txn.get(a.id))})" for a in accounts
     ) or "  No checking accounts"
     upcoming_text = "\n".join(
-        f"  {_day_label(d):<10} {r.name}: {'+' if r.type == models.RecurringType.income else '-'}{fmt(r.amount)}"
-        for r, d in upcoming
+        f"  {_day_label(b.due_date):<10} {b.name}: {'+' if b.type == models.RecurringType.income else '-'}{fmt(b.amount)}"
+        + (" (actual)" if b.is_actual else "")
+        for b in upcoming
     ) or "  None in the next 7 days"
     def _card_text_row(c: models.CreditCard) -> str:
         balance_due, cycle_spend, stale = _cycle_breakdown(c)

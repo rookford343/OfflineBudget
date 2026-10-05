@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -271,46 +271,26 @@ def get_upcoming(
     list: it read r.amount directly (ignoring any confirmed
     BillAmountOverride actual, so a bill with a known statement still showed
     its planning estimate) and matched only on day_of_month (so a
-    yearly/quarterly item looked due every month). Both are fixed here by
-    reusing the same two sources of truth the rest of the app already
-    depends on: summary_generator._next_fire_date for the real next
-    occurrence (frequency/start/end/month_of_year aware -- the daily email's
-    own Upcoming list uses it), and the (recurring_item_id, due_date)-keyed
-    override lookup forecast_engine.py's bill_actuals dict uses.
+    yearly/quarterly item looked due every month). Both are fixed by
+    reusing upcoming_bills(), the shared service both this endpoint and the
+    daily email's own Upcoming list go through -- see its module docstring.
     """
-    from backend.services.summary_generator import _next_fire_date
+    from backend.services.upcoming_bills import upcoming_bills
 
     today = _today()
-    items = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == user.id,
-        models.RecurringItem.is_active == True,
-        models.RecurringItem.type == models.RecurringType.expense,
-    ).all()
-
-    due: list[tuple[models.RecurringItem, date]] = [
-        (item, d) for item in items if (d := _next_fire_date(item, today, days)) is not None
-    ]
-
-    overrides: dict[tuple[int, date], Decimal] = {
-        (o.recurring_item_id, o.due_date): o.actual_amount
-        for o in db.query(models.BillAmountOverride).filter(
-            models.BillAmountOverride.user_id == user.id,
-            models.BillAmountOverride.due_date >= today,
-            models.BillAmountOverride.due_date <= today + timedelta(days=days),
-        ).all()
-    }
+    bills = upcoming_bills(db, user.id, today, days, types=[models.RecurringType.expense])
 
     rows = [
         schemas.UpcomingBillOut(
-            recurring_item_id=item.id,
-            name=item.name,
-            due_date=d,
-            amount=overrides.get((item.id, d), item.amount),
-            estimated_amount=item.amount,
-            is_actual=(item.id, d) in overrides,
-            card_id=item.card_id,
+            recurring_item_id=b.recurring_item_id,
+            name=b.name,
+            due_date=b.due_date,
+            amount=b.amount,
+            estimated_amount=b.estimated_amount,
+            is_actual=b.is_actual,
+            card_id=b.card_id,
         )
-        for item, d in due
+        for b in bills
     ]
     rows.sort(key=lambda r: (r.due_date, r.name))
     return rows

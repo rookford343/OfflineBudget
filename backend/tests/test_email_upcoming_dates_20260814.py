@@ -117,3 +117,52 @@ def test_daily_summary_shows_dates_and_stays_chronological_across_a_month_bounda
     far_pos = text.find("Far Bill")
     assert near_pos != -1 and far_pos != -1
     assert near_pos < far_pos, "the item due in 2 days must be listed before the one due in 5 days"
+
+
+def test_daily_summary_upcoming_shows_the_override_amount_not_the_typical_amount(db_session):
+    """Bug found 2026-10-04 (.superpowers/sdd/sync-race/brief.md): the email's
+    Upcoming list built straight off RecurringItem.amount and never read
+    BillAmountOverride, so confirming the real billed amount (the same
+    (recurring_item_id, due_date)-keyed override GET /recurring/upcoming
+    already applies for the Dashboard's Upcoming Bills card) never changed
+    what the email showed -- it kept quoting the stale planning estimate."""
+    from backend.services.summary_generator import generate_daily_summary
+
+    user = models.User(username="overridetest", hashed_password="x", display_name="O")
+    db_session.add(user)
+    db_session.flush()
+    account = models.Account(user_id=user.id, name="Checking", type=models.AccountType.checking,
+                              current_balance=Decimal("5000.00"))
+    db_session.add(account)
+    db_session.flush()
+    item = models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Utility Bill",
+        amount=Decimal("100.00"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly, day_of_month=30,
+        start_date=date(2026, 1, 1),
+    )
+    db_session.add(item)
+    db_session.flush()
+    db_session.add(models.BillAmountOverride(
+        user_id=user.id, recurring_item_id=item.id, due_date=date(2026, 8, 30),
+        actual_amount=Decimal("124.69"),
+    ))
+    db_session.commit()
+
+    import backend.services.summary_generator as sg
+    orig = sg.date
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 8, 28)
+    sg.date = _FixedDate
+    try:
+        html, text = generate_daily_summary(db_session, user)
+    finally:
+        sg.date = orig
+
+    assert "$124.69" in html, "the confirmed actual amount must appear"
+    assert "$100.00" not in html, "the stale typical/planning amount must not appear"
+    assert "actual" in html.lower(), "an is_actual row should carry a muted 'actual' tag"
+    assert "$124.69" in text
+    assert "$100.00" not in text
