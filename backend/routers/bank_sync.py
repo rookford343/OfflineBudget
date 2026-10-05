@@ -5,6 +5,7 @@ from backend.dependencies import get_db, get_current_user
 from backend.services.crypto import assert_encryption_configured, decrypt, encrypt, EncryptionNotConfigured
 from backend.services.simplefin_client import claim_setup_token, fetch_accounts, SimpleFinError
 from backend.services.bank_sync_service import sync_connection
+from backend.services.job_locks import _bank_sync_lock
 
 router = APIRouter(prefix="/bank-sync", tags=["bank-sync"])
 
@@ -156,26 +157,41 @@ def sync_now(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    # Errored connections are deliberately included -- sync_connection is the
-    # only path that can restore `active`, so skipping them here would make a
-    # transient failure permanent and leave "Sync Now" reporting 0 forever.
-    connections = db.query(models.BankConnection).filter(
-        models.BankConnection.user_id == user.id,
-        models.BankConnection.status != models.BankConnectionStatus.disconnected,
-    ).all()
-    errors = []
-    total_imported = 0
-    total_skipped = 0
-    for connection in connections:
-        imported, skipped = sync_connection(db, connection)
-        total_imported += imported
-        total_skipped += skipped
-        if connection.last_error:
-            errors.append(connection.last_error)
-    return schemas.BankSyncNowResponse(
-        synced_connections=len(connections), errors=errors,
-        imported=total_imported, skipped_duplicates=total_skipped,
-    )
+    # Shares _bank_sync_lock with the scheduled job (main.py's
+    # _run_bank_sync) so a click on "Sync Now" during a scheduled sync can't
+    # race it the same way the cron trigger and the sweep's retry used to
+    # race each other. Non-blocking: rather than queue behind a sync already
+    # in flight (which could be seconds or minutes), 409 immediately --
+    # errorBus.ts's describeError() surfaces an HTTPException's `detail` via
+    # the global mutation-error toast, which is the frontend's existing
+    # handling for this endpoint today (AccountsTab.tsx defines no
+    # onSuccess-adjacent error rendering of its own).
+    if not _bank_sync_lock.acquire(blocking=False):
+        raise HTTPException(status_code=409, detail="A sync is already running")
+    try:
+        # Errored connections are deliberately included -- sync_connection is
+        # the only path that can restore `active`, so skipping them here
+        # would make a transient failure permanent and leave "Sync Now"
+        # reporting 0 forever.
+        connections = db.query(models.BankConnection).filter(
+            models.BankConnection.user_id == user.id,
+            models.BankConnection.status != models.BankConnectionStatus.disconnected,
+        ).all()
+        errors = []
+        total_imported = 0
+        total_skipped = 0
+        for connection in connections:
+            imported, skipped = sync_connection(db, connection)
+            total_imported += imported
+            total_skipped += skipped
+            if connection.last_error:
+                errors.append(connection.last_error)
+        return schemas.BankSyncNowResponse(
+            synced_connections=len(connections), errors=errors,
+            imported=total_imported, skipped_duplicates=total_skipped,
+        )
+    finally:
+        _bank_sync_lock.release()
 
 
 @router.delete("/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
