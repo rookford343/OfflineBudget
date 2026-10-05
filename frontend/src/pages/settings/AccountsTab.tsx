@@ -164,7 +164,7 @@ export default function AccountsTab() {
         </div>
         <div className="space-y-4">
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Connects to your bank via SimpleFIN Bridge (~$15/yr, read-only) to pull transactions automatically. Syncs daily at 5am ET.
+            Connects to your bank via SimpleFIN Bridge (~$15/yr, read-only) to pull transactions automatically. Syncs daily at 7am ET.
           </p>
           {syncResult && (
             <p className="text-xs text-emerald-600 dark:text-emerald-400">

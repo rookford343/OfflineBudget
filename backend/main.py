@@ -60,7 +60,11 @@ def _is_digest_day(today: date, digest_day: str) -> bool:
     return _WEEKDAY_ABBREVIATIONS[today.weekday()] == day or _WEEKDAY_FULL_NAMES[today.weekday()] == day
 
 
-_BANK_SYNC_HOUR = 5
+# 7, not 5 (the user, 2026-10-04): the Mac sleeps through 5am with the lid shut,
+# so the 5am run only ever fired late, on wake. The email shares this hour and
+# runs at :15 (below) so it reports post-sync data.
+_BANK_SYNC_HOUR = 7
+_DAILY_SUMMARY_MINUTE = 15
 
 # Generous on purpose -- covers "the Mac slept straight through the trigger
 # and only woke hours later." APScheduler fires a missed cron trigger once on
@@ -267,7 +271,11 @@ def _scheduler_sweep() -> None:
         # effect on the next restart. Until then the sweep is what honours it:
         # it re-checks every 20 minutes and fires the job once the new hour has
         # passed without a success, so a changed hour still sends the same day.
-        if scheduler_state.due_for_retry(db, "daily_summary", target_hour=summary_hour):
+        if _bank_sync_lock.locked():
+            # A sync is mid-run in another thread (the cron job); sending now
+            # would email pre-sync numbers. The next sweep picks it up.
+            logger.info("Scheduler sweep: bank sync in progress, holding daily_summary")
+        elif scheduler_state.due_for_retry(db, "daily_summary", target_hour=summary_hour):
             logger.info("Scheduler sweep: daily_summary missed today, retrying")
             _send_daily_summaries()
         # Start-of-month forecast for the Dashboard's Balance Flow card. Cheap
@@ -285,7 +293,7 @@ _SWEEP_MINUTES = 20
 
 _scheduler = BackgroundScheduler()
 _scheduler.add_job(
-    _send_daily_summaries, "cron", hour=settings.DAILY_SUMMARY_HOUR,
+    _send_daily_summaries, "cron", hour=settings.DAILY_SUMMARY_HOUR, minute=_DAILY_SUMMARY_MINUTE,
     misfire_grace_time=_MISFIRE_GRACE_SECONDS,
 )
 _scheduler.add_job(

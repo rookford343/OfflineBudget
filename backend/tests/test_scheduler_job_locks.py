@@ -103,3 +103,31 @@ def test_sync_now_still_works_when_the_lock_is_free(db_session):
 
     assert resp.status_code == 200
     assert not job_locks._bank_sync_lock.locked(), "must release the lock after finishing"
+
+
+def test_bank_sync_runs_at_seven_and_the_email_waits_until_quarter_past():
+    """the user, 2026-10-04: the Mac sleeps through 5am (lid closed), so the sync
+    moved to 7. The email shares that hour, so it fires at :15 to land after
+    the sync instead of racing it with yesterday's data."""
+    assert main._BANK_SYNC_HOUR == 7
+    jobs = {j.func.__name__: j for j in main._scheduler.get_jobs()}
+    summary_fields = {f.name: str(f) for f in jobs["_send_daily_summaries"].trigger.fields}
+    assert summary_fields["minute"] == "15"
+
+
+def test_sweep_holds_the_email_while_a_sync_is_running():
+    """A sweep that lands mid-sync (the cron sync is in another thread) must
+    not send the day's email from pre-sync data; it retries next sweep."""
+    sent = []
+    assert job_locks._bank_sync_lock.acquire(blocking=False)
+    try:
+        with patch("backend.database.SessionLocal"), \
+             patch("backend.services.app_settings.get_effective", return_value=7), \
+             patch("backend.services.forecast_baseline.ensure_baselines_for_all"), \
+             patch("backend.services.scheduler_state.due_for_retry", return_value=True), \
+             patch.object(main, "_run_bank_sync", lambda: None), \
+             patch.object(main, "_send_daily_summaries", lambda: sent.append(1)):
+            main._scheduler_sweep()
+    finally:
+        job_locks._bank_sync_lock.release()
+    assert sent == []
