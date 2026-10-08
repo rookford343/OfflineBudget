@@ -60,8 +60,11 @@ One row per scenario. The scenario stays the container for its existing building
 | down_payment | Numeric(14,2), default 0 | `financed` only. It leaves on the purchase date via the same route (checking, or the card's payoff date). |
 | sort_order | int | |
 
-### Setting
-`WISH_CUSHION` is added to the `app_settings` registry as an int number of dollars. The default when it's unset is the checking account's `low_balance_threshold`, or **1000** if that is unset too.
+### `wish_settings`
+One row per user: `user_id` (unique) and `cushion`, a nullable Numeric(14,2). When `cushion` is null, the cushion is the checking account's `low_balance_threshold`, or **1000** if that is also unset. This is a per-user table rather than a key in the `app_settings` registry, because that registry is app-wide and backed by `.env`.
+
+### `wish_commit_rows`
+These are the purchase rows a commit created, so that uncommit removes exactly those rows: `wish_item_id`, `kind` (`planned_expense` | `recurring_item`), and `row_id`.
 
 ### Existing scenarios
 On first load of the Wish List, every scenario without a `wish_items` row gets one: price 0, rank after the existing items, no options. Its building blocks behave as before. With no options, the item is evaluated as a single implicit option that has no purchase cash flow.
