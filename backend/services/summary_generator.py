@@ -366,7 +366,14 @@ def generate_daily_summary(
     # reads straight off the parent row's already-rolled-up actual_total
     # either way; summing the children's actuals again on top of that would
     # double them instead.
-    budget_title = f"Budget this month ({month_start.strftime('%b')} {month_start.day}–{today.day})"
+    # On the 1st, month_start == today -- a range would collapse to the
+    # nonsensical "Oct 1–1", so show the single date instead.
+    budget_date_range = (
+        f"{month_start.strftime('%b')} {month_start.day}"
+        if month_start == today
+        else f"{month_start.strftime('%b')} {month_start.day}–{today.day}"
+    )
+    budget_title = f"Budget this month ({budget_date_range})"
 
     def _budget_bar(pct: float, over: bool) -> str:
         color = "#dc2626" if over else "#6366f1"
