@@ -3,9 +3,11 @@ from decimal import Decimal
 import pytest
 from backend import models
 from backend.services import scenario_service
+from backend.services.budget_snapshot import floor_mask
 from backend.services.forecast_engine import build_forecast, _card_payoff_date_for_charge
 from backend.services.wish_lifecycle import WishError, ensure_wish_items, commit_wish, uncommit_wish
 from backend.services.wish_math import add_months
+from backend.services.wish_plan import build_plan, _series, low_point
 
 
 def _seed(db):
@@ -91,6 +93,29 @@ def test_commit_refused_when_chosen_option_has_error(db_session):
         commit_wish(db_session, u, acct.id, it.id, date.today())
     assert db_session.query(models.PlannedExpense).count() == 0
     assert it.scenario.status == "draft"
+
+
+def test_commit_persists_the_chosen_plan_option_for_highlighting(db_session):
+    """Minor 1: build_plan computes a `plan_option_id` for the item (either
+    the user's own pick, or its own cheapest-fitting auto-pick) but never
+    wrote it back onto the WishItem row -- so once committed, item.plan_option_id
+    stayed whatever it was before (often None), and the UI had nothing to
+    highlight the option that was actually used for the purchase. Left
+    unset here on purpose so build_plan's auto-pick is what resolves it."""
+    u, acct, _ = _seed(db_session)
+    sc = models.ForecastScenario(user_id=u.id, name="Grill"); db_session.add(sc); db_session.flush()
+    item = models.WishItem(user_id=u.id, scenario_id=sc.id, rank=0, price=Decimal("500.00"))
+    db_session.add(item); db_session.flush()
+    opt = models.WishOption(user_id=u.id, wish_item_id=item.id, label="Full",
+                            method=models.WishMethod.full_checking)
+    db_session.add(opt); db_session.flush()
+    db_session.commit()
+    assert item.plan_option_id is None
+
+    commit_wish(db_session, u, acct.id, item.id, date.today())
+
+    db_session.refresh(item)
+    assert item.plan_option_id == opt.id
 
 
 def test_commit_financed_with_card_creates_individual_one_offs_not_recurring(db_session):
@@ -226,3 +251,99 @@ def test_uncommit_wish_rolls_back_its_own_deletes_when_scenario_uncommit_refuses
     assert db_session.query(models.PlannedExpense).filter_by(user_id=u.id).count() == pe_count_before
     assert db_session.query(models.WishCommitRow).filter_by(wish_item_id=it.id).count() == row_count_before
     assert it.scenario.status == "committed"
+
+
+# ── Minor 3: plan-vs-commit agreement ────────────────────────────────────────
+
+@pytest.mark.parametrize("label,method,price,kw", [
+    ("full_checking", models.WishMethod.full_checking, "1500.00", {}),
+    ("full_card_no_estimate", models.WishMethod.full_card, "1500.00", {"card": True}),
+    ("financed_checking_12m_6pct", models.WishMethod.financed, "2400.00",
+     {"months": 12, "apr": "6.0", "down": "200.00"}),
+    ("financed_card_3m_0pct", models.WishMethod.financed, "1800.00",
+     {"card": True, "months": 3, "apr": "0", "down": "100.00"}),
+    ("full_checking_with_later_trade_in", models.WishMethod.full_checking, "1500.00",
+     {"trade_value": "400.00", "trade_offset": 40}),
+])
+def test_plan_predicted_low_point_equals_the_committed_forecasts_low_point(db_session, label, method, price, kw):
+    """Minor 3: build_plan's explain receipt predicts a low point for an
+    option's placement date entirely from an in-memory overlay (the
+    baseline forecast plus cumulative cash-flow deltas) -- it never actually
+    runs the committed rows through forecast_engine. If the overlay math and
+    the real engine ever disagreed (a routing rule the overlay doesn't
+    mirror, a rounding edge, a month-end clamp), the UI's safe-date promise
+    would silently diverge from what the real forecast shows once committed.
+    Covers one method per combination called out in the fix-wave brief: plain
+    checking, a card with no monthly_spend_estimate (so the real amount, not
+    a flat estimate, must drive the forecast), financed from checking at a
+    non-zero APR, financed on a card at 0%, and a later trade-in credit.
+    "Today" is pinned (not date.today()) so the paycheck/rent schedule below
+    and every date arithmetic step stay identical on every run."""
+    db = db_session
+    today = date(2026, 3, 2)
+    u = models.User(username=f"equiv_{label}", hashed_password="x", display_name="Equiv")
+    db.add(u)
+    db.flush()
+    acct = models.Account(user_id=u.id, name="Checking", type=models.AccountType.checking,
+                          current_balance=Decimal("6000.00"))
+    db.add(acct)
+    db.flush()
+    card = models.CreditCard(user_id=u.id, name="Card", credit_limit=Decimal("9000.00"), statement_day=28,
+                             due_day=25, current_balance=Decimal("0"))
+    db.add(card)
+    db.flush()
+    db.add(models.RecurringItem(
+        user_id=u.id, account_id=acct.id, name="Pay", amount=Decimal("2500.00"),
+        type=models.RecurringType.income, frequency=models.RecurringFrequency.monthly,
+        day_of_month=1, start_date=today - timedelta(days=400), is_active=True))
+    db.add(models.RecurringItem(
+        user_id=u.id, account_id=acct.id, name="Rent", amount=Decimal("2300.00"),
+        type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
+        day_of_month=3, start_date=today - timedelta(days=400), is_active=True))
+    db.add(models.WishSettings(user_id=u.id, cushion=Decimal("500.00")))
+    sc = models.ForecastScenario(user_id=u.id, name="Equiv")
+    db.add(sc)
+    db.flush()
+    trade_value = kw.get("trade_value")
+    trade_offset = kw.get("trade_offset")
+    item = models.WishItem(
+        user_id=u.id, scenario_id=sc.id, rank=0, price=Decimal(price),
+        trade_in_value=Decimal(trade_value) if trade_value else Decimal("0"),
+        trade_in_on=(today + timedelta(days=trade_offset)) if trade_offset is not None else None,
+    )
+    db.add(item)
+    db.flush()
+    opt = models.WishOption(
+        user_id=u.id, wish_item_id=item.id, label="o", method=method,
+        card_id=card.id if kw.get("card") else None, months=kw.get("months"),
+        apr=None if kw.get("apr") is None else Decimal(kw["apr"]),
+        down_payment=Decimal(kw.get("down", "0")),
+    )
+    db.add(opt)
+    db.flush()
+    item.plan_option_id = opt.id
+    db.commit()
+
+    plan = build_plan(db, u, acct.id, today)
+    entry = plan["items"][0]
+    assert entry["explain"] is not None, f"{label}: expected this option to fit and produce a receipt"
+    predicted_low = Decimal(entry["explain"]["result"])
+    placement = entry["placement_date"]
+    assert placement is not None
+
+    commit_wish(db, u, acct.id, item.id, today)
+
+    end = today + timedelta(days=365)
+    days = _series(db, u.id, acct.id, today, end)
+    dates = [d.date for d in days]
+    base = [Decimal(d.projected_balance) for d in days]
+    mask = floor_mask(days, [card])
+    idx = next(i for i, d in enumerate(dates) if d >= placement)
+    actual = low_point(base, mask, dates, [], idx)
+    assert actual is not None
+    actual_low, _ = actual
+
+    assert actual_low == predicted_low, (
+        f"{label}: build_plan predicted a low point of {predicted_low}, "
+        f"but the committed forecast's real low point is {actual_low}"
+    )

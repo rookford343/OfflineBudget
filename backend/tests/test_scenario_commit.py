@@ -584,3 +584,72 @@ def test_delete_scenario_with_a_wish_row_removes_the_wish_and_its_options(db_ses
     assert db.query(models.ForecastScenario).filter_by(id=scenario.id).count() == 0
     assert db.query(models.WishItem).filter_by(scenario_id=scenario.id).count() == 0
     assert db.query(models.WishOption).filter_by(id=option.id).count() == 0
+
+
+# ── I2: /scenarios commit/uncommit must defer to the Wish List ──────────────
+
+def test_scenarios_uncommit_route_refuses_a_committed_wishs_scenario(db_session):
+    """Bug: /scenarios/{id}/uncommit happily accepted a scenario that is
+    really a committed wish, reversing scenario_service's own bookkeeping
+    while leaving the wish's own commit rows (and its WishItem.scenario
+    status reasoning) untouched -- silently forking the two in a way nothing
+    else detects. Once a WishItem row exists for the scenario, only
+    /wish-list/items/{id}/uncommit may reverse it."""
+    db = db_session
+    user = models.User(username="wishlock", hashed_password="x", display_name="W")
+    db.add(user)
+    db.flush()
+    account = models.Account(
+        user_id=user.id, name="Checking", type=models.AccountType.checking,
+        current_balance=Decimal("5000.00"),
+    )
+    db.add(account)
+    db.commit()
+    c = _wish_client(db, user)
+    item = c.post("/wish-list/items", json={"name": "Grill", "price": "200.00"}).json()
+    c.post(f"/wish-list/items/{item['id']}/options", json={"label": "Full", "method": "full_checking"})
+    assert c.post(f"/wish-list/items/{item['id']}/commit").status_code == 200
+
+    wish_item = db.query(models.WishItem).filter_by(id=item["id"]).one()
+    scenario_id = wish_item.scenario_id
+    pe_count_before = db.query(models.PlannedExpense).filter_by(user_id=user.id).count()
+    row_count_before = db.query(models.WishCommitRow).filter_by(wish_item_id=item["id"]).count()
+
+    response = c.post(f"/scenarios/{scenario_id}/uncommit")
+
+    assert response.status_code == 409
+    assert "Wish List" in response.json()["detail"]
+    db.refresh(wish_item)
+    assert wish_item.scenario.status == "committed"
+    assert db.query(models.PlannedExpense).filter_by(user_id=user.id).count() == pe_count_before
+    assert db.query(models.WishCommitRow).filter_by(wish_item_id=item["id"]).count() == row_count_before
+
+
+def test_scenarios_commit_route_refuses_a_draft_wishs_scenario(db_session):
+    """Same guard, the other direction: a draft wish's scenario must be
+    committed only through /wish-list/items/{id}/commit, which also lays
+    down the chosen option's purchase rows -- /scenarios/{id}/commit alone
+    would flip the scenario to committed with no purchase rows at all."""
+    db = db_session
+    user = models.User(username="wishlock2", hashed_password="x", display_name="W2")
+    db.add(user)
+    db.flush()
+    account = models.Account(
+        user_id=user.id, name="Checking", type=models.AccountType.checking,
+        current_balance=Decimal("5000.00"),
+    )
+    db.add(account)
+    db.commit()
+    c = _wish_client(db, user)
+    item = c.post("/wish-list/items", json={"name": "Grill", "price": "200.00"}).json()
+    wish_item = db.query(models.WishItem).filter_by(id=item["id"]).one()
+    scenario_id = wish_item.scenario_id
+
+    response = c.post(f"/scenarios/{scenario_id}/commit")
+
+    assert response.status_code == 409
+    assert "Wish List" in response.json()["detail"]
+    db.refresh(wish_item)
+    assert wish_item.scenario.status == "draft"
+    assert db.query(models.RecurringItem).filter_by(user_id=user.id).count() == 0
+    assert db.query(models.PlannedExpense).filter_by(user_id=user.id).count() == 0

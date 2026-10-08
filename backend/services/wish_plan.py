@@ -103,8 +103,16 @@ def build_plan(db, user, account_id, today: date) -> dict:
     base_days = _series(db, user.id, account_id, today, end)
     dates = [d.date for d in base_days]
     base = [Decimal(d.projected_balance) for d in base_days]
-    cards = {c.id: c for c in db.query(models.CreditCard).filter(models.CreditCard.user_id == user.id).all()}
-    active_cards = [c for c in cards.values() if c.is_active]
+    # Only active cards: forecast_engine only ever routes a card charge to its
+    # payoff date for a card still in active_cards_by_id -- a charge on any
+    # other card falls through to hitting checking on the raw charge date
+    # instead (I1). Rather than silently mispredict that, an option on an
+    # inactive card simply can't resolve a route at all: wish_math._route
+    # raises "Card no longer exists" for any card_id missing from this dict,
+    # the same path a deleted card already takes.
+    active_cards = [c for c in db.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user.id, models.CreditCard.is_active == True).all()]
+    cards = {c.id: c for c in active_cards}
     mask = floor_mask(base_days, active_cards)
     cushion = effective_cushion(db, user, account_id)
     last_idx = max(0, len(dates) - 1 - LAST_BUY_OFFSET)
@@ -206,7 +214,7 @@ def build_plan(db, user, account_id, today: date) -> dict:
                         {"op": "add", "label": "Wishes ranked above this one", "amount": str(prior[li])},
                         {"op": "add", "label": "This item's extra costs", "amount": str(blocks[li])},
                         {"op": "add", "label": "This option's payments by then", "amount": str(cum[li])},
-                        {"op": "result", "label": f"Low point (cushion {cushion})", "amount": str(low)},
+                        {"op": "result", "label": "Low point vs cushion", "amount": str(low)},
                     ],
                 }
                 if using_target:

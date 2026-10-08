@@ -88,6 +88,14 @@ def commit_wish(db: Session, user, account_id: int, item_id: int, today: date) -
     option = next((o for o in item.options if o.id == entry["plan_option_id"]), None)
     name = item.scenario.name
 
+    # Minor 1: persist the option build_plan actually used for this commit --
+    # it may be the user's own pick or build_plan's own cheapest-fitting
+    # auto-pick when none was set -- so plan_option_id keeps meaning "the
+    # option this wish was bought with" rather than going stale (often still
+    # None) the moment it's committed. The UI's "plan" radio reads this
+    # field to highlight the option that actually happened.
+    item.plan_option_id = entry["plan_option_id"]
+
     scenario_service.commit_scenario(db, user.id, item.scenario_id)
     try:
         if option is not None:
