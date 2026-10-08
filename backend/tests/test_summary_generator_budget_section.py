@@ -4,11 +4,17 @@ the same `compute_overview` the Budget page reads, so the email can never
 disagree with the app about a category's numbers.
 
 compute_overview rolls child actuals up into the parent row (actual_total)
-but does NOT roll up budgeted -- a parent only carries its own direct
-allocation there, if any. The group header total below must sum the
-children's budgeted amounts itself while using the parent's own (already
-rolled-up) actual_total as-is, or it either misses the budgeted side or
-double-counts the actual side.
+but does NOT roll up budgeted -- a parent's `budgeted` is its OWN direct
+allocation, entirely separate from its children's. The group header's
+budget must therefore be the parent's own budgeted when it has one
+(>0), falling back to summing the children's budgeted only when the
+parent carries no allocation of its own -- matching what the Budget page
+shows for that parent. Adding the two together double-counts whenever a
+parent happens to carry both (found in the real preview: "Necessities"
+showed its own $5,395.03 plus its children's $5,622.98 as $11,017.30).
+Header actual stays the parent's already-rolled-up actual_total either
+way -- re-summing the children's actuals on top of that would double
+them instead.
 """
 from datetime import date
 from decimal import Decimal
@@ -52,9 +58,14 @@ def _spend(db, user, account, category, amount, today):
 
 
 def _seed_budget_scenario(db):
-    """Needs/Food (500 budget, 120 spent), Needs/Fuel (100 budget, 150 spent
-    -- over), Fun/Toys (0 budget, 40 spent -- no budget set), plus an income
-    category with its own budget that must never show up in this section."""
+    """Needs (own allocation 600) / Food (500 budget, 120 spent) / Fuel (100
+    budget, 150 spent -- over), Fun/Toys (0 budget, 40 spent -- no budget
+    set), plus an income category with its own budget that must never show
+    up in this section.
+
+    Needs carries its own direct allocation of 600 *in addition to* its
+    children's 500+100 -- the header must use the parent's own 600, not
+    600+600=1200."""
     today = date.today()
     user, account = _make_user_account(db)
 
@@ -65,6 +76,7 @@ def _seed_budget_scenario(db):
     toys = _category(db, user, "Toys", parent_id=fun.id)
     income = _category(db, user, "Paycheck", type=models.CategoryType.income)
 
+    _allocate(db, user, needs, "600.00", today)
     _allocate(db, user, food, "500.00", today)
     _allocate(db, user, fuel, "100.00", today)
     _allocate(db, user, income, "5000.00", today)
@@ -72,6 +84,27 @@ def _seed_budget_scenario(db):
     _spend(db, user, account, food, "-120.00", today)
     _spend(db, user, account, fuel, "-150.00", today)
     _spend(db, user, account, toys, "-40.00", today)
+
+    db.commit()
+    return user, account
+
+
+def _seed_header_sum_scenario(db):
+    """"Extras" carries NO allocation of its own -- only its children
+    (Games 30 budget/10 spent, Hobbies 20 budget/5 spent) do. The header
+    must fall back to summing the children: $15.00 of $50.00."""
+    today = date.today()
+    user, account = _make_user_account(db, username="headersumuser")
+
+    extras = _category(db, user, "Extras")
+    games = _category(db, user, "Games", parent_id=extras.id)
+    hobbies = _category(db, user, "Hobbies", parent_id=extras.id)
+
+    _allocate(db, user, games, "30.00", today)
+    _allocate(db, user, hobbies, "20.00", today)
+
+    _spend(db, user, account, games, "-10.00", today)
+    _spend(db, user, account, hobbies, "-5.00", today)
 
     db.commit()
     return user, account
@@ -110,12 +143,23 @@ def test_budget_section_excludes_income_category(db_session):
     assert "Paycheck" not in budget_section
 
 
-def test_budget_section_parent_header_rolls_up_children_without_double_counting(db_session):
-    """Needs' header must show $270.00 of $600.00 -- the sum of Food's and
-    Fuel's budgets (500+100) against the sum of their actuals (120+150).
-    compute_overview already rolls the children's actual_total into the
-    parent row, so summing the children's actuals again here as well as
-    reading them off the parent would double them to $540.00."""
+def test_budget_section_parent_header_uses_its_own_allocation_not_double_counted(db_session):
+    """Needs carries its own 600 allocation AND has children totaling
+    500+100=600. The header must show $270.00 of $600.00 (the parent's own
+    budgeted) -- not $1,200.00 (own + children summed), and not $540.00
+    (children's actuals summed on top of the parent's already-rolled-up
+    actual_total)."""
     user, account = _seed_budget_scenario(db_session)
     html, _ = generate_daily_summary(db_session, user)
     assert "$270.00 of $600.00" in html
+    assert "$1,200.00" not in html
+    assert "$540.00" not in html
+
+
+def test_budget_section_header_sums_children_when_parent_has_no_own_allocation(db_session):
+    """Extras has no allocation of its own, so the header falls back to
+    summing its children's budgets (30+20=50) against their actuals
+    (10+5=15)."""
+    user, account = _seed_header_sum_scenario(db_session)
+    html, _ = generate_daily_summary(db_session, user)
+    assert "$15.00 of $50.00" in html

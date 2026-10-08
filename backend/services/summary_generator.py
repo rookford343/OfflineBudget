@@ -357,12 +357,15 @@ def generate_daily_summary(
     # section can never quietly disagree with the app about a category's
     # numbers. compute_overview rolls each child's actual_checking/
     # actual_cards/actual_total up into its parent row, but NOT budgeted --
-    # a parent only carries its own direct allocation there (usually none,
-    # for a pure grouping category like "Needs"). The group header below
-    # therefore sums the children's budgeted amounts itself, while reading
-    # actual straight off the parent row's already-rolled-up actual_total --
-    # summing the children's actuals again on top of that would double
-    # them.
+    # a parent's budgeted is its OWN direct allocation, entirely separate
+    # from its children's. The group header below therefore uses the
+    # parent's own budgeted when it has one, falling back to summing the
+    # children's only when the parent carries none (matching what the
+    # Budget page itself shows for that parent) -- adding the two together
+    # double-counts whenever a parent happens to carry both. Header actual
+    # reads straight off the parent row's already-rolled-up actual_total
+    # either way; summing the children's actuals again on top of that would
+    # double them instead.
     budget_title = f"Budget this month ({month_start.strftime('%b')} {month_start.day}–{today.day})"
 
     def _budget_bar(pct: float, over: bool) -> str:
@@ -438,7 +441,14 @@ def generate_daily_summary(
         )
         if not visible_children:
             continue  # this group has nothing to show this month
-        header_budgeted = top.budgeted + sum((c.budgeted for c in visible_children), Decimal("0"))
+        # compute_overview never rolls budgeted up -- a parent's `budgeted`
+        # is its OWN direct allocation, entirely separate from its
+        # children's. Use that own allocation when it has one; only fall
+        # back to summing the children when the parent carries none. Adding
+        # them together double-counts whenever a parent happens to carry
+        # both (found in the real preview: "Necessities" showed its own
+        # $5,395.03 plus its children's $5,622.98 as $11,017.30).
+        header_budgeted = top.budgeted if top.budgeted > 0 else sum((c.budgeted for c in visible_children), Decimal("0"))
         header_actual = top.actual_total
         group_html = _budget_row_html(top.category_name, header_budgeted, header_actual, bold=True)
         group_html += "".join(_budget_row_html(c.category_name, c.budgeted, c.actual_total, indent=True) for c in visible_children)
