@@ -123,3 +123,69 @@ def test_flows_financed_from_checking_and_on_card_plus_later_trade_in():
     # down 3/10 -> due 4/25; payment 4/10 -> due 5/25; payment 5/10 -> due 6/25
     assert fl_card == [(date(2027, 4, 25), Decimal("-100.00")), (date(2027, 5, 25), Decimal("-250.00")),
                        (date(2027, 6, 25), Decimal("-250.00"))]
+
+
+import pytest
+
+
+def test_total_cost_raises_for_financed_without_months():
+    item = _item()
+    opt = _opt(M.financed, months=None, apr="0")
+    with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
+        total_cost(item, opt)
+
+
+def test_total_cost_raises_for_financed_with_zero_months():
+    item = _item()
+    opt = _opt(M.financed, months=0, apr="0")
+    with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
+        total_cost(item, opt)
+
+
+def test_total_cost_raises_for_financed_with_negative_months():
+    item = _item()
+    opt = _opt(M.financed, months=-1, apr="0")
+    with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
+        total_cost(item, opt)
+
+
+def test_total_cost_raises_for_financed_with_too_many_months():
+    item = _item()
+    opt = _opt(M.financed, months=85, apr="0")
+    with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
+        total_cost(item, opt)
+
+
+def test_monthly_payment_raises_for_financed_without_months():
+    item = _item()
+    opt = _opt(M.financed, months=None, apr="0")
+    with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
+        monthly_payment(item, opt)
+
+
+def test_monthly_payment_raises_for_financed_with_invalid_months():
+    item = _item()
+    opt = _opt(M.financed, months=0, apr="0")
+    with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
+        monthly_payment(item, opt)
+
+
+def test_option_flows_raises_for_financed_without_months():
+    item = _item()
+    opt = _opt(M.financed, months=None, apr="0")
+    with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
+        option_flows(item, opt, date(2027, 3, 10), {})
+
+
+def test_option_flows_raises_for_financed_with_invalid_months():
+    item = _item()
+    opt = _opt(M.financed, months=0, apr="0")
+    with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
+        option_flows(item, opt, date(2027, 3, 10), {})
+
+
+def test_option_flows_raises_for_missing_card():
+    item = _item(trade="300.00")
+    opt = _opt(M.full_card, card_id=99)
+    with pytest.raises(ValueError, match="Card no longer exists"):
+        option_flows(item, opt, date(2027, 3, 10), {})
