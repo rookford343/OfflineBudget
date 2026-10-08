@@ -10,6 +10,7 @@ from backend.services.spending_helpers import category_totals_for_range
 from backend.services.forecast_engine import build_forecast, find_balance_risk, _next_occurrence_on_or_after
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.upcoming_bills import upcoming_bills
+from backend.services.budget_calculator import compute_overview
 
 _STALE_SYNC_HOURS = 24
 
@@ -351,6 +352,125 @@ def generate_daily_summary(
             f"{body}</div>"
         )
 
+    # ── "Budget this month" ─────────────────────────────────────────────
+    # Reuses compute_overview (the Budget page's own calculation) so this
+    # section can never quietly disagree with the app about a category's
+    # numbers. compute_overview rolls each child's actual_checking/
+    # actual_cards/actual_total up into its parent row, but NOT budgeted --
+    # a parent only carries its own direct allocation there (usually none,
+    # for a pure grouping category like "Needs"). The group header below
+    # therefore sums the children's budgeted amounts itself, while reading
+    # actual straight off the parent row's already-rolled-up actual_total --
+    # summing the children's actuals again on top of that would double
+    # them.
+    budget_title = f"Budget this month ({month_start.strftime('%b')} {month_start.day}–{today.day})"
+
+    def _budget_bar(pct: float, over: bool) -> str:
+        color = "#dc2626" if over else "#6366f1"
+        width = min(max(pct, 0.0), 100.0)
+        return (
+            f"<table style='width:100%;border-collapse:collapse;margin:3px 0 4px' cellpadding='0' cellspacing='0'>"
+            f"<tr><td style='background:#e5e7eb;border-radius:3px;height:6px'>"
+            f"<div style='width:{width:.0f}%;background:{color};height:6px;border-radius:3px'></div>"
+            f"</td></tr></table>"
+        )
+
+    def _budget_suffix(budgeted: Decimal, actual: Decimal) -> tuple[str, str, bool]:
+        """(suffix text, color, no_budget) for the "$X left"/"$X over"/
+        "no budget set" line. budgeted==0 with actual>0 is the only case
+        a visible row can have budgeted==0 in (rows with both at 0 are
+        dropped before this is ever called)."""
+        if budgeted == 0 and actual > 0:
+            return "no budget set", "#9ca3af", True
+        if actual > budgeted:
+            return f"{fmt(actual - budgeted)} over", "#dc2626", False
+        return f"{fmt(budgeted - actual)} left", "#6b7280", False
+
+    def _budget_row_html(name: str, budgeted: Decimal, actual: Decimal, *, indent: bool = False, bold: bool = False) -> str:
+        suffix, color, no_budget = _budget_suffix(budgeted, actual)
+        budget_str = "$0" if no_budget else fmt(budgeted)
+        bar_html = "" if no_budget else _budget_bar(
+            float(actual) / float(budgeted) * 100 if budgeted else 0.0, actual > budgeted,
+        )
+        pad = "padding-left:16px;" if indent else ""
+        weight = "font-weight:600;" if bold else ""
+        return (
+            f"<div style='margin-bottom:10px'>"
+            f"<table style='width:100%;font-size:13px'><tr>"
+            f"<td style='{pad}{weight}color:#374151'>{name}</td>"
+            f"<td style='text-align:right;white-space:nowrap;color:#111827'>{fmt(actual)} of {budget_str}</td>"
+            f"</tr></table>"
+            f"<div style='{pad}'>{bar_html}"
+            f"<span style='font-size:11px;color:{color}'>{suffix}</span></div>"
+            f"</div>"
+        )
+
+    def _budget_row_text(name: str, budgeted: Decimal, actual: Decimal, *, indent: bool = False) -> str:
+        suffix, _color, no_budget = _budget_suffix(budgeted, actual)
+        budget_str = "$0" if no_budget else fmt(budgeted)
+        prefix = "  " if indent else ""
+        return f"{prefix}{name}: {fmt(actual)} of {budget_str} · {suffix}"
+
+    def _budget_header_text(name: str, budgeted: Decimal, actual: Decimal) -> str:
+        suffix, _color, no_budget = _budget_suffix(budgeted, actual)
+        budget_str = "$0" if no_budget else fmt(budgeted)
+        return f"{name} — {fmt(actual)} of {budget_str} ({suffix})"
+
+    budget_rows = [r for r in compute_overview(db, user.id, today.year, today.month) if r.category_type != "income"]
+    budget_top_level: dict[int, object] = {}
+    budget_by_parent: dict[int, list] = defaultdict(list)
+    for r in budget_rows:
+        if r.parent_id is None:
+            budget_top_level[r.category_id] = r
+        else:
+            budget_by_parent[r.parent_id].append(r)
+
+    def _budget_visible(r) -> bool:
+        return not (r.budgeted == 0 and r.actual_total == 0)
+
+    budget_blocks: list[tuple[Decimal, str, str]] = []
+    for top in budget_top_level.values():
+        raw_children = budget_by_parent.get(top.category_id, [])
+        if not raw_children:
+            continue  # childless top-level categories are gathered below, under "Other"
+        visible_children = sorted(
+            (c for c in raw_children if _budget_visible(c)), key=lambda c: c.actual_total, reverse=True,
+        )
+        if not visible_children:
+            continue  # this group has nothing to show this month
+        header_budgeted = top.budgeted + sum((c.budgeted for c in visible_children), Decimal("0"))
+        header_actual = top.actual_total
+        group_html = _budget_row_html(top.category_name, header_budgeted, header_actual, bold=True)
+        group_html += "".join(_budget_row_html(c.category_name, c.budgeted, c.actual_total, indent=True) for c in visible_children)
+        group_text = _budget_header_text(top.category_name, header_budgeted, header_actual)
+        group_text += "\n" + "\n".join(_budget_row_text(c.category_name, c.budgeted, c.actual_total, indent=True) for c in visible_children)
+        budget_blocks.append((header_budgeted, group_html, group_text))
+
+    budget_others = sorted(
+        (top for top in budget_top_level.values() if not budget_by_parent.get(top.category_id) and _budget_visible(top)),
+        key=lambda c: c.actual_total, reverse=True,
+    )
+    if budget_others:
+        other_budgeted = sum((o.budgeted for o in budget_others), Decimal("0"))
+        other_html = (
+            "<p style='margin:12px 0 6px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Other</p>"
+            + "".join(_budget_row_html(o.category_name, o.budgeted, o.actual_total) for o in budget_others)
+        )
+        other_text = "Other\n" + "\n".join(_budget_row_text(o.category_name, o.budgeted, o.actual_total, indent=True) for o in budget_others)
+        budget_blocks.append((other_budgeted, other_html, other_text))
+
+    budget_blocks.sort(key=lambda b: b[0], reverse=True)
+
+    if budget_blocks:
+        budget_body_html = "".join(b[1] for b in budget_blocks)
+        budget_body_text = "\n\n".join(b[2] for b in budget_blocks)
+    else:
+        budget_body_html = "<p style='color:#9ca3af;margin:0'>No budget data yet this month.</p>"
+        budget_body_text = "  No budget data yet this month."
+
+    budget_section_html = _section("📊", budget_title, budget_body_html)
+    budget_section_text = f"{budget_title.upper()}\n{budget_body_text}\n"
+
     html = f"""<!DOCTYPE html>
 <html><body style='font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f3f4f6;margin:0;padding:24px 0'>
 <div style='max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;padding:24px;color:#1f2937'>
@@ -359,6 +479,7 @@ def generate_daily_summary(
 
 {stale_html}
 {household_html}
+{budget_section_html}
 {_section("🏦", "Checking Accounts", f"<table style='width:100%;font-size:14px'>{acct_rows}</table>")}
 {_section("📅", "Upcoming (next 7 days)", f"<table style='width:100%;font-size:14px'>{upcoming_rows}</table>")}
 {_section("📊", "Month-to-Date Spending", (
@@ -430,6 +551,7 @@ def generate_daily_summary(
     text = f"""OfflineBudget Daily Summary — {today.strftime("%B %-d, %Y")}
 {stale_text}
 {household_text}
+{budget_section_text}
 CHECKING ACCOUNTS
 {acct_text}
 
