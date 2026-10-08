@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from backend import models
 from backend.dependencies import get_db, get_current_user
 from backend.routers import scenarios as scenarios_router
+from backend.routers import wish_list as wish_list_router
 from backend.services import scenario_service
 
 
@@ -535,3 +536,51 @@ def test_dead_end_is_closed_commit_then_blocked_override_then_uncommit_succeeds(
     db.refresh(scenario)
     assert scenario.status == "draft"
     assert scenario.committed_at is None
+
+
+def _wish_client(db, user):
+    app = FastAPI()
+    app.include_router(wish_list_router.router)
+    app.include_router(scenarios_router.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_current_user] = lambda: user
+    return TestClient(app)
+
+
+def test_delete_scenario_with_a_wish_row_removes_the_wish_and_its_options(db_session):
+    """Bug: ensure_wish_items gives every scenario a WishItem, and
+    wish_items.scenario_id has no ondelete -- deleting the scenario while a
+    WishItem still points at it violated the FK and 500'd. The wish row (and
+    its options) must be deleted first."""
+    db = db_session
+    user = models.User(username="declutter", hashed_password="x", display_name="D")
+    db.add(user)
+    db.flush()
+    account = models.Account(
+        user_id=user.id, name="Checking", type=models.AccountType.checking,
+        current_balance=Decimal("1000.00"),
+    )
+    db.add(account)
+    db.commit()
+    scenario = models.ForecastScenario(user_id=user.id, name="Drone")
+    db.add(scenario)
+    db.commit()
+
+    c = _wish_client(db, user)
+    assert c.get("/wish-list/plan").status_code == 200  # creates the WishItem
+
+    wish_item = db.query(models.WishItem).filter_by(scenario_id=scenario.id).one()
+    option = models.WishOption(
+        user_id=user.id, wish_item_id=wish_item.id, label="Full", method=models.WishMethod.full_checking,
+    )
+    db.add(option)
+    db.commit()
+    wish_item.plan_option_id = option.id
+    db.commit()
+
+    response = c.delete(f"/scenarios/{scenario.id}")
+
+    assert response.status_code // 100 == 2
+    assert db.query(models.ForecastScenario).filter_by(id=scenario.id).count() == 0
+    assert db.query(models.WishItem).filter_by(scenario_id=scenario.id).count() == 0
+    assert db.query(models.WishOption).filter_by(id=option.id).count() == 0

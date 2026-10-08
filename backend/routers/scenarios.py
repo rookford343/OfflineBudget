@@ -50,6 +50,21 @@ def delete_scenario(scenario_id: int, db: Session = Depends(get_db), user: model
         raise HTTPException(404, "Scenario not found")
     if scenario.status == "committed":
         raise HTTPException(409, "Uncommit this scenario before deleting it")
+    # wish_items.scenario_id has no ondelete -- every scenario gets a WishItem
+    # via ensure_wish_items, so deleting the scenario while that row still
+    # points at it violates the FK. Clear its back-link and remove it (and
+    # its options, cascaded by the WishItem.options relationship) first.
+    wish_item = db.query(models.WishItem).filter(
+        models.WishItem.scenario_id == scenario.id
+    ).first()
+    if wish_item is not None:
+        db.query(models.WishCommitRow).filter(
+            models.WishCommitRow.wish_item_id == wish_item.id
+        ).delete(synchronize_session=False)
+        wish_item.plan_option_id = None
+        db.flush()
+        db.delete(wish_item)
+        db.flush()
     db.delete(scenario)
     db.commit()
     return {"ok": True}
