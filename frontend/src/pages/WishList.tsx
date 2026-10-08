@@ -110,7 +110,7 @@ export default function WishList() {
     queryKey: ["accounts"],
     queryFn: accountsApi.list,
   });
-  const accountId: number | undefined = accounts.find((a) => a.type === "checking")?.id;
+  const accountId: number | undefined = accounts.find((a) => a.type === "checking" && a.is_active)?.id;
 
   const { data: cards = [] } = useQuery<CardRow[]>({ queryKey: ["cards"], queryFn: cardsApi.list });
   // Same filter Forecast.tsx and Recurring.tsx apply before any card select --
@@ -216,6 +216,7 @@ export default function WishList() {
               onChange={(e) => setCushionInput(e.target.value)}
               onBlur={saveCushion}
             />
+            {setCushionMut.isError && <p className="text-sm text-red-600 mt-1">{errText(setCushionMut.error)}</p>}
           </div>
           <form onSubmit={submitWish} className="flex items-end gap-2">
             <div>
@@ -246,6 +247,7 @@ export default function WishList() {
       {items.length > 0 && (
         <div className="card text-sm text-gray-600 dark:text-gray-300">{stripText}</div>
       )}
+      {reorderMut.isError && <p className="text-sm text-red-600">{errText(reorderMut.error)}</p>}
 
       <div className="space-y-4">
         {items.map((item) => (
