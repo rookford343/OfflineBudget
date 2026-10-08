@@ -1203,7 +1203,7 @@ class WishItem(Base):
     trade_in_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
     trade_in_on: Mapped[date | None] = mapped_column(Date)
     target_date: Mapped[date | None] = mapped_column(Date)
-    plan_option_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("wish_options.id", use_alter=True))
+    plan_option_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("wish_options.id", use_alter=True, ondelete="SET NULL"))
 
     scenario: Mapped["ForecastScenario"] = relationship()
     options: Mapped[list["WishOption"]] = relationship(
