@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { FlaskConical, Plus, Trash2, CalendarClock } from "lucide-react";
+import { Plus, Trash2, CalendarClock } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
-import { scenariosApi, accountsApi, cardsApi, recurringApi, forecastApi } from "../api";
+import { scenariosApi, accountsApi, cardsApi, recurringApi, forecastApi } from "../../api";
 
 type Scenario = {
   id: number;
@@ -44,11 +44,11 @@ function ErrorNote({ message }: { message: string | null }) {
   );
 }
 
-export default function Scenarios() {
+export default function ScenarioEditor({ scenarioId, accountId }: { scenarioId: number; accountId: number | undefined }) {
   const qc = useQueryClient();
-  const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [newName, setNewName] = useState("");
-  const [accountId, setAccountId] = useState<number | null>(null);
+  // Local override for which account's chart to view -- independent from the
+  // caller's `accountId`, same as the per-chart account picker this came from.
+  const [chartAccountId, setChartAccountId] = useState<number | null>(null);
   // Default is one scenario against baseline; this set adds further lines for
   // comparing options against each other, which is available but not the
   // default (the user, 2026-09-20).
@@ -73,9 +73,9 @@ export default function Scenarios() {
   });
 
   const activeAccountId =
-    accountId ?? (accounts.find((a) => a.type === "checking")?.id ?? accounts[0]?.id ?? null);
+    chartAccountId ?? accountId ?? (accounts.find((a) => a.type === "checking")?.id ?? accounts[0]?.id ?? null);
 
-  const selected = scenarios.find((s) => s.id === selectedId) ?? null;
+  const selected = scenarios.find((s) => s.id === scenarioId) ?? null;
   const committed = selected?.status === "committed";
   // Every mutation that changes a scenario's own proposed items/expenses/
   // overrides changes that scenario's forecast line, so `scenario-lines`
@@ -84,8 +84,8 @@ export default function Scenarios() {
   // `scenario-baseline` is deliberately NOT here: a draft scenario's edits
   // never touch the real recurring items/planned expenses that baseline is
   // computed from, so invalidating it here would refetch the same baseline
-  // every time for zero effect. It's added only in commit/uncommit below,
-  // where the real data actually changes.
+  // every time for zero effect. It's added only on commit/uncommit, owned by
+  // the Wish List card, where the real data actually changes.
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["scenarios"] });
     qc.invalidateQueries({ queryKey: ["scenario-impact"] });
@@ -93,9 +93,9 @@ export default function Scenarios() {
   };
 
   const { data: impact } = useQuery<any>({
-    queryKey: ["scenario-impact", selectedId, activeAccountId],
-    queryFn: () => scenariosApi.impact(selectedId!, activeAccountId!),
-    enabled: selectedId !== null && activeAccountId !== null,
+    queryKey: ["scenario-impact", scenarioId, activeAccountId],
+    queryFn: () => scenariosApi.impact(scenarioId, activeAccountId!),
+    enabled: activeAccountId !== null,
   });
 
   const { data: baselineQuarters = [] } = useQuery<any[]>({
@@ -104,7 +104,7 @@ export default function Scenarios() {
     enabled: activeAccountId !== null,
   });
 
-  const lineIds = selectedId === null ? compareIds : [selectedId, ...compareIds.filter((i) => i !== selectedId)];
+  const lineIds = [scenarioId, ...compareIds.filter((i) => i !== scenarioId)];
   const { data: scenarioLines = [] } = useQuery<{ id: number; days: any[] }[]>({
     queryKey: ["scenario-lines", activeAccountId, year, lineIds],
     queryFn: async () => Promise.all(
@@ -134,76 +134,40 @@ export default function Scenarios() {
   });
   const lineColors = ["#2563eb", "#16a34a", "#c2410c", "#7c3aed"];
 
-  const createScenario = useMutation({
-    mutationFn: () => scenariosApi.create({ name: newName.trim() }),
-    onSuccess: (s: Scenario) => { setNewName(""); setSelectedId(s.id); invalidate(); },
-  });
-  const removeScenario = useMutation({
-    mutationFn: (id: number) => scenariosApi.remove(id),
-    onSuccess: () => { setSelectedId(null); invalidate(); },
-  });
   const addItem = useMutation({
-    mutationFn: (data: object) => scenariosApi.createItem(selected!.id, data),
+    mutationFn: (data: object) => scenariosApi.createItem(scenarioId, data),
     onSuccess: invalidate,
   });
   const dropItem = useMutation({
-    mutationFn: (itemId: number) => scenariosApi.removeItem(selected!.id, itemId),
+    mutationFn: (itemId: number) => scenariosApi.removeItem(scenarioId, itemId),
     onSuccess: invalidate,
   });
   const addExpense = useMutation({
-    mutationFn: (data: object) => scenariosApi.createExpense(selected!.id, data),
+    mutationFn: (data: object) => scenariosApi.createExpense(scenarioId, data),
     onSuccess: invalidate,
   });
   const dropExpense = useMutation({
-    mutationFn: (id: number) => scenariosApi.removeExpense(selected!.id, id),
+    mutationFn: (id: number) => scenariosApi.removeExpense(scenarioId, id),
     onSuccess: invalidate,
   });
   const addOverride = useMutation({
-    mutationFn: (data: object) => scenariosApi.createOverride(selected!.id, data),
+    mutationFn: (data: object) => scenariosApi.createOverride(scenarioId, data),
     onSuccess: invalidate,
   });
   const dropOverride = useMutation({
-    mutationFn: (id: number) => scenariosApi.removeOverride(selected!.id, id),
+    mutationFn: (id: number) => scenariosApi.removeOverride(scenarioId, id),
     onSuccess: invalidate,
   });
-  const commit = useMutation({
-    mutationFn: () => scenariosApi.commit(selected!.id),
-    onSuccess: () => {
-      invalidate();
-      // Committing turns this scenario's proposals into real recurring items
-      // and planned expenses, which changes the real forecast baseline --
-      // and since every other scenario's line is baseline plus its own
-      // overrides, their lines shift too. Without this the chart keeps
-      // drawing the pre-commit line for up to `staleTime` (main.tsx), while
-      // the impact table above it has already redrawn at zero delta.
-      qc.invalidateQueries({ queryKey: ["scenario-baseline"] });
-      qc.invalidateQueries({ queryKey: ["recurring"] });
-      qc.invalidateQueries({ queryKey: ["planned-expenses"] });
-    },
-  });
-  const uncommit = useMutation({
-    mutationFn: () => scenariosApi.uncommit(selected!.id),
-    onSuccess: () => {
-      invalidate();
-      // Same reasoning as commit: uncommitting removes real recurring items/
-      // planned expenses and restores overridden amounts, so baseline (and
-      // every scenario line derived from it) has to be refetched too.
-      qc.invalidateQueries({ queryKey: ["scenario-baseline"] });
-      qc.invalidateQueries({ queryKey: ["recurring"] });
-      qc.invalidateQueries({ queryKey: ["planned-expenses"] });
-    },
-  });
 
-  // Clear every mutation's stale error banner when the user switches to a
+  // Clear every mutation's stale error banner when the caller switches to a
   // different scenario -- a 409 from the previously selected scenario should
   // not linger over an unrelated one.
   useEffect(() => {
     addItem.reset(); dropItem.reset();
     addExpense.reset(); dropExpense.reset();
     addOverride.reset(); dropOverride.reset();
-    commit.reset(); uncommit.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]);
+  }, [scenarioId]);
 
   // A scenario checked for comparison can be deleted out from under the
   // chart. Drop it from compareIds rather than letting it linger in
@@ -216,238 +180,138 @@ export default function Scenarios() {
     });
   }, [scenarios]);
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        <FlaskConical className="w-5 h-5" />
-        <h1 className="text-xl font-semibold">Scenarios</h1>
-      </div>
+  if (!selected) return null;
 
-      <div className="card p-4 space-y-3">
-        <h2 className="font-medium">Your scenarios</h2>
-        <div className="flex flex-wrap gap-2">
-          {scenarios.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setSelectedId(s.id)}
-              className={`px-3 py-1.5 rounded border text-sm ${
-                s.id === selectedId ? "border-blue-500 font-medium" : "border-gray-300"
-              }`}
-            >
-              {s.name}
-              {s.status === "committed" && (
-                <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-green-100 text-green-800">
-                  committed
-                </span>
-              )}
-            </button>
-          ))}
-          {scenarios.length === 0 && (
-            <p className="text-sm text-gray-500">
-              No scenarios yet. Create one to test a change before it is real.
+  return (
+    <>
+      <ProposedItemsSection
+        scenario={selected}
+        accounts={accounts}
+        cards={cards}
+        disabled={committed}
+        onAdd={(data) => addItem.mutate(data)}
+        onDrop={(id) => dropItem.mutate(id)}
+        addError={addItem.isError ? errorDetail(addItem.error, "Could not add this item.") : null}
+        dropError={dropItem.isError ? errorDetail(dropItem.error, "Could not remove this item.") : null}
+      />
+      <ProposedExpensesSection
+        scenario={selected}
+        accounts={accounts}
+        cards={cards}
+        disabled={committed}
+        onAdd={(data) => addExpense.mutate(data)}
+        onDrop={(id) => dropExpense.mutate(id)}
+        addError={addExpense.isError ? errorDetail(addExpense.error, "Could not add this expense.") : null}
+        dropError={dropExpense.isError ? errorDetail(dropExpense.error, "Could not remove this expense.") : null}
+      />
+      <OverridesSection
+        scenario={selected}
+        recurring={recurring}
+        disabled={committed}
+        onAdd={(data) => addOverride.mutate(data)}
+        onDrop={(id) => dropOverride.mutate(id)}
+        addError={addOverride.isError ? errorDetail(addOverride.error, "Could not add this tweak.") : null}
+        dropError={dropOverride.isError ? errorDetail(dropOverride.error, "Could not remove this tweak.") : null}
+      />
+
+      {impact && (
+        <div className="card p-4">
+          <h2 className="font-medium mb-3">Impact</h2>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-gray-500">
+                <th className="py-1">Figure</th>
+                <th className="py-1">Baseline</th>
+                <th className="py-1">Scenario</th>
+                <th className="py-1">Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {([
+                ["3-month low", "low", true],
+                ["Weekly safety margin", "safety_margin_weekly", true],
+                ["Total monthly commitments", "total_monthly_commitments", false],
+              ] as [string, string, boolean][]).map(([label, key, higherIsBetter]) => {
+                const base = Number(impact.baseline[key]);
+                const scen = Number(impact.scenario[key]);
+                const delta = scen - base;
+                const good = higherIsBetter ? delta >= 0 : delta <= 0;
+                return (
+                  <tr key={key} className="border-t">
+                    <td className="py-1.5">{label}</td>
+                    <td className="py-1.5">{money(base)}</td>
+                    <td className="py-1.5">{money(scen)}</td>
+                    <td className={`py-1.5 ${good ? "text-green-700" : "text-red-700"}`}>
+                      {delta >= 0 ? "+" : "−"}{money(Math.abs(delta))}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {impact.scenario.low_date && (
+            <p className="text-xs text-gray-500 mt-2">
+              Scenario low lands {impact.scenario.low_date}.
             </p>
           )}
         </div>
-        <div className="flex gap-2">
-          <input
-            className="input"
-            placeholder="New scenario name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-          />
-          <button
-            className="btn"
-            disabled={!newName.trim()}
-            onClick={() => createScenario.mutate()}
-          >
-            <Plus className="w-4 h-4" /> Create
-          </button>
-          {selected && (
-            <button className="btn" onClick={() => removeScenario.mutate(selected.id)}>
-              <Trash2 className="w-4 h-4" /> Delete
-            </button>
-          )}
-        </div>
-        <ErrorNote message={createScenario.isError ? errorDetail(createScenario.error, "Could not create the scenario.") : null} />
-        <ErrorNote message={removeScenario.isError ? errorDetail(removeScenario.error, "Could not delete this scenario.") : null} />
-      </div>
-
-      {selected && (
-        <>
-          <ProposedItemsSection
-            scenario={selected}
-            accounts={accounts}
-            cards={cards}
-            disabled={committed}
-            onAdd={(data) => addItem.mutate(data)}
-            onDrop={(id) => dropItem.mutate(id)}
-            addError={addItem.isError ? errorDetail(addItem.error, "Could not add this item.") : null}
-            dropError={dropItem.isError ? errorDetail(dropItem.error, "Could not remove this item.") : null}
-          />
-          <ProposedExpensesSection
-            scenario={selected}
-            accounts={accounts}
-            cards={cards}
-            disabled={committed}
-            onAdd={(data) => addExpense.mutate(data)}
-            onDrop={(id) => dropExpense.mutate(id)}
-            addError={addExpense.isError ? errorDetail(addExpense.error, "Could not add this expense.") : null}
-            dropError={dropExpense.isError ? errorDetail(dropExpense.error, "Could not remove this expense.") : null}
-          />
-          <OverridesSection
-            scenario={selected}
-            recurring={recurring}
-            disabled={committed}
-            onAdd={(data) => addOverride.mutate(data)}
-            onDrop={(id) => dropOverride.mutate(id)}
-            addError={addOverride.isError ? errorDetail(addOverride.error, "Could not add this tweak.") : null}
-            dropError={dropOverride.isError ? errorDetail(dropOverride.error, "Could not remove this tweak.") : null}
-          />
-
-          {impact && (
-            <div className="card p-4">
-              <h2 className="font-medium mb-3">Impact</h2>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-500">
-                    <th className="py-1">Figure</th>
-                    <th className="py-1">Baseline</th>
-                    <th className="py-1">Scenario</th>
-                    <th className="py-1">Change</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {([
-                    ["3-month low", "low", true],
-                    ["Weekly safety margin", "safety_margin_weekly", true],
-                    ["Total monthly commitments", "total_monthly_commitments", false],
-                  ] as [string, string, boolean][]).map(([label, key, higherIsBetter]) => {
-                    const base = Number(impact.baseline[key]);
-                    const scen = Number(impact.scenario[key]);
-                    const delta = scen - base;
-                    const good = higherIsBetter ? delta >= 0 : delta <= 0;
-                    return (
-                      <tr key={key} className="border-t">
-                        <td className="py-1.5">{label}</td>
-                        <td className="py-1.5">{money(base)}</td>
-                        <td className="py-1.5">{money(scen)}</td>
-                        <td className={`py-1.5 ${good ? "text-green-700" : "text-red-700"}`}>
-                          {delta >= 0 ? "+" : "−"}{money(Math.abs(delta))}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              {impact.scenario.low_date && (
-                <p className="text-xs text-gray-500 mt-2">
-                  Scenario low lands {impact.scenario.low_date}.
-                </p>
-              )}
-            </div>
-          )}
-
-          <div className="card p-4 space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="font-medium">Projected balance</h2>
-              <select
-                className="input w-auto"
-                value={activeAccountId ?? ""}
-                onChange={(e) => setAccountId(parseInt(e.target.value, 10))}
-              >
-                {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-wrap gap-2 text-sm">
-              <span className="text-gray-500">Also compare:</span>
-              {scenarios.filter((s) => s.id !== selected.id).map((s) => (
-                <label key={s.id} className="inline-flex items-center gap-1">
-                  <input
-                    type="checkbox"
-                    checked={compareIds.includes(s.id)}
-                    onChange={(e) => setCompareIds(
-                      e.target.checked
-                        ? [...compareIds, s.id]
-                        : compareIds.filter((i) => i !== s.id),
-                    )}
-                  />
-                  {s.name}
-                </label>
-              ))}
-            </div>
-            <div style={{ height: 320 }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartRows}>
-                  <CartesianGrid strokeDasharray="3 3" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={40} />
-                  <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v: any) => money(v)} />
-                  <Legend />
-                  <Line type="monotone" dataKey="baseline" name="Baseline"
-                        stroke="#6b7280" strokeWidth={2} dot={false} />
-                  {lineMaps.map((l, idx) => (
-                    <Line
-                      key={l.id}
-                      type="monotone"
-                      dataKey={`s${l.id}`}
-                      name={scenarios.find((s) => s.id === l.id)?.name ?? `Scenario ${l.id}`}
-                      stroke={lineColors[idx % lineColors.length]}
-                      strokeWidth={2}
-                      strokeDasharray="5 3"
-                      dot={false}
-                    />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          <div className="card p-4 space-y-2">
-            {committed ? (
-              <>
-                <p className="text-sm">
-                  Committed{selected.committed_at ? ` ${selected.committed_at.slice(0, 10)}` : ""}.
-                  Its items are now real recurring items and planned expenses.
-                </p>
-                <button
-                  className="btn"
-                  onClick={() => {
-                    const ok = window.confirm(
-                      "Uncommit deletes the recurring items and planned expenses this " +
-                      "scenario created and restores the amounts it changed. Any edits " +
-                      "you made to those rows since committing will be lost. Continue?",
-                    );
-                    if (ok) uncommit.mutate();
-                  }}
-                >
-                  Uncommit
-                </button>
-                <ErrorNote message={uncommit.isError ? errorDetail(uncommit.error, "Could not uncommit this scenario.") : null} />
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-gray-500">
-                  Committing creates real recurring items and planned expenses from
-                  this scenario, and applies its amount tweaks. It can be reversed.
-                </p>
-                <button
-                  className="btn"
-                  disabled={
-                    selected.proposed_items.length === 0 &&
-                    selected.proposed_expenses.length === 0 &&
-                    selected.overrides.length === 0
-                  }
-                  onClick={() => commit.mutate()}
-                >
-                  Commit to forecast
-                </button>
-                <ErrorNote message={commit.isError ? errorDetail(commit.error, "Could not commit this scenario.") : null} />
-              </>
-            )}
-          </div>
-        </>
       )}
-    </div>
+
+      <div className="card p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="font-medium">Projected balance</h2>
+          <select
+            className="input w-auto"
+            value={activeAccountId ?? ""}
+            onChange={(e) => setChartAccountId(parseInt(e.target.value, 10))}
+          >
+            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </div>
+        <div className="flex flex-wrap gap-2 text-sm">
+          <span className="text-gray-500">Also compare:</span>
+          {scenarios.filter((s) => s.id !== selected.id).map((s) => (
+            <label key={s.id} className="inline-flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={compareIds.includes(s.id)}
+                onChange={(e) => setCompareIds(
+                  e.target.checked
+                    ? [...compareIds, s.id]
+                    : compareIds.filter((i) => i !== s.id),
+                )}
+              />
+              {s.name}
+            </label>
+          ))}
+        </div>
+        <div style={{ height: 320 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartRows}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="date" tick={{ fontSize: 11 }} minTickGap={40} />
+              <YAxis tick={{ fontSize: 11 }} />
+              <Tooltip formatter={(v: any) => money(v)} />
+              <Legend />
+              <Line type="monotone" dataKey="baseline" name="Baseline"
+                    stroke="#6b7280" strokeWidth={2} dot={false} />
+              {lineMaps.map((l, idx) => (
+                <Line
+                  key={l.id}
+                  type="monotone"
+                  dataKey={`s${l.id}`}
+                  name={scenarios.find((s) => s.id === l.id)?.name ?? `Scenario ${l.id}`}
+                  stroke={lineColors[idx % lineColors.length]}
+                  strokeWidth={2}
+                  strokeDasharray="5 3"
+                  dot={false}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </>
   );
 }
 

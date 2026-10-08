@@ -18,7 +18,7 @@ import Calendar from "./pages/Calendar";
 import Goals from "./pages/Goals";
 import NetWorth from "./pages/NetWorth";
 import AccountDetail from "./pages/AccountDetail";
-import Scenarios from "./pages/Scenarios";
+import WishList from "./pages/WishList";
 import Adventures from "./pages/Adventures";
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -47,7 +47,8 @@ export default function App() {
           <Route path="calendar" element={<Calendar />} />
           <Route path="credit-cards" element={<CreditCards />} />
           <Route path="forecast" element={<Forecast />} />
-          <Route path="scenarios" element={<Scenarios />} />
+          <Route path="wish-list" element={<WishList />} />
+          <Route path="scenarios" element={<Navigate to="/wish-list" replace />} />
           <Route path="adventures" element={<Adventures />} />
           <Route path="spending" element={<Spending />} />
           <Route path="tax" element={<TaxExport />} />

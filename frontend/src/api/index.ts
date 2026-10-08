@@ -308,6 +308,22 @@ export const scenariosApi = {
       .then((r) => r.data),
 };
 
+// ── Wish List ─────────────────────────────────────────────────────────────────
+export const wishApi = {
+  plan: (accountId?: number) => api.get("/wish-list/plan", { params: { account_id: accountId } }).then((r) => r.data),
+  cushion: (accountId?: number) => api.get("/wish-list/cushion", { params: { account_id: accountId } }).then((r) => r.data),
+  setCushion: (cushion: string | null) => api.put("/wish-list/cushion", { cushion }).then((r) => r.data),
+  createItem: (data: object) => api.post("/wish-list/items", data).then((r) => r.data),
+  updateItem: (id: number, data: object) => api.patch(`/wish-list/items/${id}`, data).then((r) => r.data),
+  removeItem: (id: number) => api.delete(`/wish-list/items/${id}`),
+  reorder: (ids: number[]) => api.post("/wish-list/items/reorder", { ids }),
+  createOption: (id: number, data: object) => api.post(`/wish-list/items/${id}/options`, data).then((r) => r.data),
+  updateOption: (id: number, oid: number, data: object) => api.patch(`/wish-list/items/${id}/options/${oid}`, data).then((r) => r.data),
+  removeOption: (id: number, oid: number) => api.delete(`/wish-list/items/${id}/options/${oid}`),
+  commit: (id: number, accountId?: number) => api.post(`/wish-list/items/${id}/commit`, null, { params: { account_id: accountId } }).then((r) => r.data),
+  uncommit: (id: number) => api.post(`/wish-list/items/${id}/uncommit`).then((r) => r.data),
+};
+
 // ── Day Checkpoints ───────────────────────────────────────────────────────────
 export const dayCheckpointsApi = {
   list: (accountId: number) =>
