@@ -2086,3 +2086,123 @@ class FinishRequest(BaseModel):
         if v is not None and any(amount < 0 for amount in v.values()):
             raise ValueError("points_used_by_program values must be >= 0")
         return v
+
+
+# ── Wish List ──────────────────────────────────────────────────────────────
+
+class WishItemIn(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    price: Decimal = Field(default=Decimal("0"), ge=0)
+    trade_in_value: Decimal = Field(default=Decimal("0"), ge=0)
+    trade_in_on: date | None = None
+    target_date: date | None = None
+
+
+class WishItemUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    price: Decimal | None = Field(default=None, ge=0)
+    trade_in_value: Decimal | None = Field(default=None, ge=0)
+    trade_in_on: date | None = None
+    target_date: date | None = None
+    plan_option_id: int | None = None
+
+
+class WishItemRowOut(BaseModel):
+    id: int
+    scenario_id: int
+    name: str
+    rank: int
+    status: str
+    price: Decimal
+    trade_in_value: Decimal
+    trade_in_on: date | None
+    target_date: date | None
+    plan_option_id: int | None
+
+
+class WishOptionIn(BaseModel):
+    label: str = Field(min_length=1, max_length=64)
+    method: models.WishMethod
+    card_id: int | None = None
+    months: int | None = Field(default=None, ge=1, le=84)
+    apr: Decimal | None = Field(default=None, ge=0)
+    down_payment: Decimal = Field(default=Decimal("0"), ge=0)
+
+
+class WishOptionUpdate(BaseModel):
+    label: str | None = Field(default=None, min_length=1, max_length=64)
+    method: models.WishMethod | None = None
+    card_id: int | None = None
+    months: int | None = Field(default=None, ge=1, le=84)
+    apr: Decimal | None = Field(default=None, ge=0)
+    down_payment: Decimal | None = Field(default=None, ge=0)
+
+
+class WishOptionOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    wish_item_id: int
+    label: str
+    method: models.WishMethod
+    card_id: int | None
+    months: int | None
+    apr: Decimal | None
+    down_payment: Decimal
+    sort_order: int
+
+
+class ReorderIn(BaseModel):
+    ids: list[int]
+
+
+class CushionIn(BaseModel):
+    cushion: Decimal | None = Field(default=None, ge=0)
+
+
+class CushionOut(BaseModel):
+    cushion: Decimal
+
+
+class WishCommitOut(BaseModel):
+    placement_date: date
+    option_id: int | None
+
+
+class WishPlanOptionOut(BaseModel):
+    option_id: int | None
+    label: str
+    method: str | None
+    monthly_payment: Decimal | None
+    total_cost: Decimal | None
+    error: str | None
+    safe_date: date | None
+    low: Decimal | None
+    low_date: date | None
+    best_date: date | None
+    best_low: Decimal | None
+    shortfall: Decimal | None
+
+
+class WishPlanItemOut(BaseModel):
+    id: int
+    scenario_id: int
+    name: str
+    rank: int
+    status: str
+    price: Decimal
+    trade_in_value: Decimal
+    trade_in_on: date | None
+    target_date: date | None
+    target_ignored: bool
+    target_low: Decimal | None
+    target_shortfall: Decimal | None
+    plan_option_id: int | None
+    placement_date: date | None
+    fits: bool
+    options: list[WishPlanOptionOut]
+    explain: Explanation | None
+
+
+class WishPlanOut(BaseModel):
+    cushion: Decimal
+    items: list[WishPlanItemOut]

@@ -251,6 +251,34 @@ def test_uncommit_blocked_by_another_scenarios_override(seeded):
     assert scenario.status == "committed"
 
 
+def test_uncommit_blocked_by_a_posted_transaction(seeded):
+    """ScenarioPaymentsPosted: a bank sync already linked a real Transaction
+    to the RecurringItem this scenario created. Deleting that item mid-uncommit
+    would violate Transaction.recurring_item_id's FK (no ondelete), so it is
+    refused up front -- mirroring how ScenarioUncommitBlocked guards the
+    ScenarioOverride FK."""
+    db, user, account, scenario, _dining = seeded
+    scenario_service.commit_scenario(db, user.id, scenario.id)
+    created = db.query(models.RecurringItem).filter(
+        models.RecurringItem.name == "iPhone Trade-In"
+    ).one()
+    db.add(models.Transaction(
+        user_id=user.id, account_id=account.id, recurring_item_id=created.id,
+        date=date(2026, 10, 23), amount=Decimal("-57.87"), description="iPhone Trade-In",
+    ))
+    db.commit()
+
+    response = _client(db, user).post(f"/scenarios/{scenario.id}/uncommit")
+
+    assert response.status_code == 409
+    assert "posted transactions" in response.json()["detail"]
+    assert db.query(models.RecurringItem).filter(
+        models.RecurringItem.id == created.id
+    ).count() == 1
+    db.refresh(scenario)
+    assert scenario.status == "committed"
+
+
 def test_commit_refused_on_a_stacked_tweak(seeded):
     """I2: a different, already-committed scenario has already tweaked this
     same item. Stacking a second tweak would make the true original amount
