@@ -101,28 +101,42 @@ def commit_wish(db: Session, user, account_id: int, item_id: int, today: date) -
                 if down > 0:
                     _expense(db, user, item, f"{name}: down payment", down, when, option.card_id)
                 sched = payment_schedule(financed_principal(item, option), option.apr or 0, option.months or 0)
-                if len(sched) > 1:
-                    # account_id is required on RecurringItem (NOT NULL) even
-                    # when card_id is also set -- routers/recurring.py's
-                    # RecurringCreate schema makes account_id mandatory
-                    # unconditionally, and forecast_engine.build_forecast
-                    # finds a card-paid recurring item by filtering on BOTH
-                    # account_id and card_id (it's how a card's payoff gets
-                    # attributed back to the checking account that ultimately
-                    # feels it). Setting it to None here would violate the
-                    # NOT NULL constraint and silently misroute the forecast.
-                    rec = models.RecurringItem(
-                        user_id=user.id, account_id=account_id, card_id=option.card_id,
-                        name=f"{name}: payment"[:128], amount=sched[0],
-                        type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
-                        day_of_month=add_months(when, 1).day, start_date=add_months(when, 1),
-                        end_date=add_months(when, len(sched) - 1), is_active=True,
-                    )
-                    db.add(rec); db.flush()
-                    _record(db, user, item, "recurring_item", rec.id)
-                if sched:
-                    _expense(db, user, item, f"{name}: final payment", sched[-1], add_months(when, len(sched)),
-                             option.card_id)
+                if option.card_id is not None:
+                    # RULING: a card-linked RecurringItem would be invisible
+                    # whenever the card carries a monthly_spend_estimate > 0 --
+                    # forecast_engine (~760-792) lets a manually-set estimate
+                    # win outright and never looks at card_items_by_card at
+                    # all in that branch, so the real payment would vanish
+                    # from the forecast entirely instead of being double- or
+                    # under-counted. Routed as individual one-off
+                    # PlannedExpenses instead, same path (card_planned_by_date,
+                    # forecast_engine ~450-476) any other card purchase takes:
+                    # each lands on add_months(when, k), card_id set, no
+                    # RecurringItem created for card financing at all.
+                    for k, pay in enumerate(sched, start=1):
+                        _expense(db, user, item, f"{name}: payment {k}/{len(sched)}", pay,
+                                 add_months(when, k), option.card_id)
+                else:
+                    if len(sched) > 1:
+                        rec = models.RecurringItem(
+                            user_id=user.id, account_id=account_id, card_id=None,
+                            name=f"{name}: payment"[:128], amount=sched[0],
+                            type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
+                            # Mirrors the buy date's own day-of-month -- the
+                            # engine clamps it into short months itself (same
+                            # RecurringItem.day_of_month convention as every
+                            # other item), so add_months(when, 1).day was
+                            # silently losing a 29/30/31 buy day the moment
+                            # the first payment month was shorter than the
+                            # buy month.
+                            day_of_month=when.day, start_date=add_months(when, 1),
+                            end_date=add_months(when, len(sched) - 1), is_active=True,
+                        )
+                        db.add(rec); db.flush()
+                        _record(db, user, item, "recurring_item", rec.id)
+                    if sched:
+                        _expense(db, user, item, f"{name}: final payment", sched[-1], add_months(when, len(sched)),
+                                 None)
         credit = _trade_in_credit(item)
         if credit > 0:
             _expense(db, user, item, f"{name}: trade-in credit", credit, item.trade_in_on, None,
@@ -135,8 +149,39 @@ def commit_wish(db: Session, user, account_id: int, item_id: int, today: date) -
     return {"placement_date": when, "option_id": option.id if option else None}
 
 
+def _refuse_if_payments_posted(db: Session, item: models.WishItem) -> None:
+    """RULING: once a bank sync has linked a real Transaction to a
+    RecurringItem this wish created -- or a scenario amount-tweak
+    (ScenarioOverride) targets it -- uncommit must refuse before touching
+    anything. Both FKs (Transaction.recurring_item_id,
+    ScenarioOverride.recurring_item_id) have no ondelete, so with foreign
+    keys enforced, deleting a still-referenced RecurringItem mid-uncommit
+    would crash partway through, stranding the wish half-uncommitted (some
+    rows deleted, others not) with no way to retry. Checked up front, before
+    the first delete, so a refusal changes nothing at all."""
+    recurring_ids = [
+        r.row_id for r in db.query(models.WishCommitRow).filter(
+            models.WishCommitRow.wish_item_id == item.id,
+            models.WishCommitRow.kind == "recurring_item",
+        ).all()
+    ]
+    if not recurring_ids:
+        return
+    posted = db.query(models.Transaction).filter(
+        models.Transaction.recurring_item_id.in_(recurring_ids),
+    ).first()
+    overridden = db.query(models.ScenarioOverride).filter(
+        models.ScenarioOverride.recurring_item_id.in_(recurring_ids),
+    ).first()
+    if posted is not None or overridden is not None:
+        raise WishError(
+            "Payments for this wish have already posted; edit them on the Recurring page instead"
+        )
+
+
 def uncommit_wish(db: Session, user, item_id: int) -> dict:
     item = _own_item(db, user, item_id)
+    _refuse_if_payments_posted(db, item)
     rows = db.query(models.WishCommitRow).filter(models.WishCommitRow.wish_item_id == item.id).all()
     for r in rows:
         model = models.PlannedExpense if r.kind == "planned_expense" else models.RecurringItem

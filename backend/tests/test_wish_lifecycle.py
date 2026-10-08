@@ -2,7 +2,9 @@ from datetime import date, timedelta
 from decimal import Decimal
 import pytest
 from backend import models
+from backend.services.forecast_engine import build_forecast, _card_payoff_date_for_charge
 from backend.services.wish_lifecycle import WishError, ensure_wish_items, commit_wish, uncommit_wish
+from backend.services.wish_math import add_months
 
 
 def _seed(db):
@@ -90,14 +92,93 @@ def test_commit_refused_when_chosen_option_has_error(db_session):
     assert it.scenario.status == "draft"
 
 
-def test_commit_financed_with_card_sets_account_id_on_recurring_item(db_session):
-    """RecurringItem.account_id is NOT NULL even when card_id is also set --
-    routers/recurring.py's RecurringCreate schema requires it unconditionally,
-    and forecast_engine filters card-paid recurring items by account_id too.
-    A card-routed financed payment must still carry the real account_id."""
+def test_commit_financed_with_card_creates_individual_one_offs_not_recurring(db_session):
+    """I2 (RULING): a card-linked RecurringItem would be invisible whenever
+    the card carries monthly_spend_estimate > 0 -- forecast_engine's flat
+    estimate (~760-792) wins outright and never looks at card-linked
+    RecurringItems in that branch, so the real financed payment would vanish
+    from the forecast entirely instead of showing up. Card financing must
+    create no RecurringItem at all: each scheduled payment is its own
+    PlannedExpense with card_id set, landing on add_months(when, k), routed
+    through the forecast the same way any other card one-off is -- via
+    card_planned_by_date / _card_payoff_date_for_charge -- so it shows up on
+    its real payoff date instead of being absorbed by the flat estimate."""
     u, acct, card = _seed(db_session)
+    card.monthly_spend_estimate = Decimal("5500.00")
+    db_session.commit()
+    today = date(2026, 1, 5)
     it = _wish(db_session, u, "1000.00", models.WishMethod.financed, months=3, apr="0", down="100.00",
               card_id=card.id)
+    it.target_date = today
+    db_session.commit()
+
+    res = commit_wish(db_session, u, acct.id, it.id, today)
+    buy = res["placement_date"]
+    assert buy == today
+
+    assert db_session.query(models.RecurringItem).filter_by(user_id=u.id).count() == 0
+
+    pes = db_session.query(models.PlannedExpense).filter_by(user_id=u.id).order_by(
+        models.PlannedExpense.expected_date).all()
+    assert all(p.card_id == card.id for p in pes)
+    assert [p.amount for p in pes] == [Decimal("100.00"), Decimal("300.00"), Decimal("300.00"), Decimal("300.00")]
+    payments = pes[1:]  # drop the down payment
+    assert [p.expected_date for p in payments] == [add_months(buy, k) for k in (1, 2, 3)]
+
+    days = build_forecast(db_session, u.id, acct.id, today, today + timedelta(days=150))
+    by_date = {d.date: d.transactions for d in days}
+    for pe in payments:
+        payoff = _card_payoff_date_for_charge(card, pe.expected_date)
+        matches = [
+            t for t in by_date.get(payoff, [])
+            if t.name == f"{pe.name} (via {card.name})" and t.amount == -pe.amount
+        ]
+        assert len(matches) == 1, f"expected exactly one match for {pe.name} on {payoff}, got {matches}"
+
+
+def test_uncommit_refuses_once_payments_have_posted(db_session):
+    """I1 (RULING): a posted bank-synced Transaction linking to a
+    RecurringItem this wish created must block uncommit before anything is
+    touched -- Transaction.recurring_item_id is a FK with no ondelete, so
+    with foreign keys enforced, deleting that item mid-uncommit would
+    otherwise crash partway through, stranding the wish half-uncommitted."""
+    u, acct, _ = _seed(db_session)
+    it = _wish(db_session, u, "1000.00", models.WishMethod.financed, months=3, apr="0", down="100.00")
     commit_wish(db_session, u, acct.id, it.id, date.today())
+
     rec = db_session.query(models.RecurringItem).filter_by(user_id=u.id).one()
-    assert rec.account_id == acct.id and rec.card_id == card.id
+    pe_count_before = db_session.query(models.PlannedExpense).filter_by(user_id=u.id).count()
+    row_count_before = db_session.query(models.WishCommitRow).filter_by(wish_item_id=it.id).count()
+    db_session.add(models.Transaction(
+        user_id=u.id, account_id=acct.id, recurring_item_id=rec.id,
+        date=date.today(), amount=Decimal("-300.00"), description="payment",
+    ))
+    db_session.commit()
+
+    with pytest.raises(WishError):
+        uncommit_wish(db_session, u, it.id)
+
+    # Nothing changed: every created row still exists, exactly as it was.
+    assert db_session.query(models.RecurringItem).filter_by(user_id=u.id).count() == 1
+    assert db_session.query(models.PlannedExpense).filter_by(user_id=u.id).count() == pe_count_before
+    assert db_session.query(models.WishCommitRow).filter_by(wish_item_id=it.id).count() == row_count_before
+    assert it.scenario.status == "committed"
+
+
+def test_commit_financed_from_checking_recurring_day_of_month_matches_buy_day(db_session):
+    """Minor: day_of_month must mirror the buy date's own day -- the engine
+    clamps it into short months itself, the same convention every other
+    RecurringItem.day_of_month follows -- not add_months(when, 1).day, which
+    silently loses a 29/30/31 buy day whenever the first payment month is
+    shorter than the buy month (e.g. a Jan 31 buy's first payment falls in
+    Feb, clamping the day to 28)."""
+    u, acct, _ = _seed(db_session)
+    today = date(2026, 1, 31)
+    it = _wish(db_session, u, "900.00", models.WishMethod.financed, months=3, apr="0", down="0")
+    it.target_date = today
+    db_session.commit()
+
+    commit_wish(db_session, u, acct.id, it.id, today)
+
+    rec = db_session.query(models.RecurringItem).filter_by(user_id=u.id).one()
+    assert rec.day_of_month == 31

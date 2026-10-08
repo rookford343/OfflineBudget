@@ -116,6 +116,22 @@ class ScenarioUncommitBlocked(Exception):
         )
 
 
+class ScenarioPaymentsPosted(Exception):
+    """Mirrors ScenarioUncommitBlocked's FK guard for the OTHER foreign key
+    that points at a RecurringItem this scenario created:
+    Transaction.recurring_item_id (nullable, no ondelete). Bank sync links a
+    real posted payment to a RecurringItem this way, and deleting that item
+    mid-uncommit would hit the identical FK crash ScenarioUncommitBlocked
+    guards against -- so it is detected and refused before the first delete
+    too, same as that case."""
+
+    def __init__(self, recurring_item_id: int):
+        self.recurring_item_id = recurring_item_id
+        super().__init__(
+            f"recurring item {recurring_item_id} already has posted transactions"
+        )
+
+
 class ScenarioCommitConflict(Exception):
     """A different, already-committed scenario already tweaked this item.
     Stacking a second tweak on top would leave only room to remember one
@@ -335,6 +351,21 @@ def uncommit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
         if p.committed_recurring_item_id is not None
     ]
     if committed_item_ids:
+        # RULING: checked before the ScenarioOverride guard below, for the
+        # same reason -- a posted Transaction blocks the delete just as hard
+        # as a live ScenarioOverride does, and is reachable with no
+        # cross-scenario or authz bug at all (bank sync alone links it).
+        posted = (
+            db.query(models.Transaction)
+            .filter(
+                models.Transaction.recurring_item_id.in_(committed_item_ids),
+            )
+            .order_by(models.Transaction.id.asc())
+            .first()
+        )
+        if posted is not None:
+            raise ScenarioPaymentsPosted(posted.recurring_item_id)
+
         # No scenario_id exclusion here -- a self-override (this scenario
         # tweaking an item it created) reproduces the identical FK crash, and
         # is reachable with no cross-scenario or authz bug at all.
