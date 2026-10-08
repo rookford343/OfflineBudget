@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
 from backend.routers import scenarios as scenarios_router
+from backend.services import scenario_service
 from backend.services import wish_lifecycle as life
 from backend.services import wish_plan
 
@@ -258,7 +259,29 @@ def commit_item(item_id: int, account_id: int | None = Query(None), db: Session 
     try:
         return life.commit_wish(db, user, account_id, item_id, _today())
     except life.WishError as e:
+        db.rollback()
         raise HTTPException(status_code=409, detail=str(e)) from None
+    # commit_wish calls scenario_service.commit_scenario, which also walks the
+    # scenario's own proposed_items/overrides (independent of the wish's
+    # chosen option) and can refuse over THOSE -- none of these are WishError,
+    # mirrored here exactly like the /scenarios commit route's own messages.
+    except scenario_service.ScenarioAlreadyCommitted:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Scenario is already committed") from None
+    except scenario_service.ScenarioCommitConflict as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot commit: item '{e.item_name}' is already tweaked by committed "
+                   f"scenario '{e.conflicting_scenario_name}'.",
+        ) from None
+    except scenario_service.ScenarioDuplicateOverride as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot commit: this scenario has more than one amount tweak on "
+                   f"item '{e.item_name}'.",
+        ) from None
 
 
 @router.post("/items/{item_id}/uncommit")
@@ -267,4 +290,30 @@ def uncommit_item(item_id: int, db: Session = Depends(get_db), user: models.User
     try:
         return life.uncommit_wish(db, user, item_id)
     except life.WishError as e:
+        db.rollback()
         raise HTTPException(status_code=409, detail=str(e)) from None
+    # uncommit_wish's call to scenario_service.uncommit_scenario can likewise
+    # refuse over a committed proposed_item (not the wish's own rows) --
+    # mirrored here exactly like the /scenarios uncommit route's messages.
+    # uncommit_wish already rolls back its own deletes before re-raising
+    # these; rolled back again here too, defensively, before the 409.
+    except scenario_service.ScenarioPaymentsPosted as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot uncommit: recurring item {e.recurring_item_id} already has "
+                   "posted transactions. Edit them on the Recurring page instead.",
+        ) from None
+    except scenario_service.ScenarioUncommitBlocked as e:
+        db.rollback()
+        if e.is_self:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot uncommit: this scenario has an amount tweak on an item "
+                       "it created. Remove that tweak first.",
+            ) from None
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot uncommit: scenario '{e.blocking_scenario_name}' has an amount "
+                   f"tweak on an item this scenario created. Remove that tweak first.",
+        ) from None

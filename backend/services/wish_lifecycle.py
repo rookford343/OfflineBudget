@@ -180,6 +180,19 @@ def _refuse_if_payments_posted(db: Session, item: models.WishItem) -> None:
 
 
 def uncommit_wish(db: Session, user, item_id: int) -> dict:
+    """RULING: a scenario can carry its own proposed_items (the general
+    scenario-proposal mechanism) independently of the wish's own commit rows
+    -- commit_wish's call to scenario_service.commit_scenario materializes
+    both. So scenario_service.uncommit_scenario below can refuse (a posted
+    Transaction or a live override on one of THOSE rows: ScenarioPaymentsPosted
+    / ScenarioUncommitBlocked) for reasons that have nothing to do with the
+    wish's own rows, which by then have already been deleted and flushed
+    (not committed) in this same transaction. Without the rollback below,
+    those flushed deletes would stay pending in the session -- stranding
+    this wish half-uncommitted the moment some OTHER caller down the line
+    issues a db.commit() on this session. Rolled back here so uncommit_wish
+    is atomic on its own regardless of caller, not just when the HTTP route
+    happens to roll back too."""
     item = _own_item(db, user, item_id)
     _refuse_if_payments_posted(db, item)
     rows = db.query(models.WishCommitRow).filter(models.WishCommitRow.wish_item_id == item.id).all()
@@ -191,6 +204,10 @@ def uncommit_wish(db: Session, user, item_id: int) -> dict:
         db.delete(r)
     db.flush()
     if item.scenario.status == "committed":
-        scenario_service.uncommit_scenario(db, user.id, item.scenario_id)
+        try:
+            scenario_service.uncommit_scenario(db, user.id, item.scenario_id)
+        except (scenario_service.ScenarioPaymentsPosted, scenario_service.ScenarioUncommitBlocked):
+            db.rollback()
+            raise
     db.commit()
     return {"ok": True}

@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 import pytest
 from backend import models
+from backend.services import scenario_service
 from backend.services.forecast_engine import build_forecast, _card_payoff_date_for_charge
 from backend.services.wish_lifecycle import WishError, ensure_wish_items, commit_wish, uncommit_wish
 from backend.services.wish_math import add_months
@@ -182,3 +183,46 @@ def test_commit_financed_from_checking_recurring_day_of_month_matches_buy_day(db
 
     rec = db_session.query(models.RecurringItem).filter_by(user_id=u.id).one()
     assert rec.day_of_month == 31
+
+
+def test_uncommit_wish_rolls_back_its_own_deletes_when_scenario_uncommit_refuses(db_session):
+    """RULING: commit_wish's call to scenario_service.commit_scenario also
+    materializes the scenario's own proposed_items (the general
+    scenario-proposal mechanism), independent of the wish's chosen option.
+    On uncommit, uncommit_wish deletes its own rows (the wish's commit rows)
+    and flushes BEFORE calling scenario_service.uncommit_scenario -- which can
+    then refuse over a committed proposed_item for a reason that has nothing
+    to do with the wish's own rows (here: a bank-synced Transaction posted
+    against it). Chose to roll back inside uncommit_wish itself (rather than
+    pre-checking the scenario's blockers up front) so it stays atomic
+    regardless of caller, not just when the HTTP route also rolls back."""
+    u, acct, _ = _seed(db_session)
+    it = _wish(db_session, u, "300.00", models.WishMethod.full_checking)
+    proposed = models.ScenarioProposedItem(
+        scenario_id=it.scenario_id, name="Side burner", amount=Decimal("25.00"),
+        type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
+        day_of_month=5, start_date=date(2026, 11, 5), account_id=acct.id,
+    )
+    db_session.add(proposed)
+    db_session.commit()
+
+    commit_wish(db_session, u, acct.id, it.id, date.today())
+    side_burner = db_session.query(models.RecurringItem).filter_by(name="Side burner").one()
+    pe_count_before = db_session.query(models.PlannedExpense).filter_by(user_id=u.id).count()
+    row_count_before = db_session.query(models.WishCommitRow).filter_by(wish_item_id=it.id).count()
+    db_session.add(models.Transaction(
+        user_id=u.id, account_id=acct.id, recurring_item_id=side_burner.id,
+        date=date.today(), amount=Decimal("-25.00"), description="side burner payment",
+    ))
+    db_session.commit()
+
+    with pytest.raises(scenario_service.ScenarioPaymentsPosted):
+        uncommit_wish(db_session, u, it.id)
+
+    # Nothing changed -- the wish's own rows, flushed-but-uncommitted deletes
+    # included, were rolled back right along with the refused scenario-level
+    # uncommit.
+    assert db_session.query(models.RecurringItem).filter_by(name="Side burner").count() == 1
+    assert db_session.query(models.PlannedExpense).filter_by(user_id=u.id).count() == pe_count_before
+    assert db_session.query(models.WishCommitRow).filter_by(wish_item_id=it.id).count() == row_count_before
+    assert it.scenario.status == "committed"
