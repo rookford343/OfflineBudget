@@ -68,6 +68,8 @@ def _check_card(db: Session, user: models.User, card_id: int | None):
         card = db.get(models.CreditCard, card_id)
         if card is None or card.user_id != user.id:
             raise HTTPException(status_code=422, detail="Unknown card")
+        if not card.is_active:
+            raise HTTPException(status_code=422, detail="That card is closed")
 
 
 def _validate_option(opt: models.WishOption) -> None:

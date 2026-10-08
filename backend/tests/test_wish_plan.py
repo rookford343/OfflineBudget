@@ -281,3 +281,62 @@ def test_committed_scenario_has_no_placement_and_does_not_push_lower_ranked_item
     # already reflects committed costs; build_plan's rank-stacking must not
     # double-count it.
     assert items["Grill"]["placement_date"] == today  # 5000 - 1500 = 3500 >= 1000
+
+
+# ── I1: inactive cards must not be usable by a wish option ──────────────────
+
+def test_explain_result_label_does_not_embed_the_unmasked_cushion_amount(db_session):
+    """Minor 2: the result row's label was built as
+    f"Low point (cushion {cushion})", a literal text string the frontend
+    displays as-is -- unlike the row's `amount` field, nothing on the
+    frontend runs a label through maskIfHidden, so this leaked the real
+    cushion dollar figure even with balances hidden. The label itself must
+    carry no amount at all."""
+    u, acct = _seed(db_session)
+    today = date.today()
+    db_session.add(models.WishSettings(user_id=u.id, cushion=Decimal("1234.00")))
+    _wish(db_session, u, "Grill", 0, "500.00")
+    db_session.commit()
+
+    plan = build_plan(db_session, u, acct.id, today)
+    item_out = plan["items"][0]
+    result_row = next(r for r in item_out["explain"]["rows"] if r["op"] == "result")
+
+    assert result_row["label"] == "Low point vs cushion"
+    assert "1234" not in result_row["label"]
+
+
+def test_full_card_option_on_a_since_closed_card_shows_as_an_error(db_session):
+    """Bug: build_plan's `cards` dict (used by option_flows/_route) held every
+    card, active or not, while forecast_engine only ever routes a card charge
+    for an ACTIVE card (active_cards_by_id). A full_card option on a card that
+    has since gone inactive would silently fall through forecast_engine's
+    "no active card" branch and hit checking on the raw charge date instead of
+    the card's payoff date -- a real money-timing bug, not just a cosmetic
+    one. build_plan must restrict `cards` to active cards so wish_math._route
+    raises "Card no longer exists" for this option, the same path already
+    used for a deleted card, and the option surfaces as an error instead of a
+    silently wrong safe date."""
+    u, acct = _seed(db_session)
+    today = date.today()
+    db_session.add(models.WishSettings(user_id=u.id, cushion=Decimal("1000.00")))
+    card = models.CreditCard(user_id=u.id, name="Closed card", credit_limit=Decimal("5000.00"),
+                             statement_day=28, due_day=25, current_balance=Decimal("0"),
+                             is_active=False)
+    db_session.add(card); db_session.flush()
+    sc = models.ForecastScenario(user_id=u.id, name="Grill"); db_session.add(sc); db_session.flush()
+    item = models.WishItem(user_id=u.id, scenario_id=sc.id, rank=0, price=Decimal("500.00"))
+    db_session.add(item); db_session.flush()
+    opt = models.WishOption(user_id=u.id, wish_item_id=item.id, label="Card", method=models.WishMethod.full_card,
+                            card_id=card.id)
+    db_session.add(opt); db_session.flush()
+    db_session.commit()
+
+    plan = build_plan(db_session, u, acct.id, today)
+    item_out = plan["items"][0]
+    opt_out = item_out["options"][0]
+
+    assert opt_out["error"] == "Card no longer exists"
+    assert opt_out["safe_date"] is None
+    assert opt_out["total_cost"] is None
+    assert item_out["fits"] is False

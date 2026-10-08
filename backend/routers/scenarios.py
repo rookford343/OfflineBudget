@@ -125,6 +125,19 @@ def _owned_scenario(db: Session, user_id: int, scenario_id: int) -> models.Forec
     return scenario
 
 
+def _reject_if_wish_governed(db: Session, scenario_id: int) -> None:
+    """I2: once a scenario has a WishItem row, its commit/uncommit lifecycle
+    belongs to the Wish List -- /wish-list/items/{id}/commit also lays down
+    the chosen option's purchase rows, and uncommit removes exactly those
+    rows first. Letting /scenarios/{id}/commit or /uncommit run instead would
+    flip ForecastScenario.status on its own, forking it from the wish's own
+    bookkeeping with nothing to detect the mismatch. A scenario that never
+    got a WishItem row (not yet surfaced on GET /wish-list/plan) is unaffected."""
+    governed = db.query(models.WishItem).filter(models.WishItem.scenario_id == scenario_id).first()
+    if governed is not None:
+        raise HTTPException(409, "Use the Wish List to commit/uncommit this wish")
+
+
 @router.post(
     "/{scenario_id}/items",
     response_model=schemas.ScenarioProposedItemOut,
@@ -227,6 +240,7 @@ def commit_scenario(
     user: models.User = Depends(get_current_user),
 ):
     _owned_scenario(db, user.id, scenario_id)
+    _reject_if_wish_governed(db, scenario_id)
     try:
         return scenario_service.commit_scenario(db, user.id, scenario_id)
     except scenario_service.ScenarioAlreadyCommitted:
@@ -254,6 +268,7 @@ def uncommit_scenario(
     user: models.User = Depends(get_current_user),
 ):
     _owned_scenario(db, user.id, scenario_id)
+    _reject_if_wish_governed(db, scenario_id)
     try:
         return scenario_service.uncommit_scenario(db, user.id, scenario_id)
     except scenario_service.ScenarioNotCommitted:

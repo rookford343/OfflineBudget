@@ -353,6 +353,53 @@ def test_patch_plan_option_id_to_another_items_option_is_422(db_session):
     assert row.plan_option_id is None
 
 
+# ── I1: inactive cards must not be usable by a wish option ──────────────────
+
+def test_create_option_on_an_inactive_card_is_422(db_session):
+    user = _user(db_session)
+    _account(db_session, user)
+    card = models.CreditCard(
+        user_id=user.id, name="Closed card", credit_limit=Decimal("1000.00"),
+        statement_day=1, due_day=20, is_active=False,
+    )
+    db_session.add(card)
+    db_session.commit()
+    c = _client(db_session, user)
+    item = c.post("/wish-list/items", json={"name": "Grill", "price": "200.00"}).json()
+
+    r = c.post(f"/wish-list/items/{item['id']}/options",
+               json={"label": "Card", "method": "full_card", "card_id": card.id})
+
+    assert r.status_code == 422
+    assert "closed" in r.json()["detail"].lower()
+    assert db_session.query(models.WishOption).filter_by(wish_item_id=item["id"]).count() == 0
+
+
+def test_update_option_to_an_inactive_card_is_422(db_session):
+    user = _user(db_session)
+    _account(db_session, user)
+    active_card = models.CreditCard(
+        user_id=user.id, name="Open card", credit_limit=Decimal("1000.00"), statement_day=1, due_day=20,
+    )
+    closed_card = models.CreditCard(
+        user_id=user.id, name="Closed card", credit_limit=Decimal("1000.00"),
+        statement_day=1, due_day=20, is_active=False,
+    )
+    db_session.add_all([active_card, closed_card])
+    db_session.commit()
+    c = _client(db_session, user)
+    item = c.post("/wish-list/items", json={"name": "Grill", "price": "200.00"}).json()
+    opt = c.post(f"/wish-list/items/{item['id']}/options",
+                json={"label": "Card", "method": "full_card", "card_id": active_card.id}).json()
+
+    r = c.patch(f"/wish-list/items/{item['id']}/options/{opt['id']}", json={"card_id": closed_card.id})
+
+    assert r.status_code == 422
+    assert "closed" in r.json()["detail"].lower()
+    db_session.refresh(db_session.get(models.WishOption, opt["id"]))
+    assert db_session.get(models.WishOption, opt["id"]).card_id == active_card.id
+
+
 def test_cushion_is_isolated_per_user(db_session):
     db = db_session
     a = _user(db, "cushion_a")
