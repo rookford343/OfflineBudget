@@ -1178,3 +1178,70 @@ class ChecklistTemplateItem(Base):
     pricing: Mapped[TripPricing] = mapped_column(Enum(TripPricing), default=TripPricing.flat, nullable=False)
     unit_cash: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+# ── Wish List ────────────────────────────────────────────────────────────────
+# Additive tables on top of forecast_scenarios (each scenario is a wish item;
+# its proposed items/expenses/overrides stay the item's building blocks).
+# Spec: docs/superpowers/specs/2026-10-07-wish-list-design.md
+
+
+class WishMethod(str, PyEnum):
+    full_checking = "full_checking"
+    full_card = "full_card"
+    financed = "financed"
+
+
+class WishItem(Base):
+    __tablename__ = "wish_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    scenario_id: Mapped[int] = mapped_column(Integer, ForeignKey("forecast_scenarios.id"), nullable=False, unique=True)
+    rank: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    trade_in_value: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    trade_in_on: Mapped[date | None] = mapped_column(Date)
+    target_date: Mapped[date | None] = mapped_column(Date)
+    plan_option_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("wish_options.id", use_alter=True))
+
+    scenario: Mapped["ForecastScenario"] = relationship()
+    options: Mapped[list["WishOption"]] = relationship(
+        back_populates="item", cascade="all, delete-orphan", order_by="WishOption.sort_order",
+        foreign_keys="WishOption.wish_item_id",
+    )
+
+
+class WishOption(Base):
+    __tablename__ = "wish_options"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    wish_item_id: Mapped[int] = mapped_column(Integer, ForeignKey("wish_items.id"), nullable=False)
+    label: Mapped[str] = mapped_column(String(64), nullable=False)
+    method: Mapped[WishMethod] = mapped_column(Enum(WishMethod), nullable=False)
+    card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
+    months: Mapped[int | None] = mapped_column(Integer)
+    apr: Mapped[Decimal | None] = mapped_column(Numeric(6, 3))
+    down_payment: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("0"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    item: Mapped[WishItem] = relationship(back_populates="options", foreign_keys=[wish_item_id])
+
+
+class WishCommitRow(Base):
+    __tablename__ = "wish_commit_rows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    wish_item_id: Mapped[int] = mapped_column(Integer, ForeignKey("wish_items.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # planned_expense | recurring_item
+    row_id: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class WishSettings(Base):
+    __tablename__ = "wish_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    cushion: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
