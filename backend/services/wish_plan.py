@@ -167,10 +167,29 @@ def build_plan(db, user, account_id, today: date) -> dict:
                 (o for o in opts_out if o["option_id"] == item.plan_option_id and o["error"] is None), None)
         if plan_opt is None:
             fitting = [o for o in opts_out if o["error"] is None and o["safe_date"] is not None]
-            plan_opt = min(fitting, key=lambda o: (o["safe_date"], o["total_cost"])) if fitting else opts_out[0]
-        placement = item.target_date or plan_opt["safe_date"]
+            if fitting:
+                plan_opt = min(fitting, key=lambda o: (o["safe_date"], o["total_cost"]))
+            else:
+                # Prefer any error-free option over opts_out[0], which may be
+                # the errored one -- an option that merely doesn't fit within
+                # the horizon is still a better fallback than one that
+                # couldn't even be priced. If every option errored, opts_out[0]
+                # is used only as a placeholder; `fits` below stays False
+                # because its "error" is never None.
+                plan_opt = next((o for o in opts_out if o["error"] is None), opts_out[0])
+
+        # Ruling: a target_date before today is stale (the window to act on it
+        # has already passed) and is treated as unset -- placement falls back
+        # to the engine's own safe date, and the item reports that it did so.
+        raw_target = item.target_date
+        target_ignored = raw_target is not None and raw_target < today
+        valid_target = raw_target if (raw_target is not None and not target_ignored) else None
+
+        placement = valid_target or plan_opt["safe_date"]
         fits = placement is not None and not committed and plan_opt["error"] is None
         explain = None
+        target_low = None
+        target_shortfall = None
         if fits:
             opt_obj = next((o for o in item.options if o.id == plan_opt["option_id"]), None)
             cum = cum_from_flows(dates, option_flows(item, opt_obj, placement, cards)) if opt_obj else zero
@@ -178,8 +197,9 @@ def build_plan(db, user, account_id, today: date) -> dict:
             lp = low_point(base, mask, dates, [item_prior, cum], place_idx)
             if lp is not None:
                 low, li = lp
+                using_target = valid_target is not None
                 explain = {
-                    "title": "Earliest safe date",
+                    "title": "Your chosen date" if using_target else "Earliest safe date",
                     "result": str(low),
                     "rows": [
                         {"op": "start", "label": f"Projected balance on {dates[li].isoformat()}", "amount": str(base[li])},
@@ -189,11 +209,15 @@ def build_plan(db, user, account_id, today: date) -> dict:
                         {"op": "result", "label": f"Low point (cushion {cushion})", "amount": str(low)},
                     ],
                 }
+                if using_target:
+                    target_low = low
+                    target_shortfall = (cushion - low) if low < cushion else ZERO
             prior = [p + c for p, c in zip(item_prior, cum)]
         out.append({
             "id": item.id, "scenario_id": sc.id, "name": sc.name, "rank": item.rank, "status": sc.status,
             "price": Decimal(item.price), "trade_in_value": Decimal(item.trade_in_value),
             "trade_in_on": item.trade_in_on, "target_date": item.target_date,
+            "target_ignored": target_ignored, "target_low": target_low, "target_shortfall": target_shortfall,
             "plan_option_id": plan_opt["option_id"], "placement_date": placement if not committed else None,
             "fits": fits, "options": opts_out, "explain": explain,
         })
