@@ -206,6 +206,28 @@ def _charged_so_far(db: Session, user_id: int, as_of: date) -> Decimal:
     return total
 
 
+def floor_mask(days, active_cards) -> list[bool]:
+    """Per forecast day: may it be the reported floor? False from a locked
+    card-payoff day (projected is_cc_locked, or a real card-matching payoff)
+    through to the next income day -- the Dashboard's Safety Margin rule."""
+    def _is_payoff_day(day) -> bool:
+        if any(t.is_cc_locked for t in day.transactions):
+            return True
+        return any(
+            t.is_actual and t.amount < 0
+            and any(card_matches_description(card, t.name) for card in active_cards)
+            for t in day.transactions
+        )
+    mask, in_locked_dip = [], False
+    for day in days:
+        if _is_payoff_day(day):
+            in_locked_dip = True
+        if any(t.type == "income" and t.amount > 0 for t in day.transactions):
+            in_locked_dip = False
+        mask.append(not in_locked_dip)
+    return mask
+
+
 def _lookahead_minimum(
     db: Session, user_id: int, account_id: int, as_of: date, months: int = 3,
     *, proposal: ScenarioProposal | None = None,
@@ -302,24 +324,8 @@ def _lookahead_minimum(
         models.CreditCard.is_active == True,
     ).all()
 
-    def _is_payoff_day(day) -> bool:
-        if any(t.is_cc_locked for t in day.transactions):
-            return True
-        return any(
-            t.is_actual and t.amount < 0
-            and any(card_matches_description(card, t.name) for card in active_cards)
-            for t in day.transactions
-        )
-
-    in_locked_dip = False
-    candidates = []
-    for day in days:
-        if _is_payoff_day(day):
-            in_locked_dip = True
-        if any(t.type == "income" and t.amount > 0 for t in day.transactions):
-            in_locked_dip = False
-        if day.date >= as_of and not in_locked_dip:
-            candidates.append(day)
+    mask = floor_mask(days, active_cards)
+    candidates = [day for day, ok in zip(days, mask) if day.date >= as_of and ok]
 
     if not candidates:
         candidates = [d for d in days if d.date >= as_of]
