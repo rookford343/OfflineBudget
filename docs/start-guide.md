@@ -330,6 +330,77 @@ This works best if the Goal already exists — create it first under **Money →
 
 ---
 
+## 12. Wish List
+
+Use Wish List to plan purchases — from a new laptop to home renovations — and see when you can safely afford them without dipping below your safety net.
+
+### Setting a safety cushion
+
+The **cushion** is your financial safety net — the minimum balance you want to maintain in your checking account. It's per-user and has a fallback chain:
+
+- If you've set a cushion under **Settings → Wish List → Safety Cushion**, that's used.
+- Otherwise, the app falls back to your checking account's low-balance threshold (if set).
+- If neither is set, the default is $1,000.
+
+Wishes are only considered "safe to buy" if they don't dip below the cushion at any point over the next 12 months.
+
+### Adding a wish and its cost
+
+Click **Create Wish** and enter:
+
+- **Name** — what you're buying
+- **Price** — the full cost (before trade-in credit)
+- **Trade-in value** — money you'll get for a trade-in, optional
+  - **Now:** credited immediately at purchase, lowering the price you pay
+  - **Later:** credited on a date you set (you pay full price today, get credit back later)
+- **Extra costs:** optional items like taxes, shipping, or installation. Each has its own date. Add as many as needed — they're accounted for separately in the forecast.
+
+### Choosing how to pay
+
+Each wish can have multiple payment options. Add one or more:
+
+- **Full price from checking:** one payment on the buy date, pulled from checking
+- **Full price on a card:** one payment charged to the card you pick; the money leaves checking on that card's payoff date
+- **Financed:** split into monthly payments
+  - **Down payment (optional):** money paid upfront
+  - **Card (optional):** if you pick a card, payments land on that card's payoff date; without a card, they're drawn from checking
+  - **Months:** 1 to 84
+  - **APR:** any rate, including 0% (zero interest). The monthly payment is calculated as principal ÷ months at 0%, or using standard amortization at higher rates. The final payment absorbs any rounding.
+
+**Tip:** typing a card name that doesn't exist yet won't create it — you must add the card under **Settings → Credit Cards** first, then refresh the page.
+
+### When can you buy?
+
+The **earliest safe date** is the first day in the next 12 months where your lowest projected balance (from that day forward) stays at or above your cushion. It accounts for:
+
+- Your income and bills
+- All wishes ranked above this one (which will already be bought by then)
+- Your chosen payment option and its schedule
+
+If nothing fits within the next 12 months, the page shows "doesn't fit" with the closest date and by how much you'd fall short.
+
+**Using your own date:** you can set a custom "I want it on" date instead. If it's in the past, it's ignored (and the page falls back to the earliest safe date). If it's a valid future date, the page shows whether it stays above the cushion and by how much.
+
+### Ranking and stacking
+
+Wishes are stacked — each one assumes all the wishes ranked above it are already bought on their planned dates. Drag wishes to reorder them. Committing a wish doesn't change the ranks of others, but the forecast updates to assume that purchase is done.
+
+### Committing a wish
+
+Once you've chosen a payment option and a buy date (automatic or custom), click **Commit**. This turns your choice into real items in the forecast:
+
+- **Full from checking:** adds one Planned One-Off on the buy date
+- **Full on a card:** adds one Planned One-Off on the card's payoff date
+- **Financed from checking:** adds a down payment one-off (if any), then a monthly Recurring Payment, then a final one-off for the last payment
+- **Financed on a card:** adds one Planned One-Off per card payment, each landing on the card's payoff date for that month
+- **Trade-in (later):** adds a credit (inflow) on the date you set
+
+### Uncommitting a wish
+
+Click the menu on a committed wish and choose **Uncommit**. This removes exactly the rows that commitment created. You can only uncommit if no payments have posted yet — once a payment shows up in your transactions or is edited outside Wish List, you'll need to edit or delete it on the Recurring page instead.
+
+---
+
 ## Troubleshooting
 
 **Backend won't start — ImportError**
