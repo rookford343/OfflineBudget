@@ -243,6 +243,12 @@ def uncommit_scenario(
         return scenario_service.uncommit_scenario(db, user.id, scenario_id)
     except scenario_service.ScenarioNotCommitted:
         raise HTTPException(409, "Scenario is not committed") from None
+    except scenario_service.ScenarioPaymentsPosted as e:
+        raise HTTPException(
+            409,
+            f"Cannot uncommit: recurring item {e.recurring_item_id} already has "
+            "posted transactions. Edit them on the Recurring page instead.",
+        ) from None
     except scenario_service.ScenarioUncommitBlocked as e:
         if e.is_self:
             raise HTTPException(
