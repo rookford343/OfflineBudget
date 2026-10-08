@@ -19,7 +19,18 @@ them instead.
 from datetime import date
 from decimal import Decimal
 from backend import models
+import backend.services.summary_generator as summary_generator_module
 from backend.services.summary_generator import generate_daily_summary
+
+
+def _with_today(monkeypatch, fixed_today: date):
+    """Pins summary_generator's `today = date.today()` to a fixed date, the
+    same pattern test_summary_generator_card_breakdown.py uses."""
+    class _FakeDate(date):
+        @classmethod
+        def today(cls):
+            return fixed_today
+    monkeypatch.setattr(summary_generator_module, "date", _FakeDate)
 
 
 def _make_user_account(db, username="budgetuser"):
@@ -163,3 +174,15 @@ def test_budget_section_header_sums_children_when_parent_has_no_own_allocation(d
     user, account = _seed_header_sum_scenario(db_session)
     html, _ = generate_daily_summary(db_session, user)
     assert "$15.00 of $50.00" in html
+
+
+def test_budget_section_title_shows_a_single_date_on_the_first_of_the_month(db_session, monkeypatch):
+    """month_start == today on the 1st, so the title's date range collapsed
+    to a nonsensical "Oct 1–1" instead of just "Oct 1"."""
+    _with_today(monkeypatch, date(2026, 10, 1))
+    user, account = _make_user_account(db_session)
+    db_session.commit()
+
+    html, _ = generate_daily_summary(db_session, user)
+    assert "(Oct 1)" in html
+    assert "1–1" not in html
