@@ -45,6 +45,8 @@ forecasts, and your user record.
 
 **Adventures:** trips, checklist items, loyalty-program balances and transfer partners you enter. Stored only in the local database; nothing is looked up online.
 
+**Wish List:** wishes, prices, trade-in values and payment options you enter. Stored only in the local database.
+
 **Encrypted at rest** (Fernet, keyed by `APP_ENCRYPTION_KEY`):
 
 - Your SimpleFIN access URL — the credential that can read your bank data
