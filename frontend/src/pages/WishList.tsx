@@ -52,7 +52,7 @@ interface PlanData {
   items: PlanItem[];
 }
 
-type CardRow = { id: number; name: string };
+type CardRow = { id: number; name: string; is_active: boolean };
 
 const METHOD_LABEL: Record<string, string> = {
   full_checking: "Full price · checking",
@@ -113,6 +113,9 @@ export default function WishList() {
   const accountId: number | undefined = accounts.find((a) => a.type === "checking")?.id;
 
   const { data: cards = [] } = useQuery<CardRow[]>({ queryKey: ["cards"], queryFn: cardsApi.list });
+  // Same filter Forecast.tsx and Recurring.tsx apply before any card select --
+  // a closed/inactive card shouldn't be choosable as a new option's funding source.
+  const activeCards = cards.filter((c) => c.is_active);
 
   const { data: plan } = useQuery<PlanData>({
     queryKey: ["wish-plan", accountId],
@@ -249,11 +252,12 @@ export default function WishList() {
           <ItemCard
             key={item.id}
             item={item}
-            cards={cards}
+            cards={activeCards}
             accountId={accountId}
             hidden={hidden}
             isDragging={draggingId === item.id}
             onDragStart={() => setDraggingId(item.id)}
+            onDragEnd={() => setDraggingId(null)}
             onDragOverCard={(e) => e.preventDefault()}
             onDropCard={() => handleDropOn(item.id)}
             onDeleteRequest={() => setDeleteItem(item)}
@@ -281,7 +285,7 @@ export default function WishList() {
 }
 
 function ItemCard({
-  item, cards, accountId, hidden, isDragging, onDragStart, onDragOverCard, onDropCard, onDeleteRequest,
+  item, cards, accountId, hidden, isDragging, onDragStart, onDragEnd, onDragOverCard, onDropCard, onDeleteRequest,
 }: {
   item: PlanItem;
   cards: CardRow[];
@@ -289,6 +293,7 @@ function ItemCard({
   hidden: boolean;
   isDragging: boolean;
   onDragStart: () => void;
+  onDragEnd: () => void;
   onDragOverCard: (e: React.DragEvent) => void;
   onDropCard: () => void;
   onDeleteRequest: () => void;
@@ -312,10 +317,6 @@ function ItemCard({
   const createOption = useMutation({
     mutationFn: (data: object) => wishApi.createOption(item.id, data),
     onSuccess: () => { invalidatePlan(); setShowAddOption(false); },
-  });
-  const updateOption = useMutation({
-    mutationFn: ({ optionId, data }: { optionId: number; data: object }) => wishApi.updateOption(item.id, optionId, data),
-    onSuccess: invalidatePlan,
   });
   const removeOption = useMutation({
     mutationFn: (optionId: number) => wishApi.removeOption(item.id, optionId),
@@ -397,6 +398,7 @@ function ItemCard({
           className="cursor-grab text-gray-400 hover:text-gray-600 mt-1.5 shrink-0"
           draggable
           onDragStart={(e) => { e.dataTransfer.effectAllowed = "move"; onDragStart(); }}
+          onDragEnd={onDragEnd}
         >
           <GripVertical size={16} />
         </button>
@@ -607,7 +609,6 @@ function ItemCard({
           )}
           {createOption.isError && <p className="text-sm text-red-600 mt-2">{errText(createOption.error)}</p>}
           {removeOption.isError && <p className="text-sm text-red-600 mt-2">{errText(removeOption.error)}</p>}
-          {updateOption.isError && <p className="text-sm text-red-600 mt-2">{errText(updateOption.error)}</p>}
         </div>
       )}
 
