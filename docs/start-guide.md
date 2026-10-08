@@ -338,11 +338,13 @@ Use Wish List to plan purchases — from a new laptop to home renovations — an
 
 The **cushion** is your financial safety net — the minimum balance you want to maintain in your checking account. It's per-user and has a fallback chain:
 
-- If you've set a cushion under **Settings → Wish List → Safety Cushion**, that's used.
+- If you enter a cushion in the **Cushion** field at the top of the Wish List page, that's used.
 - Otherwise, the app falls back to your checking account's low-balance threshold (if set).
 - If neither is set, the default is $1,000.
 
-Wishes are only considered "safe to buy" if they don't dip below the cushion at any point over the next 12 months.
+Leave the cushion field blank to use the fallback.
+
+Wishes are only considered "safe to buy" if, from the buy date forward through the end of the 12-month window, your lowest projected balance stays at or above the cushion.
 
 ### Adding a wish and its cost
 
@@ -367,7 +369,7 @@ Each wish can have multiple payment options. Add one or more:
   - **Months:** 1 to 84
   - **APR:** any rate, including 0% (zero interest). The monthly payment is calculated as principal ÷ months at 0%, or using standard amortization at higher rates. The final payment absorbs any rounding.
 
-**Tip:** typing a card name that doesn't exist yet won't create it — you must add the card under **Settings → Credit Cards** first, then refresh the page.
+Cards come from your **Credit Cards** page; add one there first before selecting it here.
 
 ### When can you buy?
 
@@ -390,14 +392,14 @@ Wishes are stacked — each one assumes all the wishes ranked above it are alrea
 Once you've chosen a payment option and a buy date (automatic or custom), click **Commit**. This turns your choice into real items in the forecast:
 
 - **Full from checking:** adds one Planned One-Off on the buy date
-- **Full on a card:** adds one Planned One-Off on the card's payoff date
+- **Full on a card:** adds one Planned One-Off on the buy date, charged to the card; the money leaves checking on that card's payoff date
 - **Financed from checking:** adds a down payment one-off (if any), then a monthly Recurring Payment, then a final one-off for the last payment
-- **Financed on a card:** adds one Planned One-Off per card payment, each landing on the card's payoff date for that month
+- **Financed on a card:** adds one Planned One-Off per payment, each dated on its payment date and charged to the card; the money leaves checking on that card's payoff date
 - **Trade-in (later):** adds a credit (inflow) on the date you set
 
 ### Uncommitting a wish
 
-Click the menu on a committed wish and choose **Uncommit**. This removes exactly the rows that commitment created. You can only uncommit if no payments have posted yet — once a payment shows up in your transactions or is edited outside Wish List, you'll need to edit or delete it on the Recurring page instead.
+Click the **Uncommit** button on a committed wish. This removes exactly the rows that commitment created. You can only uncommit if no payments have posted yet — once a bank transaction is linked to the created payment, you'll need to edit or delete it on the Recurring page instead.
 
 ---
 
