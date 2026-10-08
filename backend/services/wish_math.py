@@ -50,7 +50,6 @@ def payment_schedule(principal: Decimal, apr: Decimal, months: int) -> list[Deci
             bal = bal + interest - regular
             total += regular
         total += _q(bal + _q(bal * r))
-        return [regular] * (months - 1) + [_q(total - regular * (months - 1))]
     return [regular] * (months - 1) + [_q(total - regular * (months - 1))]
 
 
@@ -58,8 +57,15 @@ def _trade_in_credit(item: models.WishItem) -> Decimal:
     return _q(Decimal(item.trade_in_value or 0)) if item.trade_in_on is not None else ZERO
 
 
+def _validate_financed_months(months: int | None) -> None:
+    """Raise ValueError if financed option months is invalid."""
+    if months is None or months < 1 or months > 84:
+        raise ValueError("Financed option needs 1-84 months")
+
+
 def total_cost(item: models.WishItem, option: models.WishOption) -> Decimal:
     if option.method == models.WishMethod.financed:
+        _validate_financed_months(option.months)
         paid = Decimal(option.down_payment or 0) + sum(
             payment_schedule(financed_principal(item, option), option.apr or 0, option.months or 0), ZERO)
     else:
@@ -70,6 +76,7 @@ def total_cost(item: models.WishItem, option: models.WishOption) -> Decimal:
 def monthly_payment(item: models.WishItem, option: models.WishOption) -> Decimal | None:
     if option.method != models.WishMethod.financed:
         return None
+    _validate_financed_months(option.months)
     sched = payment_schedule(financed_principal(item, option), option.apr or 0, option.months or 0)
     return sched[0] if sched else None
 
@@ -78,8 +85,9 @@ def _route(option: models.WishOption, charge_date: date, cards: dict) -> date:
     """Card-routed money leaves checking on that card's payoff date."""
     if option.card_id is not None:
         card = cards.get(option.card_id)
-        if card is not None:
-            return _card_payoff_date_for_charge(card, charge_date)
+        if card is None:
+            raise ValueError("Card no longer exists")
+        return _card_payoff_date_for_charge(card, charge_date)
     return charge_date
 
 
@@ -95,6 +103,7 @@ def option_flows(item: models.WishItem, option: models.WishOption, buy_date: dat
         if amt > 0:
             flows.append((_route(option, buy_date, cards), -amt))
     else:
+        _validate_financed_months(option.months)
         down = _q(Decimal(option.down_payment or 0))
         if down > 0:
             flows.append((_route(option, buy_date, cards), -down))
