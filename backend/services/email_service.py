@@ -2,7 +2,6 @@ import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +15,11 @@ def parse_recipients(value: str | None) -> list[str]:
     return [e.strip() for e in value.split(",") if e.strip()]
 
 
-def _deliver(cfg: dict, to: str, subject: str, html_body: str, text_body: str) -> tuple[bool, str | None]:
+def deliver(cfg: dict, to: str, subject: str, html_body: str, text_body: str) -> tuple[bool, str | None]:
     """The actual SMTP conversation. Returns (ok, error) instead of raising so
-    one bad recipient can't abort a multi-recipient send."""
+    one bad recipient can't abort a multi-recipient send. Takes a config
+    already resolved by smtp_config(db) so a background task can send after
+    the request's DB session has closed."""
     if not cfg.get("host"):
         return False, "SMTP host is not configured"
     try:
@@ -55,17 +56,4 @@ def smtp_config(db) -> dict:
 
 def send_email_via(db, to: str, subject: str, html_body: str, text_body: str = "") -> tuple[bool, str | None]:
     """Send using the DB-backed effective config. Preferred entry point."""
-    return _deliver(smtp_config(db), to, subject, html_body, text_body)
-
-
-def send_email(to: str, subject: str, html_body: str, text_body: str = "") -> None:
-    """.env-only send, kept for callers with no session in hand (password
-    reset). No-ops silently when SMTP_HOST is unset."""
-    _deliver(
-        {
-            "host": settings.SMTP_HOST, "port": settings.SMTP_PORT,
-            "user": settings.SMTP_USER, "password": settings.SMTP_PASS,
-            "sender": settings.SMTP_FROM,
-        },
-        to, subject, html_body, text_body,
-    )
+    return deliver(smtp_config(db), to, subject, html_body, text_body)
