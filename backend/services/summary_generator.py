@@ -122,10 +122,6 @@ def generate_daily_summary(
     primary_account = primary_checking(db, user.id)
     snap = compute_budget_snapshot(db, user, primary_account.id, as_of=today) if primary_account else None
 
-    all_recurring = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == user.id,
-        models.RecurringItem.is_active == True,
-    ).all()
     # UpcomingBill rows, sorted chronologically by due_date -- not by
     # day_of_month, which sorts a window spanning a month boundary out of
     # order (an item firing 8/30, two days out, would previously sort AFTER
@@ -138,15 +134,6 @@ def generate_daily_summary(
     # directly) -- bug found 2026-10-04, see .superpowers/sdd/sync-race/brief.md.
     upcoming = sorted(upcoming_bills(db, user.id, today, 7), key=lambda b: b.due_date)
 
-    mtd_txns = db.query(models.Transaction).filter(
-        models.Transaction.user_id == user.id,
-        models.Transaction.date >= month_start,
-        models.Transaction.date <= today,
-        models.Transaction.amount < 0,
-        models.Transaction.is_actual == True,
-    ).all()
-    mtd_expenses = sum(abs(t.amount) for t in mtd_txns)
-    monthly_income = sum(r.amount for r in all_recurring if r.type == models.RecurringType.income)
 
     cards = db.query(models.CreditCard).filter(
         models.CreditCard.user_id == user.id,
@@ -341,7 +328,6 @@ def generate_daily_summary(
 
     weekly_html, weekly_text = _weekly_digest_section(weekly_digest) if weekly_digest else ("", "")
 
-    net_color = "#059669" if monthly_income - mtd_expenses >= 0 else "#dc2626"
 
     def _section(icon: str, title: str, body: str) -> str:
         return (
@@ -380,16 +366,6 @@ def generate_daily_summary(
 {month_section_html}
 {_section("🏦", "Checking Accounts", f"<table style='width:100%;font-size:14px'>{acct_rows}</table>")}
 {_section("📅", "Upcoming (next 7 days)", f"<table style='width:100%;font-size:14px'>{upcoming_rows}</table>")}
-{_section("📊", "Month-to-Date Spending", (
-    f"<table style='width:100%;font-size:14px'><tr>"
-    f"<td style='padding:4px 12px 4px 0;color:#374151'>Expenses</td>"
-    f"<td style='padding:4px 0;text-align:right'><b style='color:#dc2626'>{fmt(mtd_expenses)}</b></td></tr>"
-    f"<tr><td style='padding:4px 12px 4px 0;color:#374151'>Monthly income</td>"
-    f"<td style='padding:4px 0;text-align:right'><b style='color:#059669'>{fmt(monthly_income)}</b></td></tr>"
-    f"<tr><td style='padding:4px 12px 4px 0;color:#374151;border-top:1px solid #f3f4f6'>Net so far</td>"
-    f"<td style='padding:4px 0;text-align:right;border-top:1px solid #f3f4f6'><b style='color:{net_color}'>{fmt(monthly_income - mtd_expenses)}</b></td></tr>"
-    f"</table>"
-))}
 {_section("💳", "Credit Cards", f"<table style='width:100%;font-size:14px'>{card_rows}</table>")}
 {weekly_html}
 <p style='color:#9ca3af;font-size:11px;margin-top:24px;text-align:center'>Sent by OfflineBudget</p>
@@ -455,9 +431,6 @@ CHECKING ACCOUNTS
 
 UPCOMING BILLS (next 7 days)
 {upcoming_text}
-
-MONTH-TO-DATE
-  Expenses: {fmt(mtd_expenses)} | Monthly income: {fmt(monthly_income)} | Net so far: {fmt(monthly_income - mtd_expenses)}
 
 CREDIT CARDS
 {card_text}

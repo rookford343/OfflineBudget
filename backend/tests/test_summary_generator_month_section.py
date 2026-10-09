@@ -56,6 +56,10 @@ def test_month_section_replaces_the_budget_section(db_session, monkeypatch):
     assert "Spending this month (Oct 1–9)" in html
     assert "SPENDING THIS MONTH (OCT 1–9)" in text
     assert "Budget this month" not in html
+    # The old Month-to-Date section counted only checking debits and
+    # contradicted this section's total, so it was removed.
+    assert "Month-to-Date" not in html
+    assert "MONTH-TO-DATE" not in text
 
 
 def test_month_section_totals_checking_and_card_spend_for_this_month_only(db_session, monkeypatch):
