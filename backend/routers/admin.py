@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
-from backend.auth import hash_password
+from backend.auth import check_new_password, hash_password
 from backend.dependencies import get_db, require_admin, get_requester
 from backend.seed import seed_default_categories
 
@@ -27,6 +27,7 @@ def create_user(
     db: Session = Depends(get_db),
     _: models.User = Depends(require_admin),
 ):
+    check_new_password(body.password)
     if db.query(models.User).filter(models.User.username == body.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
     user = models.User(
@@ -70,8 +71,7 @@ def reset_user_password(
     db: Session = Depends(get_db),
     current_admin: models.User = Depends(require_admin),
 ):
-    if len(body.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    check_new_password(body.new_password)
     user = db.get(models.User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
