@@ -345,6 +345,38 @@ def _weekly_allowance(amount: Decimal, as_of: date) -> tuple[Decimal, int]:
     return weekly, days_remaining
 
 
+class SpendingBreakdown(NamedTuple):
+    total: Decimal
+    categories: list[WeeklyDigestCategory]
+    top_merchants: list[MerchantSpendingEntry]
+
+
+def spending_breakdown(db: Session, user_id: int, start: date, end: date, *, merchant_limit: int = 10) -> SpendingBreakdown:
+    """Spending in [start, end]: the total, per-category totals (highest
+    first) and top merchants. The one definition behind the Dashboard's
+    weekly digest and the email's weekly and monthly sections."""
+    cat_totals = category_totals_for_range(db, user_id, start, end)
+    cat_map = {c.id: c.name for c in db.query(models.Category).filter(models.Category.user_id == user_id).all()}
+    categories = sorted(
+        (
+            WeeklyDigestCategory(
+                category_id=cid if cid is not None else 0,
+                category_name=cat_map.get(cid, "Unknown") if cid is not None else "Uncategorized",
+                total=total,
+            )
+            for cid, total in cat_totals.items()
+        ),
+        key=lambda c: c.total,
+        reverse=True,
+    )
+    merchants = merchant_totals(db, user_id, start, end, limit=merchant_limit)
+    return SpendingBreakdown(
+        total=sum(cat_totals.values(), Decimal("0")),
+        categories=categories,
+        top_merchants=[MerchantSpendingEntry(name=n, total=t, count=c) for n, t, c in merchants],
+    )
+
+
 def compute_budget_snapshot(
     db: Session,
     user: models.User,
@@ -558,23 +590,7 @@ def compute_budget_snapshot(
         for c in active_cards
     ]
 
-    week_start = as_of - timedelta(days=6)
-    cat_totals = category_totals_for_range(db, user.id, week_start, as_of)
-    cat_map = {c.id: c.name for c in db.query(models.Category).filter(models.Category.user_id == user.id).all()}
-    categories = sorted(
-        [
-            WeeklyDigestCategory(
-                category_id=cid if cid is not None else 0,
-                category_name=cat_map.get(cid, "Unknown") if cid is not None else "Uncategorized",
-                total=total,
-            )
-            for cid, total in cat_totals.items()
-        ],
-        key=lambda c: c.total,
-        reverse=True,
-    )
-    merchants = merchant_totals(db, user.id, week_start, as_of, limit=10)
-    top_merchants = [MerchantSpendingEntry(name=n, total=t, count=c) for n, t, c in merchants]
+    _week_total, categories, top_merchants = spending_breakdown(db, user.id, as_of - timedelta(days=6), as_of)
 
     def weekly_explanation(title: str, source_label: str, source_amount, weekly_amount):
         # Mirrors _weekly_allowance exactly: whole amount in the last week,
