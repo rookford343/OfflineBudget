@@ -89,7 +89,7 @@ def test_monthly_equivalent_normalizes_every_frequency(client, db_session):
                for i in test_client.get("/recurring/breakdown").json()["ongoing"]}
 
     assert by_name["Monthly"] == Decimal("100.00")
-    assert by_name["Yearly"] == Decimal("16.67")     # 174.13 / 12
+    assert by_name["Yearly"] == Decimal("14.51")     # 174.13 / 12
     assert by_name["Quarterly"] == Decimal("4.94")   # 14.82 / 3
     assert by_name["Weekly"] == Decimal("43.33")     # 10 * 52 / 12
     assert by_name["Biweekly"] == Decimal("21.67")   # 10 * 26 / 12

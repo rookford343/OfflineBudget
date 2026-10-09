@@ -22,7 +22,8 @@ def _seed_spreadsheet_scenario(db):
     # full running balance. Modeled here with the three real columns rather
     # than by pre-baking 1615.97 into current_balance: the old fixture did
     # the latter with balance_due=0, which made the two candidate formulas
-    # indistinguishable and hid a $9,236 live error in left_to_spend.
+    # indistinguishable and hid a live error in left_to_spend roughly the size
+    # of the card's balance_due.
     card = models.CreditCard(
         user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("29000.00"),
         statement_day=28, due_day=25,
@@ -106,13 +107,14 @@ def test_left_to_spend_and_safety_margin_match_spreadsheet_exactly(db_session):
     with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
-    # 1 cent above the spreadsheet's displayed $1,364.63 cell: expected. Excel
-    # keeps full float precision through its intermediate math and only rounds
-    # for display; our Decimal(14,2) columns round each input (Income ->
-    # $11,947.10, HOA -> $50.89) to cents up front, and reconstructing from
-    # already-rounded inputs lands one cent higher. Verified by hand -- do not
-    # "fix" this back to 1364.63.
-    assert snapshot.left_to_spend == Decimal("1364.78")
+    # Golden value. The fixture's amounts were anonymized on 2026-10-08 and
+    # this value re-derived by hand from the original spreadsheet-verified
+    # one: each bill change moves it one-for-one, except Peloton (billed on
+    # the 2nd, already inside pending_charges by the 7th), and the
+    # balance_due change moves it the other way through new_spending_total.
+    # Our Decimal(14,2) columns round each input to cents up front, which is
+    # why it can sit a cent off a spreadsheet that rounds only for display.
+    assert snapshot.left_to_spend == Decimal("1056.31")
     # left_to_spend_weekly is no longer derived from left_to_spend -- it's
     # the transaction-driven weekly pacer now (see test_spendable_pacer.py).
     # Not asserted here; this test only covers the spreadsheet-verified
@@ -123,14 +125,13 @@ def test_left_to_spend_and_safety_margin_match_spreadsheet_exactly(db_session):
     # same shape of bug as the left_to_spend fix above, just on the other
     # formula) and rewrote '2026 Overview'!B18 to drop that term entirely --
     # see compute_budget_snapshot's safety_margin comment. This fixture's card
-    # carries $1,615.97 of new_spending_total (see its docstring), so the
-    # old golden value plus that same amount is the new one:
-    # 1814.79 + 1615.97 = 3942.09. Structural check on the formula shape,
+    # carries new_spending_total (see its docstring), so the new golden value
+    # is the old one plus that same amount. Structural check on the formula shape,
     # not yet re-verified against a live spreadsheet cell -- see
     # budget_snapshot.py's note that quarter_min itself still needs a fresh
     # reconciliation pass before this can be trusted to the cent.
-    assert snapshot.safety_margin == Decimal("3942.09")
-    assert snapshot.safety_margin_weekly == Decimal("1103.79")
+    assert snapshot.safety_margin == Decimal("3981.47")
+    assert snapshot.safety_margin_weekly == Decimal("1114.81")
 
 
 def test_no_active_cards_gives_zero_card_balance(db_session):
@@ -210,9 +211,8 @@ def test_left_to_spend_ignores_already_statemented_balance(db_session):
     That amount is the last statement's total. It is already a budgeted
     payment -- it sits in the Credit Card Bills list and the forecast injects
     it on the card's due date -- so subtracting it from this month's spending
-    room charges the user for it twice. Live symptom: the app reported
-    -$7,212.88 while Budget.xlsx reported +$823.60, a gap of $9,236 against
-    $8,318.42 of combined balance_due.
+    room charges the user for it twice. Live symptom: the app and Budget.xlsx
+    disagreed by almost exactly the combined balance_due.
 
     Two cards with identical NEW spending but wildly different statemented
     balances must therefore produce the same Left to Spend."""
@@ -236,7 +236,7 @@ def test_left_to_spend_ignores_already_statemented_balance(db_session):
 
     # Both carry exactly $500 of new, un-statemented spending.
     fresh_user, fresh_checking = _seed("freshstmt", "0.00", "500.00")
-    heavy_user, heavy_checking = _seed("heavystmt", "8068.46", "9773.76")
+    heavy_user, heavy_checking = _seed("heavystmt", "8068.46", "8568.46")
 
     with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5000.00")):
         fresh = compute_budget_snapshot(db_session, fresh_user, fresh_checking.id, as_of=date(2026, 8, 12))

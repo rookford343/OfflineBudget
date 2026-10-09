@@ -64,7 +64,6 @@ _KNOWN_MERCHANTS: list[tuple[str, str]] = [
     ("VERIZON", "Verizon"),
     ("INDIANA BMV", "Indiana BMV"),
     ("IN BMV", "Indiana BMV"),
-    ("MORTGAGECO", "Mortgage (MortgageCo)"),
     ("PROG SO EASTERN", "Progressive Insurance"),
     ("CLAUDE.AI", "Claude.ai"),
 ]

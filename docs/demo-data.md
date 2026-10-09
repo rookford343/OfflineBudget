@@ -31,10 +31,10 @@ The script is safe to re-run. If a `demo` user already exists it will delete it 
 | Item | Detail |
 |------|--------|
 | User | `demo` / `demo123` |
-| Main Checking | $4,217.18 balance |
+| Main Checking | $4,847.33 balance |
 | High-Yield Savings | $11,200.00 balance |
-| Chase Sapphire Preferred | $1,238.91 balance, $15k limit |
-| Apple Card | $125.46 balance, $5k limit |
+| Chase Sapphire Preferred | $1,423.87 balance, $15k limit |
+| Apple Card | $143.22 balance, $5k limit |
 | Recurring items | 17 items: 2 paychecks, mortgage, car payments, utilities, subscriptions, giving |
 | Checking transactions | 33 entries across April and May 2026 |
 | Credit card transactions | 35 entries: Kroger, Target, Amazon, Costco, dining, gas, Apple |
@@ -44,8 +44,8 @@ The script is safe to re-run. If a `demo` user already exists it will delete it 
 
 ```
 Net income:         $7,200.00 / month
-Committed expenses: $4,068.05 / month (fixed recurring bills)
-Discretionary:      $2,196.95 / month (groceries, dining, gas, etc.)
+Committed expenses: $4,674.93 / month (fixed recurring bills)
+Discretionary:      $2,525.07 / month (groceries, dining, gas, etc.)
 ```
 
 ### Troubleshooting

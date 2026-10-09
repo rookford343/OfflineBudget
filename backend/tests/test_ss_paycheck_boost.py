@@ -16,7 +16,7 @@ from backend.services.forecast_engine import build_forecast
 
 GROSS = Decimal("7484.97")
 NET = Decimal("5278.25")
-BOOST = (GROSS * Decimal("0.062")).quantize(Decimal("0.01"))  # 464.32
+BOOST = (GROSS * Decimal("0.062")).quantize(Decimal("0.01"))  # 464.07
 
 
 def _seed(db, name=None, *, wage_base: str, bonus_ytd: str = "0", paychecks_received: int = 0):
@@ -68,7 +68,7 @@ def test_boost_applies_to_a_net_paycheck(db_session):
     ss_gross_per_paycheck is gross -- here 5278.25/7484.97 = 0.705. The
     original 0.9..1.1 tagging band could not match any real paycheck, so no
     item was ever treated as one and the boost never fired for anybody."""
-    user, account = _seed(db_session, wage_base="17205.52")  # exactly 2 paychecks of gross
+    user, account = _seed(db_session, wage_base="14969.94")  # exactly 2 paychecks of gross
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 4, 30))
     amounts = [amt for _, amt in _paychecks(entries)]
@@ -88,7 +88,7 @@ def test_wage_base_draws_down_by_gross_not_by_the_net_deposit(db_session):
     wage_base is set to just over two paychecks of GROSS, so the boost must
     arrive on the third. Under the old net drawdown it would not arrive until
     the fourth."""
-    user, account = _seed(db_session, wage_base="17205.53")
+    user, account = _seed(db_session, wage_base="14969.95")
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 6, 30))
     checks = _paychecks(entries)
@@ -108,7 +108,7 @@ def test_paychecks_already_received_count_against_the_wage_base(db_session):
 
     Two paychecks' worth of base, two already received -- so the very first
     projected paycheck must already be boosted."""
-    user, account = _seed(db_session, wage_base="17205.52", paychecks_received=2)
+    user, account = _seed(db_session, wage_base="14969.94", paychecks_received=2)
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 12, 31))
     checks = _paychecks(entries)
@@ -128,7 +128,7 @@ def test_boost_does_not_depend_on_the_forecast_window_start(db_session):
     boost amount on every paycheck -- putting a false at-risk banner above a
     chart whose trough on that very day was comfortably positive. Live on
     2026-08-12: -$200.30 vs +$942.33 for the same date."""
-    user, account = _seed(db_session, "ss_window", wage_base="17205.52", paychecks_received=2)
+    user, account = _seed(db_session, "ss_window", wage_base="14969.94", paychecks_received=2)
 
     from_january = build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 12, 31))
     from_midyear = build_forecast(db_session, user.id, account.id, date(2026, 4, 1), date(2026, 12, 31))
@@ -149,7 +149,7 @@ def test_bonus_ytd_reduces_the_remaining_base(db_session):
     bonus means the boost lands on the second paycheck. Headroom is set just
     OVER one gross paycheck: the engine boosts the paycheck that crosses the
     base, so exactly-one-paycheck of headroom would boost the first."""
-    user, account = _seed(db_session, wage_base="17205.53", bonus_ytd="7484.97")
+    user, account = _seed(db_session, wage_base="14969.95", bonus_ytd="7484.97")
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 5, 31))
     checks = _paychecks(entries)
@@ -188,7 +188,7 @@ def test_incidental_recurring_income_is_not_treated_as_a_paycheck(db_session):
     """A smoothed bonus twelfth or small rental inflow is far below gross and
     must not draw the wage base down or collect a boost. the user's "Bonus (1/12)"
     is 1391.31 against 7484.97 gross -- a ratio of 0.19."""
-    user, account = _seed(db_session, wage_base="17205.52")
+    user, account = _seed(db_session, wage_base="14969.94")
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Bonus twelfth",
         amount=Decimal("1391.31"), type=models.RecurringType.income,

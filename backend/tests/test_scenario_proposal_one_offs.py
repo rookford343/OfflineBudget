@@ -79,7 +79,7 @@ def test_a_card_routed_proposed_one_off_waits_for_the_payoff(db_session):
     assert _balance_on(entries, date(2026, 11, 10)) == Decimal("5000.00")
     names = [t.name for e in entries if e.date == date(2026, 12, 25) for t in e.transactions]
     assert names == ["AppleCare up front (via Apple Card)"]
-    assert _balance_on(entries, date(2026, 12, 25)) == Decimal("4800.01")
+    assert _balance_on(entries, date(2026, 12, 25)) == Decimal("4825.87")
 
 
 def test_a_funded_proposed_one_off_brings_its_transfer_with_it(db_session):

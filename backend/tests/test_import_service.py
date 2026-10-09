@@ -23,7 +23,7 @@ def test_card_sale_increases_balance(db_session):
 
     run_import(db_session, user, rows, account_id=None, card_id=card.id)
 
-    assert card.current_balance == Decimal("152.90")
+    assert card.current_balance == Decimal("146.45")
     txn = db_session.query(models.CreditCardTransaction).filter_by(card_id=card.id).one()
     assert txn.amount == Decimal("46.45")  # positive = charge
 

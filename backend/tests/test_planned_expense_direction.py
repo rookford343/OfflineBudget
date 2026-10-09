@@ -41,7 +41,7 @@ def test_outflow_is_the_default_and_subtracts(db_session):
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 9, 14), date(2026, 9, 16))
 
-    assert _balance_on(entries, date(2026, 9, 15)) == Decimal("82.96")  # 1000 - 798.25
+    assert _balance_on(entries, date(2026, 9, 15)) == Decimal("201.75")  # 1000 - 798.25
 
 
 def test_inflow_adds_instead_of_subtracting(db_session):
@@ -55,7 +55,7 @@ def test_inflow_adds_instead_of_subtracting(db_session):
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 4, 14), date(2026, 4, 16))
 
-    assert _balance_on(entries, date(2026, 4, 15)) == Decimal("39347.92")  # 1000 + 33362.69
+    assert _balance_on(entries, date(2026, 4, 15)) == Decimal("34362.69")  # 1000 + 33362.69
 
 
 def test_inflow_is_reported_as_income_with_a_positive_amount(db_session):

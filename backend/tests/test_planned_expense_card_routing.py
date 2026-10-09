@@ -64,7 +64,7 @@ def test_charge_the_day_before_a_due_date_still_rolls_to_next_cycle(db_session):
     entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 1), date(2026, 9, 30))
 
     assert _balance_on(entries, date(2026, 8, 25)) == Decimal("5000.00"), "must not be paid off on the imminent due date"
-    assert _balance_on(entries, date(2026, 9, 25)) == Decimal("4082.96"), "belongs to the following cycle instead"
+    assert _balance_on(entries, date(2026, 9, 25)) == Decimal("4201.75"), "belongs to the following cycle instead"
     assert _txn_names(entries, date(2026, 9, 25)) == ["Holland Vacation (via Chase Sapphire)"]
 
 

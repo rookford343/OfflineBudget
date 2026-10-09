@@ -9,7 +9,7 @@ Figures sourced from 2024-2025 benchmarks:
   - Auto insurance: $214/month two-vehicle (Bankrate 2025 with multi-car discount)
   - Utilities: Electric $145, Gas $78, Water $84, Internet $80, Cell $155 (Move.org 2025)
   - Groceries: ~$1,150/month (USDA Moderate-Cost Food Plan, Jan 2025)
-  - Subscriptions: Netflix $20.14, Disney+/Hulu $12.99, Spotify $17.99, Prime $14.99
+  - Subscriptions: Netflix $22.99, Disney+/Hulu $12.99, Spotify $17.99, Prime $14.99
 
 Run from project root:
     source .venv/bin/activate
@@ -108,7 +108,7 @@ checking = models.Account(
     user_id=user.id,
     name="Main Checking",
     type="checking",
-    current_balance=Decimal("4217.18"),
+    current_balance=Decimal("4847.33"),
     currency="USD",
     notes="Primary household checking account",
 )
@@ -137,8 +137,8 @@ chase = models.CreditCard(
     credit_limit=Decimal("15000"),
     statement_day=25,
     due_day=22,
-    current_balance=Decimal("1238.91"),
-    balance_due=Decimal("1835.64"),
+    current_balance=Decimal("1423.87"),
+    balance_due=Decimal("2109.44"),
     notes="Primary rewards card — travel + dining",
 )
 db.add(chase)
@@ -150,8 +150,8 @@ apple = models.CreditCard(
     credit_limit=Decimal("5000"),
     statement_day=1,
     due_day=28,
-    current_balance=Decimal("125.46"),
-    balance_due=Decimal("125.46"),
+    current_balance=Decimal("143.22"),
+    balance_due=Decimal("143.22"),
     notes="Daily cash back via Apple Pay",
 )
 db.add(apple)
@@ -209,11 +209,11 @@ recurring_items = [
     dict(name="Electric (Duke Energy)",amount="145.00",   type="expense", day=15, cat=utilities_id),
     dict(name="Natural Gas",           amount="78.00",    type="expense", day=22, cat=utilities_id),
     dict(name="Water & Sewer",         amount="84.00",    type="expense", day=19, cat=utilities_id),
-    dict(name="Xfinity Internet",      amount="69.88",    type="expense", day=11, cat=utilities_id),
-    dict(name="Verizon Family Plan",   amount="135.13",   type="expense", day=8,  cat=utilities_id),
+    dict(name="Xfinity Internet",      amount="79.99",    type="expense", day=11, cat=utilities_id),
+    dict(name="Verizon Family Plan",   amount="154.99",   type="expense", day=8,  cat=utilities_id),
 
     # ── Subscriptions ─────────────────────────────────────────────────────────
-    dict(name="Netflix Standard",      amount="20.14",    type="expense", day=13, cat=subscriptions_id),
+    dict(name="Netflix Standard",      amount="22.99",    type="expense", day=13, cat=subscriptions_id),
     dict(name="Disney+ / Hulu Bundle", amount="12.99",    type="expense", day=19, cat=subscriptions_id),
     dict(name="Spotify Family",        amount="17.99",    type="expense", day=6,  cat=subscriptions_id),
     dict(name="Amazon Prime",          amount="14.99",    type="expense", day=23, cat=subscriptions_id),
@@ -250,16 +250,16 @@ actuals = [
     (_d(1, 5),  Decimal("-125.00"),  "Charitable Giving",      checking.id, charity_id),
     (_d(1, 6),  Decimal("-17.99"),   "Spotify Family",         checking.id, subscriptions_id),
     (_d(1, 7),  Decimal("-672.00"),  "Honda CR-V Payment",     checking.id, transport_id),
-    (_d(1, 8),  Decimal("-135.13"),  "Verizon Family Plan",    checking.id, utilities_id),
+    (_d(1, 8),  Decimal("-154.99"),  "Verizon Family Plan",    checking.id, utilities_id),
     (_d(1, 9),  Decimal("-214.00"),  "State Farm Auto",        checking.id, insurance_id),
-    (_d(1, 11), Decimal("-69.88"),   "Xfinity Internet",       checking.id, utilities_id),
-    (_d(1, 13), Decimal("-20.14"),   "Netflix Standard",       checking.id, subscriptions_id),
-    (_d(1, 14), Decimal("-121.04"),  "Duke Energy Electric",   checking.id, utilities_id),
+    (_d(1, 11), Decimal("-79.99"),   "Xfinity Internet",       checking.id, utilities_id),
+    (_d(1, 13), Decimal("-22.99"),   "Netflix Standard",       checking.id, subscriptions_id),
+    (_d(1, 14), Decimal("-138.47"),  "Duke Energy Electric",   checking.id, utilities_id),
     (_d(1, 15), Decimal("3600.00"),  "Paycheck 1",             checking.id, income_id),
     (_d(1, 19), Decimal("-12.99"),   "Disney+ / Hulu Bundle",  checking.id, subscriptions_id),
     (_d(1, 19), Decimal("-84.00"),   "Water & Sewer",          checking.id, utilities_id),
     (_d(1, 20), Decimal("-445.00"),  "Toyota Camry Payment",   checking.id, transport_id),
-    (_d(1, 22), Decimal("-63.35"),   "Natural Gas",            checking.id, utilities_id),
+    (_d(1, 22), Decimal("-71.83"),   "Natural Gas",            checking.id, utilities_id),
     (_d(1, 23), Decimal("-14.99"),   "Amazon Prime",           checking.id, subscriptions_id),
     (_d(1, 30), Decimal("3600.00"),  "Paycheck 2",             checking.id, income_id),
 
@@ -269,16 +269,16 @@ actuals = [
     (_d(2, 5),  Decimal("-125.00"),  "Charitable Giving",      checking.id, charity_id),
     (_d(2, 6),  Decimal("-17.99"),   "Spotify Family",         checking.id, subscriptions_id),
     (_d(2, 7),  Decimal("-672.00"),  "Honda CR-V Payment",     checking.id, transport_id),
-    (_d(2, 8),  Decimal("-135.13"),  "Verizon Family Plan",    checking.id, utilities_id),
+    (_d(2, 8),  Decimal("-154.99"),  "Verizon Family Plan",    checking.id, utilities_id),
     (_d(2, 9),  Decimal("-214.00"),  "State Farm Auto",        checking.id, insurance_id),
-    (_d(2, 11), Decimal("-69.88"),   "Xfinity Internet",       checking.id, utilities_id),
-    (_d(2, 13), Decimal("-20.14"),   "Netflix Standard",       checking.id, subscriptions_id),
-    (_d(2, 14), Decimal("-132.54"),  "Duke Energy Electric",   checking.id, utilities_id),
+    (_d(2, 11), Decimal("-79.99"),   "Xfinity Internet",       checking.id, utilities_id),
+    (_d(2, 13), Decimal("-22.99"),   "Netflix Standard",       checking.id, subscriptions_id),
+    (_d(2, 14), Decimal("-152.18"),  "Duke Energy Electric",   checking.id, utilities_id),
     (_d(2, 15), Decimal("3600.00"),  "Paycheck 1",             checking.id, income_id),
     (_d(2, 19), Decimal("-12.99"),   "Disney+ / Hulu Bundle",  checking.id, subscriptions_id),
     (_d(2, 19), Decimal("-84.00"),   "Water & Sewer",          checking.id, utilities_id),
     (_d(2, 20), Decimal("-445.00"),  "Toyota Camry Payment",   checking.id, transport_id),
-    (_d(2, 22), Decimal("-71.19"),   "Natural Gas",            checking.id, utilities_id),
+    (_d(2, 22), Decimal("-81.34"),   "Natural Gas",            checking.id, utilities_id),
     (_d(2, 23), Decimal("-14.99"),   "Amazon Prime",           checking.id, subscriptions_id),
     (_d(2, 31), Decimal("3600.00"),  "Paycheck 2",             checking.id, income_id),
 ]
@@ -303,36 +303,36 @@ print(f"✓ Created {len(actuals)} checking transactions (Apr–May 2026)")
 
 card_txns = [
     # ── Chase Sapphire — April ────────────────────────────────────────────────
-    (chase.id, _d(1, 3),  Decimal("163.64"),  "Kroger",                food_id),
-    (chase.id, _d(1, 5),  Decimal("59.72"),   "Chick-fil-A",           food_id),
-    (chase.id, _d(1, 8),  Decimal("79.52"),   "Shell Gas Station",     transport_id),
-    (chase.id, _d(1, 9),  Decimal("272.45"),  "Target",                shopping_id),
-    (chase.id, _d(1, 11), Decimal("47.86"),   "Panera Bread",          food_id),
-    (chase.id, _d(1, 14), Decimal("25.20"),   "McDonald's",            food_id),
-    (chase.id, _d(1, 16), Decimal("196.02"),  "Amazon",                shopping_id),
-    (chase.id, _d(1, 18), Decimal("142.86"),  "Kroger",                food_id),
-    (chase.id, _d(1, 19), Decimal("36.49"),   "Chipotle",              food_id),
-    (chase.id, _d(1, 21), Decimal("78.28"),   "BP Gas",                transport_id),
-    (chase.id, _d(1, 23), Decimal("168.26"),  "Costco",                food_id),
-    (chase.id, _d(1, 25), Decimal("30.87"),   "Regal Cinemas",         entertainment_id),
-    (chase.id, _d(1, 27), Decimal("68.48"),   "Old Navy",              shopping_id),
-    (chase.id, _d(1, 28), Decimal("100.09"),  "Kroger",                food_id),
+    (chase.id, _d(1, 3),  Decimal("187.43"),  "Kroger",                food_id),
+    (chase.id, _d(1, 5),  Decimal("67.82"),   "Chick-fil-A",           food_id),
+    (chase.id, _d(1, 8),  Decimal("91.40"),   "Shell Gas Station",     transport_id),
+    (chase.id, _d(1, 9),  Decimal("312.17"),  "Target",                shopping_id),
+    (chase.id, _d(1, 11), Decimal("54.19"),   "Panera Bread",          food_id),
+    (chase.id, _d(1, 14), Decimal("28.47"),   "McDonald's",            food_id),
+    (chase.id, _d(1, 16), Decimal("224.33"),  "Amazon",                shopping_id),
+    (chase.id, _d(1, 18), Decimal("163.55"),  "Kroger",                food_id),
+    (chase.id, _d(1, 19), Decimal("41.28"),   "Chipotle",              food_id),
+    (chase.id, _d(1, 21), Decimal("88.99"),   "BP Gas",                transport_id),
+    (chase.id, _d(1, 23), Decimal("193.40"),  "Costco",                food_id),
+    (chase.id, _d(1, 25), Decimal("34.99"),   "Regal Cinemas",         entertainment_id),
+    (chase.id, _d(1, 27), Decimal("78.55"),   "Old Navy",              shopping_id),
+    (chase.id, _d(1, 28), Decimal("114.72"),  "Kroger",                food_id),
 
     # ── Chase Sapphire — May ──────────────────────────────────────────────────
-    (chase.id, _d(2, 2),  Decimal("177.05"),  "Kroger",                food_id),
-    (chase.id, _d(2, 4),  Decimal("40.64"),   "Chick-fil-A",           food_id),
-    (chase.id, _d(2, 6),  Decimal("46.11"),   "Raising Cane's",        food_id),
-    (chase.id, _d(2, 7),  Decimal("81.19"),   "Shell Gas Station",     transport_id),
-    (chase.id, _d(2, 10), Decimal("155.39"),  "Target",                shopping_id),
-    (chase.id, _d(2, 12), Decimal("117.30"),  "Amazon",                shopping_id),
-    (chase.id, _d(2, 14), Decimal("53.73"),   "Olive Garden",          food_id),
+    (chase.id, _d(2, 2),  Decimal("203.18"),  "Kroger",                food_id),
+    (chase.id, _d(2, 4),  Decimal("45.73"),   "Chick-fil-A",           food_id),
+    (chase.id, _d(2, 6),  Decimal("52.67"),   "Raising Cane's",        food_id),
+    (chase.id, _d(2, 7),  Decimal("92.99"),   "Shell Gas Station",     transport_id),
+    (chase.id, _d(2, 10), Decimal("178.44"),  "Target",                shopping_id),
+    (chase.id, _d(2, 12), Decimal("134.50"),  "Amazon",                shopping_id),
+    (chase.id, _d(2, 14), Decimal("61.27"),   "Olive Garden",          food_id),
     (chase.id, _d(2, 17), Decimal("265.00"),  "Home Depot",            shopping_id),
-    (chase.id, _d(2, 18), Decimal("85.17"),   "BP Gas",                transport_id),
-    (chase.id, _d(2, 21), Decimal("165.43"),  "Costco",                food_id),
-    (chase.id, _d(2, 24), Decimal("41.66"),   "Chipotle",              food_id),
-    (chase.id, _d(2, 26), Decimal("97.93"),  "Kohl's",                shopping_id),
-    (chase.id, _d(2, 29), Decimal("30.13"),   "AMC Theaters",          entertainment_id),
-    (chase.id, _d(2, 31), Decimal("147.54"),  "Kroger",                food_id),
+    (chase.id, _d(2, 18), Decimal("97.40"),   "BP Gas",                transport_id),
+    (chase.id, _d(2, 21), Decimal("189.33"),  "Costco",                food_id),
+    (chase.id, _d(2, 24), Decimal("47.89"),   "Chipotle",              food_id),
+    (chase.id, _d(2, 26), Decimal("112.40"),  "Kohl's",                shopping_id),
+    (chase.id, _d(2, 29), Decimal("33.50"),   "AMC Theaters",          entertainment_id),
+    (chase.id, _d(2, 31), Decimal("168.77"),  "Kroger",                food_id),
 
     # ── Apple Card — April & May ──────────────────────────────────────────────
     (apple.id, _d(1, 6),  Decimal("12.99"),   "App Store",             entertainment_id),
@@ -340,7 +340,7 @@ card_txns = [
     (apple.id, _d(1, 28), Decimal("9.99"),    "Apple TV+",             subscriptions_id),
     (apple.id, _d(2, 3),  Decimal("8.49"),    "App Store",             entertainment_id),
     (apple.id, _d(2, 15), Decimal("2.99"),    "iCloud+ 200GB",         subscriptions_id),
-    (apple.id, _d(2, 22), Decimal("26.66"),   "Apple Arcade Annual",   subscriptions_id),
+    (apple.id, _d(2, 22), Decimal("29.99"),   "Apple Arcade Annual",   subscriptions_id),
 ]
 
 for card_id, dt, amount, merchant, cat_id in card_txns:
@@ -400,12 +400,12 @@ print(f"    Committed expenses:  ${total_fixed:>8,.2f}")
 print(f"    Discretionary:       ${discretionary:>8,.2f}  (groceries, dining, gas, etc.)")
 print()
 print("  Accounts:")
-print("    Main Checking        $4,217.18")
+print("    Main Checking        $4,847.33")
 print("    High-Yield Savings   $11,200.00")
 print()
 print("  Credit cards:")
-print("    Chase Sapphire Preferred   $1,238.91 balance")
-print("    Apple Card                   $125.46 balance")
+print("    Chase Sapphire Preferred   $1,423.87 balance")
+print("    Apple Card                   $143.22 balance")
 print()
 print("  Seeded: 17 recurring items, 33 checking txns,")
 print("          35 card txns, 11 budget allocations")
