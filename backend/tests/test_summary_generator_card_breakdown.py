@@ -24,7 +24,7 @@ def _user_with_checking(db, username="carduser"):
 def test_card_row_breaks_out_balance_upcoming_payoff_and_cycle_spend(db_session):
     """the user's real Chase figures: a $REDACTED balance is two different things
     stacked -- $REDACTED of already-statemented debt that gets paid on the
-    due date, and $3,195.84 of new spend since that statement closed. The
+    due date, and $REDACTED of new spend since that statement closed. The
     email showed only the blended total, which says nothing actionable."""
     user, account = _user_with_checking(db_session)
     db_session.add(models.CreditCard(
@@ -40,7 +40,7 @@ def test_card_row_breaks_out_balance_upcoming_payoff_and_cycle_spend(db_session)
     for body in (html, text):
         assert "$REDACTED" in body, "current balance"
         assert "$REDACTED" in body, "upcoming payoff (balance_due)"
-        assert "$3,195.84" in body, "spend so far this cycle"
+        assert "$REDACTED" in body, "spend so far this cycle"
 
 
 def test_cycle_spend_includes_pending_charges(db_session):
@@ -80,7 +80,7 @@ def test_cycle_spend_going_negative_shows_zero_and_flags_stale_statement(db_sess
     html, text = generate_daily_summary(db_session, user)
 
     for body in (html, text):
-        assert "-$105.68" not in body and "−$105.68" not in body, "never render the negative"
+        assert "-$REDACTED" not in body and "−$REDACTED" not in body, "never render the negative"
         assert "stale" in body.lower(), "flag the stale statement figure"
 
 

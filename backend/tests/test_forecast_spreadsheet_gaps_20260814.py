@@ -96,7 +96,7 @@ def test_crossing_paycheck_gets_only_the_boost_it_earned(db_session):
     The wage base here is one paycheck of gross plus $1,000, so check 2 is the
     crossing one and $REDACTED of it sits above the base: a $REDACTED boost.
     Before the fix check 2 got the whole $REDACTED."""
-    user = _user(db_session, ss_gross_per_paycheck=GROSS, ss_wage_base=Decimal("9602.76"), ss_bonus_ytd=Decimal("0"))
+    user = _user(db_session, ss_gross_per_paycheck=GROSS, ss_wage_base=Decimal("REDACTED"), ss_bonus_ytd=Decimal("0"))
     account = _checking(db_session, user)
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Paycheck",
@@ -110,7 +110,7 @@ def test_crossing_paycheck_gets_only_the_boost_it_earned(db_session):
 
     assert len(checks) >= 3
     assert checks[0][1] == NET, "nothing crossed yet on the first check"
-    partial = (Decimal("6614.40") * Decimal("0.062")).quantize(Decimal("0.01"))
+    partial = (Decimal("REDACTED") * Decimal("0.062")).quantize(Decimal("0.01"))
     assert checks[1][1] == NET + partial, (
         f"the crossing paycheck must be pro-rated to {partial}, not given the full {FULL_BOOST}"
     )
@@ -810,11 +810,11 @@ def _checkpoint_user(db, *, withheld_ytd: str, as_of: date, wage_base: str = "18
 
 
 def test_checkpoint_recovers_gross_from_withheld_tax(db_session):
-    """the user's real case: $REDACTED withheld as of 8/14 implies $REDACTED
-    gross, still $REDACTED under the $184,500 base -- the checkpoint date's
+    """$REDACTED withheld as of 8/14 implies $REDACTED gross, still
+    $REDACTED under the $184,500 base -- the checkpoint date's
     own paycheck must get NO boost, and the crossing lands on the NEXT one."""
     user, account = _checkpoint_user(
-        db_session, withheld_ytd="9868.75", as_of=date(2026, 8, 14), paycheck_day=31,
+        db_session, withheld_ytd="REDACTED", as_of=date(2026, 8, 14), paycheck_day=31,
     )
     # A same-day paycheck recurring item to exercise the "checkpoint coincides
     # with a still-projected day" branch directly.
@@ -868,7 +868,7 @@ def test_no_checkpoint_falls_back_to_legacy_bonus_ytd(db_session):
     """Existing users without a checkpoint must see no behavior change."""
     user = _user(
         db_session, username="legacy",
-        ss_gross_per_paycheck=Decimal("REDACTED"), ss_wage_base=Decimal("17205.52"),
+        ss_gross_per_paycheck=Decimal("REDACTED"), ss_wage_base=Decimal("REDACTED"),
         ss_bonus_ytd=Decimal("0"),
     )
     account = _checking(db_session, user)
