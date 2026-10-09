@@ -54,3 +54,26 @@ def card_matches_description(card: models.CreditCard, description: str) -> bool:
     if card.last_four and _matches_whole_word(card.last_four, description or ""):
         return True
     return False
+
+
+# Bank wordings for a CHECKING debit that pays off a credit card. The one
+# list every importer and the reconciler share. A bare "autopay" is
+# deliberately absent: insurers and utilities also say AUTOPAY, and the CSV/OFX
+# importers mark matches as transfers, which would hide a real bill.
+_CARD_AUTOPAY_MARKERS = (
+    "credit crd",
+    "creditcard",
+    "applecard gsbank",
+    "gsbank payment",
+    "citi autopay",
+    "autopay payment",
+    "online payment - thank",
+    "automatic payment",
+)
+
+
+def looks_like_card_autopay(description: str | None) -> bool:
+    """True when a checking description reads like a credit-card payoff."""
+    d = (description or "").lower()
+    return any(marker in d for marker in _CARD_AUTOPAY_MARKERS)
+
