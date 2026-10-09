@@ -1,8 +1,8 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
-from backend.auth import hash_password, verify_password, create_access_token
+from backend.auth import check_new_password, hash_password, verify_password, create_access_token
 from backend.dependencies import get_db, get_current_user, get_requester
 from backend.seed import seed_default_categories
 from backend.config import settings
@@ -20,12 +20,19 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register", response_model=schemas.TokenOut, status_code=status.HTTP_201_CREATED)
 def register(body: schemas.UserCreate, db: Session = Depends(get_db)):
+    """Bootstraps an empty install only. Once anyone exists, accounts are
+    created by an admin under Settings -> Household -- an open sign-up on a
+    LAN-bound app would let any device on the network mint itself an admin."""
+    if db.query(models.User).first() is not None:
+        raise HTTPException(status_code=403, detail="Registration is closed. Ask an admin to add you.")
+    check_new_password(body.password)
     if db.query(models.User).filter(models.User.username == body.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
     user = models.User(
         username=body.username,
         hashed_password=hash_password(body.password),
         display_name=body.display_name,
+        role=models.UserRole.admin,
     )
     db.add(user)
     db.commit()
@@ -36,7 +43,10 @@ def register(body: schemas.UserCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=schemas.TokenOut)
-def login(body: schemas.LoginRequest, db: Session = Depends(get_db)):
+def login(body: schemas.LoginRequest, request: Request, db: Session = Depends(get_db)):
+    client_ip = request.client.host if request.client else "unknown"
+    if not rate_limit_allow(f"login:{client_ip}:{body.username}", limit=10, window_seconds=900):
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again in 15 minutes.")
     user = db.query(models.User).filter(models.User.username == body.username).first()
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -72,6 +82,7 @@ def change_password(
 ):
     if not verify_password(body.current_password, current_user.hashed_password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Current password is incorrect")
+    check_new_password(body.new_password)
     current_user.hashed_password = hash_password(body.new_password)
     db.commit()
 
@@ -120,8 +131,7 @@ def forgot_password(
 
 @router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
 def reset_password(body: schemas.ResetPasswordRequest, db: Session = Depends(get_db)):
-    if len(body.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    check_new_password(body.new_password)
     if not consume_reset_token(db, body.token, body.new_password):
         raise HTTPException(status_code=400, detail="Invalid or expired reset link")
 
@@ -130,8 +140,7 @@ def reset_password(body: schemas.ResetPasswordRequest, db: Session = Depends(get
 def reset_password_with_code(body: schemas.ResetPasswordWithCodeRequest, db: Session = Depends(get_db)):
     if not rate_limit_allow(f"reset-code:{body.username}", limit=5, window_seconds=3600):
         raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
-    if len(body.new_password) < 6:
-        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    check_new_password(body.new_password)
     user = db.query(models.User).filter(models.User.username == body.username).first()
     if not user or not verify_and_consume_recovery_code(db, user, body.code, body.new_password):
         raise HTTPException(status_code=400, detail="Invalid recovery code")
