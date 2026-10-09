@@ -1,3 +1,4 @@
+import pytest
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import patch
@@ -218,7 +219,13 @@ def test_sync_connection_dedupes_on_rerun(db_session):
     assert len(imported) == 1
 
 
-def test_sync_connection_isolates_per_account_failure(db_session):
+@pytest.mark.parametrize("error", [
+    pytest.param(SimpleFinError("bank unreachable"), id="simplefin_error"),
+    # Anything else out of one link's sync (e.g. from build_preview/run_import)
+    # must not stop the other links on the same connection either.
+    pytest.param(RuntimeError("unexpected boom"), id="unexpected_error"),
+])
+def test_sync_connection_isolates_a_failing_link(db_session, error):
     user, account, connection, link = _make_connection(db_session)
     account2 = models.Account(user_id=user.id, name="Savings", type=models.AccountType.savings, current_balance=Decimal("0"))
     db_session.add(account2)
@@ -232,7 +239,7 @@ def test_sync_connection_isolates_per_account_failure(db_session):
 
     def fake_fetch(access_url, account_id, since):
         if account_id == "acc-1":
-            raise SimpleFinError("bank unreachable")
+            raise error
         return [SimpleFinTransaction(id="t2", posted=datetime(2026, 8, 5), amount=Decimal("500.00"), description="Transfer")], Decimal("500.00"), None
 
     with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
@@ -242,7 +249,7 @@ def test_sync_connection_isolates_per_account_failure(db_session):
     db_session.refresh(account2)
     db_session.refresh(connection)
     assert account2.current_balance == Decimal("500.00")  # second link still synced
-    assert connection.last_error == "bank unreachable"
+    assert connection.last_error == str(error)
 
 
 def test_sync_connection_marks_status_error_when_all_links_fail(db_session):
@@ -435,36 +442,6 @@ def test_run_import_tags_card_transactions_with_given_card_source(db_session):
 
     ct = db_session.query(models.CreditCardTransaction).filter_by(card_id=card.id).one()
     assert ct.source == models.CardTransactionSource.bank_sync
-
-
-def test_sync_connection_isolates_unexpected_error_per_link(db_session):
-    """An exception other than SimpleFinError out of one link's sync (e.g. an
-    unexpected error from build_preview/run_import) must not stop the other
-    links on the same connection from syncing."""
-    user, account, connection, link = _make_connection(db_session)
-    account2 = models.Account(user_id=user.id, name="Savings", type=models.AccountType.savings, current_balance=Decimal("0"))
-    db_session.add(account2)
-    db_session.flush()
-    link2 = models.BankConnectionAccountLink(
-        connection_id=connection.id, simplefin_account_id="acc-2",
-        simplefin_account_name="Savings", local_account_id=account2.id,
-    )
-    db_session.add(link2)
-    db_session.commit()
-
-    def fake_fetch(access_url, account_id, since):
-        if account_id == "acc-1":
-            raise RuntimeError("unexpected boom")
-        return [SimpleFinTransaction(id="t2", posted=datetime(2026, 8, 5), amount=Decimal("500.00"), description="Transfer")], Decimal("500.00"), None
-
-    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
-         patch("backend.services.bank_sync_service.fetch_transactions", side_effect=fake_fetch):
-        sync_connection(db_session, connection)
-
-    db_session.refresh(account2)
-    db_session.refresh(connection)
-    assert account2.current_balance == Decimal("500.00")  # second link still synced
-    assert connection.last_error == "unexpected boom"
 
 
 def test_sync_all_isolates_decrypt_failure_per_connection(db_session):

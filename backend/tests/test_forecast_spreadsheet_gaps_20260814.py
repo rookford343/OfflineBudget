@@ -979,18 +979,24 @@ def test_second_hop_leaves_a_subscription_driven_cards_projection_alone(db_sessi
     )
 
 
-def test_zero_pending_charges_skips_the_second_hop(db_session):
-    """No pending charges means no real second-hop signal -- that month
-    falls through to the flat estimate exactly as it did before this
-    feature existed. Dates relative to date.today() -- see _RelativeCardCycles."""
+@pytest.mark.parametrize("pending", [
+    # No pending charges: no second-hop signal, so the flat estimate applies
+    # exactly as before this feature existed.
+    pytest.param("0", id="zero_pending_charges"),
+    # Nonzero with no timestamp (a pre-feature row, or one a sync just
+    # cleared) is treated as stale rather than silently trusted.
+    pytest.param("2000.00", id="pending_with_no_timestamp"),
+])
+def test_second_hop_falls_through_to_the_flat_estimate(db_session, pending):
+    """Dates relative to date.today() -- see _RelativeCardCycles."""
     today = date.today()
     cycles = _RelativeCardCycles(today)
-    user = _user(db_session, username="secondhopzero")
+    user = _user(db_session, username="secondhopfallthrough")
     account = _checking(db_session, user, balance="60000.00")
     _card(
         db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
-        pending_charges=Decimal("0"),
+        pending_charges=Decimal(pending), pending_charges_updated_at=None,
         next_payment_date=today + timedelta(days=1),
         monthly_spend_estimate=Decimal("15000.00"),
     )
@@ -1000,9 +1006,7 @@ def test_zero_pending_charges_skips_the_second_hop(db_session):
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
     cycle2 = [amt for d, amt in estimates.items() if d == cycles.cycle2_due]
-    assert cycle2 == [Decimal("-15000.00")], (
-        f"zero pending_charges must fall through to the flat estimate, got {cycle2}"
-    )
+    assert cycle2 == [Decimal("-15000.00")], f"expected the flat estimate, got {cycle2}"
 
 
 def test_stale_pending_charges_skips_the_second_hop(db_session):
@@ -1075,30 +1079,3 @@ def test_the_second_hop_still_works_when_the_first_cycle_used_the_stale_payment_
         f"show the fresh pending_charges amount, got {cycle2}"
     )
 
-
-def test_pending_charges_with_no_timestamp_skips_the_second_hop(db_session):
-    """A nonzero pending_charges with no recorded timestamp (a pre-existing
-    row from before this feature shipped, or one a sync just cleared) is
-    treated as already stale rather than silently trusted. Dates relative
-    to date.today() -- see _RelativeCardCycles."""
-    today = date.today()
-    cycles = _RelativeCardCycles(today)
-    user = _user(db_session, username="secondhopnostamp")
-    account = _checking(db_session, user, balance="60000.00")
-    _card(
-        db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
-        current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
-        pending_charges=Decimal("2000.00"),
-        pending_charges_updated_at=None,
-        next_payment_date=today + timedelta(days=1),
-        monthly_spend_estimate=Decimal("15000.00"),
-    )
-    db_session.commit()
-
-    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=120))
-    estimates = dict(_named(entries, "CC Estimate: Chase"))
-
-    cycle2 = [amt for d, amt in estimates.items() if d == cycles.cycle2_due]
-    assert cycle2 == [Decimal("-15000.00")], (
-        f"a nonzero value with no timestamp must fall through to the flat estimate, got {cycle2}"
-    )

@@ -6,6 +6,7 @@ the user's spreadsheet forecast carries the April bonus (+$33,362.69 on 4/15),
 Airbnb money from family (+$1,300 on 7/21), and eBay payouts as explicit rows,
 none of which the app could represent.
 """
+import pytest
 from datetime import date
 from decimal import Decimal
 from backend import models
@@ -44,18 +45,24 @@ def test_outflow_is_the_default_and_subtracts(db_session):
     assert _balance_on(entries, date(2026, 9, 15)) == Decimal("201.75")  # 1000 - 798.25
 
 
-def test_inflow_adds_instead_of_subtracting(db_session):
-    user, account = _seed(db_session, "pe_in")
+@pytest.mark.parametrize("name,amount,on,start,expected", [
+    pytest.param("Bonus", "33362.69", date(2026, 4, 15), date(2026, 4, 14), "34362.69", id="inflow_adds"),
+    # Amounts are re-signed from `direction`, not trusted as stored, so an
+    # inflow entered as a negative number still reads as money in.
+    pytest.param("Refund", "-500.00", date(2026, 5, 10), date(2026, 5, 10), "1500.00", id="direction_wins_over_stored_sign"),
+])
+def test_inflow_adds_to_the_balance(db_session, name, amount, on, start, expected):
+    user, account = _seed(db_session, f"pe_{name.lower()}")
     db_session.add(models.PlannedExpense(
-        user_id=user.id, account_id=account.id, name="Bonus",
-        amount=Decimal("33362.69"), expected_date=date(2026, 4, 15),
+        user_id=user.id, account_id=account.id, name=name,
+        amount=Decimal(amount), expected_date=on,
         direction=models.PlannedDirection.inflow,
     ))
     db_session.commit()
 
-    entries = build_forecast(db_session, user.id, account.id, date(2026, 4, 14), date(2026, 4, 16))
+    entries = build_forecast(db_session, user.id, account.id, start, on + (on - start))
 
-    assert _balance_on(entries, date(2026, 4, 15)) == Decimal("34362.69")  # 1000 + 33362.69
+    assert _balance_on(entries, on) == Decimal(expected)
 
 
 def test_inflow_is_reported_as_income_with_a_positive_amount(db_session):
@@ -78,18 +85,3 @@ def test_inflow_is_reported_as_income_with_a_positive_amount(db_session):
     assert txns[0].is_planned is True
     assert txns[0].is_actual is False
 
-
-def test_direction_wins_over_a_stored_negative_amount(db_session):
-    """Amounts are re-signed from `direction`, not trusted as stored, so an
-    inflow entered as a negative number still reads as money in."""
-    user, account = _seed(db_session, "pe_neg")
-    db_session.add(models.PlannedExpense(
-        user_id=user.id, account_id=account.id, name="Refund",
-        amount=Decimal("-500.00"), expected_date=date(2026, 5, 10),
-        direction=models.PlannedDirection.inflow,
-    ))
-    db_session.commit()
-
-    entries = build_forecast(db_session, user.id, account.id, date(2026, 5, 10), date(2026, 5, 10))
-
-    assert _balance_on(entries, date(2026, 5, 10)) == Decimal("1500.00")

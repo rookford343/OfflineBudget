@@ -3,6 +3,7 @@
 uses (filter_real_spend, is_card_payment). The two views must never
 disagree about what counts as a transfer, a card payoff, or real spend.
 """
+import pytest
 from datetime import date
 from decimal import Decimal
 from fastapi import FastAPI
@@ -212,21 +213,13 @@ def test_endpoint_returns_200(db_session):
     assert body[0]["source"] == "checking"
 
 
-def test_endpoint_422_limit_zero(db_session):
+@pytest.mark.parametrize("limit", [pytest.param(0, id="zero"), pytest.param(51, id="too_high")])
+def test_endpoint_422_limit_out_of_range(db_session, limit):
     user, account, card = _setup(db_session)
     db_session.commit()
     c = _client(db_session, user)
 
-    resp = c.get("/spending/recent", params={"limit": 0})
+    resp = c.get("/spending/recent", params={"limit": limit})
 
     assert resp.status_code == 422
 
-
-def test_endpoint_422_limit_too_high(db_session):
-    user, account, card = _setup(db_session)
-    db_session.commit()
-    c = _client(db_session, user)
-
-    resp = c.get("/spending/recent", params={"limit": 51})
-
-    assert resp.status_code == 422

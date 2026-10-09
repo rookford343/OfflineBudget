@@ -1,3 +1,4 @@
+import pytest
 from datetime import date
 from decimal import Decimal
 from backend.services.spendable_pacer import week_bounds, weeks_remaining_in_month
@@ -8,12 +9,12 @@ def test_week_bounds_for_a_midweek_date():
     assert week_bounds(date(2026, 8, 7)) == (date(2026, 8, 2), date(2026, 8, 8))
 
 
-def test_week_bounds_when_as_of_is_the_sunday_itself():
-    assert week_bounds(date(2026, 8, 2)) == (date(2026, 8, 2), date(2026, 8, 8))
-
-
-def test_week_bounds_when_as_of_is_the_saturday_itself():
-    assert week_bounds(date(2026, 8, 8)) == (date(2026, 8, 2), date(2026, 8, 8))
+@pytest.mark.parametrize("as_of", [
+    pytest.param(date(2026, 8, 2), id="sunday_itself"),
+    pytest.param(date(2026, 8, 8), id="saturday_itself"),
+])
+def test_week_bounds_at_the_edges(as_of):
+    assert week_bounds(as_of) == (date(2026, 8, 2), date(2026, 8, 8))
 
 
 def test_weeks_remaining_in_month_on_the_first_of_a_28_day_month():
@@ -116,98 +117,65 @@ def test_excludes_a_verified_planned_transfer_transaction(db_session):
     assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
 
 
-def test_checking_refund_nets_against_the_matching_debit(db_session):
-    """Regression: a checking refund (positive amount) used to be dropped
-    entirely by the amount < 0 filter instead of netting against the debit
-    it reverses."""
+@pytest.mark.parametrize("credit_amount,credit_description,expected", [
+    # Regression: a checking refund used to be dropped by the amount < 0
+    # filter instead of netting against the debit it reverses.
+    pytest.param("50.00", "Home Depot", "0.00", id="refund_nets_against_matching_debit"),
+    pytest.param("1000.00", "Zelle from Pat Smith", "50.00", id="unrelated_income_never_nets"),
+])
+def test_checking_credits_and_refunds(db_session, credit_amount, credit_description, expected):
     user, checking = _make_user_and_checking(db_session)
     db_session.add_all([
         models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 8, 3), amount=Decimal("-50.00"), description="Home Depot", is_actual=True),
-        models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 8, 5), amount=Decimal("50.00"), description="Home Depot", is_actual=True),
+        models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 8, 4), amount=Decimal(credit_amount), description=credit_description, is_actual=True),
     ])
     db_session.commit()
 
-    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal(expected)
 
 
-def test_checking_refund_never_nets_against_unrelated_income(db_session):
-    user, checking = _make_user_and_checking(db_session)
-    db_session.add_all([
-        models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 8, 3), amount=Decimal("-50.00"), description="Home Depot", is_actual=True),
-        models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 8, 4), amount=Decimal("1000.00"), description="Zelle from Pat Smith", is_actual=True),
-    ])
-    db_session.commit()
-
-    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("50.00")
-
-
-def test_card_refund_nets_against_the_matching_charge(db_session):
-    """Regression (real-world pattern: Ozwell $25 charge + $25 refund used
-    to show as $25 of spend with the refund silently dropped, or worse, as
-    $50 if the refund happened to be miscategorized as another charge)."""
+@pytest.mark.parametrize("merchant,charge,refund,expected", [
+    # Regression: a $25 charge + $25 refund used to show as $25 of spend
+    # (refund dropped), or $50 if the refund was miscategorized as a charge.
+    pytest.param("OZWELL, LLC", "25.00", "-25.00", "0.00", id="refund_nets_against_matching_charge"),
+    # Refunds exceeding charges are real extra spendable money: negative,
+    # not floored at zero.
+    pytest.param("Store", "30.00", "-100.00", "-70.00", id="net_refund_week_goes_below_zero"),
+])
+def test_card_refunds_net_against_charges(db_session, merchant, charge, refund, expected):
     user, checking = _make_user_and_checking(db_session)
     card = models.CreditCard(user_id=user.id, name="Visa", credit_limit=Decimal("5000.00"), statement_day=28, due_day=15)
     db_session.add(card)
     db_session.flush()
     db_session.add_all([
-        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 3), amount=Decimal("25.00"), merchant="OZWELL, LLC"),
-        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 4), amount=Decimal("-25.00"), merchant="OZWELL, LLC"),
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 3), amount=Decimal(charge), merchant=merchant),
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 4), amount=Decimal(refund), merchant=merchant),
     ])
     db_session.commit()
 
-    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal(expected)
 
 
-def test_card_net_refund_period_reduces_discretionary_spend_below_zero(db_session):
-    """A week where refunds exceed charges should show as NEGATIVE
-    discretionary spend (real extra spendable money), not floor at zero."""
-    user, checking = _make_user_and_checking(db_session)
-    card = models.CreditCard(user_id=user.id, name="Visa", credit_limit=Decimal("5000.00"), statement_day=28, due_day=15)
-    db_session.add(card)
-    db_session.flush()
-    db_session.add_all([
-        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 3), amount=Decimal("30.00"), merchant="Store"),
-        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 8, 4), amount=Decimal("-100.00"), merchant="Store"),
-    ])
-    db_session.commit()
-
-    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("-70.00")
-
-
-def test_excludes_a_credit_card_autopay_debit(db_session):
-    """Regression (real data, July 2026): a $9,842.05 checking debit reading
-    'CHASE CREDIT CRD AUTOPAY' is a credit-card PAYMENT, not spending -- the
-    charges it settles were already counted on the card side. It carries no
-    category and no recurring_item_id, so neither pre-existing exclusion
-    caught it, and it alone drove Spendable this week to -$34,804.35."""
+@pytest.mark.parametrize("card_name,last_four,limit,amount,description", [
+    # Regression: an uncategorized 'CHASE CREDIT CRD AUTOPAY' debit is a card
+    # PAYMENT whose charges were already counted card-side; it alone once
+    # drove Spendable this week deeply negative.
+    pytest.param("Chase Sapphire", "1312", "20000.00", "-9842.05",
+                 "CHASE CREDIT CRD AUTOPAY                    PPD ID: 4760039224", id="chase_autopay"),
+    # 'APPLECARD GSBANK PAYMENT' matches 'Apple Card' on its compacted name,
+    # with no last_four to fall back on.
+    pytest.param("Apple Card", "", "5000.00", "-183.40",
+                 "APPLECARD GSBANK PAYMENT    16069006        WEB ID: 9999999999", id="apple_card_name_token"),
+])
+def test_excludes_a_card_autopay_debit(db_session, card_name, last_four, limit, amount, description):
     user, checking = _make_user_and_checking(db_session)
     db_session.add(models.CreditCard(
-        user_id=user.id, name="Chase Sapphire", last_four="1312",
-        credit_limit=Decimal("20000.00"), statement_day=28, due_day=15,
+        user_id=user.id, name=card_name, last_four=last_four,
+        credit_limit=Decimal(limit), statement_day=28, due_day=15,
     ))
     db_session.add(models.Transaction(
         user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
-        amount=Decimal("-9842.05"), is_actual=True,
-        description="CHASE CREDIT CRD AUTOPAY                    PPD ID: 4760039224",
-    ))
-    db_session.commit()
-
-    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
-
-
-def test_excludes_a_card_autopay_matched_by_the_cards_name_token(db_session):
-    """The second real pattern: 'APPLECARD GSBANK PAYMENT' matches the
-    'Apple Card' row on its first name token, with no last_four to fall back
-    on (that card's last_four is blank in real data)."""
-    user, checking = _make_user_and_checking(db_session)
-    db_session.add(models.CreditCard(
-        user_id=user.id, name="Apple Card", last_four="",
-        credit_limit=Decimal("5000.00"), statement_day=28, due_day=15,
-    ))
-    db_session.add(models.Transaction(
-        user_id=user.id, account_id=checking.id, date=date(2026, 8, 3),
-        amount=Decimal("-183.40"), is_actual=True,
-        description="APPLECARD GSBANK PAYMENT    16069006        WEB ID: 9999999999",
+        amount=Decimal(amount), is_actual=True, description=description,
     ))
     db_session.commit()
 

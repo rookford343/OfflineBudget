@@ -12,6 +12,7 @@ rather than trusting any outside signal, and only ever clears on FULL
 coverage -- a partial payment is left alone so a later, real payoff can't
 be double-subtracted.
 """
+import pytest
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import patch
@@ -25,7 +26,6 @@ from backend.services.statement_reconcile import (
     reconcile_statement_payment,
     statement_stale_reason,
 )
-
 
 
 def _enable_sync_auto_clear(monkeypatch):
@@ -83,41 +83,32 @@ def test_full_payment_clears_balance_due_and_advances_next_payment_date(db_sessi
     assert card.balance_due_updated_at is not None
 
 
-def test_credit_on_the_close_date_itself_does_not_count(db_session):
-    """The close date is 8/28 (the occurrence strictly before 9/25's
-    next_payment_date). A credit dated exactly on 8/28 -- not after it --
-    belongs to the PRIOR cycle and must not count toward this one."""
+@pytest.mark.parametrize("balance_due,credit,credit_on,entered_at", [
+    # The close date is 8/28 (the occurrence strictly before 9/25's
+    # next_payment_date); a credit ON it belongs to the prior cycle.
+    pytest.param("6945.00", "-6945.00", date(2026, 8, 28), None, id="credit_on_close_date"),
+    # A partial payment must not reduce balance_due: that would double-subtract
+    # once a later real payoff supersedes it. statement_stale_reason covers it.
+    pytest.param("6945.00", "-3000.00", date(2026, 9, 10), None, id="partial_payment"),
+    # Rule 1: a credit after the close but before balance_due was last
+    # entered is already reflected in the entered figure.
+    pytest.param("6945.00", "-6945.00", date(2026, 9, 5), datetime(2026, 9, 10, 12, 0), id="credit_before_statement_entered"),
+    # Rule 1 is strict (date > entered date): a same-day credit may already be
+    # in the entered figure, so it's excluded; the stale warning covers it.
+    pytest.param("500.00", "-500.00", date(2026, 9, 10), datetime(2026, 9, 10, 12, 0), id="credit_on_day_statement_entered"),
+])
+def test_credits_that_must_not_clear_the_statement(db_session, balance_due, credit, credit_on, entered_at):
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6945.00"),
+        next_payment_date=date(2026, 9, 25), balance_due=Decimal(balance_due),
+        balance_due_updated_at=entered_at,
     )
-    _credit(db_session, card, user.id, amount=Decimal("-6945.00"), on=date(2026, 8, 28))
+    _credit(db_session, card, user.id, amount=Decimal(credit), on=credit_on)
     db_session.commit()
 
-    cleared = reconcile_statement_payment(db_session, card, date(2026, 9, 30))
-
-    assert cleared is False
+    assert reconcile_statement_payment(db_session, card, date(2026, 9, 30)) is False
     db_session.refresh(card)
-    assert card.balance_due == Decimal("6945.00")
-
-
-def test_partial_payment_makes_no_change(db_session):
-    """Only $3,000 against a $6,945 statement -- reducing balance_due here
-    would double-subtract once a later, real payoff supersedes it. The
-    stale-statement warning (statement_stale_reason) covers this case
-    instead."""
-    user, card = _make_card(
-        db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6945.00"),
-    )
-    _credit(db_session, card, user.id, amount=Decimal("-3000.00"), on=date(2026, 9, 10))
-    db_session.commit()
-
-    cleared = reconcile_statement_payment(db_session, card, date(2026, 9, 30))
-
-    assert cleared is False
-    db_session.refresh(card)
-    assert card.balance_due == Decimal("6945.00")
+    assert card.balance_due == Decimal(balance_due)
     assert card.next_payment_date == date(2026, 9, 25)
 
 
@@ -259,40 +250,19 @@ def test_reconcile_all_cards_returns_names_of_cleared_cards(db_session):
 
 # ── statement_stale_reason ────────────────────────────────────────────────────
 
-def test_stale_reason_balance_below_statement(db_session):
+@pytest.mark.parametrize("next_payment,balance_due,current,as_of,expected", [
+    pytest.param(date(2026, 9, 25), "6945.00", "0.00", date(2026, 9, 20), "balance_below_statement", id="balance_below_statement"),
+    pytest.param(date(2026, 9, 25), "500.00", "5000.00", date(2026, 9, 30), "due_date_passed", id="due_date_passed"),
+    pytest.param(date(2026, 10, 25), "500.00", "5000.00", date(2026, 9, 20), None, id="healthy"),
+    pytest.param(date(2026, 8, 25), "0", "100.00", date(2026, 9, 20), None, id="nothing_due"),
+])
+def test_stale_reason(db_session, next_payment, balance_due, current, as_of, expected):
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6945.00"),
-        current_balance=Decimal("0.00"), pending_charges=Decimal("0"),
+        next_payment_date=next_payment, balance_due=Decimal(balance_due),
+        current_balance=Decimal(current), pending_charges=Decimal("0"),
     )
-    assert statement_stale_reason(card, date(2026, 9, 20)) == "balance_below_statement"
-
-
-def test_stale_reason_due_date_passed(db_session):
-    user, card = _make_card(
-        db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("500.00"),
-        current_balance=Decimal("5000.00"), pending_charges=Decimal("0"),
-    )
-    assert statement_stale_reason(card, date(2026, 9, 30)) == "due_date_passed"
-
-
-def test_stale_reason_none_when_healthy(db_session):
-    user, card = _make_card(
-        db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 10, 25), balance_due=Decimal("500.00"),
-        current_balance=Decimal("5000.00"), pending_charges=Decimal("0"),
-    )
-    assert statement_stale_reason(card, date(2026, 9, 20)) is None
-
-
-def test_stale_reason_none_when_nothing_due(db_session):
-    user, card = _make_card(
-        db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 8, 25), balance_due=Decimal("0"),
-        current_balance=Decimal("100.00"), pending_charges=Decimal("0"),
-    )
-    assert statement_stale_reason(card, date(2026, 9, 20)) is None
+    assert statement_stale_reason(card, as_of) == expected
 
 
 # ── budget_snapshot's Left to Spend note ──────────────────────────────────────
@@ -412,7 +382,6 @@ def test_bank_sync_survives_a_reconcile_failure(db_session, monkeypatch):
 # the advanced due date from landing in the past.
 
 from datetime import timedelta
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -437,39 +406,6 @@ def test_chase_live_case_with_freshness_stamp_still_clears(db_session):
     db_session.refresh(card)
     assert card.balance_due == Decimal("0")
     assert card.next_payment_date == date(2026, 10, 25)
-
-
-def test_credit_before_the_statement_was_entered_does_not_count(db_session):
-    """Rule 1: a credit after the close but BEFORE balance_due was last
-    entered is already reflected in that entered figure."""
-    user, card = _make_card(
-        db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6945.00"),
-        balance_due_updated_at=datetime(2026, 9, 10, 12, 0),
-    )
-    _credit(db_session, card, user.id, amount=Decimal("-6945.00"), on=date(2026, 9, 5))
-    db_session.commit()
-
-    assert reconcile_statement_payment(db_session, card, date(2026, 9, 30)) is False
-    db_session.refresh(card)
-    assert card.balance_due == Decimal("6945.00")
-
-
-def test_credit_on_the_day_the_statement_was_entered_does_not_count(db_session):
-    """Rule 1 boundary is strict: date > balance_due_updated_at.date(). A
-    same-day credit may already be reflected in the entered figure, so it's
-    excluded (fail-safe); the stale warning covers a real same-day payment."""
-    user, card = _make_card(
-        db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("500.00"),
-        balance_due_updated_at=datetime(2026, 9, 10, 12, 0),
-    )
-    _credit(db_session, card, user.id, amount=Decimal("-500.00"), on=date(2026, 9, 10))
-    db_session.commit()
-
-    assert reconcile_statement_payment(db_session, card, date(2026, 9, 30)) is False
-    db_session.refresh(card)
-    assert card.balance_due == Decimal("500.00")
 
 
 def test_stale_due_date_never_clears_even_with_ample_credits(db_session):
@@ -678,24 +614,18 @@ def test_new_statement_due_after_a_close_following_a_clear(db_session):
     assert statement_stale_reason(card, date(2026, 9, 27)) is None
 
 
-def test_new_statement_due_counts_pending_charges(db_session):
+@pytest.mark.parametrize("pending,expected", [
+    pytest.param("40.00", "new_statement_due", id="counts_pending_charges"),
+    pytest.param("0", None, id="not_shown_with_nothing_owed"),
+])
+def test_new_statement_due(db_session, pending, expected):
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
         next_payment_date=date(2026, 10, 25), balance_due=Decimal("0"),
         balance_due_updated_at=datetime(2026, 9, 26, 9, 0),
-        current_balance=Decimal("0"), pending_charges=Decimal("40.00"),
+        current_balance=Decimal("0"), pending_charges=Decimal(pending),
     )
-    assert statement_stale_reason(card, date(2026, 9, 30)) == "new_statement_due"
-
-
-def test_new_statement_due_not_shown_with_nothing_owed(db_session):
-    user, card = _make_card(
-        db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 10, 25), balance_due=Decimal("0"),
-        balance_due_updated_at=datetime(2026, 9, 26, 9, 0),
-        current_balance=Decimal("0"), pending_charges=Decimal("0"),
-    )
-    assert statement_stale_reason(card, date(2026, 9, 30)) is None
+    assert statement_stale_reason(card, date(2026, 9, 30)) == expected
 
 
 def test_resaving_unchanged_zero_balance_due_dismisses_new_statement_due(cards_client, db_session):
