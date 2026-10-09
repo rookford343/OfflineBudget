@@ -6,11 +6,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import MonthlySummary, WeeklyDigest, ForecastRisk
-from backend.services.spending_helpers import category_totals_for_range
 from backend.services.forecast_engine import build_forecast, find_balance_risk, _next_occurrence_on_or_after
-from backend.services.budget_snapshot import compute_budget_snapshot
+from backend.services.budget_snapshot import compute_budget_snapshot, spending_breakdown
 from backend.services.upcoming_bills import upcoming_bills
-from backend.services.budget_calculator import compute_overview
 from backend.services.primary_account import primary_checking
 
 _STALE_SYNC_HOURS = 24
@@ -353,141 +351,23 @@ def generate_daily_summary(
             f"{body}</div>"
         )
 
-    # ── "Budget this month" ─────────────────────────────────────────────
-    # Reuses compute_overview (the Budget page's own calculation) so this
-    # section can never quietly disagree with the app about a category's
-    # numbers. compute_overview rolls each child's actual_checking/
-    # actual_cards/actual_total up into its parent row, but NOT budgeted --
-    # a parent's budgeted is its OWN direct allocation, entirely separate
-    # from its children's. The group header below therefore uses the
-    # parent's own budgeted when it has one, falling back to summing the
-    # children's only when the parent carries none (matching what the
-    # Budget page itself shows for that parent) -- adding the two together
-    # double-counts whenever a parent happens to carry both. Header actual
-    # reads straight off the parent row's already-rolled-up actual_total
-    # either way; summing the children's actuals again on top of that would
-    # double them instead.
-    # On the 1st, month_start == today -- a range would collapse to the
-    # nonsensical "Oct 1–1", so show the single date instead.
-    budget_date_range = (
+    # ── "Spending this month" ───────────────────────────────────────────
+    # The weekly digest's breakdown over the month so far, from the same
+    # spending_breakdown the Dashboard's digest card uses. On the 1st,
+    # month_start == today -- a range would read "Oct 1–1", so show the date.
+    month_range = (
         f"{month_start.strftime('%b')} {month_start.day}"
         if month_start == today
         else f"{month_start.strftime('%b')} {month_start.day}–{today.day}"
     )
-    budget_title = f"Budget this month ({budget_date_range})"
-
-    def _budget_bar(pct: float, over: bool) -> str:
-        color = "#dc2626" if over else "#6366f1"
-        width = min(max(pct, 0.0), 100.0)
-        return (
-            f"<table style='width:100%;border-collapse:collapse;margin:3px 0 4px' cellpadding='0' cellspacing='0'>"
-            f"<tr><td style='background:#e5e7eb;border-radius:3px;height:6px'>"
-            f"<div style='width:{width:.0f}%;background:{color};height:6px;border-radius:3px'></div>"
-            f"</td></tr></table>"
-        )
-
-    def _budget_suffix(budgeted: Decimal, actual: Decimal) -> tuple[str, str, bool]:
-        """(suffix text, color, no_budget) for the "$X left"/"$X over"/
-        "no budget set" line. budgeted==0 with actual>0 is the only case
-        a visible row can have budgeted==0 in (rows with both at 0 are
-        dropped before this is ever called)."""
-        if budgeted == 0 and actual > 0:
-            return "no budget set", "#9ca3af", True
-        if actual > budgeted:
-            return f"{fmt(actual - budgeted)} over", "#dc2626", False
-        return f"{fmt(budgeted - actual)} left", "#6b7280", False
-
-    def _budget_row_html(name: str, budgeted: Decimal, actual: Decimal, *, indent: bool = False, bold: bool = False) -> str:
-        suffix, color, no_budget = _budget_suffix(budgeted, actual)
-        budget_str = "$0" if no_budget else fmt(budgeted)
-        bar_html = "" if no_budget else _budget_bar(
-            float(actual) / float(budgeted) * 100 if budgeted else 0.0, actual > budgeted,
-        )
-        pad = "padding-left:16px;" if indent else ""
-        weight = "font-weight:600;" if bold else ""
-        return (
-            f"<div style='margin-bottom:10px'>"
-            f"<table style='width:100%;font-size:13px'><tr>"
-            f"<td style='{pad}{weight}color:#374151'>{name}</td>"
-            f"<td style='text-align:right;white-space:nowrap;color:#111827'>{fmt(actual)} of {budget_str}</td>"
-            f"</tr></table>"
-            f"<div style='{pad}'>{bar_html}"
-            f"<span style='font-size:11px;color:{color}'>{suffix}</span></div>"
-            f"</div>"
-        )
-
-    def _budget_row_text(name: str, budgeted: Decimal, actual: Decimal, *, indent: bool = False) -> str:
-        suffix, _color, no_budget = _budget_suffix(budgeted, actual)
-        budget_str = "$0" if no_budget else fmt(budgeted)
-        prefix = "  " if indent else ""
-        return f"{prefix}{name}: {fmt(actual)} of {budget_str} · {suffix}"
-
-    def _budget_header_text(name: str, budgeted: Decimal, actual: Decimal) -> str:
-        suffix, _color, no_budget = _budget_suffix(budgeted, actual)
-        budget_str = "$0" if no_budget else fmt(budgeted)
-        return f"{name} — {fmt(actual)} of {budget_str} ({suffix})"
-
-    budget_rows = [r for r in compute_overview(db, user.id, today.year, today.month) if r.category_type != "income"]
-    budget_top_level: dict[int, object] = {}
-    budget_by_parent: dict[int, list] = defaultdict(list)
-    for r in budget_rows:
-        if r.parent_id is None:
-            budget_top_level[r.category_id] = r
-        else:
-            budget_by_parent[r.parent_id].append(r)
-
-    def _budget_visible(r) -> bool:
-        return not (r.budgeted == 0 and r.actual_total == 0)
-
-    budget_blocks: list[tuple[Decimal, str, str]] = []
-    for top in budget_top_level.values():
-        raw_children = budget_by_parent.get(top.category_id, [])
-        if not raw_children:
-            continue  # childless top-level categories are gathered below, under "Other"
-        visible_children = sorted(
-            (c for c in raw_children if _budget_visible(c)), key=lambda c: c.actual_total, reverse=True,
-        )
-        if not visible_children:
-            continue  # this group has nothing to show this month
-        # compute_overview never rolls budgeted up -- a parent's `budgeted`
-        # is its OWN direct allocation, entirely separate from its
-        # children's. Use that own allocation when it has one; only fall
-        # back to summing the children when the parent carries none. Adding
-        # them together double-counts whenever a parent happens to carry
-        # both (found in the real preview: "Necessities" showed its own
-        # $5,395.03 plus its children's $5,622.98 as $11,017.30).
-        header_budgeted = top.budgeted if top.budgeted > 0 else sum((c.budgeted for c in visible_children), Decimal("0"))
-        header_actual = top.actual_total
-        group_html = _budget_row_html(top.category_name, header_budgeted, header_actual, bold=True)
-        group_html += "".join(_budget_row_html(c.category_name, c.budgeted, c.actual_total, indent=True) for c in visible_children)
-        group_text = _budget_header_text(top.category_name, header_budgeted, header_actual)
-        group_text += "\n" + "\n".join(_budget_row_text(c.category_name, c.budgeted, c.actual_total, indent=True) for c in visible_children)
-        budget_blocks.append((header_budgeted, group_html, group_text))
-
-    budget_others = sorted(
-        (top for top in budget_top_level.values() if not budget_by_parent.get(top.category_id) and _budget_visible(top)),
-        key=lambda c: c.actual_total, reverse=True,
-    )
-    if budget_others:
-        other_budgeted = sum((o.budgeted for o in budget_others), Decimal("0"))
-        other_html = (
-            "<p style='margin:12px 0 6px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Other</p>"
-            + "".join(_budget_row_html(o.category_name, o.budgeted, o.actual_total) for o in budget_others)
-        )
-        other_text = "Other\n" + "\n".join(_budget_row_text(o.category_name, o.budgeted, o.actual_total, indent=True) for o in budget_others)
-        budget_blocks.append((other_budgeted, other_html, other_text))
-
-    budget_blocks.sort(key=lambda b: b[0], reverse=True)
-
-    if budget_blocks:
-        budget_body_html = "".join(b[1] for b in budget_blocks)
-        budget_body_text = "\n\n".join(b[2] for b in budget_blocks)
-    else:
-        budget_body_html = "<p style='color:#9ca3af;margin:0'>No budget data yet this month.</p>"
-        budget_body_text = "  No budget data yet this month."
-
-    budget_section_html = _section("📊", budget_title, budget_body_html)
-    budget_section_text = f"{budget_title.upper()}\n{budget_body_text}\n"
+    month = spending_breakdown(db, user.id, month_start, today)
+    month_title = f"Spending this month ({month_range})"
+    month_tables_html, month_tables_text = _breakdown_tables(month.categories, month.top_merchants, "this month")
+    month_section_html = _section("📊", month_title, (
+        f"<p style='font-size:14px;color:#374151;margin:0 0 8px'>Total spent: "
+        f"<b style='color:#111827'>{fmt(month.total)}</b></p>{month_tables_html}"
+    ))
+    month_section_text = f"{month_title.upper()}\n  Total spent: {fmt(month.total)}\n{month_tables_text}\n"
 
     html = f"""<!DOCTYPE html>
 <html><body style='font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f3f4f6;margin:0;padding:24px 0'>
@@ -497,7 +377,7 @@ def generate_daily_summary(
 
 {stale_html}
 {household_html}
-{budget_section_html}
+{month_section_html}
 {_section("🏦", "Checking Accounts", f"<table style='width:100%;font-size:14px'>{acct_rows}</table>")}
 {_section("📅", "Upcoming (next 7 days)", f"<table style='width:100%;font-size:14px'>{upcoming_rows}</table>")}
 {_section("📊", "Month-to-Date Spending", (
@@ -569,7 +449,7 @@ def generate_daily_summary(
     text = f"""OfflineBudget Daily Summary — {today.strftime("%B %-d, %Y")}
 {stale_text}
 {household_text}
-{budget_section_text}
+{month_section_text}
 CHECKING ACCOUNTS
 {acct_text}
 
@@ -585,6 +465,38 @@ CREDIT CARDS
     return html, text
 
 
+def _breakdown_tables(categories, merchants, period: str) -> tuple[str, str]:
+    """The "Spending by Category" and "Top Merchants" tables shared by the
+    weekly digest and the monthly section. `period` words the empty state
+    ("this week" / "this month")."""
+    fmt = _fmt
+    cat_rows = "".join(
+        f"<tr><td style='padding:4px 12px 4px 0'>{c.category_name}</td>"
+        f"<td style='padding:4px 0;text-align:right'>{fmt(c.total)}</td></tr>"
+        for c in categories
+    ) or f"<tr><td style='color:#888'>No categorized spending {period}</td></tr>"
+    cat_text = "\n".join(
+        f"  {c.category_name}: {fmt(c.total)}" for c in categories
+    ) or f"  No categorized spending {period}"
+    merchant_rows = "".join(
+        f"<tr><td style='padding:4px 12px 4px 0'>{m.name}</td>"
+        f"<td style='padding:4px 0;text-align:right'>{fmt(m.total)}</td></tr>"
+        for m in merchants[:10]
+    ) or f"<tr><td style='color:#888'>No merchant activity {period}</td></tr>"
+    merchant_text = "\n".join(
+        f"  {m.name}: {fmt(m.total)}" for m in merchants[:10]
+    ) or f"  No merchant activity {period}"
+    heading = "margin:{top}px 0 4px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em"
+    html = (
+        f"<h4 style='{heading.format(top=12)}'>Spending by Category</h4>"
+        f"<table style='width:100%;font-size:14px'>{cat_rows}</table>"
+        f"<h4 style='{heading.format(top=14)}'>Top Merchants</h4>"
+        f"<table style='width:100%;font-size:14px'>{merchant_rows}</table>"
+    )
+    text = f"SPENDING BY CATEGORY ({period})\n{cat_text}\n\nTOP MERCHANTS ({period})\n{merchant_text}"
+    return html, text
+
+
 def _weekly_digest_section(digest: WeeklyDigest) -> tuple[str, str]:
     """Render the Weekly Digest's own content (spending by category, top
     merchants, balance risk) as an HTML/text fragment appended to that
@@ -592,24 +504,7 @@ def _weekly_digest_section(digest: WeeklyDigest) -> tuple[str, str]:
     already live in the Daily Summary itself, so they aren't repeated here.
     """
     fmt = _fmt
-
-    cat_rows = "".join(
-        f"<tr><td style='padding:4px 12px 4px 0'>{c.category_name}</td>"
-        f"<td style='padding:4px 0;text-align:right'>{fmt(c.total)}</td></tr>"
-        for c in digest.categories
-    ) or "<tr><td style='color:#888'>No categorized spending this week</td></tr>"
-    cat_text = "\n".join(
-        f"  {c.category_name}: {fmt(c.total)}" for c in digest.categories
-    ) or "  No categorized spending this week"
-
-    merchant_rows = "".join(
-        f"<tr><td style='padding:4px 12px 4px 0'>{m.name}</td>"
-        f"<td style='padding:4px 0;text-align:right'>{fmt(m.total)}</td></tr>"
-        for m in digest.top_merchants[:10]
-    ) or "<tr><td style='color:#888'>No merchant activity this week</td></tr>"
-    merchant_text = "\n".join(
-        f"  {m.name}: {fmt(m.total)}" for m in digest.top_merchants[:10]
-    ) or "  No merchant activity this week"
+    tables_html, tables_text = _breakdown_tables(digest.categories, digest.top_merchants, "this week")
 
     risk_html = ""
     risk_text = ""
@@ -627,11 +522,7 @@ def _weekly_digest_section(digest: WeeklyDigest) -> tuple[str, str]:
 <h3 style='margin:24px 0 8px;padding-bottom:6px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:14px;font-weight:600'>🗓️&nbsp; Weekly Digest — {digest.week_start.strftime('%B %-d')}–{digest.week_end.strftime('%B %-d, %Y')}</h3>
 <p style='font-size:14px;color:#374151;margin:0 0 8px'>Total spent this week: <b style='color:#111827'>{fmt(digest.total_spent)}</b></p>
 {risk_html}
-<h4 style='margin:12px 0 4px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em'>Spending by Category</h4>
-<table style='width:100%;font-size:14px'>{cat_rows}</table>
-
-<h4 style='margin:14px 0 4px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em'>Top Merchants</h4>
-<table style='width:100%;font-size:14px'>{merchant_rows}</table>
+{tables_html}
 </div>
 """
 
@@ -639,11 +530,7 @@ def _weekly_digest_section(digest: WeeklyDigest) -> tuple[str, str]:
 WEEKLY DIGEST — {digest.week_start.strftime('%B %-d')} to {digest.week_end.strftime('%B %-d, %Y')}
   Total spent this week: {fmt(digest.total_spent)}
 {risk_text}
-SPENDING BY CATEGORY (past 7 days)
-{cat_text}
-
-TOP MERCHANTS (past 7 days)
-{merchant_text}
+{tables_text}
 """
     return html, text
 
@@ -774,12 +661,6 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
     week_start = today - timedelta(days=6)
     week_end = today
 
-    # total_spent is this function's own computation (the trailing-7-day sum),
-    # kept independent of compute_budget_snapshot. categories/top_merchants,
-    # however, are the identical trailing-7-day breakdown compute_budget_snapshot
-    # already computes -- reused below instead of recomputed.
-    cat_totals = category_totals_for_range(db, user.id, week_start, week_end)
-    total_spent = sum(cat_totals.values(), Decimal("0"))
 
     account = db.query(models.Account).filter(
         models.Account.id == account_id, models.Account.user_id == user.id,
@@ -789,7 +670,10 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
     risk_dict = find_balance_risk(forecast_entries, threshold)
     risk = ForecastRisk(**risk_dict)
 
+    # The snapshot already carries the trailing-7-day spending_breakdown;
+    # its category totals sum to the week's total.
     snapshot = compute_budget_snapshot(db, user, account_id, as_of=today)
+    total_spent = sum((c.total for c in snapshot.categories), Decimal("0"))
 
     return WeeklyDigest(
         week_start=week_start,
