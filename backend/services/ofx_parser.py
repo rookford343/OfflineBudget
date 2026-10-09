@@ -2,7 +2,8 @@
 from __future__ import annotations
 import io
 from decimal import Decimal, InvalidOperation
-from backend.services.csv_parser import ParsedRow, _is_cc_transfer
+from backend.services.card_matching import looks_like_card_autopay
+from backend.services.csv_parser import ParsedRow
 
 
 def parse_ofx(content: bytes) -> list[ParsedRow]:
@@ -51,7 +52,7 @@ def parse_ofx(content: bytes) -> list[ParsedRow]:
             date=txn_date,
             description=desc,
             amount=amount,
-            is_transfer=_is_cc_transfer(desc),
+            is_transfer=looks_like_card_autopay(desc),
         ))
 
     return rows

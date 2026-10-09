@@ -4,43 +4,19 @@ from datetime import date
 from decimal import Decimal
 from sqlalchemy.orm import Session, joinedload
 from backend import models
+from backend.services.card_matching import card_matches_description, looks_like_card_autopay
 from backend.schemas import (
     ReconcileResponse, ReconcileMatchedItem,
     ReconcileUnmatchedRecurring, ReconcileUnmatchedTransaction,
 )
 
-# Keyword fragments that identify CC autopay debits in bank descriptions.
-_CC_AUTOPAY_KEYWORDS = ("autopay", "gsbank payment", "credit crd", "creditcard")
-
-
-def _is_cc_autopay_desc(desc: str) -> bool:
-    d = desc.lower()
-    return any(kw in d for kw in _CC_AUTOPAY_KEYWORDS)
-
-
-def _card_matches_desc(card: models.CreditCard, desc: str) -> bool:
-    desc_lower = desc.lower()
-    card_name = (card.name or "").lower().strip()
-    first_token = card_name.split()[0] if card_name else ""
-    if first_token and first_token in desc_lower:
-        return True
-    if card.last_four and card.last_four in desc:
-        return True
-    return False
-
-
 def _fuzzy_match_cc_ri(
     txn: models.Transaction,
     cc_items: list[models.RecurringItem],
 ) -> models.RecurringItem | None:
-    """Match against credit_card_payment recurring items by card name token."""
-    desc_lower = txn.description.lower()
+    """Match against credit_card_payment recurring items by their card."""
     for item in cc_items:
-        if not item.card:
-            continue
-        card_name = (item.card.name or "").lower().strip()
-        first_token = card_name.split()[0] if card_name else ""
-        if first_token and first_token in desc_lower:
+        if item.card and card_matches_description(item.card, txn.description):
             return item
     return None
 
@@ -155,10 +131,10 @@ def compute_reconciliation(
     cc_autopay_by_card: dict[int, tuple[models.CreditCard, list[models.Transaction]]] = {}
     remaining_unlinked = []
     for t in remaining_after_ri:
-        if t.amount < 0 and _is_cc_autopay_desc(t.description):
+        if t.amount < 0 and looks_like_card_autopay(t.description):
             matched_card = None
             for card in all_cards:
-                if _card_matches_desc(card, t.description):
+                if card_matches_description(card, t.description):
                     matched_card = card
                     break
             if matched_card:

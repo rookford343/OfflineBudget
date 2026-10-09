@@ -8,23 +8,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from backend.models import ImportFormat
-
-
-_CC_TRANSFER_PATTERNS = (
-    "CREDIT CRD AUTOPAY",
-    "CREDIT CRD AUTOPA",
-    "APPLECARD GSBANK",
-    "CITI AUTOPAY",
-    "AUTOPAY PAYMENT",
-    "ONLINE PAYMENT - THANK",
-    "AUTOMATIC PAYMENT",
-)
-
-
-def _is_cc_transfer(description: str) -> bool:
-    upper = description.upper()
-    return any(p in upper for p in _CC_TRANSFER_PATTERNS)
-
+from backend.services.card_matching import looks_like_card_autopay
 
 _ZELLE_RE = re.compile(
     r"^Zelle\s+payment\s+(from|to)\s+([A-Za-z][A-Za-z\s\-]+?)\s+[A-Za-z0-9]{6,}$",
@@ -147,5 +131,5 @@ def _parse_row(fmt: ImportFormat, row: dict) -> ParsedRow | None:
         date=parsed_date,
         description=desc,
         amount=parsed_amount,
-        is_transfer=_is_cc_transfer(desc),
+        is_transfer=looks_like_card_autopay(desc),
     )
