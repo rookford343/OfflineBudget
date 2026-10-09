@@ -1,3 +1,4 @@
+import pytest
 from datetime import date, timedelta
 from decimal import Decimal
 from backend import models
@@ -170,32 +171,22 @@ def test_category_totals_for_range_nets_a_card_refund(db_session):
     assert totals[dining.id] == Decimal("0.00")
 
 
-def test_merchant_totals_nets_a_checking_refund_matching_a_debit_description(db_session):
+@pytest.mark.parametrize("credit_on,credit_amount,credit_description,expected", [
+    pytest.param(date(2026, 8, 5), "50.00", "Home Depot", "0.00", id="nets_matching_refund"),
+    # A same-window credit that matches no debit (a Zelle, a savings
+    # transfer, a paycheck) must never net against unrelated spend.
+    pytest.param(date(2026, 8, 4), "1000.00", "Zelle from Pat Smith", "50.00", id="unrelated_income_never_nets"),
+])
+def test_merchant_totals_checking_credits(db_session, credit_on, credit_amount, credit_description, expected):
     user, account = _make_user_account(db_session)
     db_session.add_all([
         models.Transaction(user_id=user.id, account_id=account.id, date=date(2026, 8, 3), amount=Decimal("-50.00"), description="Home Depot"),
-        models.Transaction(user_id=user.id, account_id=account.id, date=date(2026, 8, 5), amount=Decimal("50.00"), description="Home Depot"),
+        models.Transaction(user_id=user.id, account_id=account.id, date=credit_on, amount=Decimal(credit_amount), description=credit_description),
     ])
     db_session.commit()
 
     result = merchant_totals(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7))
-    assert result == [("Home Depot", Decimal("0.00"), 1)]
-
-
-def test_merchant_totals_does_not_net_unrelated_income_against_a_different_merchant(db_session):
-    """A same-window positive checking transaction with a description that
-    doesn't match any debit -- a Zelle, a transfer from savings, a paycheck
-    -- must never net against unrelated spend just because both landed in
-    the same week."""
-    user, account = _make_user_account(db_session)
-    db_session.add_all([
-        models.Transaction(user_id=user.id, account_id=account.id, date=date(2026, 8, 3), amount=Decimal("-50.00"), description="Home Depot"),
-        models.Transaction(user_id=user.id, account_id=account.id, date=date(2026, 8, 4), amount=Decimal("1000.00"), description="Zelle from Pat Smith"),
-    ])
-    db_session.commit()
-
-    result = merchant_totals(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7))
-    assert result == [("Home Depot", Decimal("50.00"), 1)]  # Zelle never appears
+    assert result == [("Home Depot", Decimal(expected), 1)]
 
 
 def test_generate_weekly_digest_smoke(db_session):

@@ -1,3 +1,4 @@
+import pytest
 from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
@@ -48,17 +49,13 @@ def test_current_month_creates_and_returns_points(db_session):
     assert body["points"][0] == {"date": "2026-10-01", "projected_balance": "500.00"}
 
 
-def test_current_month_after_the_window_is_404(db_session):
+@pytest.mark.parametrize("today", [
+    pytest.param(date(2026, 9, 28), id="current_month_after_the_window"),
+    pytest.param(date(2026, 10, 2), id="past_month_without_a_row_never_created"),
+])
+def test_september_baseline_is_404_without_building(db_session, today):
     user, acct = _seed(db_session)
-    with patch(TODAY, return_value=date(2026, 9, 28)), patch(ENGINE, side_effect=_fake) as eng:
-        r = _client(db_session, user).get("/forecast/baseline", params={"account_id": acct.id, "year": 2026, "month": 9})
-    assert r.status_code == 404
-    assert eng.call_count == 0
-
-
-def test_past_month_without_a_row_is_404_and_never_created(db_session):
-    user, acct = _seed(db_session)
-    with patch(TODAY, return_value=date(2026, 10, 2)), patch(ENGINE, side_effect=_fake) as eng:
+    with patch(TODAY, return_value=today), patch(ENGINE, side_effect=_fake) as eng:
         r = _client(db_session, user).get("/forecast/baseline", params={"account_id": acct.id, "year": 2026, "month": 9})
     assert r.status_code == 404
     assert eng.call_count == 0

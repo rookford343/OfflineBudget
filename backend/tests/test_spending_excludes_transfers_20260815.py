@@ -13,6 +13,7 @@ email -- had its own path without it, so the same drift as
 forecast_engine._fires_on vs summary_generator._fires_soon. These tests pin
 the behaviour on the shared predicate both now call.
 """
+import pytest
 from datetime import date
 from decimal import Decimal
 from backend import models
@@ -44,17 +45,15 @@ def _txn(db, user, account, desc, amount, when=date(2026, 7, 15)):
 
 # --- The predicate itself ------------------------------------------------
 
-def test_card_payoff_is_not_spend():
-    card = models.CreditCard(name="Chase Sapphire", credit_limit=Decimal("1"),
-                             statement_day=28, due_day=25)
-    assert is_real_checking_spend("CHASE CREDIT CRD AUTOPAY  PPD ID: 4760039224", [card]) is False
-
-
-def test_apple_card_payment_is_not_spend():
-    """"Apple Card" pays out as the single token APPLECARD."""
-    card = models.CreditCard(name="Apple Card", credit_limit=Decimal("1"),
-                             statement_day=31, due_day=25)
-    assert is_real_checking_spend("APPLECARD GSBANK PAYMENT 16069006", [card]) is False
+@pytest.mark.parametrize("card_name,statement_day,description", [
+    pytest.param("Chase Sapphire", 28, "CHASE CREDIT CRD AUTOPAY  PPD ID: 4760039224", id="card_payoff"),
+    # "Apple Card" pays out as the single token APPLECARD.
+    pytest.param("Apple Card", 31, "APPLECARD GSBANK PAYMENT 16069006", id="apple_card_payment"),
+])
+def test_card_payment_is_not_spend(card_name, statement_day, description):
+    card = models.CreditCard(name=card_name, credit_limit=Decimal("1"),
+                             statement_day=statement_day, due_day=25)
+    assert is_real_checking_spend(description, [card]) is False
 
 
 def test_internal_transfer_is_not_spend():

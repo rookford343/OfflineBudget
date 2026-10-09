@@ -125,13 +125,21 @@ def test_quarters_scenario_with_an_unknown_scenario_id_is_404(client):
 # fires at all, so committing one creates a permanently invisible real bill),
 # while an unknown enum value 500'd. Both are 422 now.
 
-def test_a_day_of_month_past_the_end_of_any_month_is_rejected(client):
+@pytest.mark.parametrize("override,expected", [
+    pytest.param({"day_of_month": 45}, 422, id="day_past_end_of_any_month"),
+    # 0 encodes "last day of month" (the RecurringCreate convention), so
+    # bounding the field must not outlaw it.
+    pytest.param({"day_of_month": 0}, 201, id="day_zero_is_last_day"),
+    pytest.param({"type": "banana"}, 422, id="unknown_type_is_422_not_500"),
+    pytest.param({"frequency": "fortnightly"}, 422, id="unknown_frequency_is_422_not_500"),
+])
+def test_proposed_item_field_validation(client, override, expected):
     c, _user, account, scenario = client
     r = c.post(f"/scenarios/{scenario.id}/items", json={
-        "name": "Typo", "amount": "10.00", "type": "expense", "frequency": "monthly",
-        "day_of_month": 45, "start_date": "2026-10-01", "account_id": account.id,
+        "name": "Item", "amount": "10.00", "type": "expense", "frequency": "monthly",
+        "day_of_month": 1, "start_date": "2026-10-01", "account_id": account.id, **override,
     })
-    assert r.status_code == 422, r.text
+    assert r.status_code == expected, r.text
 
 
 def test_a_negative_day_of_month_is_rejected(client):
@@ -145,39 +153,6 @@ def test_a_negative_day_of_month_is_rejected(client):
     })
     assert r.status_code == 422, r.text
     assert c.get("/scenarios").json()[0]["proposed_items"] == []
-
-
-def test_day_of_month_zero_is_still_accepted_as_last_day(client):
-    """0 is the encoding for 'last day of month', not an out-of-range value --
-    the same convention RecurringCreate uses. Bounding the field must not
-    outlaw it."""
-    c, _user, account, scenario = client
-    r = c.post(f"/scenarios/{scenario.id}/items", json={
-        "name": "Last day", "amount": "10.00", "type": "expense",
-        "frequency": "monthly", "day_of_month": 0,
-        "start_date": "2026-10-01", "account_id": account.id,
-    })
-    assert r.status_code == 201, r.text
-
-
-def test_an_unknown_recurring_type_is_a_422_not_a_500(client):
-    c, _user, account, scenario = client
-    r = c.post(f"/scenarios/{scenario.id}/items", json={
-        "name": "Nonsense", "amount": "10.00", "type": "banana",
-        "frequency": "monthly", "day_of_month": 1,
-        "start_date": "2026-10-01", "account_id": account.id,
-    })
-    assert r.status_code == 422, r.text
-
-
-def test_an_unknown_frequency_is_a_422_not_a_500(client):
-    c, _user, account, scenario = client
-    r = c.post(f"/scenarios/{scenario.id}/items", json={
-        "name": "Nonsense", "amount": "10.00", "type": "expense",
-        "frequency": "fortnightly", "day_of_month": 1,
-        "start_date": "2026-10-01", "account_id": account.id,
-    })
-    assert r.status_code == 422, r.text
 
 
 def test_an_unknown_expense_direction_is_rejected(client):

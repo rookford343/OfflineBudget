@@ -8,6 +8,7 @@ Worked example throughout (see brief): Power Co, statement day S=17, due day
 Sep 17, due = Oct 8, already passed). On Nov 5 it still prompts (same window).
 On Nov 9 there's no prompt (window closed the day after the due date).
 """
+import pytest
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
@@ -82,49 +83,33 @@ def test_prompts_the_day_before_the_statement_is_due(db_session):
     assert results[0].due_date == date(2026, 11, 8)
 
 
-def test_no_prompt_the_day_before_that(db_session):
+@pytest.mark.parametrize("today", [
+    pytest.param(date(2026, 10, 15), id="day_before_the_window_opens"),
+    pytest.param(date(2026, 11, 9), id="once_the_due_date_has_passed"),
+])
+def test_no_prompt_outside_the_window(db_session, today):
     user = _user(db_session); acct = _account(db_session, user)
     _item(db_session, user, acct, statement_day=17, day_of_month=8)
-    assert bills_to_confirm(db_session, user.id, date(2026, 10, 15)) == []
+    assert bills_to_confirm(db_session, user.id, today) == []
 
 
-def test_still_prompts_close_to_the_due_date(db_session):
+@pytest.mark.parametrize("statement_day,due_day,today,statement_date,due_date", [
+    pytest.param(17, 8, date(2026, 11, 5), date(2026, 10, 17), date(2026, 11, 8), id="close_to_the_due_date"),
+    pytest.param(28, 5, date(2026, 12, 30), date(2026, 12, 28), date(2027, 1, 5), id="crosses_a_month_end"),
+    pytest.param(28, 5, date(2027, 1, 3), date(2026, 12, 28), date(2027, 1, 5), id="crosses_a_year_end"),
+    pytest.param(17, 0, date(2026, 10, 20), date(2026, 10, 17), date(2026, 10, 31), id="due_day_zero_is_last_day"),
+])
+def test_prompts_with_statement_and_due_dates(db_session, statement_day, due_day, today, statement_date, due_date):
     user = _user(db_session); acct = _account(db_session, user)
-    item = _item(db_session, user, acct, statement_day=17, day_of_month=8)
-    results = bills_to_confirm(db_session, user.id, date(2026, 11, 5))
+    item = _item(db_session, user, acct, statement_day=statement_day, day_of_month=due_day)
+    results = bills_to_confirm(db_session, user.id, today)
     assert len(results) == 1
     assert results[0].recurring_item_id == item.id
-    assert results[0].statement_date == date(2026, 10, 17)
-    assert results[0].due_date == date(2026, 11, 8)
-
-
-def test_no_prompt_once_the_due_date_has_passed(db_session):
-    user = _user(db_session); acct = _account(db_session, user)
-    _item(db_session, user, acct, statement_day=17, day_of_month=8)
-    assert bills_to_confirm(db_session, user.id, date(2026, 11, 9)) == []
+    assert results[0].statement_date == statement_date
+    assert results[0].due_date == due_date
 
 
 # ── Crossing month and year ends ─────────────────────────────────────────────
-
-def test_crosses_a_month_end(db_session):
-    user = _user(db_session); acct = _account(db_session, user)
-    item = _item(db_session, user, acct, name="Water Co", statement_day=28, day_of_month=5)
-    results = bills_to_confirm(db_session, user.id, date(2026, 12, 30))
-    assert len(results) == 1
-    assert results[0].recurring_item_id == item.id
-    assert results[0].statement_date == date(2026, 12, 28)
-    assert results[0].due_date == date(2027, 1, 5)
-
-
-def test_crosses_a_year_end(db_session):
-    user = _user(db_session); acct = _account(db_session, user)
-    item = _item(db_session, user, acct, name="Water Co", statement_day=28, day_of_month=5)
-    results = bills_to_confirm(db_session, user.id, date(2027, 1, 3))
-    assert len(results) == 1
-    assert results[0].recurring_item_id == item.id
-    assert results[0].statement_date == date(2026, 12, 28)
-    assert results[0].due_date == date(2027, 1, 5)
-
 
 def test_window_closes_the_day_after_a_crossed_due_date(db_session):
     user = _user(db_session); acct = _account(db_session, user)
@@ -157,16 +142,6 @@ def test_clamps_a_31_statement_day_in_february(db_session):
 
 
 # ── Due day 0 (last day of month) ────────────────────────────────────────────
-
-def test_due_day_zero_is_the_last_day_of_month(db_session):
-    user = _user(db_session); acct = _account(db_session, user)
-    item = _item(db_session, user, acct, statement_day=17, day_of_month=0)
-    results = bills_to_confirm(db_session, user.id, date(2026, 10, 20))
-    assert len(results) == 1
-    assert results[0].recurring_item_id == item.id
-    assert results[0].statement_date == date(2026, 10, 17)
-    assert results[0].due_date == date(2026, 10, 31)
-
 
 # ── Existing overrides ────────────────────────────────────────────────────────
 

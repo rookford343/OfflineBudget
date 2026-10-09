@@ -135,23 +135,15 @@ def test_total_cost_raises_for_financed_without_months():
         total_cost(item, opt)
 
 
-def test_total_cost_raises_for_financed_with_zero_months():
-    item = _item()
-    opt = _opt(M.financed, months=0, apr="0")
+@pytest.mark.parametrize("months", [pytest.param(0, id="zero"), pytest.param(85, id="too_many")])
+def test_total_cost_raises_for_financed_months_out_of_range(months):
     with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
-        total_cost(item, opt)
+        total_cost(_item(), _opt(M.financed, months=months, apr="0"))
 
 
 def test_total_cost_raises_for_financed_with_negative_months():
     item = _item()
     opt = _opt(M.financed, months=-1, apr="0")
-    with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
-        total_cost(item, opt)
-
-
-def test_total_cost_raises_for_financed_with_too_many_months():
-    item = _item()
-    opt = _opt(M.financed, months=85, apr="0")
     with pytest.raises(ValueError, match="Financed option needs 1-84 months"):
         total_cost(item, opt)
 

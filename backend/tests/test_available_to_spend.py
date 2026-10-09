@@ -1,3 +1,4 @@
+import pytest
 import calendar
 from datetime import date
 from decimal import Decimal
@@ -46,27 +47,21 @@ def test_a_posted_recurring_bill_is_not_deducted_twice(db_session):
     assert r.available == Decimal("4000.00")   # 5000 income - 1000 committed
 
 
-def test_card_spending_counts_toward_the_month(db_session):
-    """Card charges were excluded entirely, so for a card-first household the
-    figure omitted the larger half and a single week could exceed the month."""
+@pytest.mark.parametrize("merchant,amount,expected", [
+    # Card charges used to be excluded entirely, so a card-first household's
+    # figure omitted the larger half and one week could exceed the month.
+    pytest.param("Some Shop", "250.00", "250.00", id="card_spending_counts"),
+    # A payoff settles charges already counted individually.
+    pytest.param("AUTOMATIC PAYMENT - THANK YOU", "900.00", "0", id="card_payoff_is_not_spending"),
+])
+def test_card_rows_toward_the_month(db_session, merchant, amount, expected):
     user, acct, card = _seed(db_session)
     db_session.add(models.CreditCardTransaction(
         card_id=card.id, user_id=user.id, date=_mid_month(),
-        amount=Decimal("250.00"), merchant="Some Shop"))
+        amount=Decimal(amount), merchant=merchant))
     db_session.commit()
 
-    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("250.00")
-
-
-def test_a_card_payoff_is_not_spending(db_session):
-    """It settles charges already counted individually."""
-    user, acct, card = _seed(db_session)
-    db_session.add(models.CreditCardTransaction(
-        card_id=card.id, user_id=user.id, date=_mid_month(),
-        amount=Decimal("900.00"), merchant="AUTOMATIC PAYMENT - THANK YOU"))
-    db_session.commit()
-
-    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("0")
+    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal(expected)
 
 
 def test_card_linked_recurring_charges_are_not_double_counted(db_session):

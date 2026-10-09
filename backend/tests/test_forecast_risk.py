@@ -1,3 +1,4 @@
+import pytest
 from datetime import date
 from decimal import Decimal
 from backend.schemas import ForecastEntry, ForecastTransaction
@@ -28,31 +29,17 @@ def test_no_risk_when_balance_stays_above_threshold():
     assert result == {"at_risk": False, "date": None, "amount": None, "threshold": Decimal("0")}
 
 
-def test_flags_first_day_balance_drops_below_threshold():
-    entries = [
-        _entry(date(2026, 8, 1), "200.00"),
-        _entry(date(2026, 8, 2), "50.00"),
-        _entry(date(2026, 8, 3), "-30.00"),
-        _entry(date(2026, 8, 4), "-80.00"),
-    ]
-    result = find_balance_risk(entries, Decimal("0"))
+@pytest.mark.parametrize("balances,threshold,amount", [
+    pytest.param(["200.00", "50.00", "-30.00", "-80.00"], "0", "-30.00", id="first_day_below_zero"),
+    pytest.param(["200.00", "150.00", "80.00"], "100", "80.00", id="custom_threshold_not_just_zero"),
+])
+def test_flags_first_day_below_threshold(balances, threshold, amount):
+    entries = [_entry(date(2026, 8, 1 + i), b) for i, b in enumerate(balances)]
+    result = find_balance_risk(entries, Decimal(threshold))
     assert result["at_risk"] is True
     assert result["date"] == date(2026, 8, 3)
-    assert result["amount"] == Decimal("-30.00")
-    assert result["threshold"] == Decimal("0")
-
-
-def test_uses_custom_threshold_not_just_zero():
-    entries = [
-        _entry(date(2026, 8, 1), "200.00"),
-        _entry(date(2026, 8, 2), "150.00"),
-        _entry(date(2026, 8, 3), "80.00"),
-    ]
-    result = find_balance_risk(entries, Decimal("100"))
-    assert result["at_risk"] is True
-    assert result["date"] == date(2026, 8, 3)
-    assert result["amount"] == Decimal("80.00")
-    assert result["threshold"] == Decimal("100")
+    assert result["amount"] == Decimal(amount)
+    assert result["threshold"] == Decimal(threshold)
 
 
 def test_empty_entries_returns_no_risk():

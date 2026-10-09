@@ -78,27 +78,16 @@ def test_group_category_bill_grouping_with_totals(client, db_session):
     assert [i["name"] for i in node["items"]] == ["Bulk store", "Corner store"], "largest first"
 
 
-def test_yearly_bill_counted_as_one_twelfth_in_the_tree(client, db_session):
+@pytest.mark.parametrize("amount,frequency,month_of_year", [
+    pytest.param("120.00", models.RecurringFrequency.yearly, 6, id="yearly_is_one_twelfth"),
+    pytest.param("30.00", models.RecurringFrequency.quarterly, 1, id="quarterly_is_one_third"),
+])
+def test_non_monthly_bill_normalized_in_the_tree(client, db_session, amount, frequency, month_of_year):
     test_client, user, account = client
     group = _cat(db_session, user, name="Wants")
     fun = _cat(db_session, user, name="Fun", parent_id=group.id)
-    _item(db_session, user, account, name="Annual pass", amount=Decimal("120.00"),
-          frequency=models.RecurringFrequency.yearly, month_of_year=6, category_id=fun.id)
-    db_session.commit()
-
-    body = test_client.get("/recurring/breakdown").json()
-    node = body["by_category"][0]["categories"][0]
-
-    assert Decimal(node["items"][0]["monthly_equivalent"]) == Decimal("10.00")
-    assert Decimal(node["monthly"]) == Decimal("10.00")
-
-
-def test_quarterly_bill_counted_as_one_third_in_the_tree(client, db_session):
-    test_client, user, account = client
-    group = _cat(db_session, user, name="Wants")
-    fun = _cat(db_session, user, name="Fun", parent_id=group.id)
-    _item(db_session, user, account, name="Box subscription", amount=Decimal("30.00"),
-          frequency=models.RecurringFrequency.quarterly, month_of_year=1, category_id=fun.id)
+    _item(db_session, user, account, name="Bill", amount=Decimal(amount),
+          frequency=frequency, month_of_year=month_of_year, category_id=fun.id)
     db_session.commit()
 
     body = test_client.get("/recurring/breakdown").json()

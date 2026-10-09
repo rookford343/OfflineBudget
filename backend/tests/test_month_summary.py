@@ -5,6 +5,7 @@ recurring item that fires in the given calendar month (via forecast_engine's
 own `_fires_on`, so this can never disagree with the day-by-day forecast),
 plus one-off PlannedExpense rows landing in that month.
 """
+import pytest
 from datetime import date
 from decimal import Decimal
 from fastapi import FastAPI
@@ -127,32 +128,22 @@ def test_quarterly_bill_firing_vs_off_month(db_session):
     assert len(off.periodic_due) == 0
 
 
-def test_bill_past_end_date_not_counted(db_session):
+@pytest.mark.parametrize("start,end", [
+    pytest.param(date(2020, 1, 1), date(2026, 5, 31), id="past_end_date"),
+    pytest.param(date(2026, 7, 1), None, id="before_start_date"),
+])
+def test_bill_outside_its_dates_not_counted(db_session, start, end):
     user = _user(db_session)
     acct = _account(db_session, user)
     _item(
-        db_session, user, acct, name="Old Loan", amount=Decimal("200.00"), day_of_month=5,
-        start_date=date(2020, 1, 1), end_date=date(2026, 5, 31),
+        db_session, user, acct, name="Dated Bill", amount=Decimal("200.00"), day_of_month=5,
+        start_date=start, end_date=end,
     )
     db_session.commit()
 
     summary = build_month_summary(db_session, user.id, 2026, 6)
 
-    assert not any(o.name == "Old Loan" for o in summary.monthly_bills)
-
-
-def test_bill_before_start_date_not_counted(db_session):
-    user = _user(db_session)
-    acct = _account(db_session, user)
-    _item(
-        db_session, user, acct, name="New Subscription", amount=Decimal("9.00"), day_of_month=5,
-        start_date=date(2026, 7, 1),
-    )
-    db_session.commit()
-
-    summary = build_month_summary(db_session, user.id, 2026, 6)
-
-    assert not any(o.name == "New Subscription" for o in summary.monthly_bills)
+    assert not any(o.name == "Dated Bill" for o in summary.monthly_bills)
 
 
 def test_override_replaces_amount_and_flags_overridden(db_session):
@@ -346,19 +337,15 @@ def test_endpoint_returns_200(db_session):
     assert resp.json()["month"] == 6
 
 
-def test_endpoint_rejects_month_out_of_range(db_session):
+@pytest.mark.parametrize("year,month", [
+    pytest.param(2026, 13, id="month_out_of_range"),
+    pytest.param(0, 6, id="year_out_of_range"),
+])
+def test_endpoint_rejects_out_of_range(db_session, year, month):
     user = _user(db_session)
     db_session.commit()
 
-    resp = _client(db_session, user).get("/recurring/month-summary", params={"year": 2026, "month": 13})
+    resp = _client(db_session, user).get("/recurring/month-summary", params={"year": year, "month": month})
 
     assert resp.status_code == 400
 
-
-def test_endpoint_rejects_year_out_of_range(db_session):
-    user = _user(db_session)
-    db_session.commit()
-
-    resp = _client(db_session, user).get("/recurring/month-summary", params={"year": 0, "month": 6})
-
-    assert resp.status_code == 400

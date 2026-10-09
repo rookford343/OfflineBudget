@@ -6,24 +6,23 @@ config value, not app logic) for "never fired," and scheduler_state's
 due_for_retry for "fired but failed, or never fired at all and it's now
 later in the day."
 """
+import pytest
 from datetime import date, datetime, timedelta
 from backend import models
 from backend.services import scheduler_state
 
 
-def test_due_for_retry_is_false_before_the_scheduled_hour(db_session):
-    """Not due yet at 3am for a 5am job -- there's nothing to catch up on."""
+@pytest.mark.parametrize("hour,expected", [
+    # Not due yet at 3am for a 5am job: nothing to catch up on.
+    pytest.param(3, False, id="before_the_scheduled_hour"),
+    # Never succeeded (fresh install, or every attempt failed): due as soon
+    # as its hour arrives.
+    pytest.param(9, True, id="no_prior_run_at_all"),
+])
+def test_due_for_retry_with_no_prior_run(db_session, hour, expected):
     assert scheduler_state.due_for_retry(
-        db_session, "bank_sync", target_hour=5, now=datetime(2026, 8, 14, 3, 0),
-    ) is False
-
-
-def test_due_for_retry_is_true_with_no_prior_run_at_all(db_session):
-    """A job that has never once succeeded (fresh install, or every prior
-    attempt failed) is due as soon as its hour arrives."""
-    assert scheduler_state.due_for_retry(
-        db_session, "bank_sync", target_hour=5, now=datetime(2026, 8, 14, 9, 0),
-    ) is True
+        db_session, "bank_sync", target_hour=5, now=datetime(2026, 8, 14, hour, 0),
+    ) is expected
 
 
 def test_due_for_retry_is_false_after_a_success_today(db_session):

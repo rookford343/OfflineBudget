@@ -70,9 +70,13 @@ def test_build_plan_stacks_in_rank_order(db_session):
     u, acct = _seed(db_session)
     today = date.today()
     # A paycheck every 14 days keeps the balance climbing so later dates fit.
+    # Anchored on the next Tuesday: a weekend payday is pulled back to Friday,
+    # so "tomorrow" on a Friday or Saturday would land the first check today
+    # and let the Grill fit immediately.
+    first_pay = today + timedelta(days=(1 - today.weekday()) % 7 or 7)
     db_session.add(models.RecurringItem(user_id=u.id, account_id=acct.id, name="Pay", amount=Decimal("1000.00"),
                                         type=models.RecurringType.income, frequency=models.RecurringFrequency.biweekly,
-                                        day_of_month=1, start_date=today + timedelta(days=1)))
+                                        day_of_month=1, start_date=first_pay))
     db_session.add(models.WishSettings(user_id=u.id, cushion=Decimal("1000.00")))
     first, _ = _wish(db_session, u, "Laptop", 0, "3500.00")
     second, _ = _wish(db_session, u, "Grill", 1, "1500.00")
