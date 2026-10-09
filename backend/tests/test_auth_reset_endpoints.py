@@ -40,8 +40,8 @@ def _make_user(db_session, username="alice", email=None):
 def test_forgot_password_always_returns_204(client, db_session, username, email, smtp_host):
     if username == "alice":
         _make_user(db_session, email=email)
-    with patch("backend.routers.auth.settings.SMTP_HOST", smtp_host), \
-         patch("backend.routers.auth.send_email") as mock_send:
+    with patch("backend.routers.auth.smtp_config", return_value={"host": smtp_host}), \
+         patch("backend.routers.auth.deliver") as mock_send:
         resp = client.post("/auth/forgot-password", json={"username": username})
         assert resp.status_code == 204
         mock_send.assert_not_called()
@@ -49,20 +49,33 @@ def test_forgot_password_always_returns_204(client, db_session, username, email,
 
 def test_forgot_password_sends_email_when_configured(client, db_session):
     _make_user(db_session, email="a@example.com")
-    with patch("backend.routers.auth.settings.SMTP_HOST", "smtp.example.com"), \
-         patch("backend.routers.auth.send_email") as mock_send:
+    with patch("backend.routers.auth.smtp_config", return_value={"host": "smtp.example.com"}), \
+         patch("backend.routers.auth.deliver") as mock_send:
         resp = client.post("/auth/forgot-password", json={"username": "alice"})
         assert resp.status_code == 204
         mock_send.assert_called_once()
-        assert mock_send.call_args.args[0] == "a@example.com"
+        assert mock_send.call_args.args[1] == "a@example.com"
+
+
+def test_forgot_password_uses_the_settings_page_smtp_host(client, db_session):
+    """The reset email follows the same SMTP config as the daily report: a
+    host saved on the Settings page is enough, no .env entry required."""
+    from backend.services import app_settings
+    _make_user(db_session, email="a@example.com")
+    app_settings.set_value(db_session, "SMTP_HOST", "smtp.settings-page.example")
+    db_session.commit()
+    with patch("backend.routers.auth.deliver") as mock_send:
+        assert client.post("/auth/forgot-password", json={"username": "alice"}).status_code == 204
+    mock_send.assert_called_once()
+    assert mock_send.call_args.args[0]["host"] == "smtp.settings-page.example"
 
 
 def test_forgot_password_rate_limited_after_five_attempts_still_returns_204(client, db_session):
     """Rate limiting must not leak a distinguishable signal — a rate-limited
     request still returns 204 with no email sent, same as any other no-op."""
     _make_user(db_session, email="a@example.com")
-    with patch("backend.routers.auth.settings.SMTP_HOST", "smtp.example.com"), \
-         patch("backend.routers.auth.send_email") as mock_send:
+    with patch("backend.routers.auth.smtp_config", return_value={"host": "smtp.example.com"}), \
+         patch("backend.routers.auth.deliver") as mock_send:
         for _ in range(5):
             client.post("/auth/forgot-password", json={"username": "alice"})
         mock_send.reset_mock()
@@ -114,16 +127,16 @@ def test_reset_password_with_code_actually_changes_password_and_clears_code(clie
 
 def test_forgot_password_then_reset_password_actually_changes_password(client, db_session):
     """End-to-end emailed-link path: forgot-password queues an email with a
-    reset link (captured via the mocked send_email background task), and
+    reset link (captured via the mocked deliver background task), and
     submitting that exact token to reset-password really changes the
     password — not just a 204."""
     user = _make_user(db_session, email="a@example.com")
-    with patch("backend.routers.auth.settings.SMTP_HOST", "smtp.example.com"), \
-         patch("backend.routers.auth.send_email") as mock_send:
+    with patch("backend.routers.auth.smtp_config", return_value={"host": "smtp.example.com"}), \
+         patch("backend.routers.auth.deliver") as mock_send:
         resp = client.post("/auth/forgot-password", json={"username": "alice"})
         assert resp.status_code == 204
         mock_send.assert_called_once()
-        text_body = mock_send.call_args.args[3]
+        text_body = mock_send.call_args.args[4]
         token = text_body.rsplit("token=", 1)[-1]
 
     resp = client.post("/auth/reset-password", json={"token": token, "new_password": "brand-new-pw"})

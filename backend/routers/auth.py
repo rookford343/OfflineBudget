@@ -6,7 +6,7 @@ from backend.auth import check_new_password, hash_password, verify_password, cre
 from backend.dependencies import get_db, get_current_user, get_requester
 from backend.seed import seed_default_categories
 from backend.config import settings
-from backend.services.email_service import send_email
+from backend.services.email_service import deliver, parse_recipients, send_email_via, smtp_config
 from backend.services.password_reset import (
     create_reset_token,
     consume_reset_token,
@@ -89,18 +89,24 @@ def change_password(
 
 @router.post("/me/send-test-email", status_code=status.HTTP_204_NO_CONTENT)
 def send_test_email(
+    db: Session = Depends(get_db),
     current_user: models.User = Depends(get_requester),
 ):
     if not current_user.email:
         raise HTTPException(status_code=400, detail="No email address set on your account")
-    from backend.services.email_service import parse_recipients
+    errors = []
     for recipient in parse_recipients(current_user.email):
-        send_email(
+        ok, err = send_email_via(
+            db,
             recipient,
             "OfflineBudget — Test Email",
             "<h2 style='color:#4f46e5'>It works!</h2><p>Your OfflineBudget email is configured correctly.</p>",
             "OfflineBudget — Test Email\n\nYour email is configured correctly.",
         )
+        if not ok:
+            errors.append(f"{recipient}: {err}")
+    if errors:
+        raise HTTPException(status_code=502, detail="; ".join(errors))
 
 
 @router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
@@ -116,11 +122,13 @@ def forgot_password(
     if not rate_limit_allow(f"forgot:{body.username}", limit=5, window_seconds=3600):
         return
     user = db.query(models.User).filter(models.User.username == body.username).first()
-    if user and user.email and settings.SMTP_HOST:
+    cfg = smtp_config(db)
+    if user and user.email and cfg["host"]:
         raw_token = create_reset_token(db, user)
         link = f"{settings.frontend_url}/reset-password?token={raw_token}"
         background_tasks.add_task(
-            send_email,
+            deliver,
+            cfg,
             user.email,
             "OfflineBudget — Reset Your Password",
             f"<p>Click below to reset your password. This link expires in 15 minutes.</p>"
