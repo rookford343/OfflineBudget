@@ -9,6 +9,7 @@ from backend.dependencies import get_db, get_current_user
 # _clear_pending_if_balance_due_changed now lives in statement_reconcile.py
 # so both this router's hand-edit paths and the auto-clear service share one
 # copy -- see that module's docstring on the function.
+from backend.routers._shared import owned_or_404
 from backend.services.statement_reconcile import (
     _clear_pending_if_balance_due_changed,
     statement_stale_reason,
@@ -300,13 +301,7 @@ def update_card_transaction(
 
 
 def _get_or_404(db: Session, user_id: int, card_id: int) -> models.CreditCard:
-    card = db.query(models.CreditCard).filter(
-        models.CreditCard.id == card_id,
-        models.CreditCard.user_id == user_id,
-    ).first()
-    if not card:
-        raise HTTPException(status_code=404, detail="Credit card not found")
-    return card
+    return owned_or_404(db, models.CreditCard, card_id, user_id, "Credit card not found")
 
 
 def _enrich(card: models.CreditCard) -> schemas.CreditCardOut:

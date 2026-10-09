@@ -6,15 +6,13 @@ from backend.services.crypto import assert_encryption_configured, decrypt, encry
 from backend.services.simplefin_client import claim_setup_token, fetch_accounts, SimpleFinError
 from backend.services.bank_sync_service import sync_connection
 from backend.services.job_locks import _bank_sync_lock
+from backend.routers._shared import owned_or_404
 
 router = APIRouter(prefix="/bank-sync", tags=["bank-sync"])
 
 
 def _get_owned_connection(db: Session, user: models.User, connection_id: int) -> models.BankConnection:
-    connection = db.get(models.BankConnection, connection_id)
-    if not connection or connection.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Connection not found")
-    return connection
+    return owned_or_404(db, models.BankConnection, connection_id, user.id, "Connection not found")
 
 
 def _assert_account_owned(db: Session, user_id: int, account_id: int) -> None:

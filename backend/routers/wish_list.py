@@ -12,6 +12,8 @@ from backend.routers import scenarios as scenarios_router
 from backend.services import scenario_service
 from backend.services import wish_lifecycle as life
 from backend.services import wish_plan
+from backend.services.primary_account import primary_checking
+from backend.routers._shared import owned_or_404, reject_nulls
 
 router = APIRouter(prefix="/wish-list", tags=["wish-list"])
 
@@ -21,37 +23,12 @@ def _today() -> date:
     return date.today()
 
 
-def _own(db: Session, model, obj_id: int, user: models.User):
-    obj = db.get(model, obj_id)
-    if obj is None or obj.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Not found")
-    return obj
-
-
-def _reject_nulls(data: dict, required: set[str]):
-    """422s an explicit JSON null on a field the model stores NOT NULL. Without
-    this, the setattr loops write None straight through and the eventual
-    commit surfaces as an IntegrityError (500) instead of a validation error."""
-    for key in required:
-        if key in data and data[key] is None:
-            raise HTTPException(status_code=422, detail=f"{key} can't be empty")
-
-
-def _default_checking_account_id(db: Session, user: models.User) -> int | None:
-    acct = db.query(models.Account).filter(
-        models.Account.user_id == user.id,
-        models.Account.type == models.AccountType.checking,
-        models.Account.is_active == True,
-    ).order_by(models.Account.id).first()
-    return acct.id if acct is not None else None
-
-
 def _resolve_account_id(db: Session, user: models.User, account_id: int | None) -> int:
     if account_id is None:
-        resolved = _default_checking_account_id(db, user)
+        resolved = primary_checking(db, user.id)
         if resolved is None:
             raise HTTPException(status_code=404, detail="No checking account found")
-        return resolved
+        return resolved.id
     acct = db.get(models.Account, account_id)
     if acct is None or acct.user_id != user.id or acct.type != models.AccountType.checking:
         raise HTTPException(status_code=404, detail="Account not found")
@@ -145,10 +122,10 @@ def create_item(body: schemas.WishItemIn, db: Session = Depends(get_db),
 @router.patch("/items/{item_id}", response_model=schemas.WishItemRowOut)
 def update_item(item_id: int, body: schemas.WishItemUpdate, db: Session = Depends(get_db),
                 user: models.User = Depends(get_current_user)):
-    item = _own(db, models.WishItem, item_id, user)
+    item = owned_or_404(db, models.WishItem, item_id, user.id)
     _not_committed(item)
     data = body.model_dump(exclude_unset=True)
-    _reject_nulls(data, {"name", "price", "trade_in_value"})
+    reject_nulls(data, {"name", "price", "trade_in_value"})
     if "plan_option_id" in data and data["plan_option_id"] is not None:
         opt = db.get(models.WishOption, data["plan_option_id"])
         if opt is None or opt.wish_item_id != item.id:
@@ -165,7 +142,7 @@ def update_item(item_id: int, body: schemas.WishItemUpdate, db: Session = Depend
 
 @router.delete("/items/{item_id}", status_code=204)
 def delete_item(item_id: int, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    item = _own(db, models.WishItem, item_id, user)
+    item = owned_or_404(db, models.WishItem, item_id, user.id)
     _not_committed(item, verb="deleting")
     scenario = item.scenario
     item.plan_option_id = None
@@ -195,7 +172,7 @@ def reorder_items(body: schemas.ReorderIn, db: Session = Depends(get_db),
 @router.post("/items/{item_id}/options", response_model=schemas.WishOptionOut, status_code=201)
 def create_option(item_id: int, body: schemas.WishOptionIn, db: Session = Depends(get_db),
                   user: models.User = Depends(get_current_user)):
-    item = _own(db, models.WishItem, item_id, user)
+    item = owned_or_404(db, models.WishItem, item_id, user.id)
     _not_committed(item, verb="adding an option to")
     _check_card(db, user, body.card_id)
     opt = models.WishOption(user_id=user.id, wish_item_id=item.id, sort_order=len(item.options),
@@ -214,13 +191,13 @@ def create_option(item_id: int, body: schemas.WishOptionIn, db: Session = Depend
 @router.patch("/items/{item_id}/options/{option_id}", response_model=schemas.WishOptionOut)
 def update_option(item_id: int, option_id: int, body: schemas.WishOptionUpdate,
                   db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    item = _own(db, models.WishItem, item_id, user)
+    item = owned_or_404(db, models.WishItem, item_id, user.id)
     opt = db.get(models.WishOption, option_id)
     if opt is None or opt.user_id != user.id or opt.wish_item_id != item.id:
         raise HTTPException(status_code=404, detail="Not found")
     _not_committed(item, verb="editing an option on")
     data = body.model_dump(exclude_unset=True)
-    _reject_nulls(data, {"label", "method", "down_payment"})
+    reject_nulls(data, {"label", "method", "down_payment"})
     if "card_id" in data:
         _check_card(db, user, data["card_id"])
     for k, v in data.items():
@@ -238,7 +215,7 @@ def update_option(item_id: int, option_id: int, body: schemas.WishOptionUpdate,
 @router.delete("/items/{item_id}/options/{option_id}", status_code=204)
 def delete_option(item_id: int, option_id: int, db: Session = Depends(get_db),
                   user: models.User = Depends(get_current_user)):
-    item = _own(db, models.WishItem, item_id, user)
+    item = owned_or_404(db, models.WishItem, item_id, user.id)
     opt = db.get(models.WishOption, option_id)
     if opt is None or opt.user_id != user.id or opt.wish_item_id != item.id:
         raise HTTPException(status_code=404, detail="Not found")
@@ -256,7 +233,7 @@ def delete_option(item_id: int, option_id: int, db: Session = Depends(get_db),
 @router.post("/items/{item_id}/commit", response_model=schemas.WishCommitOut)
 def commit_item(item_id: int, account_id: int | None = Query(None), db: Session = Depends(get_db),
                 user: models.User = Depends(get_current_user)):
-    _own(db, models.WishItem, item_id, user)
+    owned_or_404(db, models.WishItem, item_id, user.id)
     account_id = _resolve_account_id(db, user, account_id)
     try:
         return life.commit_wish(db, user, account_id, item_id, _today())
@@ -288,7 +265,7 @@ def commit_item(item_id: int, account_id: int | None = Query(None), db: Session 
 
 @router.post("/items/{item_id}/uncommit")
 def uncommit_item(item_id: int, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    _own(db, models.WishItem, item_id, user)
+    owned_or_404(db, models.WishItem, item_id, user.id)
     try:
         return life.uncommit_wish(db, user, item_id)
     except life.WishError as e:

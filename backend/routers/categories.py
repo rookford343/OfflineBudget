@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
+from backend.routers._shared import owned_or_404
 
 router = APIRouter(prefix="/categories", tags=["categories"])
 
@@ -69,10 +70,4 @@ def delete_category(
 
 
 def _get_or_404(db: Session, user_id: int, cat_id: int) -> models.Category:
-    cat = db.query(models.Category).filter(
-        models.Category.id == cat_id,
-        models.Category.user_id == user_id,
-    ).first()
-    if not cat:
-        raise HTTPException(status_code=404, detail="Category not found")
-    return cat
+    return owned_or_404(db, models.Category, cat_id, user_id, "Category not found")

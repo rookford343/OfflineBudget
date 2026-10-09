@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
+from backend.routers._shared import owned_or_404
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -68,10 +69,4 @@ def delete_account(
 
 
 def _get_or_404(db: Session, user_id: int, account_id: int) -> models.Account:
-    account = db.query(models.Account).filter(
-        models.Account.id == account_id,
-        models.Account.user_id == user_id,
-    ).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    return account
+    return owned_or_404(db, models.Account, account_id, user_id, "Account not found")

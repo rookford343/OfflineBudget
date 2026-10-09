@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
+from backend.routers._shared import owned_or_404
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -118,13 +119,7 @@ def delete_transaction(
 
 
 def _get_or_404(db: Session, user_id: int, txn_id: int) -> models.Transaction:
-    txn = db.query(models.Transaction).filter(
-        models.Transaction.id == txn_id,
-        models.Transaction.user_id == user_id,
-    ).first()
-    if not txn:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    return txn
+    return owned_or_404(db, models.Transaction, txn_id, user_id, "Transaction not found")
 
 
 def _assert_account_owned(db: Session, user_id: int, account_id: int) -> None:
