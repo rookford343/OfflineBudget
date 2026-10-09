@@ -9,6 +9,7 @@ import TransactionsCalendar from "../components/TransactionsCalendar";
 import { CategoryOptions, AccountOptions } from "../lib/selectOptions";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
 import { sortCategoryList, byName } from "../lib/selectOptions";
+import { primaryChecking } from "../lib/accounts";
 
 // A single row shape both checking transactions and card charges normalize
 // into for the "All" tab -- lets one table render a chronological, source-
@@ -291,7 +292,7 @@ export default function Transactions() {
   // needed here, it just stops showing up. Loaded whenever any of the tabs
   // that display it are active (all/checking/card), not gated to one tab --
   // shown inline within whichever tab is selected rather than its own tab.
-  const primaryCheckingId = (accounts as any[]).filter((a: any) => a.type === "checking")[0]?.id ?? null;
+  const primaryCheckingId = primaryChecking(accounts as any[])?.id ?? null;
   const pendingStart = (() => {
     const d = new Date();
     d.setDate(d.getDate() - PENDING_LOOKBACK_DAYS);
@@ -354,7 +355,7 @@ export default function Transactions() {
     })
     .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id) : [];
 
-  const activeReconcileAccountId = reconcileAccountId ?? ((accounts as any[]).filter((a: any) => a.type === "checking")[0]?.id ?? null);
+  const activeReconcileAccountId = reconcileAccountId ?? (primaryChecking(accounts as any[])?.id ?? null);
   const { data: reconcileData, isLoading: reconcileLoading } = useQuery({
     queryKey: ["reconcile", activeReconcileAccountId, reconcileYear, reconcileMonth],
     queryFn: () => reconciliationApi.get(activeReconcileAccountId!, reconcileYear, reconcileMonth),
@@ -657,9 +658,9 @@ export default function Transactions() {
             sense for one month at a time). Scoped to the first checking
             account, matching the Dashboard's Balance Flow card. */}
         {txnTab === "checking" && checkingView === "calendar" && (() => {
-          const primaryChecking = (accounts as any[]).filter((a: any) => a.type === "checking")[0];
-          return primaryChecking
-            ? <TransactionsCalendar accountId={primaryChecking.id} accountName={primaryChecking.name} />
+          const checking = primaryChecking(accounts as any[]);
+          return checking
+            ? <TransactionsCalendar accountId={checking.id} accountName={checking.name} />
             : <p className="text-sm text-gray-400 text-center py-8">No checking account yet.</p>;
         })()}
 

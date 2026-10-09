@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.rules_engine import test_rule
+from backend.routers._shared import owned_or_404
 
 router = APIRouter(prefix="/rules", tags=["rules"])
 
@@ -71,10 +72,4 @@ def test_rule_endpoint(
 
 
 def _get_or_404(db: Session, user_id: int, rule_id: int) -> models.TransactionRule:
-    rule = db.query(models.TransactionRule).filter(
-        models.TransactionRule.id == rule_id,
-        models.TransactionRule.user_id == user_id,
-    ).first()
-    if not rule:
-        raise HTTPException(status_code=404, detail="Rule not found")
-    return rule
+    return owned_or_404(db, models.TransactionRule, rule_id, user_id, "Rule not found")

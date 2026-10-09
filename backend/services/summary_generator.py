@@ -11,6 +11,7 @@ from backend.services.forecast_engine import build_forecast, find_balance_risk, 
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.upcoming_bills import upcoming_bills
 from backend.services.budget_calculator import compute_overview
+from backend.services.primary_account import primary_checking
 
 _STALE_SYNC_HOURS = 24
 
@@ -119,8 +120,8 @@ def generate_daily_summary(
         models.Account.user_id == user.id,
         models.Account.is_active == True,
         models.Account.type == models.AccountType.checking,
-    ).all()
-    primary_account = accounts[0] if accounts else None
+    ).order_by(models.Account.id).all()
+    primary_account = primary_checking(db, user.id)
     snap = compute_budget_snapshot(db, user, primary_account.id, as_of=today) if primary_account else None
 
     all_recurring = db.query(models.RecurringItem).filter(

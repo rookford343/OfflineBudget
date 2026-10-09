@@ -8,6 +8,7 @@ from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services import adventures as adv
 from backend.services import adventures_lifecycle as life
+from backend.routers._shared import owned_or_404, reject_nulls
 
 router = APIRouter(prefix="/adventures", tags=["adventures"])
 
@@ -15,13 +16,6 @@ router = APIRouter(prefix="/adventures", tags=["adventures"])
 def _today() -> date:
     # Indirection so tests can pin "today" without patching the date class.
     return date.today()
-
-
-def _own(db: Session, model, obj_id: int, user: models.User):
-    obj = db.get(model, obj_id)
-    if obj is None or obj.user_id != user.id:
-        raise HTTPException(status_code=404, detail="Not found")
-    return obj
 
 
 def _conflict(e: Exception):
@@ -92,15 +86,6 @@ def _check_refs(db, user, *, program_ids=(), card_ids=()):
                 raise HTTPException(status_code=422, detail="Unknown card")
 
 
-def _reject_nulls(data: dict, required: set[str]):
-    """422s an explicit JSON null on a field the model stores NOT NULL. Without
-    this, the setattr loops write None straight through and the eventual
-    commit surfaces as an IntegrityError (500) instead of a validation error."""
-    for key in required:
-        if key in data and data[key] is None:
-            raise HTTPException(status_code=422, detail=f"{key} can't be empty")
-
-
 # ── Wallet / programs ────────────────────────────────────────────────────────
 
 @router.get("/wallet", response_model=list[schemas.WalletRow])
@@ -122,9 +107,9 @@ def create_program(body: schemas.ProgramCreate, db: Session = Depends(get_db),
 @router.patch("/programs/{program_id}", response_model=schemas.WalletRow)
 def update_program(program_id: int, body: schemas.ProgramUpdate, db: Session = Depends(get_db),
                    user: models.User = Depends(get_current_user)):
-    p = _own(db, models.LoyaltyProgram, program_id, user)
+    p = owned_or_404(db, models.LoyaltyProgram, program_id, user.id)
     data = body.model_dump(exclude_unset=True)
-    _reject_nulls(data, {"name", "balance", "is_active", "sort_order"})
+    reject_nulls(data, {"name", "balance", "is_active", "sort_order"})
     for k, v in data.items():
         setattr(p, k, v)
     if "balance" in data:
@@ -138,7 +123,7 @@ def update_program(program_id: int, body: schemas.ProgramUpdate, db: Session = D
 @router.delete("/programs/{program_id}", status_code=204)
 def delete_program(program_id: int, db: Session = Depends(get_db),
                    user: models.User = Depends(get_current_user)):
-    p = _own(db, models.LoyaltyProgram, program_id, user)
+    p = owned_or_404(db, models.LoyaltyProgram, program_id, user.id)
     used = db.query(models.TripItem).filter(
         models.TripItem.user_id == user.id,
         (models.TripItem.points_program_id == p.id) | (models.TripItem.transfer_from_program_id == p.id),
@@ -177,9 +162,9 @@ def create_partner(body: schemas.PartnerIn, db: Session = Depends(get_db),
 @router.patch("/partners/{partner_id}", response_model=schemas.PartnerOut)
 def update_partner(partner_id: int, body: schemas.PartnerUpdate, db: Session = Depends(get_db),
                    user: models.User = Depends(get_current_user)):
-    p = _own(db, models.TransferPartner, partner_id, user)
+    p = owned_or_404(db, models.TransferPartner, partner_id, user.id)
     data = body.model_dump(exclude_unset=True)
-    _reject_nulls(data, {"ratio"})
+    reject_nulls(data, {"ratio"})
     for k, v in data.items():
         setattr(p, k, v)
     db.commit(); db.refresh(p)
@@ -189,7 +174,7 @@ def update_partner(partner_id: int, body: schemas.PartnerUpdate, db: Session = D
 @router.delete("/partners/{partner_id}", status_code=204)
 def delete_partner(partner_id: int, db: Session = Depends(get_db),
                    user: models.User = Depends(get_current_user)):
-    p = _own(db, models.TransferPartner, partner_id, user)
+    p = owned_or_404(db, models.TransferPartner, partner_id, user.id)
     used = db.query(models.TripItem).filter(
         models.TripItem.user_id == user.id,
         models.TripItem.transfer_from_program_id == p.from_program_id,
@@ -225,7 +210,7 @@ def add_template_item(body: schemas.TemplateItemIn, db: Session = Depends(get_db
 @router.delete("/template/{template_id}", status_code=204)
 def delete_template_item(template_id: int, db: Session = Depends(get_db),
                          user: models.User = Depends(get_current_user)):
-    db.delete(_own(db, models.ChecklistTemplateItem, template_id, user)); db.commit()
+    db.delete(owned_or_404(db, models.ChecklistTemplateItem, template_id, user.id)); db.commit()
     return Response(status_code=204)
 
 
@@ -262,16 +247,16 @@ def create_trip(body: schemas.TripCreate, db: Session = Depends(get_db),
 
 @router.get("/trips/{trip_id}", response_model=schemas.TripDetail)
 def get_trip(trip_id: int, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    return _detail(db, _own(db, models.Trip, trip_id, user))
+    return _detail(db, owned_or_404(db, models.Trip, trip_id, user.id))
 
 
 @router.patch("/trips/{trip_id}", response_model=schemas.TripDetail)
 def update_trip(trip_id: int, body: schemas.TripUpdate, db: Session = Depends(get_db),
                 user: models.User = Depends(get_current_user)):
-    trip = _own(db, models.Trip, trip_id, user)
+    trip = owned_or_404(db, models.Trip, trip_id, user.id)
     _not_done(trip)
     data = body.model_dump(exclude_unset=True)
-    _reject_nulls(data, {"name", "start_date", "end_date", "travelers"})
+    reject_nulls(data, {"name", "start_date", "end_date", "travelers"})
     _check_refs(db, user, card_ids=(data.get("default_card_id"),))
     for k, v in data.items():
         setattr(trip, k, v)
@@ -285,7 +270,7 @@ def update_trip(trip_id: int, body: schemas.TripUpdate, db: Session = Depends(ge
 
 @router.delete("/trips/{trip_id}", status_code=204)
 def delete_trip(trip_id: int, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    life.delete_trip(db, _own(db, models.Trip, trip_id, user)); db.commit()
+    life.delete_trip(db, owned_or_404(db, models.Trip, trip_id, user.id)); db.commit()
     return Response(status_code=204)
 
 
@@ -305,7 +290,7 @@ def _validate_item(db: Session, item: models.TripItem):
 @router.post("/trips/{trip_id}/items", response_model=schemas.TripDetail, status_code=201)
 def add_item(trip_id: int, body: schemas.TripItemIn, db: Session = Depends(get_db),
              user: models.User = Depends(get_current_user)):
-    trip = _own(db, models.Trip, trip_id, user)
+    trip = owned_or_404(db, models.Trip, trip_id, user.id)
     _not_done(trip)
     data = body.model_dump(exclude_unset=True, exclude={"is_paid"})
     if not data.get("category") or not data.get("name"):
@@ -326,14 +311,14 @@ def add_item(trip_id: int, body: schemas.TripItemIn, db: Session = Depends(get_d
 @router.patch("/trips/{trip_id}/items/{item_id}", response_model=schemas.TripDetail)
 def update_item(trip_id: int, item_id: int, body: schemas.TripItemIn, db: Session = Depends(get_db),
                 user: models.User = Depends(get_current_user)):
-    trip = _own(db, models.Trip, trip_id, user)
-    item = _own(db, models.TripItem, item_id, user)
+    trip = owned_or_404(db, models.Trip, trip_id, user.id)
+    item = owned_or_404(db, models.TripItem, item_id, user.id)
     if item.trip_id != trip.id:
         raise HTTPException(status_code=404, detail="Not found")
     _not_done(trip)
     data = body.model_dump(exclude_unset=True)
     paid = data.pop("is_paid", None)
-    _reject_nulls(data, {"category", "name", "pricing", "payment"})
+    reject_nulls(data, {"category", "name", "pricing", "payment"})
     _check_refs(db, user, program_ids=(data.get("points_program_id"), data.get("transfer_from_program_id")),
                 card_ids=(data.get("card_id"),))
     for k, v in data.items():
@@ -350,8 +335,8 @@ def update_item(trip_id: int, item_id: int, body: schemas.TripItemIn, db: Sessio
 @router.delete("/trips/{trip_id}/items/{item_id}", response_model=schemas.TripDetail)
 def remove_item(trip_id: int, item_id: int, remove_from_template: bool = Query(False),
                 db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    trip = _own(db, models.Trip, trip_id, user)
-    item = _own(db, models.TripItem, item_id, user)
+    trip = owned_or_404(db, models.Trip, trip_id, user.id)
+    item = owned_or_404(db, models.TripItem, item_id, user.id)
     if item.trip_id != trip.id:
         raise HTTPException(status_code=404, detail="Not found")
     _not_done(trip)
@@ -368,7 +353,7 @@ def remove_item(trip_id: int, item_id: int, remove_from_template: bool = Query(F
 
 @router.post("/trips/{trip_id}/commit", response_model=schemas.TripDetail)
 def commit(trip_id: int, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    trip = _own(db, models.Trip, trip_id, user)
+    trip = owned_or_404(db, models.Trip, trip_id, user.id)
     try:
         life.commit_trip(db, trip)
     except life.LifecycleError as e:
@@ -379,7 +364,7 @@ def commit(trip_id: int, db: Session = Depends(get_db), user: models.User = Depe
 
 @router.post("/trips/{trip_id}/uncommit", response_model=schemas.TripDetail)
 def uncommit(trip_id: int, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    trip = _own(db, models.Trip, trip_id, user)
+    trip = owned_or_404(db, models.Trip, trip_id, user.id)
     try:
         life.uncommit_trip(db, trip)
     except life.LifecycleError as e:
@@ -390,13 +375,13 @@ def uncommit(trip_id: int, db: Session = Depends(get_db), user: models.User = De
 
 @router.get("/trips/{trip_id}/finish-plan", response_model=dict[int, int])
 def finish_plan(trip_id: int, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    return life.finish_plan(db, _own(db, models.Trip, trip_id, user), _today())
+    return life.finish_plan(db, owned_or_404(db, models.Trip, trip_id, user.id), _today())
 
 
 @router.post("/trips/{trip_id}/finish", response_model=schemas.TripDetail)
 def finish(trip_id: int, body: schemas.FinishRequest, db: Session = Depends(get_db),
            user: models.User = Depends(get_current_user)):
-    trip = _own(db, models.Trip, trip_id, user)
+    trip = owned_or_404(db, models.Trip, trip_id, user.id)
     try:
         life.finish_trip(db, trip, body.points_used_by_program, body.force, _today())
     except life.LifecycleError as e:
@@ -408,7 +393,7 @@ def finish(trip_id: int, body: schemas.FinishRequest, db: Session = Depends(get_
 
 @router.post("/trips/{trip_id}/fund", response_model=schemas.TripDetail)
 def create_fund(trip_id: int, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    trip = _own(db, models.Trip, trip_id, user)
+    trip = owned_or_404(db, models.Trip, trip_id, user.id)
     _not_done(trip)
     try:
         life.create_trip_fund(db, trip)
@@ -420,7 +405,7 @@ def create_fund(trip_id: int, db: Session = Depends(get_db), user: models.User =
 
 @router.post("/trips/{trip_id}/fund/update", response_model=schemas.TripDetail)
 def update_fund(trip_id: int, db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    trip = _own(db, models.Trip, trip_id, user)
+    trip = owned_or_404(db, models.Trip, trip_id, user.id)
     _not_done(trip)
     try:
         life.update_trip_fund_target(db, trip)
@@ -433,7 +418,7 @@ def update_fund(trip_id: int, db: Session = Depends(get_db), user: models.User =
 @router.delete("/trips/{trip_id}/fund", response_model=schemas.TripDetail)
 def delete_fund(trip_id: int, delete_goal: bool = Query(False), db: Session = Depends(get_db),
                 user: models.User = Depends(get_current_user)):
-    trip = _own(db, models.Trip, trip_id, user)
+    trip = owned_or_404(db, models.Trip, trip_id, user.id)
     _not_done(trip)
     life.remove_trip_fund(db, trip, delete_goal)
     db.commit(); db.refresh(trip)

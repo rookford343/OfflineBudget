@@ -11,6 +11,7 @@ from backend import models, schemas
 from backend.dependencies import get_db, require_admin
 from backend.services import app_settings
 from backend.services.crypto import is_encryption_configured, EncryptionNotConfigured
+from backend.services.primary_account import primary_checking
 
 logger = logging.getLogger(__name__)
 
@@ -147,11 +148,7 @@ def run_daily_summary_now(
 
     weekly_digest = None
     if include_digest:
-        checking = db.query(models.Account).filter(
-            models.Account.user_id == user.id,
-            models.Account.type == models.AccountType.checking,
-            models.Account.is_active == True,
-        ).first()
+        checking = primary_checking(db, user.id)
         if checking:
             weekly_digest = generate_weekly_digest(db, user, checking.id)
 

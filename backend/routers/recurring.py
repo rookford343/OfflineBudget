@@ -6,6 +6,7 @@ from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.recurring_math import monthly_equivalent as _monthly_equivalent
+from backend.routers._shared import owned_or_404
 
 router = APIRouter(prefix="/recurring", tags=["recurring"])
 
@@ -350,13 +351,7 @@ def delete_recurring(
 
 
 def _get_or_404(db: Session, user_id: int, item_id: int) -> models.RecurringItem:
-    item = db.query(models.RecurringItem).filter(
-        models.RecurringItem.id == item_id,
-        models.RecurringItem.user_id == user_id,
-    ).first()
-    if not item:
-        raise HTTPException(status_code=404, detail="Recurring item not found")
-    return item
+    return owned_or_404(db, models.RecurringItem, item_id, user_id, "Recurring item not found")
 
 
 def _assert_account_owned(db: Session, user_id: int, account_id: int) -> None:

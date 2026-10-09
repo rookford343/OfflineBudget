@@ -8,6 +8,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import HowCalculated from "../components/HowCalculated";
 import type { Explanation } from "../components/HowCalculated";
 import ScenarioEditor from "../components/wish/ScenarioEditor";
+import { primaryChecking } from "../lib/accounts";
 
 // ── Shapes (mirrors backend/schemas.py WishPlan* -- every Decimal/date comes
 // across as a JSON string, confirmed against the live /openapi.json schema). ──
@@ -110,7 +111,7 @@ export default function WishList() {
     queryKey: ["accounts"],
     queryFn: accountsApi.list,
   });
-  const accountId: number | undefined = accounts.find((a) => a.type === "checking" && a.is_active)?.id;
+  const accountId: number | undefined = primaryChecking(accounts)?.id;
 
   const { data: cards = [] } = useQuery<CardRow[]>({ queryKey: ["cards"], queryFn: cardsApi.list });
   // Same filter Forecast.tsx and Recurring.tsx apply before any card select --

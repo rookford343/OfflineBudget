@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, CalendarClock } from "lucide-react";
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend } from "recharts";
 import { scenariosApi, accountsApi, cardsApi, recurringApi, forecastApi } from "../../api";
+import { primaryChecking } from "../../lib/accounts";
 
 type Scenario = {
   id: number;
@@ -73,7 +74,7 @@ export default function ScenarioEditor({ scenarioId, accountId }: { scenarioId: 
   });
 
   const activeAccountId =
-    chartAccountId ?? accountId ?? (accounts.find((a) => a.type === "checking")?.id ?? accounts[0]?.id ?? null);
+    chartAccountId ?? accountId ?? (primaryChecking(accounts)?.id ?? accounts[0]?.id ?? null);
 
   const selected = scenarios.find((s) => s.id === scenarioId) ?? null;
   const committed = selected?.status === "committed";

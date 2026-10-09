@@ -2,18 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
+from backend.routers._shared import owned_or_404
 
 router = APIRouter(prefix="/planned-transfers", tags=["planned-transfers"])
 
 
 def _get_owned(db: Session, user: models.User, transfer_id: int) -> models.PlannedTransfer:
-    transfer = db.query(models.PlannedTransfer).filter(
-        models.PlannedTransfer.id == transfer_id,
-        models.PlannedTransfer.user_id == user.id,
-    ).first()
-    if not transfer:
-        raise HTTPException(status_code=404, detail="Planned transfer not found")
-    return transfer
+    return owned_or_404(db, models.PlannedTransfer, transfer_id, user.id, "Planned transfer not found")
 
 
 def _assert_account_owned(db: Session, user_id: int, account_id: int) -> None:

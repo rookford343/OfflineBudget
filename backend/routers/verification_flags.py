@@ -4,18 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
+from backend.routers._shared import owned_or_404
 
 router = APIRouter(prefix="/verification-flags", tags=["verification-flags"])
 
 
 def _get_owned(db: Session, user: models.User, flag_id: int) -> models.VerificationFlag:
-    flag = db.query(models.VerificationFlag).filter(
-        models.VerificationFlag.id == flag_id,
-        models.VerificationFlag.user_id == user.id,
-    ).first()
-    if not flag:
-        raise HTTPException(status_code=404, detail="Verification flag not found")
-    return flag
+    return owned_or_404(db, models.VerificationFlag, flag_id, user.id, "Verification flag not found")
 
 
 @router.get("", response_model=list[schemas.VerificationFlagOut])
