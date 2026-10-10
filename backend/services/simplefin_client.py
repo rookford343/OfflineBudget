@@ -39,6 +39,10 @@ class SimpleFinTransaction:
     # required so existing hand-built test fixtures that don't care about raw
     # capture keep constructing this the same way they always have.
     raw: dict = field(default_factory=dict)
+    # True for a not-yet-posted transaction, which SimpleFIN only returns
+    # when asked with pending=1. Callers must never import these as real
+    # activity: the posted copy arrives later, often under a new id.
+    pending: bool = False
 
 
 def claim_setup_token(setup_token: str, timeout: float = 15.0) -> str:
@@ -85,6 +89,7 @@ def fetch_accounts(access_url: str, timeout: float = 15.0) -> list[SimpleFinAcco
 
 def fetch_transactions(
     access_url: str, account_id: str, since: datetime, timeout: float = 15.0,
+    *, include_pending: bool = False,
 ) -> tuple[list[SimpleFinTransaction], Decimal, datetime | None]:
     """Fetch transactions for one account posted after `since`. Returns
     (transactions, current_balance, balance_date) -- SimpleFIN returns the
@@ -95,8 +100,13 @@ def fetch_transactions(
     posting by days (a payment leaves checking immediately but a card
     issuer's own balance can take days to reflect it). None when the
     aggregator/institution doesn't supply it -- callers fall back to
-    trusting the balance unconditionally, the pre-existing behavior."""
+    trusting the balance unconditionally, the pre-existing behavior.
+
+    include_pending asks SimpleFIN for not-yet-posted transactions too; they
+    come back flagged `pending=True`. Not every institution supplies them."""
     params = {"account": account_id, "start-date": int(since.timestamp())}
+    if include_pending:
+        params["pending"] = 1
     data = _get(access_url, params=params, timeout=timeout)
     accounts = data.get("accounts", [])
     if not accounts:
@@ -118,12 +128,17 @@ def fetch_transactions(
     txns = []
     for t in account.get("transactions", []):
         try:
+            is_pending = bool(t.get("pending"))
+            # A pending record may carry posted=0 or no posted at all; it is
+            # never imported, so fall back to when it was transacted.
+            posted_ts = (t.get("posted") or t.get("transacted_at") or 0) if is_pending else t["posted"]
             txns.append(SimpleFinTransaction(
                 id=t["id"],
-                posted=datetime.fromtimestamp(t["posted"]),
+                posted=datetime.fromtimestamp(posted_ts),
                 amount=Decimal(str(t["amount"])),
                 description=t.get("description") or t.get("payee") or "Unknown",
                 raw=t,
+                pending=is_pending,
             ))
         except (KeyError, TypeError, ValueError, InvalidOperation, OSError) as exc:
             raise SimpleFinError(f"SimpleFIN returned a malformed transaction record: {exc}") from exc
