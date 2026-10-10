@@ -425,6 +425,24 @@ class CreditCardTransaction(Base):
     import_record: Mapped[CreditCardImport | None] = relationship(back_populates="transactions")
 
 
+class CardPendingTransaction(Base):
+    """What the card issuer currently lists as pending (not yet posted).
+    Bank sync replaces a card's rows wholesale on every sync, so this is a
+    snapshot, never history: a charge that posts drops out of the issuer's
+    pending list and arrives as a CreditCardTransaction instead. Never counted
+    as spending; its total is CreditCard.pending_charges."""
+    __tablename__ = "card_pending_transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    card_id: Mapped[int] = mapped_column(Integer, ForeignKey("credit_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)  # positive=charge, negative=refund
+    merchant: Mapped[str] = mapped_column(String(256), nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class CreditCardImport(Base):
     __tablename__ = "credit_card_imports"
 

@@ -102,6 +102,18 @@ def upcoming_due(
     return result
 
 
+@router.get("/pending-transactions", response_model=list[schemas.CardPendingTransactionOut])
+def list_pending_transactions(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Every card's current pending snapshot, newest first. Pending rows
+    are display-only: they aren't spending and can't be edited."""
+    return db.query(models.CardPendingTransaction).filter(
+        models.CardPendingTransaction.user_id == user.id,
+    ).order_by(models.CardPendingTransaction.date.desc(), models.CardPendingTransaction.id).all()
+
+
 @router.get("/{card_id}", response_model=schemas.CreditCardOut)
 def get_card(
     card_id: int,

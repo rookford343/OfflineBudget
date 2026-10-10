@@ -271,6 +271,17 @@ export default function Transactions() {
   });
   const allCardsLoading = txnTab === "all" && allCardsQueries.some(q => q.isLoading);
 
+  // The card issuers' own pending (not yet posted) charges, refreshed by
+  // every bank sync. Bank sync replaces the whole list each time, so a
+  // charge that posts simply disappears from here and shows up as a real
+  // card transaction instead -- nothing to match or dedupe client-side.
+  // Display-only: not spending, not editable.
+  const { data: bankPending = [] } = useQuery<any[]>({
+    queryKey: ["card-pending-transactions"],
+    queryFn: cardsApi.pendingTransactions,
+    enabled: txnTab === "all" || txnTab === "card",
+  });
+
   const cardNameMap: Record<number, string> = Object.fromEntries((cards as any[]).map((c: any) => [c.id, c.name]));
   const accountNameMap: Record<number, string> = Object.fromEntries((accounts as any[]).map((a: any) => [a.id, a.name]));
   // /categories returns a TREE -- six top-level rows with nested children --
@@ -334,6 +345,13 @@ export default function Transactions() {
       externalId: null,
       categoryName: p.categoryName ?? (p.isCcPayment ? "Credit Card Payment" : null),
       notes: null, recurringName: null, isActual: false,
+    })),
+    ...bankPending.map((p: any) => ({
+      id: -(100000 + p.id), kind: "card" as const, date: p.date, description: p.merchant,
+      amount: -parseFloat(p.amount), // card convention flipped, as below
+      source: "bank_pending", sourceLabel: cardNameMap[p.card_id] ?? "Card",
+      externalId: null, categoryName: null, notes: null, recurringName: null,
+      isActual: false,
     })),
     ...allCardsQueries.flatMap((q, i) => (q.data ?? []).map((t: any) => ({
       id: t.id, kind: "card" as const, date: t.date, description: t.merchant || t.description || "",
@@ -472,7 +490,7 @@ export default function Transactions() {
               {txnTab === "checking"
                 ? `${txns.length} transaction${txns.length !== 1 ? "s" : ""}${pendingRows.length ? ` (${pendingRows.length} pending)` : ""}`
                 : txnTab === "all"
-                  ? `${unifiedRows.length} transaction${unifiedRows.length !== 1 ? "s" : ""} across ${1 + (cards as any[]).length} account${(cards as any[]).length !== 0 ? "s" : ""}${pendingRows.length ? ` (${pendingRows.length} pending)` : ""}`
+                  ? `${unifiedRows.length} transaction${unifiedRows.length !== 1 ? "s" : ""} across ${1 + (cards as any[]).length} account${(cards as any[]).length !== 0 ? "s" : ""}${pendingRows.length + bankPending.length ? ` (${pendingRows.length + bankPending.length} pending)` : ""}`
                   : `${cardTxns.length} card charge${cardTxns.length !== 1 ? "s" : ""}`}
             </p>
           )}
@@ -768,14 +786,15 @@ export default function Transactions() {
           // specific card (forecast_engine.py's "CC Payment: {name}" /
           // "CC Estimate: {name}") -- per-charge card forecasting doesn't
           // exist, only the aggregate payoff/estimate hitting checking.
+          const cardBankPending = activeCard ? bankPending.filter((p: any) => p.card_id === activeCard.id) : [];
           const cardPendingRows = activeCard
             ? pendingRows.filter(p => p.isCcPayment && (p.name === `CC Payment: ${activeCard.name}` || p.name === `CC Estimate: ${activeCard.name}`))
             : [];
           return (
           <>
             {cards.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No credit cards configured</p>}
-            {cards.length > 0 && cardTxns.length === 0 && cardPendingRows.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No card transactions in this period</p>}
-            {(cardTxns.length > 0 || cardPendingRows.length > 0) && (
+            {cards.length > 0 && cardTxns.length === 0 && cardPendingRows.length === 0 && cardBankPending.length === 0 && <p className="text-sm text-gray-400 text-center py-8">No card transactions in this period</p>}
+            {(cardTxns.length > 0 || cardPendingRows.length > 0 || cardBankPending.length > 0) && (
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 dark:bg-gray-800/50 border-b border-gray-100 dark:border-gray-700">
                   <tr>
@@ -800,6 +819,22 @@ export default function Transactions() {
                       </td>
                       <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">Credit Card Payment</td>
                       <td className="px-4 py-3 text-right font-semibold tabular-nums text-red-600">{fmt(Math.abs(p.amount))}</td>
+                      <td className="px-4 py-3"></td>
+                    </tr>
+                  ))}
+                  {cardBankPending.map((p: any) => (
+                    <tr key={`bank-pending-${p.id}`} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                        {new Date(p.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </td>
+                      <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
+                        <div className="truncate flex items-center gap-1.5">
+                          {p.merchant}
+                          <span className="shrink-0 text-[10px] uppercase tracking-wide px-1 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">pending</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-gray-400 hidden sm:table-cell">—</td>
+                      <td className="px-4 py-3 text-right font-semibold tabular-nums text-red-600">{fmt(parseFloat(p.amount))}</td>
                       <td className="px-4 py-3"></td>
                     </tr>
                   ))}

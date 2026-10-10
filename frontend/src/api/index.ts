@@ -170,6 +170,7 @@ export const cardsApi = {
   clearPaymentSent: (id: number) => api.post(`/credit-cards/${id}/clear-payment-sent`).then((r) => r.data),
   transactions: (id: number, params?: object) =>
     api.get(`/credit-cards/${id}/transactions`, { params }).then((r) => r.data),
+  pendingTransactions: () => api.get("/credit-cards/pending-transactions").then((r) => r.data),
   addTransaction: (id: number, data: object) =>
     api.post(`/credit-cards/${id}/transactions`, data).then((r) => r.data),
   updateTransaction: (cardId: number, txnId: number, data: object) =>
