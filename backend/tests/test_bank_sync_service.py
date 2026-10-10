@@ -237,7 +237,7 @@ def test_sync_connection_isolates_a_failing_link(db_session, error):
     db_session.add(link2)
     db_session.commit()
 
-    def fake_fetch(access_url, account_id, since):
+    def fake_fetch(access_url, account_id, since, **kwargs):
         if account_id == "acc-1":
             raise error
         return [SimpleFinTransaction(id="t2", posted=datetime(2026, 8, 5), amount=Decimal("500.00"), description="Transfer")], Decimal("500.00"), None
@@ -654,3 +654,48 @@ def test_savings_account_sync_does_not_get_a_forecast_day_checkpoint(db_session)
         sync_connection(db_session, connection)
 
     assert db_session.query(models.ForecastDayCheckpoint).filter_by(account_id=savings.id).count() == 0
+
+
+def _pending(id_, amount, ts=1791504000):
+    return SimpleFinTransaction(id=id_, posted=datetime.fromtimestamp(ts), amount=Decimal(amount),
+                                description="PENDING SHOP", pending=True)
+
+
+def test_card_sync_sets_pending_charges_from_the_issuers_pending_feed(db_session):
+    """Pending charges come straight from the issuer: the figure is the
+    negated sum (charges are negative, a pending refund nets), it replaces
+    a hand-typed value, it is stamped fresh, and no pending row is ever
+    imported as a transaction."""
+    user, card, connection, link = _make_card_connection(db_session)
+    card.pending_charges = Decimal("999.00")
+    db_session.commit()
+    feed = [_pending("p1", "-40.00"), _pending("p2", "-25.50"), _pending("p3", "5.50")]
+
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=(feed, Decimal("-300.00"), None)) as fetch:
+        sync_connection(db_session, connection)
+
+    assert fetch.call_args.kwargs["include_pending"] is True
+    db_session.refresh(card)
+    assert card.pending_charges == Decimal("60.00")
+    assert card.pending_charges_updated_at is not None
+    assert db_session.query(models.CreditCardTransaction).filter_by(card_id=card.id).count() == 0
+
+
+def test_card_sync_pending_net_refund_floors_at_zero(db_session):
+    user, card, connection, link = _make_card_connection(db_session)
+    db_session.commit()
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions",
+               return_value=([_pending("p1", "20.00")], Decimal("-300.00"), None)):
+        sync_connection(db_session, connection)
+    db_session.refresh(card)
+    assert card.pending_charges == Decimal("0")
+
+
+def test_checking_sync_does_not_ask_for_pending(db_session):
+    user, account, connection, link = _make_connection(db_session)
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions", return_value=([], Decimal("100.00"), None)) as fetch:
+        sync_connection(db_session, connection)
+    assert fetch.call_args.kwargs["include_pending"] is False

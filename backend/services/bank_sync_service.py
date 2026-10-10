@@ -103,7 +103,15 @@ def _sync_link(
         if link.last_synced_at
         else datetime.utcnow() - timedelta(days=_INITIAL_LOOKBACK_DAYS)
     )
-    txns, balance, balance_date = fetch_transactions(access_url, link.simplefin_account_id, since)
+    is_card = link.local_credit_card_id is not None
+    fetched, balance, balance_date = fetch_transactions(
+        access_url, link.simplefin_account_id, since, include_pending=is_card,
+    )
+    # Pending card charges only ever feed CreditCard.pending_charges below;
+    # importing them would duplicate each one once its posted copy arrives
+    # (usually under a new id).
+    pending = [t for t in fetched if t.pending]
+    txns = [t for t in fetched if not t.pending]
 
     if user.debug_capture_raw_bank_data and txns:
         _capture_raw_snapshots(db, user.id, txns)
@@ -223,7 +231,15 @@ def _sync_link(
                     card.payment_sent_pending_sync = False
                     card.payment_sent_amount = None
 
-            if card.pending_charges and card.pending_charges > 0 and imported > 0:
+            if pending:
+                # The issuer reported its not-yet-posted charges: that IS the
+                # pending figure, replacing whatever was typed by hand.
+                # SimpleFIN charges are negative and pending refunds positive,
+                # so the owed amount is the negated sum, never below zero.
+                card.pending_charges = max(-sum((t.amount for t in pending), Decimal("0")), Decimal("0"))
+                card.pending_charges_updated_at = datetime.utcnow()
+            elif card.pending_charges and card.pending_charges > 0 and imported > 0:
+                # No pending feed for this card (some issuers never send one).
                 # the user's call (final whole-branch review, 2026-08-28): only
                 # clear when this sync actually brought in new transactions
                 # for this card -- a balance refresh alone isn't proof the

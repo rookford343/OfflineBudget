@@ -160,3 +160,19 @@ def test_fetch_transactions_raises_on_malformed_data(account_fields, txn_fields)
         with pytest.raises(SimpleFinError):
             fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
 
+
+
+def test_fetch_transactions_flags_pending_and_asks_for_them():
+    """pending=1 is only sent when asked for; a pending record may arrive with
+    no posted timestamp and must still parse, flagged pending."""
+    payload = {"accounts": [{"id": "acc-1", "balance": "-300.00", "transactions": [
+        dict(_GOOD_TXN),
+        {"id": "p1", "pending": True, "transacted_at": 1723276800, "amount": "-40.00", "description": "PENDING SHOP"},
+    ]}]}
+    with _mock_json(payload) as get:
+        txns, _, _ = fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1), include_pending=True)
+    assert get.call_args.kwargs["params"]["pending"] == 1
+    assert [t.pending for t in txns] == [False, True]
+    with _mock_json(payload) as get:
+        fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+    assert "pending" not in get.call_args.kwargs["params"]
