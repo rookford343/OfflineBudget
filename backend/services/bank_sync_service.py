@@ -30,7 +30,9 @@ _OVERLAP_DAYS = 3  # re-fetch a few days of overlap each sync so late-posting
                     # anything already imported
 
 
-def sync_connection(db: Session, connection: models.BankConnection) -> tuple[int, int]:
+def sync_connection(
+    db: Session, connection: models.BankConnection, *, cards_only: bool = False,
+) -> tuple[int, int]:
     """Sync every linked account for one BankConnection. Isolates failures per
     account so one broken link doesn't block the others, and isolates the
     decrypt step so a corrupted/key-mismatched token can't propagate out to
@@ -40,6 +42,10 @@ def sync_connection(db: Session, connection: models.BankConnection) -> tuple[int
     connection -- lets a caller (the "Sync Now" button) tell "ran, found
     nothing new" apart from "ran, here's what changed" instead of the
     timestamp-only signal that used to be the only feedback available.
+
+    cards_only limits the run to credit-card links: the afternoon refresh
+    exists for card pending charges and shouldn't spend request quota on
+    bank accounts.
     """
     user = db.get(models.User, connection.user_id)
     if not user:
@@ -59,9 +65,12 @@ def sync_connection(db: Session, connection: models.BankConnection) -> tuple[int
         db.commit()
         return (0, 0)
 
-    links = db.query(models.BankConnectionAccountLink).filter(
+    links_q = db.query(models.BankConnectionAccountLink).filter(
         models.BankConnectionAccountLink.connection_id == connection.id,
-    ).all()
+    )
+    if cards_only:
+        links_q = links_q.filter(models.BankConnectionAccountLink.local_credit_card_id.isnot(None))
+    links = links_q.all()
 
     any_success = False
     connection.last_error = None
@@ -93,6 +102,44 @@ def sync_connection(db: Session, connection: models.BankConnection) -> tuple[int
     connection.last_synced_at = datetime.utcnow()
     db.commit()
     return (total_imported, total_skipped)
+
+
+def _replace_pending_snapshot(
+    db: Session, user: models.User, card: models.CreditCard, pending: list,
+) -> bool:
+    """Replace the card's CardPendingTransaction rows with the issuer's
+    current pending list and set pending_charges to their total. Returns
+    False, touching nothing, for a card whose issuer has never reported
+    pending items (no rows before, none now): its pending_charges is
+    hand-typed and stays under the older clear-on-import rule. A card that
+    had pending rows and now has none really is down to zero."""
+    existing = db.query(models.CardPendingTransaction).filter(
+        models.CardPendingTransaction.card_id == card.id,
+    ).all()
+    if not pending and not existing:
+        return False
+    before = {r.external_id for r in existing}
+    for row in existing:
+        db.delete(row)
+    now = datetime.utcnow()
+    for t in pending:
+        # SimpleFIN charges are negative; card rows store charges positive.
+        db.add(models.CardPendingTransaction(
+            user_id=user.id, card_id=card.id, external_id=t.id,
+            date=t.posted.date(), amount=-t.amount, merchant=t.description[:256],
+            synced_at=now,
+        ))
+    card.pending_charges = max(-sum((t.amount for t in pending), Decimal("0")), Decimal("0"))
+    card.pending_charges_updated_at = now
+    # Measures whether intraday pulls see fresh data (the Bridge refreshes
+    # banks roughly daily): if this never logs "changed" on the afternoon
+    # run, that run isn't earning its request.
+    after = {t.id for t in pending}
+    logger.info(
+        "Pending snapshot for card %s: %s (%d items, %s)",
+        card.id, "changed" if after != before else "unchanged", len(pending), card.pending_charges,
+    )
+    return True
 
 
 def _sync_link(
@@ -231,14 +278,9 @@ def _sync_link(
                     card.payment_sent_pending_sync = False
                     card.payment_sent_amount = None
 
-            if pending:
-                # The issuer reported its not-yet-posted charges: that IS the
-                # pending figure, replacing whatever was typed by hand.
-                # SimpleFIN charges are negative and pending refunds positive,
-                # so the owed amount is the negated sum, never below zero.
-                card.pending_charges = max(-sum((t.amount for t in pending), Decimal("0")), Decimal("0"))
-                card.pending_charges_updated_at = datetime.utcnow()
-            elif card.pending_charges and card.pending_charges > 0 and imported > 0:
+            if not _replace_pending_snapshot(db, user, card, pending) and (
+                card.pending_charges and card.pending_charges > 0 and imported > 0
+            ):
                 # No pending feed for this card (some issuers never send one).
                 # the user's call (final whole-branch review, 2026-08-28): only
                 # clear when this sync actually brought in new transactions
@@ -301,7 +343,7 @@ def _capture_raw_snapshots(db: Session, user_id: int, txns: list) -> None:
             ))
 
 
-def sync_all(db: Session) -> None:
+def sync_all(db: Session, *, cards_only: bool = False) -> None:
     """Entry point for the daily scheduled job -- syncs every connection the
     user hasn't explicitly disconnected. Errored connections are deliberately
     INCLUDED: sync_connection is the only code path that can flip status back
@@ -314,7 +356,7 @@ def sync_all(db: Session) -> None:
     ).all()
     for connection in connections:
         try:
-            sync_connection(db, connection)
+            sync_connection(db, connection, cards_only=cards_only)
         except Exception as exc:  # noqa: BLE001 -- defense in depth: sync_connection
             # already isolates decrypt and per-link failures internally, but
             # nothing raised while processing one connection may prevent

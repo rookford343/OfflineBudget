@@ -837,6 +837,17 @@ class CardTransactionUpdate(BaseModel):
     description: Optional[str] = None
 
 
+class CardPendingTransactionOut(BaseModel):
+    """A not-yet-posted card charge from the issuer's pending feed."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    card_id: int
+    date: date
+    amount: Decimal  # positive=charge, negative=refund
+    merchant: str
+    synced_at: datetime
+
+
 class CardTransactionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

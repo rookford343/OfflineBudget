@@ -131,3 +131,30 @@ def test_sweep_holds_the_email_while_a_sync_is_running():
     finally:
         job_locks._bank_sync_lock.release()
     assert sent == []
+
+
+def test_card_refresh_is_a_no_op_while_a_bank_sync_holds_the_lock():
+    """The afternoon cards-only refresh shares _bank_sync_lock: overlapping
+    the full sync or a manual Sync Now would reopen the double-insert race."""
+    assert job_locks._bank_sync_lock.acquire(blocking=False)
+    try:
+        with patch("backend.services.bank_sync_service.sync_all") as sync_spy:
+            main._run_card_refresh()
+        sync_spy.assert_not_called()
+    finally:
+        job_locks._bank_sync_lock.release()
+
+
+def test_card_refresh_syncs_cards_only_and_releases_the_lock():
+    with patch("backend.services.bank_sync_service.sync_all") as sync_spy, \
+         patch("backend.database.SessionLocal"):
+        main._run_card_refresh()
+    assert sync_spy.call_args.kwargs == {"cards_only": True}
+    assert job_locks._bank_sync_lock.acquire(blocking=False)
+    job_locks._bank_sync_lock.release()
+
+
+def test_card_refresh_is_scheduled_off_the_hour_in_the_afternoon():
+    job = next(j for j in main._scheduler.get_jobs() if j.func is main._run_card_refresh)
+    fields = {f.name: str(f) for f in job.trigger.fields}
+    assert (fields["hour"], fields["minute"]) == ("15", "17")
