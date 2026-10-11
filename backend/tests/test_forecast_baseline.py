@@ -179,7 +179,7 @@ def test_save_race_returns_existing_row_instead_of_raising(db_session):
     with patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e)):
         winner = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 1))
     with patch("backend.services.forecast_baseline.get_month_baseline", side_effect=racing_get), \
-         patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e, base="5.00")) as eng:
+         patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e, base="5.00")):
         loser = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 3))
     assert loser.id == winner.id
     assert db_session.query(models.MonthlyForecastSnapshot).count() == 1

@@ -21,7 +21,6 @@ def compute_overview(
     categories = db.query(models.Category).filter(
         models.Category.user_id == user_id,
     ).all()
-    cat_map = {c.id: c for c in categories}
 
     # Budget allocations — prefer month-specific, fall back to month=0
     allocations = db.query(models.BudgetAllocation).filter(

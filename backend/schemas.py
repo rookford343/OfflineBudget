@@ -144,7 +144,7 @@ class UserAdminOut(BaseModel):
 
 class TokenOut(BaseModel):
     access_token: str
-    token_type: str = "bearer"
+    token_type: str = "bearer"  # noqa: S105 -- the OAuth2 token type name, not a credential
     user: UserOut
 
 

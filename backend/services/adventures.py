@@ -6,7 +6,7 @@ Lifecycle writes (commit, sync, finish, fund) live in adventures_lifecycle.py.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_UP
 
 from sqlalchemy.orm import Session

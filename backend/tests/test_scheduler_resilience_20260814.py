@@ -7,7 +7,7 @@ due_for_retry for "fired but failed, or never fired at all and it's now
 later in the day."
 """
 import pytest
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from backend import models
 from backend.services import scheduler_state
 

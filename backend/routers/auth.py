@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.auth import check_new_password, hash_password, verify_password, create_access_token
-from backend.dependencies import get_db, get_current_user, get_requester
+from backend.dependencies import get_db, get_requester
 from backend.seed import seed_default_categories
 from backend.config import settings
 from backend.services.email_service import deliver, parse_recipients, send_email_via, smtp_config

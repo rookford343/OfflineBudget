@@ -5,7 +5,6 @@ proposals into a request body: the client cannot express a transient
 RecurringItem, and duplicating the resolution rules (a committed scenario
 resolves to nothing) in TypeScript would be a second place for them to drift.
 """
-from datetime import date
 from decimal import Decimal
 
 import pytest

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.database import SessionLocal
-from backend.routers.auth import get_current_user
+from backend.dependencies import get_current_user
 
 router = APIRouter(prefix="/forecast/day-checkpoints", tags=["forecast"])
 

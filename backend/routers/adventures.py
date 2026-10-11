@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 from backend import models, schemas

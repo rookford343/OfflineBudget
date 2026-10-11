@@ -7,8 +7,6 @@ widened the attack surface would be a worse outcome than leaving the
 settings in .env, so the allowlist, the secret masking, and the refusal to
 store a plaintext password all have tests rather than just comments.
 """
-from datetime import date
-from decimal import Decimal
 import pytest
 from backend import models
 from backend.services import app_settings

@@ -1,0 +1,16 @@
+# Lint gate run by .githooks/pre-commit (staged files) and .githooks/pre-push
+# (whole tree). The pin lives in backend/requirements-dev.txt; keep the two equal.
+target-version = "py311"
+line-length = 120
+extend-exclude = ["frontend", "data", "graphify-out"]
+
+[lint]
+select = [
+    "S",   # flake8-bandit: security. Never silenced without a reason on the same line.
+    "F",   # Pyflakes: unused names, undefined names, real bugs
+    "E9",  # syntax errors
+]
+
+[lint.per-file-ignores]
+# Tests assert by design and build users with literal throwaway passwords.
+"backend/tests/**" = ["S101", "S105", "S106", "S107"]

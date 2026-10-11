@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.auth import check_new_password, hash_password
-from backend.dependencies import get_db, require_admin, get_requester
+from backend.dependencies import get_db, require_admin
 from backend.seed import seed_default_categories
 
 router = APIRouter(prefix="/admin", tags=["admin"])

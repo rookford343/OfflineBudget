@@ -21,6 +21,7 @@ from backend.schemas import ForecastEntry
 from backend.services.bank_sync_service import sync_connection
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.simplefin_client import SimpleFinTransaction
+from backend.services.forecast_engine import _next_occurrence_on_or_after
 from backend.services.statement_reconcile import (
     reconcile_all_cards,
     reconcile_statement_payment,
@@ -330,7 +331,6 @@ def test_bank_sync_calls_reconcile_after_a_card_sync(db_session, monkeypatch):
     # are relative to it (v1 hard-coded 9/25, which rule 2 would start
     # refusing as stale once the real clock passed late October).
     from datetime import timedelta
-    from backend.services.forecast_engine import _next_occurrence_on_or_after
     user, card, connection, link = _make_card_connection(db_session)
     today = date.today()
     npd = today + timedelta(days=3)
@@ -384,10 +384,8 @@ def test_bank_sync_survives_a_reconcile_failure(db_session, monkeypatch):
 from datetime import timedelta
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 from backend.dependencies import get_db, get_current_user
 from backend.routers import credit_cards as credit_cards_router_module
-from backend.services.forecast_engine import _next_occurrence_on_or_after
 
 
 def test_chase_live_case_with_freshness_stamp_still_clears(db_session):
