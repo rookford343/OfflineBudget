@@ -1,5 +1,5 @@
 # Lint gate run by .githooks/pre-commit (staged files) and .githooks/pre-push
-# (whole tree). The pin lives in backend/requirements-dev.txt; keep the two equal.
+# (whole tree). The ruff pin lives in pyproject.toml's dev group.
 target-version = "py311"
 line-length = 120
 extend-exclude = ["frontend", "data", "graphify-out"]

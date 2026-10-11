@@ -17,8 +17,7 @@ does NOT touch CreditCard.current_balance: that comes from SimpleFIN's live
 balance, not from summing rows.
 
 Run from project root:
-    source .venv/bin/activate
-    python scripts/dedupe_card_transactions.py [--apply]
+    uv run python scripts/dedupe_card_transactions.py [--apply]
 
 Without --apply it reports what it would do and changes nothing.
 """

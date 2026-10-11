@@ -12,8 +12,7 @@ Figures sourced from 2024-2025 benchmarks:
   - Subscriptions: Netflix $22.99, Disney+/Hulu $12.99, Spotify $17.99, Prime $14.99
 
 Run from project root:
-    source .venv/bin/activate
-    python scripts/seed_demo.py
+    uv run python scripts/seed_demo.py
 """
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

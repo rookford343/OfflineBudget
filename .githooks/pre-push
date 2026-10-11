@@ -8,28 +8,41 @@
 # forced the suite to run before code shipped. This is the second half of
 # that fix: the tests alone don't help if nobody has to run them.
 #
-# It also re-runs the commit-time lint over the whole tree (a commit can skip
-# its hook), imports the app (an "unused import" autofix once broke a router
+# It also checks uv.lock against pyproject.toml, audits the locked
+# dependencies for known vulnerabilities, re-runs the commit-time lint over the
+# whole tree (a commit can skip its hook), imports the app (an "unused import" autofix once broke a router
 # that imported through another module), and enforces the coverage floor in
 # backend/.coveragerc.
 repo_root=$(git rev-parse --show-toplevel) || exit 1
-py="$repo_root/.venv/bin/python"
+cd "$repo_root" || exit 1
+
+echo "Lockfile matches pyproject.toml..."
+if ! uv lock --check; then
+  echo "BLOCKED: uv.lock is out of date. Run: uv lock" >&2
+  exit 1
+fi
+
+echo "Dependency audit (known vulnerabilities, abandoned packages)..."
+if ! uv audit --preview-features audit; then
+  echo "BLOCKED: a locked dependency has a known vulnerability or is abandoned. Upgrade or replace it." >&2
+  exit 1
+fi
 
 echo "Lint (ruff: security + bugs)..."
-if ! (cd "$repo_root" && "$repo_root/.venv/bin/ruff" check .); then
+if ! uv run --locked ruff check .; then
   echo "BLOCKED: ruff findings. Fix them before pushing." >&2
   exit 1
 fi
 
 echo "Import check..."
-if ! (cd "$repo_root" && "$py" -c "import backend.main, cli.budget"); then
+if ! uv run --locked python -c "import backend.main, cli.budget"; then
   echo "BLOCKED: the app no longer imports." >&2
   exit 1
 fi
 
 echo "Backend tests with coverage floor..."
 cd "$repo_root/backend" || exit 1
-if ! "$py" -m pytest -q --cov --cov-report=term:skip-covered; then
+if ! uv run --locked python -m pytest -q --cov --cov-report=term:skip-covered; then
   echo "" >&2
   echo "BLOCKED: tests failing or coverage under the floor in backend/.coveragerc. Push with --no-verify only if you're sure." >&2
   exit 1

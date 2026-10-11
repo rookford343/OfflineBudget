@@ -12,7 +12,7 @@ def parse_ofx(content: bytes) -> list[ParsedRow]:
         from ofxparse import OfxParser
     except ImportError:
         raise RuntimeError(
-            "ofxparse is not installed. Run: pip install ofxparse"
+            "ofxparse is not installed. Run: uv sync --locked"
         )
 
     ofx = OfxParser.parse(io.BytesIO(content))

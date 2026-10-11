@@ -5,11 +5,10 @@ Reset a user's password directly in the database.
 Use this when a user is locked out and no admin can log in to use the UI.
 
 Run from the project root:
-    source .venv/bin/activate
-    python scripts/reset_password.py <username> <new_password>
+    uv run python scripts/reset_password.py <username> <new_password>
 
 Example:
-    python scripts/reset_password.py admin newpassword123
+    uv run python scripts/reset_password.py admin newpassword123
 """
 import sys
 import os

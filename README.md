@@ -93,9 +93,9 @@ Income and bills that repeat, with monthly/quarterly/yearly frequencies.
 ## Quick Start
 
 ```bash
-# 1. Set up Python environment
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r backend/requirements.txt
+# 1. Install Python dependencies exactly as uv.lock pins them (hash-checked)
+#    Needs uv: https://docs.astral.sh/uv/  (brew install uv)
+uv sync --locked
 
 # 2. Install frontend dependencies
 cd frontend && bun install && cd ..
@@ -373,23 +373,23 @@ The **Transactions → Reconcile** tab helps you match records against bank stat
 The CLI shares the same database and service layer as the web app — no server required.
 
 ```bash
-source .venv/bin/activate
+# uv run uses the project's locked environment; no activation needed.
 
 # User management
-python cli/budget.py users create
+uv run python cli/budget.py users create
 
 # Accounts
-python cli/budget.py accounts list --username alice
+uv run python cli/budget.py accounts list --username alice
 
 # Recurring items
-python cli/budget.py recurring list --username alice
+uv run python cli/budget.py recurring list --username alice
 
 # Forecast
-python cli/budget.py forecast quarters --username alice --account "Main Checking"
-python cli/budget.py forecast show   --username alice --account "Main Checking" --quarter Q2-2026
+uv run python cli/budget.py forecast quarters --username alice --account "Main Checking"
+uv run python cli/budget.py forecast show   --username alice --account "Main Checking" --quarter Q2-2026
 
 # Credit cards
-python cli/budget.py cards list --username alice
+uv run python cli/budget.py cards list --username alice
 ```
 
 ---

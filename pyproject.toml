@@ -1,0 +1,39 @@
+[project]
+name = "offlinebudget"
+version = "0.1.0"
+description = "Forecasting-first household budget tracker you host yourself"
+requires-python = ">=3.11,<3.12"
+# Direct dependencies, pinned exactly. uv.lock pins every transitive one and
+# records a SHA-256 for each file; installs that don't match fail.
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn[standard]==0.52.1",
+    "sqlalchemy==2.0.51",
+    "passlib[bcrypt]==1.7.4",
+    "bcrypt==4.0.1",              # passlib 1.7.4 breaks on bcrypt 4.1+
+    "python-multipart==0.0.32",   # FastAPI form and file-upload parsing
+    "python-dotenv==1.2.2",       # pydantic-settings reads .env through it
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    "httpx==0.28.1",
+    "typer==0.27.1",
+    "rich==15.0.0",
+    "apscheduler==3.11.3",
+    "ofxparse==0.21",
+    "cryptography==50.0.0",
+    "pyjwt==2.15.1",               # login tokens (replaced python-jose: CVE-2026-85394)
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-cov==7.1.0",
+    "ruff==0.15.22",              # keep equal to the version noted in ruff.toml
+]
+
+[tool.uv]
+# An application, not a library: nothing to build or publish.
+package = false
+# Supply-chain cooldown: resolution ignores anything published in the last
+# week, so a hijacked release has time to be caught before it can land here.
+exclude-newer = "7 days"

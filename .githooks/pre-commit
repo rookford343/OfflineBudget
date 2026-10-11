@@ -47,14 +47,21 @@ for f in $staged; do
   fi
 done
 
+# A changed pyproject.toml must come with its matching uv.lock.
+if printf '%s\n' "$staged" | grep -qx 'pyproject.toml'; then
+  if ! (cd "$repo_root" && uv lock --check >/dev/null 2>&1); then
+    echo "BLOCKED: uv.lock is out of date with pyproject.toml. Run: uv lock" >&2
+    fail=1
+  fi
+fi
+
 # Security and bug lint on staged Python (ruff.toml: Bandit S rules + Pyflakes).
 py=$(printf '%s\n' "$staged" | grep -E '\.py$')
 if [ -n "$py" ]; then
-  ruff="$repo_root/.venv/bin/ruff"
-  if [ ! -x "$ruff" ]; then
-    echo "BLOCKED: ruff is not installed. Run: .venv/bin/pip install -r backend/requirements-dev.txt" >&2
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "BLOCKED: uv is not installed (https://docs.astral.sh/uv/)." >&2
     fail=1
-  elif ! (cd "$repo_root" && printf '%s\n' $py | xargs "$ruff" check); then
+  elif ! (cd "$repo_root" && printf '%s\n' $py | xargs uv run --locked ruff check); then
     echo "BLOCKED: fix the ruff findings above. Never silence an S rule without a reason on the same line." >&2
     fail=1
   fi

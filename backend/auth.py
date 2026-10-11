@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
-from jose import jwt, JWTError
+import jwt
 from passlib.context import CryptContext
 from backend.config import settings
 
@@ -34,5 +34,5 @@ def create_access_token(user_id: int, username: str) -> str:
 def decode_token(token: str) -> dict:
     try:
         return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
-    except JWTError:
+    except jwt.PyJWTError:
         return {}
