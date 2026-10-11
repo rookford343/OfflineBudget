@@ -11,7 +11,7 @@ OfflineBudget/
 │   ├── models.py     All ORM models
 │   ├── schemas.py    All Pydantic request/response models
 │   ├── auth.py       JWT creation/verification, bcrypt helpers
-│   ├── dependencies.py  get_db(), get_current_user(), require_admin()
+│   ├── dependencies.py  get_db(), get_current_user() (also enforces View Only), require_admin()
 │   ├── seed.py       Default category seeding on registration
 │   ├── middleware.py AuditMiddleware — logs all mutating requests
 │   ├── routers/      One file per resource
@@ -20,7 +20,9 @@ OfflineBudget/
 │   │   ├── forecast.py, goals.py, imports.py, networth.py
 │   │   ├── planned_expenses.py, reconciliation.py, recurring.py
 │   │   ├── rules.py, scenarios.py, spending.py, transactions.py
-│   │   └── admin.py
+│   │   ├── bank_sync.py, adventures.py, wish_list.py, settings.py
+│   │   ├── admin.py
+│   │   └── _shared.py  owned_or_404() and reject_nulls(), used by every router
 │   └── services/     Business logic shared by API + CLI
 │       ├── forecast_engine.py     Day-by-day balance projection
 │       ├── import_service.py      Shared import pipeline (preview + confirm)
@@ -31,8 +33,15 @@ OfflineBudget/
 │       ├── tax_service.py         2025 federal + state tax estimation
 │       ├── budget_calculator.py   Budget vs. actual aggregation
 │       ├── recurring_detector.py  Auto-detect recurring transaction patterns
-│       ├── email_service.py       SMTP send helper
-│       └── summary_generator.py   Daily email narrative
+│       ├── email_service.py       SMTP send (one config: Settings page over .env)
+│       ├── summary_generator.py   Daily email (Spending this month, weekly digest)
+│       ├── budget_snapshot.py     Household Snapshot; spending_breakdown(start, end)
+│       ├── bank_sync_service.py   SimpleFIN sync, card pending snapshot
+│       ├── simplefin_client.py    SimpleFIN protocol client (pending=1 for cards)
+│       ├── card_matching.py       Card name matcher + looks_like_card_autopay()
+│       ├── primary_account.py     primary_checking(): the account forecasts walk
+│       ├── wish_math.py, wish_plan.py, wish_lifecycle.py   Wish List
+│       └── adventures.py, adventures_lifecycle.py          Adventures
 ├── frontend/         React 18 + TypeScript + Vite + Tailwind
 │   ├── src/
 │   │   ├── api/      Typed API client (axios) — all endpoints in api/index.ts
@@ -200,22 +209,71 @@ State rates are approximate effective rates for middle-income earners (not margi
 
 ## API Authentication
 
-- `POST /auth/register` → creates user, seeds categories, returns JWT
-- `POST /auth/login` → verifies bcrypt hash, returns JWT
+- `POST /auth/register` → only works on an empty install: creates the first
+  user as admin, seeds categories, returns JWT. Once any user exists it
+  returns 403; admins add everyone else via `POST /admin/users`
+- `POST /auth/login` → verifies bcrypt hash, returns JWT. Limited to 10
+  attempts per client and username per 15 minutes (429 after that)
+- Passwords: one rule, `auth.check_new_password()` (minimum 6 characters),
+  applied by register, change password, both reset flows, and admin
+  create/reset
 - All other endpoints require `Authorization: Bearer <token>` header
 - FastAPI dependency `get_current_user()` decodes JWT and loads user from DB
 - Token expiry: 7 days (configurable via `JWT_EXPIRE_DAYS`)
 - Admin-only endpoints use the `require_admin()` dependency — non-admin requests get 403
+- **View Only** is enforced in `get_current_user()`: a viewer's POST, PUT,
+  PATCH or DELETE on any data endpoint gets 403. `/auth/me` endpoints use
+  `get_requester()` instead, so viewers can still change their own password
 
 ### Password Reset
 
-**Via the UI (admin):** Settings → Users → click the reset icon next to any user.
+**Via the UI (admin):** Settings → Household → click the reset icon next to any user.
 
 **Via the CLI (emergency):**
 ```bash
 source .venv/bin/activate
 python scripts/reset_password.py <username> <new_password>
 ```
+
+---
+
+## Bank Sync and Scheduled Jobs
+
+APScheduler jobs registered in `backend/main.py`:
+
+| Job | When | What |
+|-----|------|------|
+| `_run_bank_sync` | 7:00 | `sync_all()`: every linked account and card |
+| `_send_daily_summaries` | :15 past the send hour (default 7) | Daily email, after the sync |
+| `_run_card_refresh` | 15:17 | `sync_all(cards_only=True)`: card links only |
+| `_scheduler_sweep` | every 20 min | Retries a job that hasn't succeeded today |
+
+Both sync jobs and **Sync Now** share `job_locks._bank_sync_lock` (a
+non-blocking lock), so two syncs can never run at once; concurrent runs used
+to insert the same transactions twice.
+
+Each link costs one SimpleFIN request. Card links pass `include_pending=True`;
+pending records come back flagged `pending` and are never imported. Instead
+`_replace_pending_snapshot()` deletes the card's `card_pending_transactions`
+rows and inserts the current pending list, then sets
+`CreditCard.pending_charges` to its total. A card whose issuer has never sent
+pending data is left alone, so a hand-typed figure survives. The function logs
+whether the pending list changed, which shows whether the afternoon run sees
+fresh data. `GET /credit-cards/pending-transactions` serves the snapshot to
+the Transactions page.
+
+## Shared Helpers (one place to fix)
+
+| Helper | Use it for |
+|--------|-----------|
+| `routers/_shared.owned_or_404()` | Fetch a row and 404 unless it belongs to the user |
+| `routers/_shared.reject_nulls()` | 422 an explicit null on a NOT NULL field |
+| `services/primary_account.primary_checking()` | "The" checking account (frontend: `lib/accounts.primaryChecking`) |
+| `services/card_matching.card_matches_description()` | Does a description name this card (word-bounded) |
+| `services/card_matching.looks_like_card_autopay()` | Is a checking debit a card payoff |
+| `services/budget_snapshot.spending_breakdown()` | Total, categories and merchants for any date range |
+| `services/email_service.send_email_via()` / `deliver()` | Every email; never read SMTP settings yourself |
+| `auth.check_new_password()` | Every place a password is set |
 
 ---
 

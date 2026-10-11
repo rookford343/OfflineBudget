@@ -274,7 +274,7 @@ export default function CreditCards() {
               </div>
               <div><label className="label">Next Payment Date <span className="text-gray-400 font-normal">(for forecast)</span></label><input type="date" className="input" value={form.next_payment_date} onChange={e => setForm({ ...form, next_payment_date: e.target.value })} /></div>
               <div><label className="label">Monthly Spend Estimate <span className="text-gray-400 font-normal">(for forecast projection)</span></label><input type="number" step="0.01" className="input" placeholder="e.g. 800" value={form.monthly_spend_estimate} onChange={e => setForm({ ...form, monthly_spend_estimate: e.target.value })} /></div>
-              <div><label className="label">Pending Charges <span className="text-gray-400 font-normal">(expected but not yet posted)</span></label><input type="number" step="0.01" className="input" placeholder="0.00" value={form.pending_charges} onChange={e => setForm({ ...form, pending_charges: e.target.value })} /></div>
+              <div><label className="label">Pending Charges <span className="text-gray-400 font-normal">(not yet posted; filled in automatically when your bank reports them)</span></label><input type="number" step="0.01" className="input" placeholder="0.00" value={form.pending_charges} onChange={e => setForm({ ...form, pending_charges: e.target.value })} /></div>
               <div><label className="label">Notes</label><input className="input" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></div>
               <div className="flex gap-3 pt-2">
                 <button type="submit" className="btn-primary flex-1">{editCard ? "Save Changes" : "Add Card"}</button>

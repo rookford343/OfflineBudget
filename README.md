@@ -38,9 +38,29 @@ Day-by-day balance projection with credit cards due and planned one-offs.
 ![Forecast](docs/images/forecast.png)
 
 ### Transactions
-Checking and every card in one chronological view, sign-normalized.
+Checking and every card in one chronological view, sign-normalized. Charges
+your card issuer still lists as pending show with a **pending** badge until
+they post.
 
 ![Transactions](docs/images/transactions.png)
+
+### Credit Cards
+Balance, last statement, pending charges and utilization per card, with a
+warning when the statement figure looks out of date.
+
+![Credit Cards](docs/images/credit-cards.png)
+
+### Wish List
+Ranked purchases, each with payment options (pay in full, put it on a card,
+or finance it) and the earliest date your forecast can absorb it.
+
+![Wish List](docs/images/wish-list.png)
+
+### Adventures
+Trip planning with points: a points wallet, transfer partners, and each
+trip's cash and points cost, with a transfer suggestion when you're short.
+
+![Adventures](docs/images/adventures.png)
 
 ### Recurring
 Income and bills that repeat, with monthly/quarterly/yearly frequencies.
@@ -53,16 +73,18 @@ Income and bills that repeat, with monthly/quarterly/yearly frequencies.
 
 | Area | Highlights |
 |------|-----------|
-| [Forecast](#forecasting) | Day-by-day balance projection; quarterly and multi-year views; scenario planning |
+| [Forecast](#forecasting) | Day-by-day balance projection; quarterly and multi-year views |
+| Wish List | Ranked purchases with pay-in-full, card and financing options; finds the earliest safe date to buy |
+| Adventures | Trips priced in cash and points, a points wallet with transfer partners, committed to the forecast |
 | [Spending Analysis](#spending-analysis) | Monthly trends, ranged spending chart, merchant ranking, income flow diagram |
 | [Tax Estimator](#tax-estimator) | Full 2025 federal + state estimate; itemized vs. standard deduction; bracket ladder |
 | [Transaction Import](#transaction-import) | CSV and OFX/QFX upload; auto-categorization; custom rules engine; optional automated bank sync via SimpleFIN |
-| [Credit Cards](#credit-cards) | Balance tracking, due-date reminders, payment recording, per-card spending |
+| [Credit Cards](#credit-cards) | Balance tracking, due-date reminders, payment recording, per-card spending, pending charges from your bank |
 | [Budget Tracking](#budget-tracking) | Monthly category budgets with rollover; actual vs. budgeted variance |
 | [Reconciliation](#reconciliation) | Link transactions to recurring items; quarterly balance checkpoints |
 | [Net Worth](#net-worth) | Assets and liabilities with historical snapshots |
 | [Savings Goals](#savings-goals) | Track named goals with target amounts and target dates |
-| [Bank Sync](#transaction-import) | Optional automated daily sync via SimpleFIN Bridge, with self-healing catch-up if the machine was asleep |
+| [Bank Sync](#bank-sync) | Optional sync via SimpleFIN Bridge: everything at 7am, cards again at 3:17pm; pending card charges; self-healing catch-up if the machine was asleep |
 | [Settings](#settings-overview) | SMTP, report recipients, and schedule all configurable in the UI; secrets encrypted at rest |
 | [CLI](#cli) | All core operations available from the terminal without running the server |
 
@@ -161,7 +183,7 @@ The **Forecast** page answers: *"If I keep paying what I'm paying, what will my 
 - **Day-by-day view** — Select a date range and account to see the projected balance for every day, with each recurring item shown as a line item.
 - **Quarterly view** — Q1–Q4 open/close balances at a glance; quarters below the low-balance threshold are highlighted in amber.
 - **Multi-year view** — Extend the forecast 1, 2, 3, or 5 years to model long-term financial health.
-- **Scenario planning** — Create named scenarios with per-item overrides (e.g., "What if I refinance?"). The scenario and baseline traces appear side-by-side on the chart.
+- **Wish List** (Planning → Wish List) replaces the old Scenarios page. Each wish can carry extra costs and bill changes ("what if I refinance?") alongside its price and payment options. The page finds the earliest date your projected balance stays above your cushion, and committing a wish adds it to the forecast.
 - **Quarterly checkpoints** — Record actual end-of-quarter balances to calibrate future projections.
 
 The forecast engine generates projections on-the-fly from recurring items each time you load the page — no stale cached data.
@@ -272,7 +294,12 @@ The import preview groups similar transactions by normalizing descriptions (stri
 
 ## Credit Cards
 
-- Add cards with current balance, credit limit, minimum payment, and due date
+- Add cards with current balance, credit limit, statement day and due day
+- **Statement balance** (balance due) is paid in the forecast on the due date;
+  a warning appears when the current balance suggests it's already been paid
+- **Pending charges** fill in automatically from bank sync for issuers that
+  report them (type them in for issuers that don't), and the forecast plans
+  for them
 - Record payments — automatically deducts from the linked checking account
 - Per-card transaction log with category assignment
 - Utilization percentage and upcoming due-date alerts on the dashboard
@@ -287,7 +314,9 @@ spent — then a progress bar per category that turns amber at 80% and red past
 100%.
 
 - Set a budget inline from the pencil on any category row
-- Budget amounts apply to all months unless overridden for a specific month
+- Discretionary categories are budgeted month by month (zero-based). Turn on
+  **Settings → Preferences → Carry budget amounts into the next month** to
+  have an unassigned month reuse the category's standing amount instead
 - A parent category's budget is the sum of its children, so budgeting at the
   leaf (Shopping, Food & Drinks) rolls up correctly
 - **Rollover** — carry unspent budget forward per category
@@ -367,10 +396,17 @@ python cli/budget.py cards list --username alice
 
 ## Multi-User
 
-- **Admin** users manage accounts from Settings → Users
-- **View-only** users can read data but cannot create, edit, or delete anything
+- **Sign-up only creates the first account.** After that, admins add
+  household members in **Settings → Household**; open sign-up on a
+  LAN-reachable app would let any device on the network create an admin
+- **Admin** users manage household members and can reset their passwords
+- **View Only** users can read every page but can't create, edit, or delete
+  anything (enforced by the server, not just hidden in the UI). They can
+  still change their own password
+- Passwords need at least 6 characters; more than 10 sign-in attempts in 15
+  minutes locks that username out on that device for 15 minutes
 - All write operations are logged in the audit log
-- Password reset: Settings → Users → reset icon, or via `python scripts/reset_password.py <username> <new_password>`
+- Password reset: Settings → Household → reset icon, or via `python scripts/reset_password.py <username> <new_password>`
 
 ---
 
@@ -386,10 +422,13 @@ to the UI without an edit.
 separate from your login email — the people who read it don't need accounts.
 Comma-separate addresses.
 
-**The daily summary** includes the Household Snapshot, checking balances,
-upcoming bills for the next 7 days with real dates, month-to-date spending,
-and per-card balances with utilization. On the configured digest day it also
-carries spending by category, top merchants, and a balance-risk warning.
+**The daily summary** includes the Household Snapshot, **Spending this
+month** (total, spending by category and top merchants since the 1st, the
+same numbers as the Dashboard's digest card), checking balances, upcoming
+bills for the next 7 days with real dates, and per-card balances. On the
+configured digest day it also carries the past week's spending by category,
+top merchants, and a balance-risk warning. Password-reset emails use the same
+SMTP settings.
 
 **Reliability.** Both the daily email and the bank sync self-heal when the
 machine was asleep or offline at the scheduled time. A generous misfire grace
@@ -401,6 +440,29 @@ up yet. Status is visible at Settings → Preferences → Background Jobs.
 **Secrets.** The SMTP password is encrypted at rest with `APP_ENCRYPTION_KEY`
 and is never returned by the API. Without an encryption key configured the
 app refuses to store it rather than falling back to plaintext.
+
+---
+
+## Bank Sync
+
+Optional, via [SimpleFIN Bridge](https://beta-bridge.simplefin.org/) (about
+$15/year, read-only). Paste a setup token in **Settings → Accounts & Bank
+Sync** and link each SimpleFIN account to an account or card in the app.
+
+| When | What syncs |
+|------|-----------|
+| 7:00am | Every linked account and card |
+| 3:17pm | Credit cards only, for fresh pending charges |
+| Sync Now | Everything, on demand |
+
+Each linked account costs one request per sync; SimpleFIN asks for 24 or fewer
+a day, and this schedule uses about six for a typical household.
+
+**Pending card charges.** Each card sync stores the issuer's current pending
+list and replaces it wholesale on the next sync, so a charge that posts drops
+off the list and arrives once as a normal transaction. Pending charges show
+in Transactions with a badge, feed the forecast through the card's pending
+total, and are never counted as spending until they post.
 
 ---
 

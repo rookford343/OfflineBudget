@@ -6,7 +6,7 @@ How to load realistic demo data for testing or screenshots, and how to fully wip
 
 ## Loading the Demo Account
 
-The demo script creates a complete dual-income household with realistic 2024–2025 benchmark figures: two checking/savings accounts, two credit cards, 17 recurring items, 33 checking transactions, 35 credit card charges, and 11 budget allocations across April–May 2026.
+The demo script creates a complete dual-income household with realistic 2024–2025 benchmark figures: two checking/savings accounts, two credit cards, 17 recurring items, posted transactions for last month and this month to date, monthly budgets, pending card charges, two Wish List items and one planned Adventure. Dates are relative to the day you run it.
 
 **Login after seeding:** `username: demo` / `password: demo123`
 
@@ -36,9 +36,12 @@ The script is safe to re-run. If a `demo` user already exists it will delete it 
 | Chase Sapphire Preferred | $1,423.87 balance, $15k limit |
 | Apple Card | $143.22 balance, $5k limit |
 | Recurring items | 17 items: 2 paychecks, mortgage, car payments, utilities, subscriptions, giving |
-| Checking transactions | 33 entries across April and May 2026 |
-| Credit card transactions | 35 entries: Kroger, Target, Amazon, Costco, dining, gas, Apple |
-| Budget allocations | 11 category budgets for 2026 |
+| Checking transactions | Last month and this month up to today (nothing future-dated), each linked to the recurring bill it pays |
+| Credit card transactions | Kroger, Target, Amazon, Costco, dining, gas, Apple; last month and this month to date |
+| Budget allocations | 11 category budgets, assigned for last month and this month |
+| Pending card charges | 3 not-yet-posted Chase charges, shown with a "pending" badge |
+| Wish List | New laptop (pay in full or 0% for 12 months) and Patio grill, $1,500 cushion |
+| Adventures | Points wallet (Chase UR, United, Hyatt), transfer partners, and a "Holiday beach trip" |
 
 ### Monthly Budget Summary (Demo)
 
@@ -152,7 +155,11 @@ The seed script is at [scripts/seed_demo.py](../scripts/seed_demo.py). To change
 python scripts/seed_demo.py
 ```
 
-Because the script deletes the existing `demo` user before re-seeding, changes take effect immediately on the next run.
+Re-seed into a fresh file so nothing from an older demo lingers:
+
+```bash
+rm -f data/demo.db && DATABASE_URL="sqlite:///./data/demo.db" python scripts/seed_demo.py
+```
 
 ---
 
@@ -182,4 +189,4 @@ Transaction dates are generated relative to today — last month and this month
 in December works the same as seeding it in August.
 
 Every screenshot in the README and on the docs site is captured from exactly
-this dataset.
+this dataset, with balances shown (the eye icon in the sidebar).

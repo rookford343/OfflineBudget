@@ -57,6 +57,27 @@ Day-by-day balance projection, credit cards due, and planned one-offs.
 
 ![Forecast](images/forecast.png)
 
+### Transactions
+
+Checking and every card in one view. Charges your card issuer still lists as
+pending carry a **pending** badge and drop off once they post.
+
+![Transactions](images/transactions.png)
+
+### Wish List
+
+Ranked purchases with payment options, and the earliest date your forecast
+can take each one.
+
+![Wish List](images/wish-list.png)
+
+### Adventures
+
+Trips priced in cash and points, with transfer suggestions from your points
+wallet.
+
+![Adventures](images/adventures.png)
+
 ---
 
 ## The ideas behind it
