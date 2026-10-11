@@ -465,14 +465,14 @@ reports fresh numbers:
 
 - **Household Snapshot**: Spendable this week, Safety Margin, and the lowest
   projected balance in the next three months.
-- **Spending this month**: total spent since the 1st, spending by category
-  (highest first) and your top merchants. These are the same numbers as the
-  Dashboard's digest card, just over the month instead of the week.
 - **Checking Accounts**: each balance and when its last transaction posted.
 - **Upcoming (next 7 days)**: bills and income due this week, using a real
   bill amount when you've entered one.
 - **Credit Cards**: balance, the statement payoff coming up, and spending
   since the statement closed.
+- **Spending this month**: total spent since the 1st, spending by category
+  (highest first) and your top merchants. These are the same numbers as the
+  Dashboard's digest card, just over the month instead of the week.
 - **Weekly Digest**: on your chosen digest day only, the past seven days'
   spending plus a warning if the balance is projected to dip below your
   threshold.
