@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, cast, String
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from backend import models
 from backend import schemas
@@ -274,7 +274,6 @@ def spending_by_category(
     categories = db.query(models.Category).filter(
         models.Category.user_id == user.id,
     ).all()
-    cat_map = {c.id: c for c in categories}
 
     cards = db.query(models.CreditCard).filter(
         models.CreditCard.user_id == user.id,
@@ -455,8 +454,6 @@ def spending_by_card(
             continue
         if t.category_id:
             sub_totals[t.category_id] = sub_totals.get(t.category_id, Decimal("0")) + t.amount
-
-    cat_map = {c.id: c for c in categories}
     top_categories = [c for c in categories if c.parent_id is None and c.type == "expense"]
     result: list[schemas.SpendingTopLevel] = []
 
@@ -844,7 +841,6 @@ def spending_sankey(
         nodes.append(schemas.SankeyNode(id=f"expense:{name}", name=name, type="expense"))
 
     # Total income pool node that aggregates all income
-    total_income = sum(income_totals.values(), Decimal("0"))
     if income_totals and expense_totals:
         nodes.append(schemas.SankeyNode(id="income:__total__", name="Total Income", type="income_total"))
         for name, amount in income_totals.items():

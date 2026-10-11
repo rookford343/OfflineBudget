@@ -1,5 +1,6 @@
 """Request audit logging middleware."""
 from __future__ import annotations
+import logging
 import time
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -7,6 +8,8 @@ from starlette.responses import Response
 from backend.auth import decode_token
 from backend.database import SessionLocal
 from backend import models
+
+logger = logging.getLogger(__name__)
 
 # Paths to skip logging entirely
 _SKIP_PATHS = {"/health", "/docs", "/redoc", "/openapi.json"}
@@ -67,9 +70,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
                 if body_bytes:
                     text = body_bytes.decode("utf-8", errors="replace")
                     body_summary = text[:200] if len(text) > 200 else text
-            except Exception:
-                pass
+            except Exception:  # noqa: BLE001 -- an unreadable body only costs the summary
+                logger.warning("Audit log could not read the request body for %s", request.url.path)
 
+        db = None
         try:
             db = SessionLocal()
             log_entry = models.AuditLog(
@@ -83,9 +87,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
             )
             db.add(log_entry)
             db.commit()
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 -- auditing must never fail the request it records
+            logger.warning("Audit log write failed for %s %s: %s", request.method, request.url.path, exc)
         finally:
-            db.close()
+            if db is not None:
+                db.close()
 
         return response

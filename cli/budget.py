@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import typer
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional

@@ -7,12 +7,31 @@
 # regression tests that would have caught it didn't exist yet AND nothing
 # forced the suite to run before code shipped. This is the second half of
 # that fix: the tests alone don't help if nobody has to run them.
+#
+# It also re-runs the commit-time lint over the whole tree (a commit can skip
+# its hook), imports the app (an "unused import" autofix once broke a router
+# that imported through another module), and enforces the coverage floor in
+# backend/.coveragerc.
 repo_root=$(git rev-parse --show-toplevel) || exit 1
-echo "Running backend test suite before push..."
+py="$repo_root/.venv/bin/python"
+
+echo "Lint (ruff: security + bugs)..."
+if ! (cd "$repo_root" && "$repo_root/.venv/bin/ruff" check .); then
+  echo "BLOCKED: ruff findings. Fix them before pushing." >&2
+  exit 1
+fi
+
+echo "Import check..."
+if ! (cd "$repo_root" && "$py" -c "import backend.main, cli.budget"); then
+  echo "BLOCKED: the app no longer imports." >&2
+  exit 1
+fi
+
+echo "Backend tests with coverage floor..."
 cd "$repo_root/backend" || exit 1
-if ! python3 -m pytest -q; then
+if ! "$py" -m pytest -q --cov --cov-report=term:skip-covered; then
   echo "" >&2
-  echo "BLOCKED: backend tests are failing. Fix them, or push with --no-verify if you're sure." >&2
+  echo "BLOCKED: tests failing or coverage under the floor in backend/.coveragerc. Push with --no-verify only if you're sure." >&2
   exit 1
 fi
 exit 0

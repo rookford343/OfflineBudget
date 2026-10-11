@@ -1,5 +1,5 @@
 """CRUD for user-defined transaction categorization rules."""
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user

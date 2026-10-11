@@ -48,7 +48,7 @@ try:
     user.hashed_password = hash_password(new_password)
     if not user.is_active:
         user.is_active = True
-        print(f"Note: account was inactive — re-activated")
+        print("Note: account was inactive — re-activated")
     db.commit()
     print(f"Password reset for '{username}'")
 finally:

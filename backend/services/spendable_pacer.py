@@ -18,7 +18,6 @@ from decimal import Decimal
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from backend import models
-from backend.services.card_matching import card_matches_description
 from backend.services.spending_helpers import NOT_SAVINGS, is_card_payment
 
 
@@ -39,7 +38,6 @@ _EXCLUDED_CATEGORY_NAMES = ("Groceries", "Savings")
 # Spending page and the weekly email -- which read through spending_helpers --
 # never got this exclusion and counted card payoffs and transfers as spend.
 from backend.services.spending_helpers import (  # noqa: E402
-    looks_like_internal_transfer as _looks_like_internal_transfer,
     is_real_checking_spend,
 )
 

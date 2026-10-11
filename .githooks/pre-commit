@@ -17,4 +17,47 @@ if [ -n "$blocked" ]; then
   echo "This repo is PUBLIC. If one of these is genuinely safe, commit with --no-verify." >&2
   exit 1
 fi
-exit 0
+
+repo_root=$(git rev-parse --show-toplevel) || exit 1
+added=$(git diff --cached -U0 --diff-filter=ACM)
+fail=0
+
+# Private key material (the pre-commit-hooks detect-private-key check). The
+# pattern is assembled from parts so this file never contains the phrase it
+# searches for.
+key_marker="PRIV""ATE KEY"
+if printf '%s\n' "$added" | grep -qE "^\+.*BEGIN ([A-Z]+ )?$key_marker"; then
+  echo "BLOCKED: a private key is being committed." >&2
+  fail=1
+fi
+
+# Unresolved merge conflict markers.
+if printf '%s\n' "$added" | grep -qE '^\+(<{7} |>{7} |={7}$)'; then
+  echo "BLOCKED: unresolved merge conflict markers are staged." >&2
+  fail=1
+fi
+
+# Large files (over 1 MB): fetched data and archives belong outside history.
+for f in $staged; do
+  [ -f "$f" ] || continue
+  size=$(wc -c < "$f" | tr -d ' ')
+  if [ "$size" -gt 1048576 ]; then
+    echo "BLOCKED: $f is $size bytes (limit 1 MB)." >&2
+    fail=1
+  fi
+done
+
+# Security and bug lint on staged Python (ruff.toml: Bandit S rules + Pyflakes).
+py=$(printf '%s\n' "$staged" | grep -E '\.py$')
+if [ -n "$py" ]; then
+  ruff="$repo_root/.venv/bin/ruff"
+  if [ ! -x "$ruff" ]; then
+    echo "BLOCKED: ruff is not installed. Run: .venv/bin/pip install -r backend/requirements-dev.txt" >&2
+    fail=1
+  elif ! (cd "$repo_root" && printf '%s\n' $py | xargs "$ruff" check); then
+    echo "BLOCKED: fix the ruff findings above. Never silence an S rule without a reason on the same line." >&2
+    fail=1
+  fi
+fi
+
+exit $fail

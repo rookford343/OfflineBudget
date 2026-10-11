@@ -496,7 +496,7 @@ def test_an_estimated_payoff_can_still_be_the_floor(db_session):
     cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="influx")
     account = _checking(db_session, user, balance="20000.00")
-    card = _card(db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
+    _card(db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
                  balance_due=Decimal("1000.00"), current_balance=Decimal("1000.00"),
                  next_payment_date=cycles.cycle1_due,
                  monthly_spend_estimate=Decimal("15000.00"))
@@ -906,7 +906,7 @@ def test_the_cycle_after_the_carried_cycle_uses_fresh_pending_charges(db_session
     cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="secondhop")
     account = _checking(db_session, user, balance="60000.00")
-    card = _card(
+    _card(
         db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),
@@ -1054,7 +1054,7 @@ def test_the_second_hop_still_works_when_the_first_cycle_used_the_stale_payment_
     cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="secondhopstalemerge")
     account = _checking(db_session, user, balance="60000.00")
-    card = _card(
+    _card(
         db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from backend import models
 from backend.services.summary_generator import _stale_bank_connections, generate_daily_summary

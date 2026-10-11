@@ -1,5 +1,4 @@
 from datetime import date
-from decimal import Decimal
 from unittest.mock import patch
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.explain import replay, children_consistent

@@ -12,7 +12,7 @@ from backend.dependencies import get_current_user, get_db
 from backend.routers import credit_cards as credit_cards_router
 from backend.services.bank_sync_service import sync_connection
 from backend.services.simplefin_client import SimpleFinTransaction
-from tests.test_bank_sync_service import _make_card_connection, _make_connection
+from tests.test_bank_sync_service import _make_card_connection
 
 
 def _txn(id_, amount, day, *, pending, description="SHOP"):

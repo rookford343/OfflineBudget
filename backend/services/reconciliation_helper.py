@@ -71,7 +71,6 @@ def compute_reconciliation(
         models.CreditCard.user_id == user_id,
         models.CreditCard.is_active == True,
     ).all()
-    card_by_id = {c.id: c for c in all_cards}
 
     linked_txns = [t for t in txns if t.recurring_item_id is not None]
     unlinked_txns = [t for t in txns if t.recurring_item_id is None]

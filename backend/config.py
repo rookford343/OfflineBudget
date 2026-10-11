@@ -1,9 +1,19 @@
+import logging
+import secrets
+
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+# The old default, published in this public repo: anyone could sign tokens
+# with it, so it is treated exactly like a missing secret.
+_PUBLISHED_DEFAULT_SECRET = "dev-secret-change-in-production"  # noqa: S105 -- the value being refused, not used
 
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./data/budget.db"
-    JWT_SECRET: str = "dev-secret-change-in-production"
+    JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_DAYS: int = 7
     ALLOWED_ORIGINS: str = "*"
@@ -42,6 +52,17 @@ class Settings(BaseSettings):
     APP_ENCRYPTION_KEY: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator("JWT_SECRET")
+    @classmethod
+    def _never_a_guessable_secret(cls, value: str) -> str:
+        """A missing or published secret would let anyone forge a login token.
+        A random one is safe; the cost is that sessions end on restart until
+        JWT_SECRET is set in .env."""
+        if value and value != _PUBLISHED_DEFAULT_SECRET:
+            return value
+        logger.warning("JWT_SECRET is not set; using a random one. Set it in .env to keep logins across restarts.")
+        return secrets.token_urlsafe(48)
 
     @property
     def allowed_origins_list(self) -> list[str]:

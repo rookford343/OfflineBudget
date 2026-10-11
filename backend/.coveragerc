@@ -1,0 +1,14 @@
+# Read by pytest-cov in the pre-push hook. Tests are excluded so they can't
+# inflate the figure; the floor sits just under today's measured coverage
+# and only ever moves up.
+[run]
+branch = True
+source = .
+omit =
+    tests/*
+    */__init__.py
+
+[report]
+show_missing = False
+# Measured 80% on 2026-10-10. Raise it as coverage grows; never lower it.
+fail_under = 79

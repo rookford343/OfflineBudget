@@ -414,11 +414,7 @@ def compute_budget_snapshot(
     # budget. Under "save_monthly" it leaves the pool, which is the default and
     # what reconciles to the user's sheet at -385.84.
     parts = leftover_parts(db, user, as_of, extra_items)
-    monthly_income = parts.income
-    monthly_expenses = parts.expenses
     savings_budget = parts.savings_budget
-    groceries_budget = parts.groceries_budget
-    committed_savings = parts.committed_savings
     leftover = parts.leftover
 
     active_cards = db.query(models.CreditCard).filter(
@@ -623,7 +619,7 @@ def compute_budget_snapshot(
         for c, amount in card_new_spending
     ]
     low_note = (
-        f"Lowest projected checking balance in the next 3 months"
+        "Lowest projected checking balance in the next 3 months"
         + (f", on {quarter_min_date:%b %-d}" if quarter_min_date else "")
         + ". Excludes the already-scheduled card payoff."
     )

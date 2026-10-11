@@ -12,7 +12,6 @@ for its bill_actuals dict.
 from datetime import date
 from decimal import Decimal
 from unittest.mock import patch
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from backend import models

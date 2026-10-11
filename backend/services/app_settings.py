@@ -65,7 +65,7 @@ ENV_ONLY_KEYS = [
     "APP_ENCRYPTION_KEY",
 ]
 
-SECRET_PLACEHOLDER = "********"
+SECRET_PLACEHOLDER = "********"  # noqa: S105 -- the mask shown instead of a secret, not a secret
 
 
 def _coerce(raw: str | None, typ: type):
