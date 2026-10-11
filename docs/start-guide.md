@@ -59,10 +59,24 @@ This starts:
 
 1. Open `http://localhost:5173` in your browser
 2. Click **Create Account**
-3. Enter a username, password, and your name
-4. Click **Create Account** — you'll land on the Dashboard with a Quick Start wizard
+3. Enter a username, a password (at least 6 characters), and your name
+4. Click **Create Account**. You'll land on the Dashboard with a Quick Start
+   wizard. This first account is the admin.
 
-> Other users can create their own accounts by visiting the same URL and clicking **Create Account**.
+**Sign-up closes after the first account.** The app listens on your whole home
+network, so once one account exists, **Create Account** is refused for
+everyone. Add the rest of your household yourself in **Settings → Household**:
+
+| Role | Can do |
+|------|--------|
+| **Admin** | Everything, including adding household members and resetting their passwords |
+| **View Only** | See every page, but change nothing. They can still change their own password |
+
+Link a household member to your account and they see *your* budget; leave
+them unlinked and they get a budget of their own.
+
+> More than ten sign-in attempts in 15 minutes locks that username out of signing in from
+> that device for 15 minutes.
 
 ---
 
@@ -142,7 +156,11 @@ Add each bill with its day-of-month. Examples:
 | Car Payment | $501 | 17 |
 
 ### Step 5 — Add Credit Cards (Credit Cards page)
-- Enter current balance and minimum payment for each card
+- Enter the current balance, statement day and due day for each card
+- **Statement balance (balance due)**: the last statement's total, which the
+  forecast pays on the due date
+- **Pending Charges**: charges that haven't posted yet. Bank sync fills this
+  in for issuers that report pending charges; otherwise type it yourself
 
 ### Step 6 — View Your Forecast (Forecast page)
 - Select your checking account
@@ -440,6 +458,79 @@ Both are optional and both are configured in the app rather than in files.
    along on.
 5. Hit **Send test email**. A saved form proves nothing about whether mail
    actually leaves your machine.
+
+Password-reset emails and the **Send test email** button on your Profile use
+these same settings, so one SMTP setup covers every email the app sends.
+
+### What the daily email contains
+
+The daily report arrives at 7:15am by default, right after the morning bank sync, so it
+reports fresh numbers:
+
+- **Household Snapshot**: Spendable this week, Safety Margin, and the lowest
+  projected balance in the next three months.
+- **Spending this month**: total spent since the 1st, spending by category
+  (highest first) and your top merchants. These are the same numbers as the
+  Dashboard's digest card, just over the month instead of the week.
+- **Checking Accounts**: each balance and when its last transaction posted.
+- **Upcoming (next 7 days)**: bills and income due this week, using a real
+  bill amount when you've entered one.
+- **Credit Cards**: balance, the statement payoff coming up, and spending
+  since the statement closed.
+- **Weekly Digest**: on your chosen digest day only, the past seven days'
+  spending plus a warning if the balance is projected to dip below your
+  threshold.
+
+### Connect your bank (optional)
+
+Bank sync uses [SimpleFIN Bridge](https://beta-bridge.simplefin.org/)
+(about $15/year, read-only). SimpleFIN only reads your accounts; it can't
+move money.
+
+1. Sign up at SimpleFIN Bridge, connect your bank there, and copy a
+   **setup token**.
+2. In **Settings → Accounts & Bank Sync → Bank Connections**, paste the token.
+3. Link each SimpleFIN account to the matching account or credit card in the
+   app.
+
+After that, everything is automatic:
+
+| When | What syncs |
+|------|-----------|
+| **7:00am** | Every linked account and card: posted transactions, balances, and card pending charges |
+| **3:17pm** | Credit cards only, to refresh pending charges |
+| **Sync Now** | Everything, whenever you press it |
+
+SimpleFIN asks apps to stay under **24 requests a day**. Each linked account
+or card costs one request per sync, so the schedule above uses about six a day
+for a typical household (checking, savings and two cards). That leaves room
+for a few **Sync Now** presses. SimpleFIN itself refreshes from your bank
+roughly once a day, so syncing more often rarely finds anything new.
+
+Imported transactions are categorized by your rules and linked to the
+recurring bill they pay, so the forecast stops projecting that bill.
+
+### Pending card charges
+
+Card issuers that report pending charges (Chase does) send them along with
+each sync:
+
+- They appear in **Transactions** (the All and Credit Cards tabs) with a
+  **pending** badge. They can't be edited or categorized yet.
+- Every sync replaces the whole pending list. When a charge posts, it drops
+  off the list and comes in as a normal transaction, so nothing is ever
+  counted twice.
+- The card's **Pending Charges** figure fills in automatically from that list,
+  and the forecast and Safety Margin plan for it.
+- Pending charges are never counted as spending in Spending, budgets or the
+  emails until they post.
+
+Some issuers never report pending charges (Apple Card doesn't). For those
+cards, type the figure on the **Credit Cards** page; it clears itself once
+new posted activity syncs.
+
+> SimpleFIN can lag your card app by a few hours to a day, so the pending total
+> in OfflineBudget may trail what your issuer's app shows.
 
 > The SMTP password is encrypted before storage and is never sent back to the
 > browser. That requires `APP_ENCRYPTION_KEY` in your `.env` — generate one

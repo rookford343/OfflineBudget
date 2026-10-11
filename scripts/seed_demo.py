@@ -237,7 +237,7 @@ for r in recurring_items:
     db.add(ri)
     ri_objects.append(ri)
 
-db.flush()   # ensure IDs are assigned before paycheck_ri lookup below
+db.flush()   # ensure IDs are assigned before the recurring_by_name lookup below
 db.commit()
 print(f"✓ Created {len(ri_objects)} recurring items")
 
@@ -283,11 +283,18 @@ actuals = [
     (_d(2, 31), Decimal("3600.00"),  "Paycheck 2",             checking.id, income_id),
 ]
 
-# Map paycheck names to their recurring item objects for linking
-paycheck_ri = {ri.name: ri for ri in ri_objects if ri.name.startswith("Paycheck")}
+# Link each posted row to the recurring item it settles, the way bank-sync
+# import does; an unlinked row would leave the bill's forecast copy showing
+# as "pending" alongside it.
+recurring_by_name = {ri.name: ri for ri in ri_objects}
+
+# Only what has already happened: "this month" rows dated after today would
+# be posted transactions from the future, inflating Spent So Far.
+actuals = [a for a in actuals if a[0] <= _TODAY]
+card_txns_cutoff = _TODAY
 
 for dt, amount, desc, acc_id, cat_id in actuals:
-    ri_id = paycheck_ri[desc].id if desc in paycheck_ri else None
+    ri_id = recurring_by_name[desc].id if desc in recurring_by_name else None
     db.add(models.Transaction(
         user_id=user.id, account_id=acc_id, category_id=cat_id,
         date=dt, amount=amount, description=desc, is_actual=True, source="manual",
@@ -295,7 +302,7 @@ for dt, amount, desc, acc_id, cat_id in actuals:
     ))
 
 db.commit()
-print(f"✓ Created {len(actuals)} checking transactions (Apr–May 2026)")
+print(f"✓ Created {len(actuals)} checking transactions (last month and this month to date)")
 
 # ─── 7. Credit Card Transactions ─────────────────────────────────────────────
 # ~$2,200/month discretionary on Chase Sapphire (groceries, dining, gas, shopping)
@@ -343,6 +350,8 @@ card_txns = [
     (apple.id, _d(2, 22), Decimal("29.99"),   "Apple Arcade Annual",   subscriptions_id),
 ]
 
+card_txns = [t for t in card_txns if t[1] <= card_txns_cutoff]
+
 for card_id, dt, amount, merchant, cat_id in card_txns:
     db.add(models.CreditCardTransaction(
         card_id=card_id, user_id=user.id, category_id=cat_id,
@@ -350,10 +359,10 @@ for card_id, dt, amount, merchant, cat_id in card_txns:
     ))
 
 db.commit()
-print(f"✓ Created {len(card_txns)} credit card transactions (Apr–May 2026)")
+print(f"✓ Created {len(card_txns)} credit card transactions (last month and this month to date)")
 
 # ─── 8. Budget Allocations ────────────────────────────────────────────────────
-# month=0 applies to all months; reflects committed + typical discretionary spend
+# Reflects committed + typical discretionary spend
 
 budget_allocs = [
     (mortgage_id,      2_300),   # ~5% cushion over actual
@@ -369,17 +378,94 @@ budget_allocs = [
     (other_id,           200),
 ]
 
+# Assigned per month, the way the Budget page does it: with carry-forward off
+# (the default), a month=0 row is ignored for discretionary categories, so a
+# demo seeded that way showed almost nothing budgeted.
 for cat_id, amount in budget_allocs:
     if cat_id is None:
         continue
-    db.add(models.BudgetAllocation(
-        user_id=user.id, category_id=cat_id,
-        year=2026, month=0,
-        budgeted_amount=Decimal(str(amount)),
-    ))
+    for month_start in (_month_start(1), _month_start(0)):
+        db.add(models.BudgetAllocation(
+            user_id=user.id, category_id=cat_id,
+            year=month_start.year, month=month_start.month,
+            budgeted_amount=Decimal(str(amount)),
+        ))
 
 db.commit()
 print(f"✓ Created {len(budget_allocs)} budget allocations")
+
+# ─── 9. Pending card charges ─────────────────────────────────────────────────
+# What the issuer lists as not-yet-posted; bank sync replaces these on every
+# run. Shown in Transactions with a "pending" badge; never counted as spend.
+from datetime import datetime as _datetime, timedelta as _timedelta
+pending_demo = [
+    ("demo-p1", _TODAY - _timedelta(days=1), Decimal("64.18"), "Kroger"),
+    ("demo-p2", _TODAY - _timedelta(days=1), Decimal("23.40"), "Starbucks"),
+    ("demo-p3", _TODAY, Decimal("48.95"), "Shell Gas Station"),
+]
+for ext, dt, amount, merchant in pending_demo:
+    db.add(models.CardPendingTransaction(
+        user_id=user.id, card_id=chase.id, external_id=ext, date=dt,
+        amount=amount, merchant=merchant, synced_at=_datetime.utcnow(),
+    ))
+chase.pending_charges = sum((a for _, _, a, _ in pending_demo), Decimal("0"))
+chase.pending_charges_updated_at = _datetime.utcnow()
+db.commit()
+print(f"✓ Created {len(pending_demo)} pending card charges")
+
+# ─── 10. Wish List ───────────────────────────────────────────────────────────
+db.add(models.WishSettings(user_id=user.id, cushion=Decimal("1500.00")))
+wishes = [
+    ("New laptop", Decimal("2499.00"), Decimal("600.00"), [
+        ("Pay in full", models.WishMethod.full_checking, None, None, None),
+        ("Card, 0% for 12 mo", models.WishMethod.financed, chase.id, 12, Decimal("0")),
+    ]),
+    ("Patio grill", Decimal("899.00"), Decimal("0"), [
+        ("Pay in full on card", models.WishMethod.full_card, chase.id, None, None),
+    ]),
+]
+for rank, (name, price, trade_in, options) in enumerate(wishes):
+    sc = models.ForecastScenario(user_id=user.id, name=name)
+    db.add(sc)
+    db.flush()
+    item = models.WishItem(user_id=user.id, scenario_id=sc.id, rank=rank, price=price, trade_in_value=trade_in)
+    db.add(item)
+    db.flush()
+    for order, (label, method, card_id, months, apr) in enumerate(options):
+        db.add(models.WishOption(user_id=user.id, wish_item_id=item.id, label=label, method=method,
+                                 card_id=card_id, months=months, apr=apr, sort_order=order))
+db.commit()
+print(f"✓ Created {len(wishes)} wish list items")
+
+# ─── 11. Adventures ──────────────────────────────────────────────────────────
+ur = models.LoyaltyProgram(user_id=user.id, name="Chase Ultimate Rewards", kind=models.LoyaltyKind.bank, balance=85000)
+airline = models.LoyaltyProgram(user_id=user.id, name="United MileagePlus", kind=models.LoyaltyKind.airline, balance=12000, sort_order=1)
+hotel = models.LoyaltyProgram(user_id=user.id, name="World of Hyatt", kind=models.LoyaltyKind.hotel, balance=8000, sort_order=2)
+db.add_all([ur, airline, hotel])
+db.flush()
+db.add_all([
+    models.TransferPartner(user_id=user.id, from_program_id=ur.id, to_program_id=airline.id),
+    models.TransferPartner(user_id=user.id, from_program_id=ur.id, to_program_id=hotel.id),
+])
+trip_start = _month_start(0).replace(day=1) + _timedelta(days=75)
+trip = models.Trip(user_id=user.id, name="Holiday beach trip", destination="Gulf Shores",
+                   start_date=trip_start, end_date=trip_start + _timedelta(days=5), travelers=4,
+                   default_card_id=chase.id)
+db.add(trip)
+db.flush()
+db.add_all([
+    models.TripItem(trip_id=trip.id, user_id=user.id, category=models.TripCategory.getting_there,
+                    name="Flights", pricing=models.TripPricing.per_person, payment=models.TripPayment.points,
+                    points_program_id=airline.id, points_price=15000, cash_copay=Decimal("5.60")),
+    models.TripItem(trip_id=trip.id, user_id=user.id, category=models.TripCategory.staying,
+                    name="Beach condo", pricing=models.TripPricing.per_night, unit_cash=Decimal("189.00"),
+                    payment=models.TripPayment.cash, card_id=chase.id, sort_order=1),
+    models.TripItem(trip_id=trip.id, user_id=user.id, category=models.TripCategory.daily,
+                    name="Food & fun", pricing=models.TripPricing.per_day, unit_cash=Decimal("120.00"),
+                    payment=models.TripPayment.cash, sort_order=2),
+])
+db.commit()
+print("✓ Created points programs and one planned adventure")
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 

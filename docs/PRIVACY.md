@@ -16,7 +16,7 @@ optional and all off by default:
 
 | Destination | When | What it carries |
 |---|---|---|
-| SimpleFIN Bridge | Only if you connect a bank | Your access token; returns accounts + transactions |
+| SimpleFIN Bridge | Only if you connect a bank | Your access token; returns accounts, posted transactions, and pending card charges |
 | SimpleFIN Bridge | Only if you connect a bank | One-time setup-token claim |
 | Your SMTP server | Only if you configure email | The daily summary email |
 
@@ -32,8 +32,9 @@ Verify it yourself:
 grep -rn "httpx\.\|requests\.\|smtplib\|urlopen" backend --include="*.py" | grep -v tests
 ```
 
-That should return three lines, in `simplefin_client.py` and
-`email_service.py`.
+The three calls are `httpx.post` (setup-token claim) and `httpx.get` (sync)
+in `simplefin_client.py`, and `smtplib.SMTP` in `email_service.py`. The other
+matching lines are their error handlers and the `smtplib` import.
 
 ---
 
@@ -46,6 +47,11 @@ forecasts, and your user record.
 **Adventures:** trips, checklist items, loyalty-program balances and transfer partners you enter. Stored only in the local database; nothing is looked up online.
 
 **Wish List:** wishes, prices, trade-in values and payment options you enter. Stored only in the local database.
+
+**Pending card charges:** if you connect a bank, the charges your card issuer
+currently lists as pending (date, merchant, amount). Each sync replaces the
+whole list, so a charge is deleted from it as soon as it posts; nothing about
+pending charges is kept as history.
 
 **Encrypted at rest** (Fernet, keyed by `APP_ENCRYPTION_KEY`):
 
@@ -82,6 +88,9 @@ see your financial data, so it's worth being precise:
   encrypts that, and stores it locally. The token is spent in the exchange.
 - Sync is **pull-only**. Nothing is written back to your bank, and the app
   never sees or stores your online-banking password.
+- The app asks SimpleFIN twice a day: every linked account at 7am, and credit
+  cards again at 3:17pm for pending charges, plus whenever you press
+  **Sync Now**.
 - Your budget data, categories, forecasts, and everything you enter in the
   app are never sent to SimpleFIN. The traffic is one-directional: you ask
   for transactions, they answer.
@@ -99,14 +108,14 @@ want it fully severed.
 
 The daily summary is sent through whatever SMTP server you configure — your
 own, or a provider like Gmail. That provider sees the email, which contains
-your checking balances, upcoming bills, month-to-date spending, credit-card
-balances and utilization, and on digest days your top spending categories and
-merchants.
+your checking balances, upcoming bills, this month's spending by category and
+your top merchants, and credit-card balances. On digest days it adds the past
+week's spending. Password-reset emails go through the same server.
 
 That is real financial detail leaving your machine. It goes only to the
 recipients you list, through the server you chose. Leave SMTP unconfigured
-and no email is ever sent — `send_email` returns immediately when no host is
-set.
+and no email is ever sent: every send checks for an SMTP host first and stops
+when there isn't one.
 
 ---
 
