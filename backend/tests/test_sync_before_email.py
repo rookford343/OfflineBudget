@@ -29,7 +29,7 @@ def test_summary_skips_the_sync_when_it_already_succeeded_today(db_session):
     with patch.object(main, "_run_bank_sync", side_effect=lambda: calls.append("sync")), \
          patch("backend.database.SessionLocal", return_value=db_session), \
          patch.object(db_session, "close", lambda: None), \
-         patch("backend.services.scheduler_state.succeeded_today", return_value=True):
+         patch("backend.services.scheduler_state.succeeded_today", side_effect=lambda db, job, now=None: job == "bank_sync"):
         main._send_daily_summaries()
     assert calls == []
 
@@ -106,7 +106,7 @@ def test_a_second_active_user_resolving_to_the_same_recipient_is_not_emailed_twi
 
     with patch("backend.database.SessionLocal", return_value=db_session), \
          patch.object(db_session, "close", lambda: None), \
-         patch("backend.services.scheduler_state.succeeded_today", return_value=True), \
+         patch("backend.services.scheduler_state.succeeded_today", side_effect=lambda db, job, now=None: job == "bank_sync"), \
          patch("backend.services.summary_generator.generate_daily_summary", _fake_generate), \
          patch("backend.services.email_service.send_email_via", _capture):
         main._send_daily_summaries()

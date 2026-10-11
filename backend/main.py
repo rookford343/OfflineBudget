@@ -117,6 +117,18 @@ def _send_daily_summaries_locked() -> None:
     #
     # Skipped when the day's sync already succeeded, so the normal 5am-then-7am
     # path costs nothing extra.
+    # At most one scheduled report a day. The cron trigger, its misfire
+    # catch-up and the sweep can each reach this function; whichever runs
+    # second must not mail the household a duplicate. ("Send now" in Settings
+    # has its own path and is unaffected.)
+    db = SessionLocal()
+    try:
+        if scheduler_state.succeeded_today(db, "daily_summary"):
+            logger.info("Daily summary: already sent today, skipping")
+            return
+    finally:
+        db.close()
+
     db = SessionLocal()
     try:
         if not scheduler_state.succeeded_today(db, "bank_sync"):
@@ -305,7 +317,9 @@ def _scheduler_sweep() -> None:
             # A sync is mid-run in another thread (the cron job); sending now
             # would email pre-sync numbers. The next sweep picks it up.
             logger.info("Scheduler sweep: bank sync in progress, holding daily_summary")
-        elif scheduler_state.due_for_retry(db, "daily_summary", target_hour=summary_hour):
+        elif scheduler_state.due_for_retry(
+            db, "daily_summary", target_hour=summary_hour, target_minute=_DAILY_SUMMARY_MINUTE,
+        ):
             logger.info("Scheduler sweep: daily_summary missed today, retrying")
             _send_daily_summaries()
         # Start-of-month forecast for the Dashboard's Balance Flow card. Cheap
