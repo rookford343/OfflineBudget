@@ -58,9 +58,14 @@ def record_failure(db: Session, job_name: str, error: str) -> None:
     _write(db, job_name, lambda run: setattr(run, "last_error", error[:500]))
 
 
-def due_for_retry(db: Session, job_name: str, *, target_hour: int, now: datetime | None = None) -> bool:
-    """True when this job has not succeeded today AND today's scheduled hour
-    has already passed -- the condition the sweep retries on.
+def due_for_retry(
+    db: Session, job_name: str, *, target_hour: int, target_minute: int = 0, now: datetime | None = None,
+) -> bool:
+    """True when this job has not succeeded today AND today's scheduled time
+    (hour and minute) has already passed -- the condition the sweep retries on.
+
+    The minute matters: checking the hour alone let a 7:05 sweep send the
+    7:15 email early, and the 7:15 trigger then sent it again.
 
     Deliberately does not also require a prior attempt: a job whose trigger
     never fired at all (process asleep past misfire_grace_time's window, or
@@ -77,7 +82,7 @@ def due_for_retry(db: Session, job_name: str, *, target_hour: int, now: datetime
     # comparing a UTC timestamp's .date() against a local date() silently
     # returns the wrong answer for the whole UTC-offset window each night.
     now = now or datetime.now()
-    if now.hour < target_hour:
+    if (now.hour, now.minute) < (target_hour, target_minute):
         return False
     try:
         run = db.query(models.SchedulerRun).filter_by(job_name=job_name).first()
