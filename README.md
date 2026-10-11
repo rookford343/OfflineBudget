@@ -422,12 +422,12 @@ to the UI without an edit.
 separate from your login email — the people who read it don't need accounts.
 Comma-separate addresses.
 
-**The daily summary** includes the Household Snapshot, **Spending this
-month** (total, spending by category and top merchants since the 1st, the
-same numbers as the Dashboard's digest card), checking balances, upcoming
-bills for the next 7 days with real dates, and per-card balances. On the
-configured digest day it also carries the past week's spending by category,
-top merchants, and a balance-risk warning. Password-reset emails use the same
+**The daily summary** opens with the Household Snapshot, checking balances,
+upcoming bills for the next 7 days with real dates, and per-card balances,
+then closes with the spending breakdowns: **Spending this month** (total,
+spending by category and top merchants since the 1st, the same numbers as
+the Dashboard's digest card) and, on the configured digest day, the past
+week's spending by category, top merchants, and a balance-risk warning. Password-reset emails use the same
 SMTP settings.
 
 **Reliability.** Both the daily email and the bank sync self-heal when the

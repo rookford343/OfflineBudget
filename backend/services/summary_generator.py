@@ -363,10 +363,10 @@ def generate_daily_summary(
 
 {stale_html}
 {household_html}
-{month_section_html}
 {_section("🏦", "Checking Accounts", f"<table style='width:100%;font-size:14px'>{acct_rows}</table>")}
 {_section("📅", "Upcoming (next 7 days)", f"<table style='width:100%;font-size:14px'>{upcoming_rows}</table>")}
 {_section("💳", "Credit Cards", f"<table style='width:100%;font-size:14px'>{card_rows}</table>")}
+{month_section_html}
 {weekly_html}
 <p style='color:#9ca3af;font-size:11px;margin-top:24px;text-align:center'>Sent by OfflineBudget</p>
 </div>
@@ -425,7 +425,6 @@ def generate_daily_summary(
     text = f"""OfflineBudget Daily Summary — {today.strftime("%B %-d, %Y")}
 {stale_text}
 {household_text}
-{month_section_text}
 CHECKING ACCOUNTS
 {acct_text}
 
@@ -434,6 +433,8 @@ UPCOMING BILLS (next 7 days)
 
 CREDIT CARDS
 {card_text}
+
+{month_section_text}
 {weekly_text}"""
     return html, text
 
