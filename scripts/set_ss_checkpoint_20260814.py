@@ -10,8 +10,7 @@ still $1,346.83 under the $184,500 wage base -- the crossing has not
 happened yet and lands on the 8/31 paycheck, not 8/14.
 
 Idempotent. Run from project root:
-    source .venv/bin/activate
-    python scripts/set_ss_checkpoint_20260814.py [--apply]
+    uv run python scripts/set_ss_checkpoint_20260814.py [--apply]
 """
 import sys, os, argparse
 from datetime import date, datetime

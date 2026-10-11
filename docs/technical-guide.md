@@ -231,11 +231,34 @@ State rates are approximate effective rates for middle-income earners (not margi
 
 **Via the CLI (emergency):**
 ```bash
-source .venv/bin/activate
-python scripts/reset_password.py <username> <new_password>
+uv run python scripts/reset_password.py <username> <new_password>
 ```
 
 ---
+
+## Dependencies and supply chain
+
+Python dependencies are managed with [uv](https://docs.astral.sh/uv/):
+
+- `pyproject.toml` pins every direct dependency exactly; `uv.lock` pins every
+  transitive one and records a SHA-256 for each file. An install whose files
+  don't match the recorded hashes fails.
+- `[tool.uv] exclude-newer = "7 days"` is a cooldown: resolution ignores any
+  release younger than a week, so a hijacked upload has time to be caught
+  before it can reach this project.
+- Install with `uv sync --locked` (refuses a lockfile that doesn't match
+  `pyproject.toml`). Run anything with `uv run --locked`, never bare `pip`.
+- Add or upgrade a package with `uv add name==X.Y.Z`, then commit both files.
+  The pre-commit hook refuses a `pyproject.toml` change without its lockfile.
+- `.githooks/pre-push` runs `uv audit` and blocks the push if any locked
+  package has a known vulnerability or has been abandoned.
+- `Dockerfile.backend` pins both base images by digest and installs from the
+  lockfile with `uv sync --locked --no-dev`.
+
+`python-jose` was replaced by `PyJWT` on 2026-10-10. jose had an unpatched
+algorithm-confusion flaw (CVE-2026-85394) and pulled in `ecdsa` (an unpatched
+timing attack) and `rsa` (archived). Unused `plaid-python`, `alembic` and
+`aiosqlite` were removed at the same time.
 
 ## Bank Sync and Scheduled Jobs
 
@@ -313,7 +336,7 @@ the Transactions page.
 
 ## Cloud Migration (SQLite → PostgreSQL)
 
-1. Install PostgreSQL driver: `pip install psycopg2-binary`
+1. Add the PostgreSQL driver: `uv add psycopg2-binary` (pin it exactly, then commit `pyproject.toml` and `uv.lock`)
 2. Update `.env`: `DATABASE_URL=postgresql://user:pass@host:5432/budget`
 3. Run the app — SQLAlchemy auto-creates tables on startup
 4. Migrate existing data with `sqlite3` export + `psql` import if needed
@@ -325,9 +348,10 @@ No code changes are required — SQLAlchemy abstracts the dialect.
 ## Running Tests
 
 ```bash
-# Backend
-source .venv/bin/activate
-PYTHONPATH=. pytest tests/ -v
+# Backend (from backend/, so tests can import their helpers)
+cd backend && uv run --locked python -m pytest -q --cov && cd ..
+uv run --locked ruff check .        # Bandit security + Pyflakes
+uv audit --preview-features audit   # known-vulnerable or abandoned dependencies
 
 # Frontend type check
 cd frontend && npx tsc --noEmit

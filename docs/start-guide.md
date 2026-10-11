@@ -4,7 +4,8 @@
 
 | Tool | Version | Check |
 |------|---------|-------|
-| Python | 3.11+ | `python3 --version` |
+| Python | 3.11 | `python3 --version` (uv can install it: `uv python install 3.11`) |
+| uv | 0.11+ | `uv --version` (install: `brew install uv`) |
 | Node.js | 20+ | `node --version` |
 | bun | 1.0+ | `bun --version` |
 
@@ -16,13 +17,9 @@
 # Clone or copy the project
 cd /path/to/OfflineBudget
 
-# Create and activate Python virtual environment
-python3 -m venv .venv
-source .venv/bin/activate           # macOS/Linux
-# .venv\Scripts\activate            # Windows
-
-# Install Python dependencies
-pip install -r backend/requirements.txt
+# Install Python dependencies exactly as uv.lock pins them. Every file is
+# checked against its recorded SHA-256, and a stale lockfile is refused.
+uv sync --locked
 
 # Install frontend dependencies
 cd frontend && bun install && cd ..
@@ -208,23 +205,22 @@ After saving, go to **Tax** (Money → Tax in the sidebar) to see your full esti
 The CLI uses the same database as the web app — no server required.
 
 ```bash
-# Always run from the project root with the venv active
-source .venv/bin/activate
+# Always run from the project root; uv run uses the locked environment
 
 # Create a user (if not using the web UI)
-python cli/budget.py users create
+uv run python cli/budget.py users create
 
 # List accounts
-python cli/budget.py accounts list --username alice
+uv run python cli/budget.py accounts list --username alice
 
 # See quarterly forecast
-python cli/budget.py forecast quarters --username alice --account "Main Checking"
+uv run python cli/budget.py forecast quarters --username alice --account "Main Checking"
 
 # See a specific quarter
-python cli/budget.py forecast show --username alice --account "Main Checking" --quarter Q2-2026
+uv run python cli/budget.py forecast show --username alice --account "Main Checking" --quarter Q2-2026
 
 # List credit cards
-python cli/budget.py cards list --username alice
+uv run python cli/budget.py cards list --username alice
 ```
 
 ---
@@ -424,9 +420,9 @@ Click the **Uncommit** button on a committed wish. This removes exactly the rows
 ## Troubleshooting
 
 **Backend won't start — ImportError**
-Make sure you're running from the project root with the venv active:
+Make sure you're running from the project root and the environment matches the lockfile:
 ```bash
-source .venv/bin/activate
+uv sync --locked
 ./scripts/start.sh
 ```
 

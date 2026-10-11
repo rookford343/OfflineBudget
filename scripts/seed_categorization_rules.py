@@ -12,8 +12,7 @@ Patterns are drawn from the merchant strings actually present in this database,
 so each one earns its keep rather than being a generic guess.
 
 Run from project root:
-    source .venv/bin/activate
-    python scripts/seed_categorization_rules.py [--apply]
+    uv run python scripts/seed_categorization_rules.py [--apply]
 """
 import sys, os, argparse
 from collections import Counter

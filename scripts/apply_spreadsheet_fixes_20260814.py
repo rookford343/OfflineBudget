@@ -14,8 +14,7 @@ exceptions are called out in NOTES at the bottom -- places where the sheet is
 the thing that needs updating.
 
 Idempotent. Run from project root:
-    source .venv/bin/activate
-    python scripts/apply_spreadsheet_fixes_20260814.py [--apply]
+    uv run python scripts/apply_spreadsheet_fixes_20260814.py [--apply]
 """
 import sys, os, argparse
 from datetime import date, datetime

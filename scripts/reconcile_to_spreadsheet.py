@@ -10,8 +10,7 @@ sheet materially, this script prints a NOTE rather than silently overriding --
 those are cases for the user to update the sheet.
 
 Run from project root:
-    source .venv/bin/activate
-    python scripts/reconcile_to_spreadsheet.py [--apply]
+    uv run python scripts/reconcile_to_spreadsheet.py [--apply]
 """
 import sys, os, argparse
 from decimal import Decimal

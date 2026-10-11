@@ -7,10 +7,8 @@
 set -e
 cd "$(dirname "$0")/.."
 
-# Activate venv if it exists
-if [ -d ".venv" ]; then
-  source .venv/bin/activate
-fi
+# Install exactly what uv.lock pins (hash-checked); refuses a stale lockfile.
+uv sync --locked
 
 # Copy .env if it doesn't exist yet
 if [ ! -f ".env" ]; then
@@ -40,15 +38,15 @@ fi
 echo ""
 
 # Start backend in background
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload $SSL_BACKEND_ARGS &
+uv run --locked uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload $SSL_BACKEND_ARGS &
 BACKEND_PID=$!
 
 # Start frontend dev server
 cd frontend
 if [ -n "$SSL_FRONTEND_ARGS" ]; then
-  npm run dev -- --https &
+  bun run dev --https &
 else
-  npm run dev &
+  bun run dev &
 fi
 FRONTEND_PID=$!
 

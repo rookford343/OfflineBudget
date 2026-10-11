@@ -68,3 +68,49 @@ def test_audit_middleware__audit_write_fails__request_succeeds_and_failure_is_lo
         resp = TestClient(_audited_app()).post("/thing", json={})
     assert resp.status_code == 200
     assert any("Audit log write failed" in r.getMessage() for r in caplog.records)
+
+
+# --- JWT handling (python-jose replaced by PyJWT: jose's algorithm-confusion
+# CVE-2026-85394 and its unmaintained ecdsa/rsa dependencies). Tokens are
+# built by hand so these hold whatever library sits underneath. ---
+import base64
+import hashlib
+import hmac
+import json
+import time
+
+from backend.auth import create_access_token, decode_token
+from backend.config import settings
+
+
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _token(header: dict, payload: dict, secret: str | None = None, alg: str = "sha256") -> str:
+    signing_input = f"{_b64(json.dumps(header).encode())}.{_b64(json.dumps(payload).encode())}"
+    if secret is None:
+        return signing_input + "."
+    sig = hmac.new(secret.encode(), signing_input.encode(), getattr(hashlib, alg)).digest()
+    return f"{signing_input}.{_b64(sig)}"
+
+
+def _claims(**extra):
+    return {"sub": "1", "username": "u", "exp": int(time.time()) + 3600, **extra}
+
+
+def test_jwt__a_token_we_issued__round_trips():
+    assert decode_token(create_access_token(7, "alice"))["sub"] == "7"
+
+
+@pytest.mark.parametrize("token", [
+    pytest.param(lambda: _token({"alg": "none", "typ": "JWT"}, _claims()), id="alg_none_unsigned"),
+    pytest.param(lambda: _token({"alg": "HS256", "typ": "JWT"}, _claims(), secret="someone-elses-secret"), id="wrong_secret"),
+    pytest.param(lambda: _token({"alg": "HS512", "typ": "JWT"}, _claims(), secret=settings.JWT_SECRET, alg="sha512"),
+                 id="unexpected_algorithm"),
+    pytest.param(lambda: _token({"alg": "HS256", "typ": "JWT"}, _claims(exp=int(time.time()) - 10),
+                                secret=settings.JWT_SECRET), id="expired"),
+    pytest.param(lambda: "not.a.jwt", id="garbage"),
+])
+def test_jwt__forged_or_stale_tokens__decode_to_nothing(token):
+    assert decode_token(token()) == {}

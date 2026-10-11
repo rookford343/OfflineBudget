@@ -16,12 +16,11 @@ The demo script creates a complete dual-income household with realistic 2024–2
 # 1. Navigate to the project root
 cd /path/to/OfflineBudget
 
-# 2. Activate the Python virtual environment
-source .venv/bin/activate        # macOS / Linux
-# .venv\Scripts\activate         # Windows
+# 2. Install the locked dependencies
+uv sync --locked
 
 # 3. Run the seed script
-python scripts/seed_demo.py
+uv run python scripts/seed_demo.py
 ```
 
 The script is safe to re-run. If a `demo` user already exists it will delete it and all associated data first, then re-seed from scratch.
@@ -60,7 +59,7 @@ The script must be run from the project root so Python can find the `backend` pa
 ```bash
 # Correct
 cd /path/to/OfflineBudget
-python scripts/seed_demo.py
+uv run python scripts/seed_demo.py
 
 # Wrong — backend package not on sys.path
 cd /path/to
@@ -72,8 +71,7 @@ python OfflineBudget/scripts/seed_demo.py
 The virtual environment is not activated, or dependencies are not installed:
 
 ```bash
-source .venv/bin/activate
-pip install -r backend/requirements.txt
+uv sync --locked
 ```
 
 **`sqlite3.OperationalError: no such table`**
@@ -83,7 +81,7 @@ Start the backend once first so `create_tables()` runs, then re-run the seed:
 ```bash
 uvicorn backend.main:app --reload &
 # wait a moment, then Ctrl+C and run:
-python scripts/seed_demo.py
+uv run python scripts/seed_demo.py
 ```
 
 Alternatively, the seed script calls `create_tables()` itself, so a plain run should work as long as the `data/` directory exists. Create it if needed: `mkdir -p data`.
@@ -115,9 +113,6 @@ curl -X DELETE http://localhost:8000/admin/users/<ID> \
 Useful when the backend is not running, or you want to script a full reset.
 
 ```bash
-# Activate the virtual environment first
-source .venv/bin/activate
-
 sqlite3 data/budget.db "DELETE FROM users WHERE username = 'demo';"
 ```
 
@@ -152,13 +147,13 @@ The next time the backend starts, `create_tables()` and `upgrade_schema()` will 
 The seed script is at [scripts/seed_demo.py](../scripts/seed_demo.py). To change figures or add more transactions, edit the `actuals`, `card_txns`, or `recurring_items` lists directly — the file is self-contained and well-commented. After editing, re-run it:
 
 ```bash
-python scripts/seed_demo.py
+uv run python scripts/seed_demo.py
 ```
 
 Re-seed into a fresh file so nothing from an older demo lingers:
 
 ```bash
-rm -f data/demo.db && DATABASE_URL="sqlite:///./data/demo.db" python scripts/seed_demo.py
+rm -f data/demo.db && DATABASE_URL="sqlite:///./data/demo.db" uv run python scripts/seed_demo.py
 ```
 
 ---
@@ -166,8 +161,7 @@ rm -f data/demo.db && DATABASE_URL="sqlite:///./data/demo.db" python scripts/see
 ## Loading the demo
 
 ```bash
-source .venv/bin/activate
-DATABASE_URL="sqlite:///./data/demo.db" python scripts/seed_demo.py
+DATABASE_URL="sqlite:///./data/demo.db" uv run python scripts/seed_demo.py
 ```
 
 Pointing `DATABASE_URL` at a separate file keeps the demo entirely away from
@@ -176,7 +170,7 @@ your real `budget.db`. To run the app against it:
 ```bash
 DATABASE_URL="sqlite:///./data/demo.db" \
   ALLOWED_ORIGINS="http://127.0.0.1:5174,http://localhost:5174" \
-  uvicorn backend.main:app --host 127.0.0.1 --port 8001
+  uv run uvicorn backend.main:app --host 127.0.0.1 --port 8001
 
 # in another terminal
 cd frontend && VITE_API_URL="http://127.0.0.1:8001" bun run dev --port 5174

@@ -12,12 +12,14 @@ Rules:
 
 The global "Security gates for AI coding" rules apply here. Project specifics:
 
-- Lint: `.venv/bin/ruff check .` (config `ruff.toml`: Bandit `S` + Pyflakes `F`). Tools pinned in
-  `backend/requirements-dev.txt`.
+- Python runs through uv only: `uv sync --locked`, `uv run --locked ...`; never bare `pip`/`python`.
+  Lint: `uv run --locked ruff check .` (config `ruff.toml`: Bandit `S` + Pyflakes `F`).
+- Dependencies: pin exactly in `pyproject.toml`, commit `uv.lock` with it, keep the 7-day
+  `exclude-newer` cooldown, and never push past a failing `uv audit` (pre-push runs it).
 - `.githooks/pre-commit` blocks bank data, private keys, merge markers, files over 1 MB, and ruff
-  findings on staged Python. `.githooks/pre-push` re-runs ruff on the whole tree, imports the app,
+  findings on staged Python. `.githooks/pre-push` checks the lockfile, runs `uv audit`, re-runs ruff on the whole tree, imports the app,
   and runs the tests with the coverage floor in `backend/.coveragerc` (never lower it).
 - Every security fix gets a test in `backend/tests/test_security_regressions.py` that feeds the
   bad input and asserts it is refused.
-- After any "remove unused imports" fix, confirm `python -c "import backend.main, cli.budget"`:
+- After any "remove unused imports" fix, confirm `uv run python -c "import backend.main, cli.budget"`:
   something may have imported a name through that module.
