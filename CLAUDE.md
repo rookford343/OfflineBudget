@@ -19,6 +19,8 @@ The global "Security gates for AI coding" rules apply here. Project specifics:
 - `.githooks/pre-commit` blocks bank data, private keys, merge markers, files over 1 MB, and ruff
   findings on staged Python. `.githooks/pre-push` checks the lockfile, runs `uv audit`, re-runs ruff on the whole tree, imports the app,
   and runs the tests with the coverage floor in `backend/.coveragerc` (never lower it).
+- `scripts/codeql_scan.sh` runs GitHub's code-scanning analysis locally (CodeQL CLI, same version
+  as GitHub); pre-push runs it. A finding blocks the push.
 - Every security fix gets a test in `backend/tests/test_security_regressions.py` that feeds the
   bad input and asserts it is refused.
 - After any "remove unused imports" fix, confirm `uv run python -c "import backend.main, cli.budget"`:

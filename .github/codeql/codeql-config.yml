@@ -1,0 +1,8 @@
+# Paths CodeQL skips, locally (scripts/codeql_scan.sh) and to mirror GitHub.
+# Build output, dependencies and generated graphs aren't source.
+paths-ignore:
+  - frontend/node_modules
+  - frontend/dist
+  - graphify-out
+  - data
+  - .venv

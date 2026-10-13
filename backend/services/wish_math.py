@@ -53,6 +53,14 @@ def payment_schedule(principal: Decimal, apr: Decimal, months: int) -> list[Deci
     return [regular] * (months - 1) + [_q(total - regular * (months - 1))]
 
 
+class FinancedMonthsInvalid(ValueError):
+    """A financed option without 1-84 months."""
+
+
+class CardMissing(ValueError):
+    """An option routed to a card that no longer exists."""
+
+
 def _trade_in_credit(item: models.WishItem) -> Decimal:
     return _q(Decimal(item.trade_in_value or 0)) if item.trade_in_on is not None else ZERO
 
@@ -60,7 +68,7 @@ def _trade_in_credit(item: models.WishItem) -> Decimal:
 def _validate_financed_months(months: int | None) -> None:
     """Raise ValueError if financed option months is invalid."""
     if months is None or months < 1 or months > 84:
-        raise ValueError("Financed option needs 1-84 months")
+        raise FinancedMonthsInvalid("Financed option needs 1-84 months")
 
 
 def total_cost(item: models.WishItem, option: models.WishOption) -> Decimal:
@@ -86,7 +94,7 @@ def _route(option: models.WishOption, charge_date: date, cards: dict) -> date:
     if option.card_id is not None:
         card = cards.get(option.card_id)
         if card is None:
-            raise ValueError("Card no longer exists")
+            raise CardMissing("Card no longer exists")
         return _card_payoff_date_for_charge(card, charge_date)
     return charge_date
 

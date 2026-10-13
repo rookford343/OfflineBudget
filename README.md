@@ -271,7 +271,7 @@ Navigate to **Import** → choose Checking or Credit Card → upload a file.
 
 New transactions are categorized in this priority order:
 
-1. **Transaction rules** — user-defined rules (contains / starts-with / regex) applied first
+1. **Transaction rules** — user-defined rules (contains / starts-with / wildcard) applied first
 2. **Import history** — same description was categorized before → reuse that category
 3. **Keyword rules** — built-in merchant keyword list
 
@@ -281,7 +281,7 @@ Rows that can't be matched are flagged for manual review before import is confir
 
 Add rules under **Settings → Transaction Rules**:
 
-- Match by `contains`, `startswith`, or `regex` on the transaction description
+- Match by `contains`, `startswith`, or a wildcard pattern (`*` = anything) on the transaction description
 - Actions: `set_category` or `mark_transfer`
 - Priority ordering — first match wins
 - Live test input in the rule modal to verify a pattern before saving

@@ -66,7 +66,7 @@ def test_fetch_transactions_returns_txns_and_balance():
         }]
     }
     with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
-        txns, balance, balance_date = fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+        txns, balance, balance_date = fetch_transactions("https://user:pw@beta-bridge.simplefin.org/simplefin", "acc-1", datetime(2026, 8, 1))
 
     assert balance == Decimal("980.44")
     assert balance_date is None  # no balance-date in the response
@@ -90,7 +90,7 @@ def test_fetch_transactions_parses_balance_date():
         }]
     }
     with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
-        txns, balance, balance_date = fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+        txns, balance, balance_date = fetch_transactions("https://user:pw@beta-bridge.simplefin.org/simplefin", "acc-1", datetime(2026, 8, 1))
 
     assert balance_date == datetime.fromtimestamp(1723276800)
 
@@ -107,7 +107,7 @@ def test_fetch_transactions_tolerates_malformed_balance_date():
         }]
     }
     with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
-        txns, balance, balance_date = fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+        txns, balance, balance_date = fetch_transactions("https://user:pw@beta-bridge.simplefin.org/simplefin", "acc-1", datetime(2026, 8, 1))
 
     assert balance_date is None
 
@@ -118,13 +118,13 @@ def test_fetch_transactions_raises_when_account_missing():
     mock_resp.json.return_value = {"accounts": []}
     with patch("backend.services.simplefin_client.httpx.get", return_value=mock_resp):
         with pytest.raises(SimpleFinError):
-            fetch_transactions("https://access.url", "acc-missing", datetime(2026, 8, 1))
+            fetch_transactions("https://user:pw@beta-bridge.simplefin.org/simplefin", "acc-missing", datetime(2026, 8, 1))
 
 
 def test_fetch_accounts_raises_simplefinerror_on_http_error():
     with patch("backend.services.simplefin_client.httpx.get", side_effect=httpx.HTTPError("boom")):
         with pytest.raises(SimpleFinError):
-            fetch_accounts("https://access.url")
+            fetch_accounts("https://user:pw@beta-bridge.simplefin.org/simplefin")
 
 
 def _mock_json(payload):
@@ -142,7 +142,7 @@ def test_fetch_accounts_raises_on_bad_balance(extra):
     account = {"id": "acc-1", "name": "Checking", "org": {"name": "Chase"}, "currency": "USD", **extra}
     with _mock_json({"accounts": [account]}):
         with pytest.raises(SimpleFinError):
-            fetch_accounts("https://access.url")
+            fetch_accounts("https://user:pw@beta-bridge.simplefin.org/simplefin")
 
 
 _GOOD_TXN = {"id": "t1", "posted": 1723276800, "amount": "-46.45", "description": "MEIJER #123"}
@@ -158,7 +158,7 @@ def test_fetch_transactions_raises_on_malformed_data(account_fields, txn_fields)
     txn = {k: v for k, v in {**_GOOD_TXN, **txn_fields}.items() if v is not None}
     with _mock_json({"accounts": [{"id": "acc-1", **account_fields, "transactions": [txn]}]}):
         with pytest.raises(SimpleFinError):
-            fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+            fetch_transactions("https://user:pw@beta-bridge.simplefin.org/simplefin", "acc-1", datetime(2026, 8, 1))
 
 
 
@@ -170,9 +170,9 @@ def test_fetch_transactions_flags_pending_and_asks_for_them():
         {"id": "p1", "pending": True, "transacted_at": 1723276800, "amount": "-40.00", "description": "PENDING SHOP"},
     ]}]}
     with _mock_json(payload) as get:
-        txns, _, _ = fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1), include_pending=True)
+        txns, _, _ = fetch_transactions("https://user:pw@beta-bridge.simplefin.org/simplefin", "acc-1", datetime(2026, 8, 1), include_pending=True)
     assert get.call_args.kwargs["params"]["pending"] == 1
     assert [t.pending for t in txns] == [False, True]
     with _mock_json(payload) as get:
-        fetch_transactions("https://access.url", "acc-1", datetime(2026, 8, 1))
+        fetch_transactions("https://user:pw@beta-bridge.simplefin.org/simplefin", "acc-1", datetime(2026, 8, 1))
     assert "pending" not in get.call_args.kwargs["params"]

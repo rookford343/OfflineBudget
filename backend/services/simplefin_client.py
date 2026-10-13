@@ -9,11 +9,33 @@ import binascii
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from urllib.parse import urlsplit, urlunsplit
+
 import httpx
 
 
 class SimpleFinError(Exception):
     """Raised on any SimpleFIN claim/fetch failure -- callers catch per-connection/per-account."""
+
+
+# The only hosts this app ever talks to. A setup token is user-supplied base64
+# that decodes to the URL we POST to, and the access URL comes back from that
+# server, so both are checked here before any request: otherwise a crafted
+# token could point the server at anything on the home network.
+_SIMPLEFIN_HOSTS = ("beta-bridge.simplefin.org", "bridge.simplefin.org")
+
+
+def _simplefin_url(url: str) -> str:
+    """The same URL rebuilt on its allowlisted host, or SimpleFinError.
+
+    Rebuilt rather than returned as-is, so the host in the request always
+    comes from the constant above, never from the input."""
+    parsed = urlsplit(url)
+    host = next((h for h in _SIMPLEFIN_HOSTS if parsed.hostname == h), None)
+    if parsed.scheme != "https" or host is None or parsed.port not in (None, 443):
+        raise SimpleFinError("That isn't a SimpleFIN Bridge URL. Paste the setup token from SimpleFIN Bridge.")
+    userinfo = parsed.netloc.rsplit("@", 1)[0] + "@" if "@" in parsed.netloc else ""
+    return urlunsplit(("https", userinfo + host, parsed.path, parsed.query, ""))
 
 
 @dataclass
@@ -56,6 +78,7 @@ def claim_setup_token(setup_token: str, timeout: float = 15.0) -> str:
     except (binascii.Error, UnicodeDecodeError) as exc:
         raise SimpleFinError(f"Invalid setup token: {exc}") from exc
 
+    claim_url = _simplefin_url(claim_url)
     try:
         resp = httpx.post(claim_url, timeout=timeout)
         resp.raise_for_status()
@@ -65,7 +88,7 @@ def claim_setup_token(setup_token: str, timeout: float = 15.0) -> str:
     access_url = resp.text.strip()
     if not access_url.startswith("http"):
         raise SimpleFinError("Claim response did not return a valid access URL")
-    return access_url
+    return _simplefin_url(access_url)
 
 
 def fetch_accounts(access_url: str, timeout: float = 15.0) -> list[SimpleFinAccount]:
@@ -147,7 +170,7 @@ def fetch_transactions(
 
 def _get(access_url: str, params: dict, timeout: float) -> dict:
     try:
-        resp = httpx.get(f"{access_url}/accounts", params=params, timeout=timeout)
+        resp = httpx.get(f"{_simplefin_url(access_url)}/accounts", params=params, timeout=timeout)
         resp.raise_for_status()
     except httpx.HTTPError as exc:
         raise SimpleFinError(f"SimpleFIN request failed: {exc}") from exc
