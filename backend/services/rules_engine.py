@@ -17,22 +17,10 @@ def apply_rules(
     rules: list[models.TransactionRule],
 ) -> RuleMatch | None:
     """Return the first matching rule (sorted by priority descending), or None."""
-    desc_lower = description.lower()
     for rule in sorted(rules, key=lambda r: r.priority, reverse=True):
         if not rule.is_active:
             continue
-        pattern = rule.pattern
-        matched = False
-        if rule.pattern_type == models.RulePatternType.contains:
-            matched = pattern.lower() in desc_lower
-        elif rule.pattern_type == models.RulePatternType.startswith:
-            matched = desc_lower.startswith(pattern.lower())
-        elif rule.pattern_type == models.RulePatternType.regex:
-            try:
-                matched = bool(re.search(pattern, description, re.IGNORECASE))
-            except re.error:
-                continue
-        if matched:
+        if _matches(rule.pattern, getattr(rule.pattern_type, "value", rule.pattern_type), description):
             return RuleMatch(
                 rule_id=rule.id,
                 category_id=rule.category_id,
@@ -43,14 +31,27 @@ def apply_rules(
 
 def test_rule(pattern: str, pattern_type: str, description: str) -> bool:
     """Check whether a single rule pattern matches a sample description (for UI live preview)."""
+    return _matches(pattern, pattern_type, description)
+
+
+def _wildcard(pattern: str) -> re.Pattern:
+    """`*` matches anything; every other character is literal.
+
+    The "regex" rule type used to run the user's pattern as a real regex, and
+    a pattern like `(a+)+$` backtracks for minutes on a short description,
+    hanging the worker (CodeQL py/regex-injection). Escaping everything but
+    `*` keeps the matching linear. No stored rule used regex syntax when this
+    changed (2026-10-12)."""
+    return re.compile(".*".join(re.escape(part) for part in pattern.split("*")), re.IGNORECASE)
+
+
+def _matches(pattern: str, pattern_type: str, description: str) -> bool:
+    """The one place a rule pattern is tested against a description."""
     desc_lower = description.lower()
     if pattern_type == "contains":
         return pattern.lower() in desc_lower
     if pattern_type == "startswith":
         return desc_lower.startswith(pattern.lower())
     if pattern_type == "regex":
-        try:
-            return bool(re.search(pattern, description, re.IGNORECASE))
-        except re.error:
-            return False
+        return _wildcard(pattern).search(description) is not None
     return False

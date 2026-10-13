@@ -105,3 +105,4 @@ graphify-out/
 .coverage.*
 coverage.xml
 .ruff_cache/
+.codeql/

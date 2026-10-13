@@ -178,7 +178,7 @@ run_import(db, user, parsed_rows, account_id, ...) → ImportConfirmResponse
 apply_rules(description: str, rules: list[TransactionRule]) -> RuleMatch | None
 ```
 
-- Pattern types: `contains` (case-insensitive substring), `startswith`, `regex`
+- Pattern types: `contains` (case-insensitive substring), `startswith`, and wildcard (stored as `regex`; `*` matches anything, everything else is literal, so no pattern can backtrack catastrophically)
 - First match by `priority` wins
 - Actions: `set_category` (assigns `category_id`) or `mark_transfer` (sets `is_transfer=True`)
 - Rules are applied in the `build_preview` phase before history and keyword matching

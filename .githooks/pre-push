@@ -10,7 +10,8 @@
 #
 # It also checks uv.lock against pyproject.toml, audits the locked
 # dependencies for known vulnerabilities, re-runs the commit-time lint over the
-# whole tree (a commit can skip its hook), imports the app (an "unused import" autofix once broke a router
+# whole tree (a commit can skip its hook), runs the same CodeQL analysis as
+# GitHub code scanning (scripts/codeql_scan.sh), imports the app (an "unused import" autofix once broke a router
 # that imported through another module), and enforces the coverage floor in
 # backend/.coveragerc.
 repo_root=$(git rev-parse --show-toplevel) || exit 1
@@ -37,6 +38,12 @@ fi
 echo "Import check..."
 if ! uv run --locked python -c "import backend.main, cli.budget"; then
   echo "BLOCKED: the app no longer imports." >&2
+  exit 1
+fi
+
+echo "CodeQL (same analysis as GitHub code scanning, ~1 min)..."
+if ! sh "$repo_root/scripts/codeql_scan.sh"; then
+  echo "BLOCKED: CodeQL findings (or CodeQL missing: brew install --cask codeql)." >&2
   exit 1
 fi
 

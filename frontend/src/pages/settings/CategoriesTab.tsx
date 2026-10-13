@@ -286,7 +286,7 @@ export default function CategoriesTab() {
                   <select className="input" value={ruleForm.pattern_type} onChange={e => { setRuleForm({ ...ruleForm, pattern_type: e.target.value }); setRuleTestResult(null); }}>
                     <option value="contains">Contains</option>
                     <option value="startswith">Starts with</option>
-                    <option value="regex">Regex</option>
+                    <option value="regex">Wildcard (* = anything)</option>
                   </select>
                 </div>
                 <div>
@@ -296,7 +296,7 @@ export default function CategoriesTab() {
               </div>
               <div>
                 <label className="label">Pattern</label>
-                <input className="input font-mono" placeholder={ruleForm.pattern_type === "regex" ? "e.g. SPOTIFY|NETFLIX" : "e.g. SPOTIFY"} value={ruleForm.pattern} onChange={e => { setRuleForm({ ...ruleForm, pattern: e.target.value }); setRuleTestResult(null); }} required />
+                <input className="input font-mono" placeholder={ruleForm.pattern_type === "regex" ? "e.g. AMZN*MKTP" : "e.g. SPOTIFY"} value={ruleForm.pattern} onChange={e => { setRuleForm({ ...ruleForm, pattern: e.target.value }); setRuleTestResult(null); }} required />
               </div>
               <div>
                 <label className="label">Action</label>

@@ -76,7 +76,7 @@ from backend import models
 from backend.services.budget_snapshot import floor_mask
 from backend.services.forecast_engine import build_forecast
 from backend.services.scenario_service import resolve_scenario
-from backend.services.wish_math import option_flows, total_cost, monthly_payment
+from backend.services.wish_math import CardMissing, FinancedMonthsInvalid, option_flows, total_cost, monthly_payment
 
 HORIZON_DAYS = 365
 LAST_BUY_OFFSET = 30
@@ -96,6 +96,16 @@ def _series(db, user_id, account_id, today, end, proposal=None, overrides=None):
     days = build_forecast(db, user_id, account_id, today - timedelta(days=45), end,
                           overrides=overrides, proposal=proposal, include_unbilled_card_bills=False)
     return [d for d in days if d.date >= today]
+
+
+# What the client may see about an option that can't be priced: fixed text
+# chosen by error type, never the exception's own message, so no internal
+# detail can reach the response.
+_OPTION_ERRORS = {
+    FinancedMonthsInvalid: "Financed option needs 1-84 months",
+    CardMissing: "Card no longer exists",
+}
+_OPTION_ERROR_FALLBACK = "This option can't be priced. Check its details."
 
 
 def build_plan(db, user, account_id, today: date) -> dict:
@@ -156,7 +166,7 @@ def build_plan(db, user, account_id, today: date) -> dict:
                         flows_for = lambda d, o=opt: option_flows(item, o, d, cards)
                         fit = earliest_safe_date(dates, base, mask, item_prior, flows_for, cushion, 0, last_idx)
                 except ValueError as e:
-                    error = str(e)
+                    error = _OPTION_ERRORS.get(type(e), _OPTION_ERROR_FALLBACK)
                     opt_monthly_payment = None
                     opt_total_cost = None
                     fit = none_fit

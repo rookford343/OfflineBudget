@@ -114,3 +114,87 @@ def test_jwt__a_token_we_issued__round_trips():
 ])
 def test_jwt__forged_or_stale_tokens__decode_to_nothing(token):
     assert decode_token(token()) == {}
+
+
+# --- CodeQL alerts (2026-10-12) ---
+# py/full-ssrf: a pasted SimpleFIN setup token decodes to the URL the server
+# POSTs to, so a crafted token could aim the server at the home network.
+# py/stack-trace-exposure: raw exception text reached the Wish List response.
+# py/regex-injection: a user-supplied regex ran unbounded (catastrophic
+# backtracking hangs a worker); rules now use escaped wildcards.
+from datetime import date
+from unittest.mock import MagicMock
+
+from backend.services import simplefin_client
+from backend.services.rules_engine import test_rule as rule_matches
+from backend.services.simplefin_client import SimpleFinError, claim_setup_token
+
+
+def _setup_token(url: str) -> str:
+    return base64.b64encode(url.encode()).decode()
+
+
+@pytest.mark.parametrize("claim_url", [
+    "http://192.168.1.1/admin",
+    "https://192.168.1.1/simplefin/claim/x",
+    "https://evil.example/simplefin/claim/x",
+    "https://beta-bridge.simplefin.org.evil.example/claim",
+    "http://beta-bridge.simplefin.org/simplefin/claim/x",
+    "file:///etc/passwd",
+])
+def test_claim_setup_token__url_off_simplefin__refused_before_any_request(claim_url):
+    with patch.object(simplefin_client.httpx, "post") as post:
+        with pytest.raises(SimpleFinError):
+            claim_setup_token(_setup_token(claim_url))
+    post.assert_not_called()
+
+
+def test_claim_setup_token__simplefin_url__posts_there_and_checks_the_access_url():
+    resp = MagicMock(text="https://user:pw@beta-bridge.simplefin.org/simplefin", raise_for_status=lambda: None)
+    with patch.object(simplefin_client.httpx, "post", return_value=resp) as post:
+        assert claim_setup_token(_setup_token("https://beta-bridge.simplefin.org/simplefin/claim/abc")) \
+            == "https://user:pw@beta-bridge.simplefin.org/simplefin"
+    assert post.call_args.args[0] == "https://beta-bridge.simplefin.org/simplefin/claim/abc"
+
+
+def test_claim_setup_token__returned_access_url_off_simplefin__refused():
+    resp = MagicMock(text="https://user:pw@10.0.0.5/simplefin", raise_for_status=lambda: None)
+    with patch.object(simplefin_client.httpx, "post", return_value=resp):
+        with pytest.raises(SimpleFinError):
+            claim_setup_token(_setup_token("https://beta-bridge.simplefin.org/simplefin/claim/abc"))
+
+
+def test_fetch__stored_access_url_off_simplefin__refused_before_any_request():
+    with patch.object(simplefin_client.httpx, "get") as get:
+        with pytest.raises(SimpleFinError):
+            simplefin_client.fetch_accounts("https://user:pw@127.0.0.1:8000/simplefin")
+    get.assert_not_called()
+
+
+def test_wish_plan__unexpected_error__reaches_the_client_as_a_generic_message(db_session):
+    from tests.test_wish_plan import _seed, _wish
+    from backend.services import wish_plan
+    from backend.services.wish_plan import build_plan
+    u, acct = _seed(db_session)
+    _wish(db_session, u, "Laptop", 0, "1000.00")
+    db_session.commit()
+    with patch.object(wish_plan, "monthly_payment", side_effect=ValueError("/srv/app/secret internals")):
+        plan = build_plan(db_session, u, acct.id, date.today())
+    error = plan["items"][0]["options"][0]["error"]
+    assert error and "secret internals" not in error and "/srv" not in error
+
+
+@pytest.mark.parametrize("pattern,description,expected", [
+    pytest.param("SPOT*FY", "SPOTIFY USA 1234", True, id="star_matches_anything"),
+    pytest.param("spotify", "SPOTIFY USA", True, id="case_insensitive"),
+    pytest.param("SPOTIFY|NETFLIX", "NETFLIX.COM", False, id="pipe_is_literal_not_alternation"),
+    pytest.param("A.B", "AXB", False, id="dot_is_literal"),
+])
+def test_rule_wildcard__matches_literally_except_star(pattern, description, expected):
+    assert rule_matches(pattern, "regex", description) is expected
+
+
+def test_rule_wildcard__catastrophic_regex__is_literal_and_fast():
+    started = time.monotonic()
+    assert rule_matches("(a+)+$", "regex", "a" * 40 + "!") is False
+    assert time.monotonic() - started < 1
