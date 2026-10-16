@@ -6,6 +6,7 @@ import json
 import logging
 from decimal import Decimal
 from datetime import date, datetime, timedelta, timezone
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.crypto import decrypt
@@ -33,6 +34,8 @@ _INITIAL_LOOKBACK_DAYS = 30  # first sync for a newly-linked account
 # Re-fetching costs no extra requests, and rows already imported are matched
 # by SimpleFIN's id, so the overlap can't duplicate anything.
 _OVERLAP_DAYS = 10
+
+_AUTO_ANCHOR_NOTE = "Auto (bank sync)"
 
 
 def sync_connection(
@@ -147,6 +150,35 @@ def _replace_pending_snapshot(
     return True
 
 
+def _fold_late_transactions_into_anchors(db: Session, user_id: int, account_id: int) -> None:
+    """Move each automatic anchor by the transactions that arrived after it was
+    recorded but are dated on or before its day.
+
+    An auto anchor is the bank's balance at the moment of a sync. A
+    transaction dated that day or earlier that only reaches the feed later
+    (an Oct 1 insurance charge arrived on Oct 3) wasn't in that
+    balance, so the anchor was missing it and the forecast swung up, then
+    snapped back down. Hand-entered anchors (no "Auto" note) are the user's
+    own figure and are never moved. Bumping updated_at on a moved anchor
+    means a later sync can't apply the same transaction twice."""
+    anchors = db.query(models.ForecastDayCheckpoint).filter(
+        models.ForecastDayCheckpoint.user_id == user_id,
+        models.ForecastDayCheckpoint.account_id == account_id,
+        models.ForecastDayCheckpoint.note == _AUTO_ANCHOR_NOTE,
+    ).all()
+    for anchor in anchors:
+        late = db.query(func.coalesce(func.sum(models.Transaction.amount), 0)).filter(
+            models.Transaction.user_id == user_id,
+            models.Transaction.account_id == account_id,
+            models.Transaction.is_actual == True,
+            models.Transaction.date <= anchor.date,
+            models.Transaction.created_at > anchor.updated_at,
+        ).scalar()
+        if late:
+            anchor.actual_balance = Decimal(str(anchor.actual_balance)) + Decimal(str(late))
+            anchor.updated_at = datetime.utcnow()
+
+
 def _sync_link(
     db: Session, user: models.User, access_url: str, link: models.BankConnectionAccountLink,
 ) -> tuple[int, int]:
@@ -205,6 +237,9 @@ def _sync_link(
     if link.local_account_id:
         account = db.get(models.Account, link.local_account_id)
         if account:
+            if imported:
+                db.flush()
+                _fold_late_transactions_into_anchors(db, user.id, account.id)
             account.current_balance = balance
             if account.type == models.AccountType.checking:
                 # Anchor the forecast to today's real posted balance on every
@@ -234,12 +269,12 @@ def _sync_link(
                     ).first()
                     if cp:
                         cp.actual_balance = balance
-                        cp.note = "Auto (bank sync)"
+                        cp.note = _AUTO_ANCHOR_NOTE
                     else:
                         db.add(models.ForecastDayCheckpoint(
                             user_id=user.id, account_id=account.id,
                             date=checkpoint_date, actual_balance=balance,
-                            note="Auto (bank sync)",
+                            note=_AUTO_ANCHOR_NOTE,
                         ))
     elif link.local_credit_card_id:
         card = db.get(models.CreditCard, link.local_credit_card_id)
