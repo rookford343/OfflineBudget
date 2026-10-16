@@ -1172,8 +1172,20 @@ export default function Forecast() {
                   </tr>
                 </thead>
                 <tbody>
-                  {q.days.filter((d: any) => d.transactions.length > 0 || dayCheckpointMap[d.date] !== undefined).map((d: any) => {
-                    const hasCp = dayCheckpointMap[d.date] !== undefined;
+                  {(() => {
+                    // An anchor matters only where it moved the balance. Most daily
+                    // bank-sync anchors land exactly where the day's transactions
+                    // already put it; listing those as "snapped" was just noise.
+                    const moved: Record<string, boolean> = {};
+                    q.days.forEach((d: any, i: number) => {
+                      if (dayCheckpointMap[d.date] === undefined) return;
+                      if (i === 0) { moved[d.date] = true; return; }
+                      const walked = Number(q.days[i - 1].projected_balance)
+                        + d.transactions.reduce((sum: number, t: any) => sum + Number(t.amount), 0);
+                      moved[d.date] = Math.abs(Number(dayCheckpointMap[d.date]) - walked) >= 0.005;
+                    });
+                    return q.days.filter((d: any) => d.transactions.length > 0 || moved[d.date]).map((d: any) => {
+                    const hasCp = moved[d.date] === true;
                     return (
                     <tr key={d.date} className={`border-b border-gray-50 dark:border-gray-800 group hover:bg-gray-50 dark:hover:bg-gray-800/40 ${hasCp ? "bg-indigo-50/30 dark:bg-indigo-900/10" : ""}`}>
                       <td className="py-2 pr-4 text-gray-500 whitespace-nowrap">
@@ -1251,7 +1263,8 @@ export default function Forecast() {
                       </td>
                     </tr>
                     );
-                  })}
+                  });
+                  })()}
                 </tbody>
               </table>
             </div>
