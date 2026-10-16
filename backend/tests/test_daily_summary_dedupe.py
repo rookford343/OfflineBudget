@@ -41,6 +41,48 @@ def test_sweep__checks_the_daily_summary_against_its_minute(monkeypatch, db_sess
     assert summary["target_minute"] == main._DAILY_SUMMARY_MINUTE
 
 
+def test_sweep__refreshes_bonus_plan_item_amounts(monkeypatch, db_session):
+    """GET /bonus-plans can't refresh a bonus item's amount itself (that
+    would let a View Only account trigger a write) -- the sweep is what
+    keeps a quiet account's figure from going stale. Made-up figures."""
+    from datetime import date as date_type
+    from decimal import Decimal
+    from backend import models
+
+    user = models.User(username="bonus-sweep", hashed_password="x", display_name="B",
+                       annual_salary=Decimal("100000"), annual_salary_year=2026, annual_raise_pct=Decimal("0"))
+    db_session.add(user)
+    db_session.flush()
+    acct = models.Account(user_id=user.id, name="Checking", type=models.AccountType.checking,
+                          current_balance=Decimal("1"))
+    db_session.add(acct)
+    db_session.flush()
+    item = models.RecurringItem(user_id=user.id, account_id=acct.id, name="Annual Bonus", amount=Decimal("1"),
+                                type=models.RecurringType.income, frequency=models.RecurringFrequency.yearly,
+                                month_of_year=4, day_of_month=15, start_date=date_type(2026, 1, 1))
+    db_session.add(item)
+    db_session.flush()
+    plan = models.BonusPlan(user_id=user.id, recurring_item_id=item.id, target_pct=Decimal("20"),
+                            salary_lag_years=1, withholding_pct=Decimal("30"))
+    db_session.add(plan)
+    db_session.commit()
+
+    item.amount = Decimal("999.99")  # stale, as if GET had been hit repeatedly
+    db_session.commit()
+
+    item_id = item.id
+    monkeypatch.setattr("backend.database.SessionLocal", lambda: db_session)
+    with patch.object(scheduler_state, "due_for_retry", return_value=False), \
+         patch("backend.services.forecast_baseline.ensure_baselines_for_all"):
+        main._scheduler_sweep()
+
+    # _scheduler_sweep's `finally: db.close()` expunges everything from the
+    # (monkeypatched-to-be-the-same) session, so `item` is now detached --
+    # re-fetch by id rather than refresh() the stale Python object.
+    refreshed = db_session.get(models.RecurringItem, item_id)
+    assert refreshed.amount == Decimal("14000.00")  # 20% of 100000(2026), 30% withheld
+
+
 @pytest.mark.parametrize("already_sent,expect_send", [
     pytest.param(False, True, id="control_first_send_of_the_day_goes_out"),
     pytest.param(True, False, id="second_trigger_same_day_is_skipped"),

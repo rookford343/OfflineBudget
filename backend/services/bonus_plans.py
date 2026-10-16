@@ -69,8 +69,16 @@ def upcoming_payouts(plan: models.BonusPlan, user: models.User, today: date, cou
 def refresh_item_amounts(db: Session, user: models.User, today: date) -> None:
     """Keep each bonus item's amount equal to its next payout's net, so the
     Recurring page, budget totals and the matcher's amount check see a real
-    figure. Leaves the amount alone when the next gross is unknown."""
-    for plan in plans_by_item(db, user.id).values():
+    figure. Leaves the amount alone when the next gross is unknown.
+
+    A no-op -- no commit -- when the user has no bonus plans, so callers that
+    run across every user regardless of whether they use this feature (the
+    scheduler sweep, PATCH /auth/me) don't open a write transaction for
+    accounts with nothing to refresh."""
+    plans = plans_by_item(db, user.id)
+    if not plans:
+        return
+    for plan in plans.values():
         nxt = upcoming_payouts(plan, user, today, count=1)[0]
         if nxt["net"] is not None and nxt["net"] > 0:
             plan.recurring_item.amount = nxt["net"]

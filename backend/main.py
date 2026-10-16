@@ -330,6 +330,21 @@ def _scheduler_sweep() -> None:
             ensure_baselines_for_all(db, date.today())
         except Exception:
             logger.exception("Scheduler sweep: forecast baseline step failed")
+        # Keep every bonus item's amount equal to its next payout -- GET
+        # /bonus-plans can't do this write itself (a View Only account hits
+        # it too), so the sweep is what keeps a quiet account's figure from
+        # going stale between a POST/PUT/salary edit. Guarded the same way
+        # as the baseline step above.
+        try:
+            from backend import models
+            from backend.services.bonus_plans import refresh_item_amounts
+            user_ids = [row[0] for row in db.query(models.BonusPlan.user_id).distinct().all()]
+            for user_id in user_ids:
+                user = db.get(models.User, user_id)
+                if user:
+                    refresh_item_amounts(db, user, date.today())
+        except Exception:
+            logger.exception("Scheduler sweep: bonus plan refresh step failed")
     finally:
         db.close()
 

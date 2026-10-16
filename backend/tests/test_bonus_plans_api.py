@@ -75,3 +75,36 @@ def test_duplicate_years_are_refused(db_session):
     body = {**BODY, "recurring_item_id": item.id,
             "years": [{"year": 2027, "gross_amount": "1"}, {"year": 2027, "gross_amount": "2"}]}
     assert _client(db_session, user).post("/bonus-plans", json=body).status_code == 422
+
+
+def test_resending_the_same_year_on_update_succeeds(db_session):
+    """PUT re-sending a year that's already on the plan (e.g. the form just
+    submitting its own current state, with a tweaked amount) used to 500 --
+    plan.years was reassigned wholesale, and SQLAlchemy flushed the new
+    rows' INSERTs before the orphaned rows' DELETEs, colliding with
+    UniqueConstraint(plan_id, year)."""
+    user, item = _seed(db_session)
+    c = _client(db_session, user)
+    r = c.post("/bonus-plans", json={**BODY, "recurring_item_id": item.id})
+    assert r.status_code == 201, r.text
+    plan_id = r.json()["id"]
+    body = {**BODY, "recurring_item_id": item.id, "years": [{"year": 2027, "gross_amount": "15000"}]}
+    r = c.put(f"/bonus-plans/{plan_id}", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json()["years"] == [{"year": 2027, "gross_amount": "15000.00"}]
+
+
+def test_get_does_not_write_the_refreshed_item_amount(db_session):
+    """GET must stay read-only -- backend/dependencies.py's get_current_user
+    only blocks writes on non-GET methods, so a write here would let a View
+    Only account trigger one. refresh_item_amounts runs after POST/PUT and
+    on the scheduler sweep instead."""
+    user, item = _seed(db_session)
+    c = _client(db_session, user)
+    r = c.post("/bonus-plans", json={**BODY, "recurring_item_id": item.id})
+    assert r.status_code == 201, r.text
+    item.amount = Decimal("999.99")
+    db_session.commit()
+    assert c.get("/bonus-plans").status_code == 200
+    db_session.refresh(item)
+    assert item.amount == Decimal("999.99")
