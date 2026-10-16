@@ -720,3 +720,37 @@ def test_sync_window_reaches_back_far_enough_for_late_posting_transactions(db_se
     assert since == datetime(2026, 10, 6, tzinfo=timezone.utc)
     duke_posted = datetime(2026, 10, 13, tzinfo=timezone.utc).timestamp()
     assert int(since.timestamp()) <= duke_posted
+
+
+def test_a_late_arriving_transaction_moves_the_auto_anchors_that_predate_it(db_session):
+    """Found 2026-10-16: the Oct 2 sync anchored Oct 1 at the bank's
+    balance, but a charge dated Oct 1 only reached the feed on Oct 3. The anchor was missing a charge dated on or before its own day,
+    so the forecast swung up and then snapped down. Auto anchors recorded
+    before such a transaction arrived now absorb it; hand-entered anchors
+    and anchors recorded after it don't, and a re-sync doesn't apply it twice."""
+    user, account, connection, link = _make_connection(db_session)
+    old = datetime(2026, 10, 2, 11, 21)
+    auto = models.ForecastDayCheckpoint(user_id=user.id, account_id=account.id, date=date(2026, 10, 1),
+                                        actual_balance=Decimal("5000.00"), note="Auto (bank sync)", updated_at=old)
+    manual = models.ForecastDayCheckpoint(user_id=user.id, account_id=account.id, date=date(2026, 9, 30),
+                                          actual_balance=Decimal("5000.00"), note=None, updated_at=old)
+    earlier_day = models.ForecastDayCheckpoint(user_id=user.id, account_id=account.id, date=date(2026, 9, 29),
+                                               actual_balance=Decimal("700.00"), note="Auto (bank sync)",
+                                               updated_at=old)
+    db_session.add_all([auto, manual, earlier_day])
+    link.last_synced_at = datetime(2026, 10, 2, 11, 21)
+    db_session.commit()
+    late = [SimpleFinTransaction(id="prog-1", posted=datetime(2026, 10, 1, 12, 0), amount=Decimal("-120.00"),
+                                 description="INSURANCE PREMIUM")]
+
+    for _ in range(2):
+        with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+             patch("backend.services.bank_sync_service.fetch_transactions",
+                   return_value=(late, Decimal("4900.00"), datetime(2026, 10, 3, 9, 0))):
+            sync_connection(db_session, connection)
+
+    for cp in (auto, manual, earlier_day):
+        db_session.refresh(cp)
+    assert auto.actual_balance == Decimal("4880.00")
+    assert manual.actual_balance == Decimal("5000.00")
+    assert earlier_day.actual_balance == Decimal("700.00")
