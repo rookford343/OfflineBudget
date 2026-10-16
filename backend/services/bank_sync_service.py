@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from decimal import Decimal
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.crypto import decrypt
@@ -25,9 +25,14 @@ AUTO_CLEAR_STATEMENTS_IN_SYNC = False
 logger = logging.getLogger(__name__)
 
 _INITIAL_LOOKBACK_DAYS = 30  # first sync for a newly-linked account
-_OVERLAP_DAYS = 3  # re-fetch a few days of overlap each sync so late-posting
-                    # transactions aren't missed; import_service's dedup skips
-                    # anything already imported
+# Each sync re-fetches from midnight UTC this many days before the last one.
+# SimpleFIN stamps a transaction with its transaction date, but it can reach
+# the feed days later (a card charge posts 2-3 days after it's made, and the
+# Bridge itself refreshes about daily). A 3-day overlap lost those for good:
+# 59 card charges and an Oct 13 bill payment between 2026-08-20 and 10-16.
+# Re-fetching costs no extra requests, and rows already imported are matched
+# by SimpleFIN's id, so the overlap can't duplicate anything.
+_OVERLAP_DAYS = 10
 
 
 def sync_connection(
@@ -145,11 +150,11 @@ def _replace_pending_snapshot(
 def _sync_link(
     db: Session, user: models.User, access_url: str, link: models.BankConnectionAccountLink,
 ) -> tuple[int, int]:
-    since = (
-        link.last_synced_at - timedelta(days=_OVERLAP_DAYS)
-        if link.last_synced_at
-        else datetime.utcnow() - timedelta(days=_INITIAL_LOOKBACK_DAYS)
-    )
+    # last_synced_at is stored UTC-naive; it must be tagged UTC before it
+    # becomes a timestamp, or .timestamp() reads it as local time.
+    last = link.last_synced_at or (datetime.utcnow() - timedelta(days=_INITIAL_LOOKBACK_DAYS - _OVERLAP_DAYS))
+    since_day = (last - timedelta(days=_OVERLAP_DAYS)).date()
+    since = datetime(since_day.year, since_day.month, since_day.day, tzinfo=timezone.utc)
     is_card = link.local_credit_card_id is not None
     fetched, balance, balance_date = fetch_transactions(
         access_url, link.simplefin_account_id, since, include_pending=is_card,
