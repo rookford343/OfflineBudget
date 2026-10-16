@@ -120,10 +120,20 @@ def test_a_bonus_that_crosses_the_base_gets_a_partial_boost(db_session):
 #
 # These seed ss_withheld_ytd/ss_withheld_ytd_as_of directly (rather than
 # going through _seed(), which only ever sets the legacy ss_bonus_ytd field)
-# and use dates relative to date.today() throughout, since the block's own
-# queries filter against the real `today = date.today()` inside
-# build_forecast -- a hardcoded past date would silently stop exercising the
-# "received before today" filter the day it actually arrived.
+# AND freeze forecast_engine.date.today() at a fixed calendar date (the
+# pattern test_email_upcoming_dates_20260814.py:104-112 uses for
+# summary_generator) instead of deriving every date from the real
+# date.today() via timedelta.
+#
+# That freeze is not cosmetic -- a review caught these tests failing on
+# roughly a third of real calendar dates despite the engine being correct,
+# because deriving checkpoint/deposit/window dates with a fixed day offset
+# from the real "today" dragged the fixture across whichever boundary the
+# wall clock happened to be near that day: the Jan-1 per-year wage-base
+# reset, the year-match guard (if the checkpoint rolled into last year), or
+# simply running out of days left in the year for a day-15 monthly paycheck
+# to still fire. Freezing `today` makes every date in these three tests a
+# fixed, inspectable constant instead of a moving target.
 #
 # wage_base is set to exactly the bonus's own gross (10,000.00) with zero
 # extra paycheck headroom in every test below, on purpose: the very FIRST
@@ -136,6 +146,20 @@ def test_a_bonus_that_crosses_the_base_gets_a_partial_boost(db_session):
 # fire and silently erase whatever this block computed, independent of
 # whether the block itself is correct. Keeping each test's checkpoint and
 # forecast window inside one calendar year sidesteps that entirely.
+
+
+def _freeze_today(monkeypatch, fixed: date) -> date:
+    """Pin forecast_engine.date.today() at `fixed` for the duration of the
+    test -- monkeypatch restores the real `date` automatically on teardown,
+    same as the referenced summary_generator pattern (which restores it by
+    hand in a finally: block instead, since it predates this fixture's use
+    here)."""
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return fixed
+    monkeypatch.setattr("backend.services.forecast_engine.date", _FixedDate)
+    return fixed
 
 
 def _distant_month(anchor: date) -> int:
@@ -188,16 +212,16 @@ def _checkpoint_seed(db, *, anchor, wage_base, bonus_plan_year, bonus_plan_gross
     return user, acct, pay, bonus, plan
 
 
-def test_checkpoint_mode_counts_a_bonus_deposited_after_it(db_session):
+def test_checkpoint_mode_counts_a_bonus_deposited_after_it(db_session, monkeypatch):
     """A bonus paid out after the pay-stub checkpoint (and before today) is
     wages too -- its gross must draw the remaining wage base down just like a
     paycheck would. wage_base equals the bonus's own gross exactly, so once
     the bonus is counted the base is already exhausted and the very next
     projected paycheck gets the full boost immediately -- without counting
     it, that same paycheck would still show no boost at all."""
-    today = date.today()
-    checkpoint_date = today - timedelta(days=90)
-    bonus_actual_date = today - timedelta(days=30)   # after the checkpoint, before today, same year as both
+    today = _freeze_today(monkeypatch, date(2027, 7, 1))
+    checkpoint_date = date(2027, 4, 1)
+    bonus_actual_date = date(2027, 5, 14)   # after the checkpoint, before today, same year as both
     user, acct, pay, bonus, _ = _checkpoint_seed(
         db_session, anchor=today, wage_base="10000.00",
         bonus_plan_year=checkpoint_date.year, bonus_plan_gross="10000.00",
@@ -212,7 +236,7 @@ def test_checkpoint_mode_counts_a_bonus_deposited_after_it(db_session):
     # Window stays inside the checkpoint's own calendar year -- see the
     # module comment above on why crossing into the next year would reset
     # ss_remaining_gross before this assertion ever gets exercised.
-    entries = build_forecast(db_session, user.id, acct.id, today, date(today.year, 12, 31))
+    entries = build_forecast(db_session, user.id, acct.id, today, date(2027, 12, 31))
     checks = _lines(entries, pay.id)
 
     assert checks, "no projected paycheck in the window"
@@ -223,13 +247,13 @@ def test_checkpoint_mode_counts_a_bonus_deposited_after_it(db_session):
     )
 
 
-def test_legacy_mode_ignores_an_actual_bonus_deposit(db_session):
+def test_legacy_mode_ignores_an_actual_bonus_deposit(db_session, monkeypatch):
     """Without a checkpoint, the wage base is tracked through the legacy
     ss_bonus_ytd figure alone. An actual bonus deposit must NOT also get
     counted through the checkpoint-mode reconciliation block -- a bonus
     ss_bonus_ytd already accounts for would otherwise be subtracted twice."""
-    today = date.today()
-    bonus_actual_date = today - timedelta(days=30)
+    today = _freeze_today(monkeypatch, date(2027, 7, 1))
+    bonus_actual_date = date(2027, 5, 14)
     user, acct, pay, bonus, _ = _checkpoint_seed(
         db_session, anchor=today, wage_base="10000.00",
         bonus_plan_year=today.year, bonus_plan_gross="10000.00",
@@ -241,7 +265,7 @@ def test_legacy_mode_ignores_an_actual_bonus_deposit(db_session):
     ))
     db_session.commit()
 
-    entries = build_forecast(db_session, user.id, acct.id, today, date(today.year, 12, 31))
+    entries = build_forecast(db_session, user.id, acct.id, today, date(2027, 12, 31))
     checks = _lines(entries, pay.id)
 
     assert checks, "no projected paycheck in the window"
@@ -252,21 +276,24 @@ def test_legacy_mode_ignores_an_actual_bonus_deposit(db_session):
     )
 
 
-def test_checkpoint_mode_ignores_a_bonus_deposited_a_different_year(db_session):
+def test_checkpoint_mode_ignores_a_bonus_deposited_a_different_year(db_session, monkeypatch):
     """ss_remaining_gross describes ONE calendar year -- the checkpoint's
     own. A bonus deposit dated in a different year, even though it still
     falls inside the reconciliation query's date > checkpoint / date < today
     range, must not draw that year's base down.
 
-    The checkpoint sits over a year ago so a deposit between it and today
-    can land in a later calendar year than the checkpoint while staying
-    before real `today` -- but the forecast window itself is placed inside
-    the CHECKPOINT's own year (not anchored at today), per the module
-    comment above: a window in a later year would hit the per-year reset
-    and pass even if the year-match guard this test targets were deleted."""
-    today = date.today()
-    checkpoint_date = today - timedelta(days=400)    # over a year ago
-    bonus_actual_date = today - timedelta(days=100)  # before today, but a later calendar year than the checkpoint
+    The checkpoint sits in 2026, the deposit in 2027 (still before the
+    frozen "today" of mid-2027) -- but the forecast window itself is placed
+    inside the CHECKPOINT's own year, 2026 (not anchored at today), per the
+    module comment above: a window in a later year would hit the per-year
+    reset and pass even if the year-match guard this test targets were
+    deleted."""
+    # The window below is anchored at checkpoint_date, not today -- the
+    # freeze still matters for the reconciliation query's `date < today`
+    # bound, just not as a local variable here.
+    _freeze_today(monkeypatch, date(2027, 7, 1))
+    checkpoint_date = date(2026, 11, 1)
+    bonus_actual_date = date(2027, 2, 1)  # before today, but a later calendar year than the checkpoint
     assert bonus_actual_date.year != checkpoint_date.year, "fixture needs a real year boundary between the two"
     user, acct, pay, bonus, plan = _checkpoint_seed(
         db_session, anchor=checkpoint_date, wage_base="10000.00",
