@@ -161,8 +161,14 @@ Add each bill with its day-of-month. Examples:
 
 ### Step 6 — View Your Forecast (Forecast page)
 - Select your checking account
-- Choose the current year
-- See day-by-day projected balances and quarterly summaries
+- Pick a **Range**: **Next 4 quarters** (the default: this quarter plus the
+  next three, so next year's Q1 is always visible late in the year), a single
+  calendar year, or 2, 3 or 5 years
+- See day-by-day projected balances and quarterly summaries. A line marks
+  **Today** and each new year.
+- **Zoom:** drag across the chart to zoom into that stretch of dates; click
+  **Reset zoom** or double-click the chart to zoom back out. Long ranges plot
+  each stretch's lowest balance, so a dip is never hidden.
 
 ---
 
