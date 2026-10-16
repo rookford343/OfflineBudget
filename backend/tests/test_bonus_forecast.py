@@ -79,6 +79,11 @@ def test_the_bonus_is_never_tagged_as_a_paycheck(db_session):
     """A bonus whose net happens to sit near a paycheck's gross must not get
     the paycheck SS boost or be drawn down as one."""
     user, acct, _, bonus = _seed(db_session, wage_base="10000", fixed={2027: "6000"})  # net 4200 ~ 0.84 x gross pay
+    # The paycheck-ratio check reads the stored RecurringItem.amount, not the
+    # live bonus_net() figure -- set it to what refresh_item_amounts() would
+    # have already written, so this test actually exercises the guard.
+    bonus.amount = Decimal("4200.00")
+    db_session.commit()
     entries = build_forecast(db_session, user.id, acct.id, date(2027, 1, 1), date(2027, 12, 31))
     assert _lines(entries, bonus.id) == [(date(2027, 4, 15), Decimal("4200.00") + (Decimal("6000") * Decimal("0.062")).quantize(Decimal("0.01")))]
 
