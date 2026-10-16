@@ -519,6 +519,15 @@ def build_forecast(
     # -$REDACTED. Recurring credit_card_payment items are already scoped by
     # their own account_id and are unaffected.
     injects_card_bills = account.type == models.AccountType.checking
+    # Cards whose pending_charges came from the bank's pending feed rather
+    # than being typed in. Those charges belong to the current cycle and are
+    # already inside the carried payoff, so the second hop below must not
+    # spend them again as the following cycle's payment.
+    bank_feed_pending_card_ids = {
+        card_id for (card_id,) in db.query(models.CardPendingTransaction.card_id).filter(
+            models.CardPendingTransaction.user_id == user_id,
+        ).distinct()
+    }
     for card in (all_active_cards if injects_card_bills else []):
         if card.id in recurring_cc_card_ids:
             continue  # recurring CC payment item already handles this card
@@ -674,7 +683,10 @@ def build_forecast(
             # keep their existing, untouched projection unchanged.
             second_close = _next_occurrence_on_or_after(card.statement_day, derived_due + timedelta(days=1))
             second_due = _next_occurrence_on_or_after(card.due_day, second_close + timedelta(days=1))
-            second_amount = _fresh_pending_charges(card, today)
+            second_amount = (
+                Decimal("0") if card.id in bank_feed_pending_card_ids
+                else _fresh_pending_charges(card, today)
+            )
 
         # A stale next_payment_date rolled forward lands on the exact date
         # derived_due just computed above whenever the real payoff already

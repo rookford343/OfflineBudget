@@ -1079,3 +1079,34 @@ def test_the_second_hop_still_works_when_the_first_cycle_used_the_stale_payment_
         f"show the fresh pending_charges amount, got {cycle2}"
     )
 
+
+
+def test_second_hop_ignores_pending_charges_synced_from_the_bank(db_session):
+    """A bank-synced pending figure is the CURRENT cycle's not-yet-posted
+    charges, already inside the carried payoff. Reusing it as the next
+    cycle's whole payment counted it twice and made that payment a small
+    fraction of the monthly estimate. Only a hand-typed
+    figure feeds the second hop; a synced one falls through to the flat
+    estimate. Dates relative to date.today() -- see _RelativeCardCycles."""
+    today = date.today()
+    cycles = _RelativeCardCycles(today)
+    user = _user(db_session, username="secondhopsynced")
+    account = _checking(db_session, user, balance="60000.00")
+    card = _card(
+        db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
+        current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
+        pending_charges=Decimal("2000.00"), pending_charges_updated_at=datetime.utcnow(),
+        next_payment_date=today + timedelta(days=1),
+        monthly_spend_estimate=Decimal("15000.00"),
+    )
+    db_session.flush()
+    db_session.add(models.CardPendingTransaction(
+        user_id=user.id, card_id=card.id, external_id="p1", date=today,
+        amount=Decimal("2000.00"), merchant="PENDING SHOP", synced_at=datetime.utcnow(),
+    ))
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=120))
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+    cycle2 = [amt for d, amt in estimates.items() if d == cycles.cycle2_due]
+    assert cycle2 == [Decimal("-15000.00")], f"synced pending must not stand in for the next cycle, got {cycle2}"
