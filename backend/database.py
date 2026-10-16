@@ -295,6 +295,10 @@ def upgrade_schema():
         # "Amounts changed?" prompts -- see services/amount_drift.py.
         "ALTER TABLE recurring_items ADD COLUMN amount_varies BOOLEAN DEFAULT 0",
         "ALTER TABLE recurring_items ADD COLUMN drift_dismissed_through DATE",
+        # Bonus forecasting -- see services/bonus_plans.py. bonus_plans and
+        # bonus_plan_years are new tables, created by create_all.
+        "ALTER TABLE users ADD COLUMN annual_salary_year INTEGER",
+        "ALTER TABLE users ADD COLUMN annual_raise_pct NUMERIC(6,3)",
     ]
     with engine.connect() as conn:
         for s in stmts:

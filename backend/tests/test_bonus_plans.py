@@ -1,0 +1,108 @@
+"""Bonus plan math: salary by year, gross from target % or a fixed ramp
+amount, net after withholding, and keeping the backing item's amount equal
+to the next payout. All figures are made up."""
+from datetime import date
+from decimal import Decimal
+
+import pytest
+
+from backend import models
+from backend.services.bonus_plans import (
+    bonus_gross, bonus_net, payout_date, plans_by_item, refresh_item_amounts,
+    salary_for_year, upcoming_payouts,
+)
+
+
+def _user(db, **kw):
+    user = models.User(username="bonus", hashed_password="x", display_name="B",
+                       annual_salary=Decimal("100000"), annual_salary_year=2026,
+                       annual_raise_pct=Decimal("3"), **kw)
+    db.add(user)
+    db.flush()
+    acct = models.Account(user_id=user.id, name="Checking", type=models.AccountType.checking,
+                          current_balance=Decimal("1000"))
+    db.add(acct)
+    db.flush()
+    return user, acct
+
+
+def _plan(db, user, acct, *, lag=1, pct="20", wh="30", fixed=None, day=15, month=4):
+    item = models.RecurringItem(user_id=user.id, account_id=acct.id, name="Annual Bonus",
+                                amount=Decimal("1"), type=models.RecurringType.income,
+                                frequency=models.RecurringFrequency.yearly, month_of_year=month,
+                                day_of_month=day, start_date=date(2026, 1, 1))
+    db.add(item)
+    db.flush()
+    plan = models.BonusPlan(user_id=user.id, recurring_item_id=item.id, target_pct=Decimal(pct),
+                            salary_lag_years=lag, withholding_pct=Decimal(wh))
+    db.add(plan)
+    db.flush()
+    for year, gross in (fixed or {}).items():
+        db.add(models.BonusPlanYear(plan_id=plan.id, year=year, gross_amount=Decimal(gross)))
+    db.commit()
+    db.refresh(plan)
+    return plan, item
+
+
+def test_salary_compounds_from_its_base_year(db_session):
+    user, _ = _user(db_session)
+    assert salary_for_year(user, 2026) == Decimal("100000.00")
+    assert salary_for_year(user, 2027) == Decimal("103000.00")
+    assert salary_for_year(user, 2028) == Decimal("106090.00")
+    assert salary_for_year(user, 2025) == Decimal("97087.38")
+
+
+def test_salary_unknown_without_settings(db_session):
+    user, _ = _user(db_session)
+    user.annual_salary_year = None
+    assert salary_for_year(user, 2027) is None
+
+
+@pytest.mark.parametrize("lag,year,expected", [
+    pytest.param(1, 2027, "20000.00", id="last_years_salary"),
+    pytest.param(1, 2028, "20600.00", id="raise_carries_forward"),
+    pytest.param(3, 2029, "20000.00", id="three_years_back"),
+])
+def test_gross_is_target_pct_of_the_lagged_salary(db_session, lag, year, expected):
+    user, acct = _user(db_session)
+    plan, _ = _plan(db_session, user, acct, lag=lag)
+    assert bonus_gross(plan, user, year) == Decimal(expected)
+
+
+def test_a_fixed_ramp_amount_wins_over_the_formula(db_session):
+    user, acct = _user(db_session)
+    plan, _ = _plan(db_session, user, acct, lag=3, fixed={2027: "12000", 2028: "17000"})
+    assert bonus_gross(plan, user, 2027) == Decimal("12000.00")
+    assert bonus_gross(plan, user, 2028) == Decimal("17000.00")
+    assert bonus_gross(plan, user, 2029) == Decimal("20000.00")
+
+
+def test_net_applies_withholding(db_session):
+    user, acct = _user(db_session)
+    plan, _ = _plan(db_session, user, acct, wh="30")
+    assert bonus_net(plan, Decimal("20000.00")) == Decimal("14000.00")
+
+
+def test_payout_date_handles_last_day(db_session):
+    user, acct = _user(db_session)
+    _, item = _plan(db_session, user, acct, day=0, month=2)
+    assert payout_date(item, 2028) == date(2028, 2, 29)
+
+
+def test_upcoming_payouts_start_after_this_years_date(db_session):
+    user, acct = _user(db_session)
+    plan, _ = _plan(db_session, user, acct)
+    rows = upcoming_payouts(plan, user, date(2026, 10, 16), count=2)
+    assert [(r["year"], r["date"], r["gross"], r["net"]) for r in rows] == [
+        (2027, date(2027, 4, 15), Decimal("20000.00"), Decimal("14000.00")),
+        (2028, date(2028, 4, 15), Decimal("20600.00"), Decimal("14420.00")),
+    ]
+
+
+def test_refresh_sets_the_item_amount_to_the_next_net(db_session):
+    user, acct = _user(db_session)
+    plan, item = _plan(db_session, user, acct)
+    refresh_item_amounts(db_session, user, date(2026, 10, 16))
+    db_session.refresh(item)
+    assert item.amount == Decimal("14000.00")
+    assert plans_by_item(db_session, user.id) == {item.id: plan}

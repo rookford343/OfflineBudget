@@ -142,6 +142,11 @@ class User(Base):
     tax_filing_status: Mapped[str | None] = mapped_column(String(32))   # single | married_jointly | married_separately | head_of_household
     tax_state: Mapped[str | None] = mapped_column(String(2))            # 2-letter state code
     annual_salary: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # Bonus forecasting (services/bonus_plans.py): the year annual_salary is
+    # for, and the expected yearly raise in percent, so later years' salary
+    # (and so a %-of-salary bonus) can be projected.
+    annual_salary_year: Mapped[int | None] = mapped_column(Integer)
+    annual_raise_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3))
     other_income: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     federal_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     state_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
@@ -287,6 +292,38 @@ class RecurringItem(Base):
     category: Mapped[Category | None] = relationship(back_populates="recurring_items")
     card: Mapped[CreditCard | None] = relationship(foreign_keys=[card_id])
     transactions: Mapped[list[Transaction]] = relationship(back_populates="recurring_item")
+
+
+class BonusPlan(Base):
+    """An annual bonus paid through a yearly income RecurringItem. The item
+    carries the date, account and matching; the plan supplies each year's
+    amount (services/bonus_plans.py)."""
+    __tablename__ = "bonus_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    recurring_item_id: Mapped[int] = mapped_column(Integer, ForeignKey("recurring_items.id"), nullable=False, unique=True)
+    target_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
+    # Which year's salary the % applies to: 1 = last year's, 3 = a grant that
+    # vests over three years and pays on the salary from three years back.
+    salary_lag_years: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    withholding_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    recurring_item: Mapped[RecurringItem] = relationship()
+    years: Mapped[list[BonusPlanYear]] = relationship(cascade="all, delete-orphan", order_by="BonusPlanYear.year")
+
+
+class BonusPlanYear(Base):
+    """A fixed gross amount for one year (e.g. a ramp year the employer states
+    outright). Wins over the target-% formula."""
+    __tablename__ = "bonus_plan_years"
+    __table_args__ = (UniqueConstraint("plan_id", "year"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plan_id: Mapped[int] = mapped_column(Integer, ForeignKey("bonus_plans.id", ondelete="CASCADE"), nullable=False)
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    gross_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
 
 
 class BufferTransferRule(Base):
