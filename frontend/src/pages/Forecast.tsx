@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi, dayCheckpointsApi, transactionsApi, categoriesApi, plannedTransfersApi } from "../api";
 import { fmt, today } from "../lib/utils";
+import { axisTicks, rangeOptions, resolveRange, sampleLows, yearStarts, type RangeKey } from "../lib/forecastRange";
 import { Link } from "react-router-dom";
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Legend, BarChart, Bar, ComposedChart } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea, Legend, BarChart, Bar, ComposedChart } from "recharts";
 import { ChevronDown, ChevronUp, AlertTriangle, Plus, Trash2, X, TrendingUp, HelpCircle, CreditCard, Pencil, ShieldCheck } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -55,8 +56,19 @@ export default function Forecast() {
   );
   const [showSavings, setShowSavings] = useState(true);
   const [accountId, setAccountId] = useState<number | null>(null);
-  const [year, setYear] = useState(new Date().getFullYear());
-  const [forecastYears, setForecastYears] = useState(1);
+  // One Range picker drives everything: which years are fetched (startYear,
+  // forecastYears) and which of their quarters are shown (range.keep).
+  // "Next 4 quarters" fetches two years in Q2-Q4 and trims to the current
+  // quarter plus three, so next year's Q1 is always in view late in the year.
+  const [rangeKey, setRangeKey] = useState<RangeKey>("next4");
+  const range = resolveRange(rangeKey, new Date());
+  const year = range.startYear;
+  const forecastYears = range.years;
+  // Drag-to-zoom on the balance chart: zoom is the committed [from, to] date
+  // window; dragFrom/dragTo track a drag in progress.
+  const [zoom, setZoom] = useState<[string, string] | null>(null);
+  const [dragFrom, setDragFrom] = useState<string | null>(null);
+  const [dragTo, setDragTo] = useState<string | null>(null);
   // Keyed `${year}-${quarter}`, not just the quarter number -- with
   // forecastYears > 1, quarter numbers repeat across years (Q1 2026 and
   // Q1 2027 are both "1"), and a bare-number key would highlight/expand
@@ -102,7 +114,10 @@ export default function Forecast() {
     queryFn: () => forecastApi.multiYear(activeAccountId, year, forecastYears),
     enabled: !!activeAccountId && forecastYears > 1,
   });
-  const quarters = forecastYears === 1 ? singleYearQuarters : multiYearQuarters;
+  // Everything fetched, then the slice the chosen range shows. The year-start
+  // banner reads the unsliced list: "Next 4 quarters" hides Q1 of this year.
+  const fetchedQuarters = (forecastYears === 1 ? singleYearQuarters : multiYearQuarters) as any[];
+  const quarters = fetchedQuarters.filter(range.keep);
   const isLoading = forecastYears === 1 ? singleLoading : multiLoading;
 
   // One forecast per savings account, summed. the user holds Savings plus a Money
@@ -220,7 +235,7 @@ export default function Forecast() {
   const janFirstIsPast = new Date(year, 0, 1) < new Date(todayIso);
   const yearStartPersistedDismiss = typeof window !== "undefined" && localStorage.getItem(yearStartDismissKey) === "1";
   // Q1 open_balance is the reconstructed Jan 1 balance — use as the suggested value
-  const q1OpenBalance = (quarters as any[]).find((q: any) => q.quarter === 1 && q.year === year)?.open_balance;
+  const q1OpenBalance = fetchedQuarters.find((q: any) => q.quarter === 1 && q.year === year)?.open_balance;
   const showYearStartBanner = janFirstIsPast && !hasYearStartCheckpoint && !yearStartDismissed && !yearStartPersistedDismiss && !!activeAccountId;
 
   const saveDayCheckpointMut = useMutation({
@@ -289,12 +304,9 @@ export default function Forecast() {
   });
 
   const today_date = new Date();
-  const quarterEndDates: Record<number, Date> = {
-    1: new Date(year, 2, 31),  // Mar 31
-    2: new Date(year, 5, 30),  // Jun 30
-    3: new Date(year, 8, 30),  // Sep 30
-    4: new Date(year, 11, 31), // Dec 31
-  };
+  // Last day of a quarter, from the quarter's OWN year: a range can span
+  // years, and using the selected year made Q1 2027 look already past.
+  const quarterEndDate = (q: { year: number; quarter: number }) => new Date(q.year, q.quarter * 3, 0);
 
   // Every mutation below changes a planned expense that forecast-quarters and
   // forecast-multi-year read from (forecast_engine.py queries PlannedExpense
@@ -361,39 +373,37 @@ export default function Forecast() {
   // scenario's PROPOSED items, which the override-list path cannot express at
   // all -- a proposal-only scenario used to trace a line identical to
   // baseline here.
-  const { data: scenarioQuarters = [] } = useQuery({
-    queryKey: ["forecast-quarters-scenario", activeAccountId, year, scenarioId],
-    queryFn: () => forecastApi.quartersWithScenarioId(activeAccountId, year, scenarioId!),
-    // Unchanged: still waits for an account, a selection, and for that
-    // selection to still exist in the loaded list (a scenario deleted
-    // elsewhere leaves a stale id behind, which would now 404 server-side).
-    enabled: !!activeAccountId && scenarioId !== null && (scenarios as any[]).some((s: any) => s.id === scenarioId),
+  // One request per year in the range (the endpoint answers a single year).
+  // Each waits for an account, a selection, and for that selection to still
+  // exist in the loaded list (a scenario deleted elsewhere leaves a stale id
+  // behind, which would 404 server-side).
+  const scenarioYearQueries = useQueries({
+    queries: Array.from({ length: forecastYears }, (_, i) => year + i).map((y) => ({
+      queryKey: ["forecast-quarters-scenario", activeAccountId, y, scenarioId],
+      queryFn: () => forecastApi.quartersWithScenarioId(activeAccountId, y, scenarioId!),
+      enabled: !!activeAccountId && scenarioId !== null && (scenarios as any[]).some((s: any) => s.id === scenarioId),
+    })),
   });
+  const scenarioQuarters = scenarioYearQueries.flatMap((q: any) => q.data ?? []);
 
   // Baseline chart data split at today for actual vs projected
   const todayStr = today();
-  // Sampled to every 3rd day to keep the line readable, but each quarter's
-  // lowest-balance day is always kept. That trough is exactly what
-  // /forecast/risk scans for, and dropping it meant the red banner could warn
-  // about a dip that was invisible on the graph it sits above.
-  const chartData = (quarters as any[]).flatMap((q: any) => {
-    const lowest = (q.days as any[]).reduce(
-      (lo: any, d: any) => (parseFloat(d.projected_balance) < parseFloat(lo.projected_balance) ? d : lo),
-      q.days[0],
-    );
-    return (q.days as any[])
-      .filter((d: any, i: number) => i % 3 === 0 || d.date === lowest?.date)
-      .map((d: any) => {
-        const balance = parseFloat(d.projected_balance);
-        return {
-          date: d.date,
-          baseline: balance,
-          actual: d.date <= todayStr ? balance : null,
-          projected: d.date >= todayStr ? balance : null,
-          label: new Date(d.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-        };
-      });
-  });
+  // Every day in the range (or the zoomed window), thinned by sampleLows to
+  // about 180 points by keeping each bucket's LOWEST balance. The trough is
+  // exactly what /forecast/risk scans for, so the red banner can never warn
+  // about a dip the chart hides. Zoomed in to a few months, every day plots.
+  const allDays = quarters.flatMap((q: any) => q.days as any[])
+    .filter((d: any) => !zoom || (d.date >= zoom[0] && d.date <= zoom[1]))
+    .map((d: any) => ({ date: d.date as string, balance: parseFloat(d.projected_balance) }));
+  const chartData = sampleLows(allDays, todayStr).map((d) => ({
+    date: d.date,
+    baseline: d.balance,
+    actual: d.date <= todayStr ? d.balance : null,
+    projected: d.date >= todayStr ? d.balance : null,
+  }));
+  const chartDates = chartData.map((d) => d.date);
+  const xAxis = axisTicks(chartDates);
+  const todayOnChart = chartDates.includes(todayStr) ? todayStr : null;
 
   // Merge scenario trace into chart data
   const scenarioMap: Record<string, number> = {};
@@ -409,8 +419,8 @@ export default function Forecast() {
     );
   }
 
-  // One savings bar per month, not one per chart point. The balance line is
-  // sampled every 3rd day, and hanging a bar off each of those put ~124
+  // One savings bar per month, not one per chart point. The balance line has
+  // up to ~180 points, and hanging a bar off each of those put ~124
   // adjacent bars across a year -- they merged into a solid pale block that
   // read as a background fill and hid the gridlines behind it. A savings
   // balance moves on a monthly rhythm anyway, so the first sampled day of
@@ -434,7 +444,7 @@ export default function Forecast() {
 
   // Net view: one bar per quarter
   const netBarData = (quarters as any[]).map((q: any) => ({
-    name: forecastYears > 1 ? `Q${q.quarter} ${q.year}` : `Q${q.quarter}`,
+    name: new Set(quarters.map((x: any) => x.year)).size > 1 ? `Q${q.quarter} ${q.year}` : `Q${q.quarter}`,
     net: parseFloat(q.net),
     income: parseFloat(q.total_income),
     expenses: parseFloat(q.total_expenses),
@@ -466,7 +476,9 @@ export default function Forecast() {
       const nameMap: Record<string, string> = { actual: "Actual", projected: "Projected", scenario: "Scenario", baseline: "Balance", savings: "Savings" };
       return (
         <div className="card py-2 px-3 shadow-lg text-sm">
-          <p className="text-gray-500 text-xs mb-1">{label}</p>
+          <p className="text-gray-500 text-xs mb-1">
+            {label ? new Date(label + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : ""}
+          </p>
           {payload.filter((p: any) => p.value != null).map((p: any) => (
             <p key={p.dataKey} className="font-bold" style={{ color: p.color }}>
               {nameMap[p.dataKey] ?? p.dataKey}: {fmt(p.value)}
@@ -497,14 +509,9 @@ export default function Forecast() {
           ) : activeAccount ? (
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300 px-1">{activeAccount.name}</span>
           ) : null}
-          <select className="input w-auto" value={year} onChange={e => setYear(parseInt(e.target.value))}>
-            {[-1, 0, 1, 2].map(d => <option key={d} value={new Date().getFullYear() + d}>{new Date().getFullYear() + d}</option>)}
-          </select>
-          <select className="input w-auto" value={forecastYears} onChange={e => setForecastYears(parseInt(e.target.value))}>
-            <option value={1}>1 year</option>
-            <option value={2}>2 years</option>
-            <option value={3}>3 years</option>
-            <option value={5}>5 years</option>
+          <select className="input w-auto" aria-label="Forecast range" value={rangeKey}
+            onChange={e => { setRangeKey(e.target.value as RangeKey); setZoom(null); setExpandedQ(null); }}>
+            {rangeOptions(new Date()).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
           <select className="input w-auto" value={chartView} onChange={e => setChartView(e.target.value as "balance" | "net")}>
             <option value="balance">Running Balance</option>
@@ -625,9 +632,16 @@ export default function Forecast() {
           <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
             <h3 className="font-semibold text-gray-900 dark:text-gray-100">
               {chartView === "balance"
-                ? `Balance Over Time — ${year}${forecastYears > 1 ? `–${year + forecastYears - 1}` : ""}`
-                : `Quarterly Net Income/Expense — ${year}${forecastYears > 1 ? `–${year + forecastYears - 1}` : ""}`}
+                ? `Balance Over Time — ${range.label}`
+                : `Quarterly Net Income/Expense — ${range.label}`}
             </h3>
+            {chartView === "balance" && (
+              <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto">
+                {zoom ? (
+                  <button className="text-indigo-500 hover:underline" onClick={() => setZoom(null)}>Reset zoom</button>
+                ) : "Drag across the chart to zoom"}
+              </span>
+            )}
             {chartView === "balance" && savingsAccounts.length > 0 && (
               <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
                 <input type="checkbox" checked={showSavings} onChange={e => setShowSavings(e.target.checked)} />
@@ -649,7 +663,19 @@ export default function Forecast() {
                 <Legend />
               </BarChart>
             ) : (
-              <ComposedChart data={mergedData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
+              <ComposedChart data={mergedData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}
+                style={{ userSelect: "none", cursor: "crosshair" }}
+                onMouseDown={(e: any) => { if (e?.activeLabel) { setDragFrom(e.activeLabel); setDragTo(null); } }}
+                onMouseMove={(e: any) => { if (dragFrom && e?.activeLabel) setDragTo(e.activeLabel); }}
+                onMouseUp={() => {
+                  // A plain click (no drag, or a drag back to the start) leaves the view alone.
+                  if (dragFrom && dragTo && dragFrom !== dragTo) {
+                    setZoom(dragFrom < dragTo ? [dragFrom, dragTo] : [dragTo, dragFrom]);
+                  }
+                  setDragFrom(null);
+                  setDragTo(null);
+                }}
+                onDoubleClick={() => setZoom(null)}>
                 <defs>
                   <linearGradient id="forecastActualGradient" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.15} />
@@ -665,7 +691,8 @@ export default function Forecast() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme().grid} />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} interval={0}
+                  ticks={xAxis.ticks} tickFormatter={xAxis.format} />
                 <YAxis yAxisId="left" tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} tick={{ fontSize: 11 }} />
                 {/* Savings sits on its own axis on purpose. Sharing one would
                     flatten a $2k checking trough into invisibility against a
@@ -677,6 +704,17 @@ export default function Forecast() {
                 )}
                 <Tooltip content={<CustomTooltip />} />
                 <ReferenceLine yAxisId="left" y={0} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.5} />
+                {yearStarts(chartDates).map(d => (
+                  <ReferenceLine key={d} yAxisId="left" x={d} stroke={chartTheme().grid} strokeWidth={2}
+                    label={{ value: d.slice(0, 4), position: "insideTopLeft", fontSize: 11, fill: "#94a3b8" }} />
+                ))}
+                {todayOnChart && (
+                  <ReferenceLine yAxisId="left" x={todayOnChart} stroke="#6366f1" strokeOpacity={0.6} strokeDasharray="2 3"
+                    label={{ value: "Today", position: "insideTopRight", fontSize: 11, fill: "#818cf8" }} />
+                )}
+                {dragFrom && dragTo && (
+                  <ReferenceArea yAxisId="left" x1={dragFrom} x2={dragTo} fill="#6366f1" fillOpacity={0.12} />
+                )}
                 {lowBalanceThreshold != null && lowBalanceThreshold > 0 && (
                   <ReferenceLine
                     yAxisId="left"
@@ -701,10 +739,10 @@ export default function Forecast() {
                   <Bar yAxisId="right" dataKey="savings" name="Savings" fill="#0ea5e9" fillOpacity={0.30}
                     stroke="#0ea5e9" strokeOpacity={0.55} barSize={22} animationDuration={600} />
                 )}
-                <Area yAxisId="left" type="monotone" dataKey="actual" name="Actual" stroke={chartTheme().series} strokeWidth={2} fill="url(#forecastActualGradient)" dot={false} connectNulls={false} animationDuration={600} />
-                <Area yAxisId="left" type="monotone" dataKey="projected" name="Projected" stroke={chartTheme().series} strokeWidth={2} strokeDasharray="5 3" fill="url(#forecastProjectedGradient)" dot={false} connectNulls={false} animationDuration={600} />
+                <Area yAxisId="left" type="stepAfter" dataKey="actual" name="Actual" stroke={chartTheme().series} strokeWidth={2} fill="url(#forecastActualGradient)" dot={false} connectNulls={false} animationDuration={600} />
+                <Area yAxisId="left" type="stepAfter" dataKey="projected" name="Projected" stroke={chartTheme().series} strokeWidth={2} strokeDasharray="5 3" fill="url(#forecastProjectedGradient)" dot={false} connectNulls={false} animationDuration={600} />
                 {hasScenario && (
-                  <Area yAxisId="left" type="monotone" dataKey="scenario" name="Scenario" stroke={chartTheme().series2} strokeWidth={2} fill="url(#forecastScenarioGradient)" dot={false} strokeDasharray="5 3" animationDuration={800} animationEasing="ease-out" />
+                  <Area yAxisId="left" type="stepAfter" dataKey="scenario" name="Scenario" stroke={chartTheme().series2} strokeWidth={2} fill="url(#forecastScenarioGradient)" dot={false} strokeDasharray="5 3" animationDuration={800} animationEasing="ease-out" />
                 )}
                 <Legend />
               </ComposedChart>
@@ -1037,7 +1075,7 @@ export default function Forecast() {
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
         {(quarters as any[]).map((q: any) => {
           const qKey = `${q.year}-${q.quarter}`;
-          const qEndDate = quarterEndDates[q.quarter];
+          const qEndDate = quarterEndDate(q);
           const isPastQuarter = qEndDate < today_date;
           const forecastClose = parseFloat(q.close_balance);
           const savedBalance = q.quarter_end_checkpoint != null ? parseFloat(q.quarter_end_checkpoint) : undefined;
@@ -1045,7 +1083,7 @@ export default function Forecast() {
           const hasConflict = delta !== null && Math.abs(delta) > 1;
           // Last day of this quarter as YYYY-MM-DD for day checkpoint
           const qLastDay = (() => {
-            const d = quarterEndDates[q.quarter];
+            const d = quarterEndDate(q);
             return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
           })();
           const isSelected = expandedQ === qKey;
