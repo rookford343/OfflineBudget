@@ -292,6 +292,9 @@ def upgrade_schema():
         # Statement-date prompts ("Bills to confirm") -- see
         # services/bill_prompts.py and RecurringItem.statement_day.
         "ALTER TABLE recurring_items ADD COLUMN statement_day INTEGER",
+        # "Amounts changed?" prompts -- see services/amount_drift.py.
+        "ALTER TABLE recurring_items ADD COLUMN amount_varies BOOLEAN DEFAULT 0",
+        "ALTER TABLE recurring_items ADD COLUMN drift_dismissed_through DATE",
     ]
     with engine.connect() as conn:
         for s in stmts:

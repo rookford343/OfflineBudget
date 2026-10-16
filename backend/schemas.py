@@ -297,6 +297,7 @@ class RecurringUpdate(BaseModel):
     include_in_forecast: Optional[bool] = None
     notes: Optional[str] = None
     statement_day: Optional[int] = None
+    amount_varies: Optional[bool] = None
 
     @field_validator("statement_day")
     @classmethod
@@ -324,6 +325,7 @@ class RecurringOut(BaseModel):
     include_in_forecast: bool = True
     notes: Optional[str]
     statement_day: Optional[int] = None
+    amount_varies: bool = False
 
 
 class UpcomingBillOut(BaseModel):
@@ -687,6 +689,26 @@ class BillToConfirmOut(BaseModel):
     estimated_amount: Decimal
     statement_date: date
     due_date: date
+
+
+class AmountDriftOut(BaseModel):
+    """A recurring item whose latest linked payment differs from its planned
+    amount. varies=True means its recent payments swing too much to suggest
+    one number. See services/amount_drift.py."""
+    recurring_item_id: int
+    name: str
+    type: RecurringType
+    planned_amount: Decimal
+    latest_amount: Decimal
+    latest_date: date
+    recent_amounts: list[Decimal]
+    varies: bool
+
+
+class AmountDriftAnswer(BaseModel):
+    """update: take the latest payment as the amount from now on. keep: leave
+    it and stay quiet until a newer payment posts. varies: never ask again."""
+    action: Literal["update", "keep", "varies"]
 
 
 class RecurringLinkPattern(BaseModel):

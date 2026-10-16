@@ -37,7 +37,12 @@ export default function Layout() {
     queryFn: recurringApi.billsToConfirm,
     staleTime: 60_000,
   });
-  const triageCount = (triage?.unclassified_count ?? 0) + billsToConfirm.length;
+  const { data: amountDrift = [] } = useQuery<any[]>({
+    queryKey: ["amount-drift"],
+    queryFn: recurringApi.amountDrift,
+    staleTime: 60_000,
+  });
+  const triageCount = (triage?.unclassified_count ?? 0) + billsToConfirm.length + amountDrift.length;
   const badgeFor = (item: { badgeKey?: string }) =>
     item.badgeKey === "triage" && triageCount > 0 ? (
       <span className="ml-auto rounded-full bg-amber-100 px-1.5 text-[11px] font-semibold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">

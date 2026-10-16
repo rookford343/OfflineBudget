@@ -256,6 +256,29 @@ def get_bills_to_confirm(
     return bills_to_confirm(db, user.id, _today())
 
 
+@router.get("/amount-drift", response_model=list[schemas.AmountDriftOut])
+def get_amount_drift(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    from backend.services.amount_drift import items_with_drift
+    return items_with_drift(db, user.id, _today())
+
+
+@router.post("/{item_id}/amount-drift", response_model=schemas.RecurringOut)
+def answer_amount_drift(
+    item_id: int,
+    body: schemas.AmountDriftAnswer,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    from backend.services.amount_drift import answer_drift
+    try:
+        return answer_drift(db, user.id, item_id, body.action, _today())
+    except LookupError:
+        raise HTTPException(status_code=404, detail="No amount change to answer for this item")
+
+
 # Declared BEFORE /{item_id} on purpose: FastAPI matches routes in
 # declaration order, so the other way round "upcoming" is read as an
 # item_id and this endpoint 422s instead of answering.

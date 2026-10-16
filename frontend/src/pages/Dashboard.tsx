@@ -15,6 +15,7 @@ import { SparkLine } from "../components/SparkLine";
 import { RiskBanner } from "../components/RiskBanner";
 import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
 import BillsToConfirm from "../components/BillsToConfirm";
+import AmountDrift from "../components/AmountDrift";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
 import RecentTransactions from "../components/RecentTransactions";
 
@@ -229,6 +230,7 @@ export default function Dashboard() {
       {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
       <PlannedTransferReminder />
       <BillsToConfirm />
+      <AmountDrift />
 
       {/* Wide screens gain a COLUMN, not width. These panels are label/value
           lists and short prose, so stretching two of them to 900px only pads

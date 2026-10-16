@@ -506,6 +506,22 @@ roughly once a day, so syncing more often rarely finds anything new.
 Imported transactions are categorized by your rules and linked to the
 recurring bill they pay, so the forecast stops projecting that bill.
 
+### When a bill's amount changes
+
+If a linked payment differs from the bill's planned amount by more than 1% and
+more than $5, an **Amounts changed?** card appears on the Dashboard and the
+Recurring page. Nothing changes until you answer:
+
+- **Update to $X**: the latest payment becomes the bill's amount from now on.
+  It uses the latest payment, not an average, because a price change is a step.
+- **Keep $Y**: leaves the plan alone and stays quiet until another payment posts.
+- **Varies, stop asking**: offered instead of Update when the last three
+  payments are all different (a cleaning service, say). You can turn this back
+  off with **Amount varies** when editing the bill.
+
+Bills with a statement day are skipped (you confirm those each month under
+**Bills to confirm**), and so is income, whose deposits move with withholding.
+
 ### Pending card charges
 
 Card issuers that report pending charges (Chase does) send them along with

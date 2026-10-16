@@ -272,6 +272,12 @@ class RecurringItem(Base):
     # confirm" window; clamped to the month length the same way day_of_month
     # already is (a 31 in February means Feb 28/29).
     statement_day: Mapped[int | None] = mapped_column(Integer)
+    # "Amounts changed?" prompts (services/amount_drift.py). amount_varies:
+    # the user said this item's amount swings on purpose, so never ask.
+    # drift_dismissed_through: the date of the newest linked payment the user
+    # already answered "Keep" for; the prompt stays quiet until a newer one.
+    amount_varies: Mapped[bool] = mapped_column(Boolean, default=False)
+    drift_dismissed_through: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
