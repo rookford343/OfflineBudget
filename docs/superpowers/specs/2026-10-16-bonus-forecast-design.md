@@ -15,9 +15,10 @@ the forecast's "SS withholding stops" date too late in the year.
 
 A user has a **base salary** and an **expected yearly raise**:
 
-- `users.base_salary` (gross, for `users.base_salary_year`)
+- `users.annual_salary` (gross; the existing Tax-profile field, reused) for
+  `users.annual_salary_year`
 - `users.annual_raise_pct` (e.g. 3.5)
-- Salary for year Y = `base_salary × (1 + raise)^(Y − base_salary_year)`
+- Salary for year Y = `annual_salary × (1 + raise)^(Y − annual_salary_year)`
 
 A **bonus plan** describes one bonus the user is paid every year:
 
@@ -52,7 +53,11 @@ pays 20,000 gross in 2027. Plan B (20%, lag 3) with fixed 2027 = 12,000 and
   boost (`excess × 6.2%`), exactly like a crossing paycheck; later paychecks
   get the full boost. A bonus actually received after the SS checkpoint date
   in the checkpoint's year is drawn down by its gross in the same
-  reconciliation that already handles received paychecks.
+  reconciliation that already handles received paychecks. (Only with a pay-stub
+  checkpoint: the legacy `ss_bonus_ytd` mode already has the user's bonus
+  figure, so counting deposits there would double it.)
+- Bonus items are never tagged as paychecks for the SS boost, whatever their
+  net-to-gross ratio.
 - Before the year's payout, the forecast shows the bonus as an ordinary
   projected income line named after the item.
 
@@ -61,7 +66,8 @@ pays 20,000 gross in 2027. Plan B (20%, lag 3) with fixed 2027 = 12,000 and
 Settings → Tax gains a **Salary & bonuses** section:
 
 - Base salary, the year it applies to, expected yearly raise.
-- A list of bonus plans: pick or create the yearly income item, target %,
+- A list of bonus plans: pick an existing yearly income item (created on the
+  Recurring page with frequency Yearly), target %,
   salary lag (last year / 3 years back), withholding %, and a small table of
   fixed amounts by year.
 - Each plan shows its computed gross/net for the next three payouts so the
