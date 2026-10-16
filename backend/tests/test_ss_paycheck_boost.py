@@ -205,3 +205,28 @@ def test_incidental_recurring_income_is_not_treated_as_a_paycheck(db_session):
 
     assert bonuses, "no projected bonus twelfths were produced"
     assert all(b == Decimal("1391.31") for b in bonuses), "incidental income must never be boosted"
+
+
+def test_boost_stops_at_year_end_and_the_wage_base_resets(db_session):
+    """The wage base is per calendar year: once the 2026 base is met every
+    later 2026 paycheck is boosted, but SS withholding resumes on January 1.
+    It used to stay boosted forever, overstating every later year's income."""
+    user, account = _seed(db_session, wage_base="REDACTED", paychecks_received=10)
+    entries = build_forecast(db_session, user.id, account.id, date(2026, 11, 1), date(2027, 3, 31))
+    by_month = {(d.year, d.month): amt for d, amt in _paychecks(entries)}
+    assert by_month[(2026, 11)] == NET + BOOST
+    assert by_month[(2026, 12)] == NET + BOOST
+    assert by_month[(2027, 1)] == NET, "January: withholding resumes against the new year's base"
+    assert by_month[(2027, 2)] == NET, "the second 2027 check exactly exhausts a base of two checks"
+    assert by_month[(2027, 3)] == NET + BOOST, "the boost returns once the 2027 base is met"
+
+
+def test_upcoming_income_matches_the_forecast(db_session):
+    """The Dashboard and email Upcoming lists used to show the plain recurring
+    amount and calendar date while the forecast boosted the paycheck and moved
+    a weekend payday to Friday."""
+    from backend.services.upcoming_bills import upcoming_bills
+    user, account = _seed(db_session, wage_base="REDACTED", paychecks_received=10)
+    bills = upcoming_bills(db_session, user.id, date(2026, 11, 1), 30)
+    paychecks = [(b.due_date, b.amount) for b in bills if b.name == "Paycheck"]
+    assert paychecks == [(date(2026, 11, 13), NET + BOOST)], "Nov 15 is a Sunday: paid Friday the 13th, boosted"
