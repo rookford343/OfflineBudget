@@ -347,6 +347,8 @@ def build_forecast(
 
     # SS paycheck boost setup
     user = db.query(models.User).filter(models.User.id == user_id).first()
+    from backend.services.bonus_plans import bonus_gross, bonus_net, plans_by_item
+    bonus_plans = plans_by_item(db, user_id) if user else {}
     ss_paycheck_item_ids: set[int] = set()
     ss_remaining_gross: Decimal | None = None
     ss_boost_per_check = Decimal("0")
@@ -396,6 +398,8 @@ def build_forecast(
         # exact withholding rate; the upper bound keeps net from exceeding gross
         # by more than rounding.
         for item in recurring_items:
+            if item.id in bonus_plans:
+                continue  # a bonus is never a paycheck, whatever its net/gross ratio
             if item.type == models.RecurringType.income and item.amount > 0:
                 ratio = item.amount / ss_gross
                 if Decimal("0.5") <= ratio <= Decimal("1.1"):
@@ -1014,6 +1018,23 @@ def build_forecast(
             if ss_remaining_gross <= 0:
                 ss_limit_reached = True
 
+    # Bonuses received after the pay-stub checkpoint also used up wage base.
+    # Only in checkpoint mode: the legacy ss_bonus_ytd figure already holds
+    # the user's bonus, so counting deposits there would double it.
+    if ss_remaining_gross is not None and ss_checkpoint_date is not None and bonus_plans:
+        for t in db.query(models.Transaction).filter(
+            models.Transaction.user_id == user_id,
+            models.Transaction.is_actual == True,
+            models.Transaction.recurring_item_id.in_(list(bonus_plans)),
+            models.Transaction.date > ss_checkpoint_date,
+            models.Transaction.date < today,
+        ):
+            gross = bonus_gross(bonus_plans[t.recurring_item_id], user, t.date.year)
+            if gross is not None and t.date.year == ss_checkpoint_date.year:
+                ss_remaining_gross -= gross
+        if ss_remaining_gross <= 0:
+            ss_limit_reached = True
+
     # The wage base is per calendar year. The figures above describe the year
     # of the checkpoint (or of start_date without one); every later January 1
     # starts over at the full base, so withholding resumes until the new
@@ -1095,8 +1116,12 @@ def build_forecast(
             # rewrite every future month to a September-only number and lose
             # the estimate the forecast needs for October onward.
             actual_override = bill_actuals.get((item.id, current))
+            bonus_plan = bonus_plans.get(item.id)
+            bonus_gross_amt = bonus_gross(bonus_plan, user, current.year) if bonus_plan else None
             if actual_override is not None:
                 base_amount = actual_override
+            elif bonus_gross_amt is not None:
+                base_amount = bonus_net(bonus_plan, bonus_gross_amt) + override_map.get(item.id, Decimal("0"))
             else:
                 base_amount = item.amount + override_map.get(item.id, Decimal("0"))
             is_cc = item.type == models.RecurringType.credit_card_payment
@@ -1137,6 +1162,17 @@ def build_forecast(
                         # bookkeeping. Every check after this one gets the full
                         # boost via the ss_limit_reached branch.
                         excess = min(-ss_remaining_gross, ss_gross)
+                        ss_boost = (excess * Decimal("0.062")).quantize(Decimal("0.01"))
+            elif ss_remaining_gross is not None and bonus_gross_amt is not None and current != ss_checkpoint_date:
+                # A bonus is wages too: its gross draws the base down, and SS
+                # withheld on whatever lies above the base comes back.
+                if ss_limit_reached:
+                    ss_boost = (bonus_gross_amt * Decimal("0.062")).quantize(Decimal("0.01"))
+                else:
+                    ss_remaining_gross -= bonus_gross_amt
+                    if ss_remaining_gross <= 0:
+                        ss_limit_reached = True
+                        excess = min(-ss_remaining_gross, bonus_gross_amt)
                         ss_boost = (excess * Decimal("0.062")).quantize(Decimal("0.01"))
 
             signed = (base_amount + ss_boost) if item.type == models.RecurringType.income else -base_amount
