@@ -71,6 +71,10 @@ def update_me(
         setattr(current_user, field, value)
     db.commit()
     db.refresh(current_user)
+    # Salary or raise changes move every %-of-salary bonus.
+    from datetime import date
+    from backend.services.bonus_plans import refresh_item_amounts
+    refresh_item_amounts(db, current_user, date.today())
     return current_user
 
 

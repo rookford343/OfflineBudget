@@ -6,6 +6,7 @@ now refuses or neutralizes it.
     repo, must never sign tokens; the app generates a random one instead.
   - S110 audit middleware: a failing audit write is logged, never silently
     swallowed, and never breaks the request it was auditing.
+  - bonus plans: another user's plan or item is 404, never readable or editable.
 """
 import logging
 from unittest.mock import patch
@@ -198,3 +199,39 @@ def test_rule_wildcard__catastrophic_regex__is_literal_and_fast():
     started = time.monotonic()
     assert rule_matches("(a+)+$", "regex", "a" * 40 + "!") is False
     assert time.monotonic() - started < 1
+
+
+def test_bonus_plans_are_user_scoped(db_session):
+    from datetime import date
+    from decimal import Decimal
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from backend import models
+    from backend.dependencies import get_current_user
+    from backend.routers import bonus_plans as bonus_router
+
+    def client(user):
+        app = FastAPI()
+        app.include_router(bonus_router.router)
+        app.dependency_overrides[bonus_router.get_db] = lambda: db_session
+        app.dependency_overrides[get_current_user] = lambda: user
+        return TestClient(app)
+
+    owner = models.User(username="bp-owner", hashed_password="x", display_name="O")
+    other = models.User(username="bp-other", hashed_password="x", display_name="X")
+    db_session.add_all([owner, other])
+    db_session.flush()
+    acct = models.Account(user_id=owner.id, name="C", type=models.AccountType.checking, current_balance=Decimal("1"))
+    db_session.add(acct)
+    db_session.flush()
+    item = models.RecurringItem(user_id=owner.id, account_id=acct.id, name="Bonus", amount=Decimal("1"),
+                                type=models.RecurringType.income, frequency=models.RecurringFrequency.yearly,
+                                month_of_year=4, day_of_month=15, start_date=date(2026, 1, 1))
+    db_session.add(item)
+    db_session.commit()
+    body = {"recurring_item_id": item.id, "target_pct": "20", "salary_lag_years": 1, "withholding_pct": "30", "years": []}
+    assert client(other).post("/bonus-plans", json=body).status_code == 404
+    plan_id = client(owner).post("/bonus-plans", json=body).json()["id"]
+    assert client(other).put(f"/bonus-plans/{plan_id}", json=body).status_code == 404
+    assert client(other).delete(f"/bonus-plans/{plan_id}").status_code == 404
+    assert client(other).get("/bonus-plans").json() == []

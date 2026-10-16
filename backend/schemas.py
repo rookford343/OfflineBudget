@@ -55,6 +55,8 @@ class UserOut(BaseModel):
     tax_filing_status: Optional[str] = None
     tax_state: Optional[str] = None
     annual_salary: Optional[Decimal] = None
+    annual_salary_year: Optional[int] = None
+    annual_raise_pct: Optional[Decimal] = None
     other_income: Optional[Decimal] = None
     federal_withholding_ytd: Optional[Decimal] = None
     state_withholding_ytd: Optional[Decimal] = None
@@ -81,6 +83,8 @@ class UserUpdate(BaseModel):
     tax_filing_status: Optional[str] = None
     tax_state: Optional[str] = None
     annual_salary: Optional[Decimal] = None
+    annual_salary_year: Optional[int] = None
+    annual_raise_pct: Optional[Decimal] = None
     other_income: Optional[Decimal] = None
     federal_withholding_ytd: Optional[Decimal] = None
     state_withholding_ytd: Optional[Decimal] = None
@@ -100,6 +104,20 @@ class UserUpdate(BaseModel):
         # and silently change the headline number, so reject it at the edge.
         if v is not None and v not in ("save_monthly", "pull_from_savings"):
             raise ValueError("savings_strategy must be save_monthly or pull_from_savings")
+        return v
+
+    @field_validator("annual_salary_year")
+    @classmethod
+    def validate_salary_year(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and not (2000 <= v <= 2100):
+            raise ValueError("annual_salary_year must be 2000-2100")
+        return v
+
+    @field_validator("annual_raise_pct")
+    @classmethod
+    def validate_raise(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is not None and not (0 <= v <= 25):
+            raise ValueError("annual_raise_pct must be 0-25")
         return v
 
 
@@ -2239,3 +2257,43 @@ class WishPlanItemOut(BaseModel):
 class WishPlanOut(BaseModel):
     cushion: Decimal
     items: list[WishPlanItemOut]
+
+
+# ── Bonus Plans ───────────────────────────────────────────────────────────────
+
+class BonusPlanYearIn(BaseModel):
+    year: int = Field(ge=2000, le=2100)
+    gross_amount: Decimal = Field(gt=0)
+
+
+class BonusPlanIn(BaseModel):
+    recurring_item_id: int
+    target_pct: Decimal = Field(ge=0, le=100)
+    salary_lag_years: int = Field(ge=0, le=5)
+    withholding_pct: Decimal = Field(ge=0, le=90)
+    years: list[BonusPlanYearIn] = []
+
+    @field_validator("years")
+    @classmethod
+    def unique_years(cls, v: list[BonusPlanYearIn]) -> list[BonusPlanYearIn]:
+        if len({y.year for y in v}) != len(v):
+            raise ValueError("each year may appear once")
+        return v
+
+
+class BonusPayoutOut(BaseModel):
+    year: int
+    date: date
+    gross: Optional[Decimal]
+    net: Optional[Decimal]
+
+
+class BonusPlanOut(BaseModel):
+    id: int
+    recurring_item_id: int
+    item_name: str
+    target_pct: Decimal
+    salary_lag_years: int
+    withholding_pct: Decimal
+    years: list[BonusPlanYearIn]
+    upcoming: list[BonusPayoutOut]
