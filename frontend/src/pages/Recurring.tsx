@@ -5,6 +5,7 @@ import { fmt } from "../lib/utils";
 import { Plus, Pencil, Trash2, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt, CalendarClock } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import BillsToConfirm from "../components/BillsToConfirm";
+import AmountDrift from "../components/AmountDrift";
 import TriageInbox from "../components/TriageInbox";
 import RecurringSummaryStrip from "../components/RecurringSummaryStrip";
 import RecurringCategoryRollup from "../components/RecurringCategoryRollup";
@@ -20,7 +21,7 @@ function endMonthLabel(iso: string): string {
   return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
 }
 
-const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "" };
+const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "", amount_varies: false };
 
 /** Next occurrence of a monthly item's due day, on or after today.
  *  Only monthly items get inline actual-amount entry: yearly and quarterly
@@ -140,9 +141,9 @@ export default function Recurring() {
   const updateMut = useMutation({ mutationFn: ({ id, data }: any) => recurringApi.update(id, data), onSuccess: done });
   const deleteMut = useMutation({ mutationFn: recurringApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setDeleteId(null); } });
 
-  function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setShowForm(false); setEditItem(null); }
+  function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["amount-drift"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setShowForm(false); setEditItem(null); }
   function openNew() { setForm({ ...emptyForm, account_id: accounts[0]?.id?.toString() ?? "" }); setEditItem(null); setShowForm(true); }
-  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "" }); setShowForm(true); }
+  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "", amount_varies: !!i.amount_varies }); setShowForm(true); }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -304,6 +305,7 @@ export default function Recurring() {
       </div>
 
       <BillsToConfirm />
+      <AmountDrift />
 
       <TriageInbox />
 
@@ -560,6 +562,12 @@ export default function Recurring() {
                   <label className="label">Statement arrives around day <span className="text-gray-400 font-normal">(optional)</span></label>
                   <input type="number" min="1" max="31" className="input" placeholder="17" value={form.statement_day} onChange={e => setForm({ ...form, statement_day: e.target.value })} />
                 </div>
+              )}
+              {editItem && form.type === "expense" && (
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input type="checkbox" checked={form.amount_varies} onChange={e => setForm({ ...form, amount_varies: e.target.checked })} />
+                  Amount varies (don't ask when payments differ)
+                </label>
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="label">Start Date</label><input type="date" className="input" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} required /></div>
