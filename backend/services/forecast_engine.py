@@ -1002,10 +1002,21 @@ def build_forecast(
             if ss_remaining_gross <= 0:
                 ss_limit_reached = True
 
+    # The wage base is per calendar year. The figures above describe the year
+    # of the checkpoint (or of start_date without one); every later January 1
+    # starts over at the full base, so withholding resumes until the new
+    # year's base is met. Without this, a boost reached in one year carried
+    # into every later year's paychecks.
+    ss_year = ss_checkpoint_date.year if ss_checkpoint_date is not None else start_date.year
+
     entries: list[ForecastEntry] = []
     current = start_date
 
     while current <= end_date:
+        if ss_remaining_gross is not None and current.year != ss_year:
+            ss_year = current.year
+            ss_remaining_gross = user.ss_wage_base
+            ss_limit_reached = False
         day_transactions: list[ForecastTransaction] = []
         actuals_today = actuals_by_date.get(current, [])
         actual_recurring_ids = {t.recurring_item_id for t in actuals_today if t.recurring_item_id}
