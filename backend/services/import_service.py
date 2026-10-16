@@ -46,76 +46,119 @@ def _normalize_for_match(text: str) -> set[str]:
     return result
 
 
+# Words too common to be evidence: "pay"/"autopay" normalize to "payment",
+# which every Zelle transfer and every "... Payment" bill share.
+_GENERIC_MATCH_TOKENS = {"payment"}
+# A bill can be paid days after its due date (autopay on the 13th for a bill
+# due the 8th), so the date window is wider than the old +/-3 days; name
+# evidence is now required, which is what keeps a wider window safe.
+_MATCH_WINDOW_DAYS = 7
+_AMOUNT_RATIO = (Decimal("0.85"), Decimal("1.15"))
+
+
 def _name_score(txn_desc: str, item_name: str) -> int:
-    """Shared-token count between normalized description and recurring item name."""
-    return len(_normalize_for_match(txn_desc) & _normalize_for_match(item_name))
+    """How many meaningful words the description and the bill name share.
+
+    Generic words don't count, and a word of 4+ letters that starts the other
+    counts as shared, so "DUKEENERGY" is evidence for "Duke Electric"."""
+    desc = _normalize_for_match(txn_desc) - _GENERIC_MATCH_TOKENS
+    name = _normalize_for_match(item_name) - _GENERIC_MATCH_TOKENS
+    return sum(
+        1 for t in desc
+        if any(t == u or (min(len(t), len(u)) >= 4 and (t.startswith(u) or u.startswith(t))) for u in name)
+    )
 
 
-def _fires_near(item: models.RecurringItem, txn_date) -> bool:
-    """True if this recurring item would fire within ±3 days of txn_date."""
-    import calendar
-    from datetime import date as date_type
-    day = item.day_of_month or 28
-    for month_offset in (0, -1, 1):
-        m = txn_date.month + month_offset
-        y = txn_date.year
-        if m < 1:
-            m += 12
-            y -= 1
-        elif m > 12:
-            m -= 12
-            y += 1
-        last_day = calendar.monthrange(y, m)[1]
-        clamped_day = min(day, last_day)
-        try:
-            fire_date = date_type(y, m, clamped_day)
-        except ValueError:
+def _evidence_tokens(text: str) -> set[str]:
+    """Meaningful words of a description: no generic words, and nothing with a
+    digit (masked account numbers and reference ids change every time)."""
+    return {
+        t for t in _normalize_for_match(text) - _GENERIC_MATCH_TOKENS
+        if not any(ch.isdigit() for ch in t) and "xxx" not in t
+    }
+
+
+def _best_recurring_match(
+    candidates: list[models.RecurringItem],
+    description: str,
+    amount: Decimal,
+    on,
+    confirmed_amounts: dict[int, list[Decimal]],
+    payee_history: dict[int, set[str]],
+) -> models.RecurringItem | None:
+    """The one place an imported checking transaction is matched to a bill.
+
+    A link marks the bill paid in the forecast, so no link beats a wrong one.
+    A candidate must pass all of:
+      - it isn't charged to a card (card-paid bills never hit checking);
+      - a card-payment debit only matches a card-payment item, and nothing
+        else does;
+      - it actually fires (frequency, month, start/end) within 3 days of the
+        transaction, or 7 when the name matches;
+      - the amount is within 15% of the planned or a confirmed bill amount;
+      - there is evidence it is this payee: a shared meaningful word in the
+        name, or an earlier payment from this payee already linked to it.
+    Without the evidence rule, any same-sized debit near a due date was
+    linked (a Zelle transfer to a gas bill, a Duke payment to a doctor's)."""
+    from backend.services.card_matching import looks_like_card_autopay
+    from backend.services.forecast_engine import _fires_on
+
+    is_card_payment = amount < 0 and looks_like_card_autopay(description)
+    amount = abs(amount)
+    lo, hi = _AMOUNT_RATIO
+    words = _evidence_tokens(description)
+    best, best_key = None, (0, 0)
+    for item in candidates:
+        if item.card_id is not None or item.amount <= 0:
             continue
-        if abs((txn_date - fire_date).days) <= 3:
-            return True
-    return False
+        if (item.type == models.RecurringType.credit_card_payment) != is_card_payment:
+            continue
+        name_hits = _name_score(description, item.name)
+        history_hits = len(words & payee_history.get(item.id, set()))
+        if not (name_hits or history_hits):
+            continue
+        window = _MATCH_WINDOW_DAYS if name_hits else 3
+        if not any(_fires_on(item, on + timedelta(days=k)) for k in range(-window, window + 1)):
+            continue
+        targets = [item.amount, *confirmed_amounts.get(item.id, [])]
+        if not any(t > 0 and lo <= amount / t <= hi for t in targets):
+            continue
+        key = (name_hits, history_hits)
+        if key > best_key:
+            best, best_key = item, key
+    return best
+
+
+def _payee_history(db: Session, user_id: int) -> dict[int, set[str]]:
+    """Each bill's payee words, learned from transactions already linked to it."""
+    out: dict[int, set[str]] = {}
+    rows = db.query(models.Transaction.recurring_item_id, models.Transaction.description).filter(
+        models.Transaction.user_id == user_id, models.Transaction.recurring_item_id.isnot(None),
+    )
+    for item_id, desc in rows:
+        out.setdefault(item_id, set()).update(_evidence_tokens(desc))
+    return out
+
+
+def _confirmed_bill_amounts(db: Session, user_id: int) -> dict[int, list[Decimal]]:
+    out: dict[int, list[Decimal]] = {}
+    for o in db.query(models.BillAmountOverride).filter(models.BillAmountOverride.user_id == user_id):
+        out.setdefault(o.recurring_item_id, []).append(Decimal(str(o.actual_amount)))
+    return out
 
 
 def _try_auto_match(txn: models.Transaction, db: Session) -> None:
-    """Link txn to a recurring item if amount, day-of-month, and name are close enough.
-
-    Covers income credits, expense debits, and CC payment debits — previously only
-    expenses were considered, which silently dropped paycheck and autopay links.
-    """
+    """Link txn to a recurring item on the same account, in the matching
+    direction (income for credits, everything else for debits)."""
     recurring = db.query(models.RecurringItem).filter(
         models.RecurringItem.user_id == txn.user_id,
         models.RecurringItem.account_id == txn.account_id,
         models.RecurringItem.is_active == True,
     ).all()
-
-    txn_amount = abs(txn.amount)
-    txn_day = txn.date.day
     is_credit = txn.amount > 0
-
-    best: models.RecurringItem | None = None
-    best_score = -1
-
-    for item in recurring:
-        # Direction guard: income items match credits, everything else matches debits
-        if item.type == models.RecurringType.income and not is_credit:
-            continue
-        if item.type != models.RecurringType.income and is_credit:
-            continue
-
-        item_day = item.day_of_month or 28
-        if abs(txn_day - item_day) > 3:
-            continue
-        if txn_amount == 0 or item.amount == 0:
-            continue
-        ratio = txn_amount / item.amount
-        if not (Decimal("0.9") <= ratio <= Decimal("1.1")):
-            continue
-
-        score = _name_score(txn.description, item.name)
-        if score > best_score:
-            best_score = score
-            best = item
-
+    candidates = [r for r in recurring if (r.type == models.RecurringType.income) == is_credit]
+    best = _best_recurring_match(candidates, txn.description, txn.amount, txn.date,
+                                 _confirmed_bill_amounts(db, txn.user_id), _payee_history(db, txn.user_id))
     if best is not None:
         txn.recurring_item_id = best.id
 
@@ -189,28 +232,15 @@ def build_preview(
     income_recurring = [r for r in all_recurring if r.type == models.RecurringType.income]
     cc_payment_recurring = [r for r in all_recurring if r.type == models.RecurringType.credit_card_payment]
 
+    confirmed_amounts = _confirmed_bill_amounts(db, user.id)
+    payee_history = _payee_history(db, user.id)
+
     def _best_suggestion(
-        candidates: list[models.RecurringItem],
-        row: ParsedRow,
-        amount_lo: Decimal = Decimal("0.85"),
-        amount_hi: Decimal = Decimal("1.15"),
+        candidates: list[models.RecurringItem], row: ParsedRow,
     ) -> tuple[int | None, str | None]:
-        txn_amount = abs(row.amount)
-        best_item: models.RecurringItem | None = None
-        best_score = -1
-        for item in candidates:
-            if item.amount <= 0 or not _fires_near(item, row.date):
-                continue
-            ratio = txn_amount / item.amount
-            if not (amount_lo <= ratio <= amount_hi):
-                continue
-            score = _name_score(row.description, item.name)
-            if score > best_score:
-                best_score = score
-                best_item = item
-        if best_item:
-            return best_item.id, best_item.name
-        return None, None
+        best = _best_recurring_match(candidates, row.description, row.amount, row.date,
+                                     confirmed_amounts, payee_history)
+        return (best.id, best.name) if best else (None, None)
 
     preview_rows: list[schemas.ImportPreviewRow] = []
     for i, row in enumerate(parsed_rows):
@@ -229,12 +259,9 @@ def build_preview(
         suggested_item_name = None
 
         if row.amount < 0:
-            if is_transfer:
-                # CC autopay and other transfer-flagged debits: check CC payment recurring items
-                suggested_item_id, suggested_item_name = _best_suggestion(cc_payment_recurring, row)
-            else:
-                # Regular expense debit
-                suggested_item_id, suggested_item_name = _best_suggestion(expense_recurring, row)
+            # The matcher itself routes card-payment debits to card-payment
+            # items and everything else to expenses.
+            suggested_item_id, suggested_item_name = _best_suggestion(expense_recurring + cc_payment_recurring, row)
         elif row.amount > 0:
             # Credit (income)
             suggested_item_id, suggested_item_name = _best_suggestion(income_recurring, row)
