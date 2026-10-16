@@ -699,3 +699,24 @@ def test_checking_sync_does_not_ask_for_pending(db_session):
          patch("backend.services.bank_sync_service.fetch_transactions", return_value=([], Decimal("100.00"), None)) as fetch:
         sync_connection(db_session, connection)
     assert fetch.call_args.kwargs["include_pending"] is False
+
+
+def test_sync_window_reaches_back_far_enough_for_late_posting_transactions(db_session):
+    """A transaction stamped with its (earlier) transaction date but posted to
+    SimpleFIN days later fell outside a window of "last sync minus 3 days",
+    and the naive-UTC cutoff was also read as local time, pushing it 4 hours
+    later. Found 2026-10-16: an Oct 13 bill payment and 59 card charges since
+    August were never imported. The window now starts at midnight UTC ten
+    days before the last sync."""
+    from datetime import timezone
+    user, account, connection, link = _make_connection(db_session)
+    link.last_synced_at = datetime(2026, 10, 16, 12, 7)  # stored UTC-naive
+    db_session.commit()
+    with patch("backend.services.bank_sync_service.decrypt", return_value="https://access.url"), \
+         patch("backend.services.bank_sync_service.fetch_transactions",
+               return_value=([], Decimal("100.00"), None)) as fetch:
+        sync_connection(db_session, connection)
+    since = fetch.call_args.args[2]
+    assert since == datetime(2026, 10, 6, tzinfo=timezone.utc)
+    duke_posted = datetime(2026, 10, 13, tzinfo=timezone.utc).timestamp()
+    assert int(since.timestamp()) <= duke_posted
