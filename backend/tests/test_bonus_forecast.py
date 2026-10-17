@@ -115,6 +115,69 @@ def test_a_bonus_that_crosses_the_base_gets_a_partial_boost(db_session):
     assert amt == Decimal("14000.00") + (Decimal("15000") * Decimal("0.062")).quantize(Decimal("0.01"))
 
 
+# ── Minor A: the engine must guard on the item's own type/frequency ─────────
+#
+# A BonusPlan can only be attached to a yearly income item at creation time
+# (routers/bonus_plans.py's _own_item), but nothing stops the user from
+# editing that same item on the Recurring page afterward. Before this fix the
+# engine applied the plan's net to ANY item still listed in bonus_plans,
+# regardless of what it had become -- a monthly item would fire the bonus's
+# net every month instead of its own amount.
+
+def test_bonus_plan_ignored_once_the_item_is_no_longer_yearly_income(db_session):
+    user, acct, _, bonus = _seed(db_session)
+    bonus.frequency = models.RecurringFrequency.monthly
+    bonus.amount = Decimal("42.00")
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, acct.id, date(2027, 1, 1), date(2027, 3, 31))
+
+    assert _lines(entries, bonus.id) == [
+        (date(2027, 1, 15), Decimal("42.00")),
+        (date(2027, 2, 15), Decimal("42.00")),
+        (date(2027, 3, 15), Decimal("42.00")),
+    ], "edited to monthly, the item's own amount must fire -- not the bonus plan's net"
+
+
+def test_bonus_plan_ignored_once_the_item_is_an_expense(db_session):
+    user, acct, _, bonus = _seed(db_session)
+    bonus.type = models.RecurringType.expense
+    bonus.amount = Decimal("500.00")
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, acct.id, date(2027, 1, 1), date(2027, 12, 31))
+
+    assert _lines(entries, bonus.id) == [(date(2027, 4, 15), Decimal("-500.00"))], (
+        "edited to an expense, the item's own amount must fire as a debit -- "
+        "not the bonus plan's net as a credit"
+    )
+
+
+# ── Minor B: a payout shifted onto Dec 31 must use the shifted-FROM year ────
+#
+# A Jan 1/Jan 2 payout that falls on a weekend shifts to the preceding
+# Friday, which can land in December of the PRIOR year. The engine read the
+# plan year from `current.year` (the projection's own date), so a Jan 1 2028
+# payout shifted to Fri 2027-12-31 got priced with 2027's gross instead of
+# 2028's.
+
+def test_a_jan1_payout_shifted_onto_dec31_uses_the_shifted_from_years_amount(db_session):
+    # 2028-01-01 is a Saturday, so that payout shifts to Fri 2027-12-31.
+    # 2027-01-01 is itself a Friday, so that payout needs no shift at all --
+    # both are exercised in the same window to also prove neither payout is
+    # double-counted.
+    user, acct, _, bonus = _seed(db_session, month=1, day=1, fixed={2027: "10000", 2028: "20000"})
+    entries = build_forecast(db_session, user.id, acct.id, date(2027, 1, 1), date(2028, 12, 31))
+
+    assert _lines(entries, bonus.id) == [
+        (date(2027, 1, 1), Decimal("7000.00")),     # 2027's own payout, unshifted
+        (date(2027, 12, 31), Decimal("14000.00")),  # 2028's payout, shifted onto Dec 31 2027
+    ], (
+        "the Dec-31-shifted projection must price 2028's amount (14,000.00 "
+        "net), and 2027 must not be counted twice"
+    )
+
+
 # --- Checkpoint-mode bonus reconciliation (forecast_engine.py's
 # "Bonuses received after the pay-stub checkpoint..." block) -------------
 #

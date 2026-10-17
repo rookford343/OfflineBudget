@@ -348,7 +348,21 @@ def build_forecast(
     # SS paycheck boost setup
     user = db.query(models.User).filter(models.User.id == user_id).first()
     from backend.services.bonus_plans import bonus_gross, bonus_net, plans_by_item
-    bonus_plans = plans_by_item(db, user_id) if user else {}
+    # A BonusPlan can only be attached to a yearly income item at creation
+    # time (routers/bonus_plans.py's _own_item), but nothing stops the user
+    # from editing that same item into a different type or frequency
+    # afterward on the Recurring page. Filtered here, once, so every
+    # downstream use of bonus_plans -- the day-walk's own amount lookup
+    # below, the paycheck-tag skip, and the checkpoint-mode SS bonus
+    # reconciliation further down -- agrees with what the item actually is
+    # right now, instead of applying the plan's net to an item that no
+    # longer qualifies (e.g. firing it every month instead of once a year).
+    bonus_plans = {
+        item_id: plan
+        for item_id, plan in (plans_by_item(db, user_id) if user else {}).items()
+        if plan.recurring_item.type == models.RecurringType.income
+        and plan.recurring_item.frequency == models.RecurringFrequency.yearly
+    }
     ss_paycheck_item_ids: set[int] = set()
     ss_remaining_gross: Decimal | None = None
     ss_boost_per_check = Decimal("0")
@@ -1086,12 +1100,22 @@ def build_forecast(
             if current.weekday() in (5, 6):
                 continue  # shifted to preceding Friday
 
+            # The date this item actually fires on before any weekend shift --
+            # `current` itself when it fires naturally, or the Sat/Sun it got
+            # pulled forward from when the Friday lookahead below is what
+            # matched. A yearly bonus's plan year must come from THIS date,
+            # not from `current`: a Jan 1 payout landing on a Saturday shifts
+            # onto the preceding Friday, which can fall in December of the
+            # PRIOR year (see bonus_gross_amt below).
+            natural_fire_date = current
             fires_projected = natural_fires
             if not fires_projected and current.weekday() == 4:
-                fires_projected = (
-                    _fires_on(item, current + timedelta(1)) or
-                    _fires_on(item, current + timedelta(2))
-                )
+                if _fires_on(item, current + timedelta(1)):
+                    fires_projected = True
+                    natural_fire_date = current + timedelta(1)
+                elif _fires_on(item, current + timedelta(2)):
+                    fires_projected = True
+                    natural_fire_date = current + timedelta(2)
 
             if not fires_projected:
                 continue
@@ -1117,7 +1141,12 @@ def build_forecast(
             # the estimate the forecast needs for October onward.
             actual_override = bill_actuals.get((item.id, current))
             bonus_plan = bonus_plans.get(item.id)
-            bonus_gross_amt = bonus_gross(bonus_plan, user, current.year) if bonus_plan else None
+            # Year of the NATURAL fire date, not `current` -- see
+            # natural_fire_date above. Counting the gross against the SS
+            # wage base on `current` (Dec 31) remains correct as-is: that's
+            # a separate question of which calendar year's base the money
+            # counts toward, not which year's plan amount it is.
+            bonus_gross_amt = bonus_gross(bonus_plan, user, natural_fire_date.year) if bonus_plan else None
             if actual_override is not None:
                 base_amount = actual_override
             elif bonus_gross_amt is not None:
