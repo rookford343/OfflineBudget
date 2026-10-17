@@ -27,7 +27,21 @@ export default function TaxTab() {
 
   const taxMut = useMutation({
     mutationFn: authApi.updateMe,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["me"] }); setTaxSaved(true); setTimeout(() => setTaxSaved(false), 2000); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["me"] });
+      // This save also edits annual_salary, which feeds every bonus plan's
+      // computed gross/net (services/bonus_plans.py) and therefore the
+      // forecast itself -- without these, the Tax tab, Recurring page and
+      // every forecast chart kept showing figures derived from the old
+      // salary until something else happened to invalidate them.
+      qc.invalidateQueries({ queryKey: ["bonus-plans"] });
+      qc.invalidateQueries({ queryKey: ["recurring"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      qc.invalidateQueries({ queryKey: ["forecast-risk"] });
+      setTaxSaved(true);
+      setTimeout(() => setTaxSaved(false), 2000);
+    },
   });
 
   useEffect(() => {
