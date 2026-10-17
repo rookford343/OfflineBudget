@@ -171,6 +171,25 @@ class ScenarioAccountNotOwned(Exception):
         super().__init__(f"account {account_id} is not owned by this user")
 
 
+class ScenarioBonusPlanOverride(Exception):
+    """An amount tweak targets a recurring item that has a BonusPlan. The
+    forecast engine ignores item.amount for a bonus item -- it derives the
+    amount from the plan instead (forecast_engine.py's bonus_gross_amt) --
+    and refresh_item_amounts overwrites item.amount right back to the plan's
+    own figure on every save and every 20-minute scheduler sweep regardless.
+    Committing a tweak here would therefore silently do nothing, so it is
+    refused up front, before any row is created or mutated, same as the
+    other guards in commit_scenario."""
+
+    def __init__(self, item_name: str, recurring_item_id: int):
+        self.item_name = item_name
+        self.recurring_item_id = recurring_item_id
+        super().__init__(
+            f"item {item_name!r} (id {recurring_item_id}) has a bonus plan. "
+            "Edit the bonus plan instead of a scenario tweak."
+        )
+
+
 def _assert_account_owned(db: Session, user_id: int, account_id: int | None) -> None:
     """Mirrors routers/recurring.py's _assert_account_owned: commit creates
     real RecurringItem/PlannedExpense rows from proposal data that was never
@@ -232,6 +251,22 @@ def commit_scenario(db: Session, user_id: int, scenario_id: int) -> dict:
             ).first()
             raise ScenarioCommitConflict(
                 conflicting_scenario_name=conflict.scenario.name,
+                item_name=item.name if item is not None else f"item {o.recurring_item_id}",
+                recurring_item_id=o.recurring_item_id,
+            )
+
+    # I3: an amount tweak on an item a BonusPlan has claimed would commit and
+    # then silently do nothing (see ScenarioBonusPlanOverride) -- caught here,
+    # before the write below, same as every other commit guard.
+    for o in scenario.overrides:
+        bonus_plan = db.query(models.BonusPlan).filter(
+            models.BonusPlan.recurring_item_id == o.recurring_item_id,
+        ).first()
+        if bonus_plan is not None:
+            item = db.query(models.RecurringItem).filter(
+                models.RecurringItem.id == o.recurring_item_id,
+            ).first()
+            raise ScenarioBonusPlanOverride(
                 item_name=item.name if item is not None else f"item {o.recurring_item_id}",
                 recurring_item_id=o.recurring_item_id,
             )

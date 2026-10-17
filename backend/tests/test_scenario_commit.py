@@ -483,6 +483,96 @@ def test_create_override_refused_on_a_committed_scenario(seeded):
     assert db.query(models.ScenarioOverride).count() == 1
 
 
+def test_commit_refused_on_a_bonus_item_override(db_session):
+    """I3: the forecast engine ignores item.amount for a bonus item (it
+    derives the amount from the BonusPlan instead -- see forecast_engine.py's
+    bonus_gross_amt), and refresh_item_amounts (run on every bonus-plan
+    save, PATCH /auth/me, and the 20-minute scheduler sweep) overwrites
+    item.amount right back to the plan's own figure regardless. A committed
+    scenario tweak on such an item would therefore silently do nothing --
+    refused instead, up front, before any row is created or mutated."""
+    db = db_session
+    user = models.User(username="bonuscommit", hashed_password="x", display_name="BC")
+    db.add(user)
+    db.flush()
+    account = models.Account(
+        user_id=user.id, name="Checking", type=models.AccountType.checking,
+        current_balance=Decimal("5000.00"),
+    )
+    db.add(account)
+    db.flush()
+    bonus_item = models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Annual Bonus",
+        amount=Decimal("14000.00"), type=models.RecurringType.income,
+        frequency=models.RecurringFrequency.yearly, month_of_year=4, day_of_month=15,
+        start_date=date(2026, 1, 1),
+    )
+    db.add(bonus_item)
+    db.flush()
+    db.add(models.BonusPlan(
+        user_id=user.id, recurring_item_id=bonus_item.id,
+        target_pct=Decimal("20"), salary_lag_years=1, withholding_pct=Decimal("30"),
+    ))
+    scenario = models.ForecastScenario(user_id=user.id, name="Bump the bonus")
+    db.add(scenario)
+    db.flush()
+    db.add(models.ScenarioOverride(
+        scenario_id=scenario.id, recurring_item_id=bonus_item.id,
+        amount_delta=Decimal("1000.00"),
+    ))
+    db.commit()
+
+    with pytest.raises(scenario_service.ScenarioBonusPlanOverride):
+        scenario_service.commit_scenario(db, user.id, scenario.id)
+
+    db.refresh(bonus_item)
+    assert bonus_item.amount == Decimal("14000.00"), "refused commit must leave the item untouched"
+    db.refresh(scenario)
+    assert scenario.status == "draft"
+
+
+def test_commit_route_refuses_a_bonus_item_override_with_a_clear_message(db_session):
+    db = db_session
+    user = models.User(username="bonuscommit2", hashed_password="x", display_name="BC2")
+    db.add(user)
+    db.flush()
+    account = models.Account(
+        user_id=user.id, name="Checking", type=models.AccountType.checking,
+        current_balance=Decimal("5000.00"),
+    )
+    db.add(account)
+    db.flush()
+    bonus_item = models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Annual Bonus",
+        amount=Decimal("14000.00"), type=models.RecurringType.income,
+        frequency=models.RecurringFrequency.yearly, month_of_year=4, day_of_month=15,
+        start_date=date(2026, 1, 1),
+    )
+    db.add(bonus_item)
+    db.flush()
+    db.add(models.BonusPlan(
+        user_id=user.id, recurring_item_id=bonus_item.id,
+        target_pct=Decimal("20"), salary_lag_years=1, withholding_pct=Decimal("30"),
+    ))
+    scenario = models.ForecastScenario(user_id=user.id, name="Bump the bonus")
+    db.add(scenario)
+    db.flush()
+    db.add(models.ScenarioOverride(
+        scenario_id=scenario.id, recurring_item_id=bonus_item.id,
+        amount_delta=Decimal("1000.00"),
+    ))
+    db.commit()
+
+    response = _client(db, user).post(f"/scenarios/{scenario.id}/commit")
+
+    assert response.status_code == 409
+    assert "Edit the bonus plan instead of a scenario tweak" in response.json()["detail"]
+    db.refresh(bonus_item)
+    assert bonus_item.amount == Decimal("14000.00")
+    db.refresh(scenario)
+    assert scenario.status == "draft"
+
+
 def test_create_override_still_works_on_a_draft_scenario(seeded):
     """The guard must not touch the normal path: a draft scenario can still
     take a new amount tweak on a different item."""
