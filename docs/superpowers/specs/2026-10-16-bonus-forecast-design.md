@@ -27,7 +27,7 @@ A **bonus plan** describes one bonus the user is paid every year:
 | `recurring_item_id` | The yearly income item that carries the deposit (name, account, payout month/day, matching). One plan per item. |
 | `target_pct` | e.g. 20 |
 | `salary_lag_years` | Which salary the % applies to: 1 = last year's, 3 = three years back (a grant that vests over three years). |
-| `withholding_pct` | Gross → net, e.g. 30 (supplemental federal + FICA + state/county). Defaulted from a real past bonus when one exists. |
+| `withholding_pct` | Gross → net, e.g. 30 (supplemental federal + FICA + state/county). Entered by the user (no default). |
 
 `bonus_plan_years` holds fixed gross amounts for specific years
 (`plan_id, year, gross_amount`), for ramp years the employer states
