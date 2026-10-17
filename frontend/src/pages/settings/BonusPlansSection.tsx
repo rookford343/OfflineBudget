@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authApi, bonusPlansApi, recurringApi } from "../../api";
 import { fmt } from "../../lib/utils";
 import { Plus, Trash2 } from "lucide-react";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 
 type Draft = {
   id?: number;
@@ -30,6 +31,8 @@ export default function BonusPlansSection() {
   const [salaryYear, setSalaryYear] = useState("");
   const [raise, setRaise] = useState("");
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [salarySaved, setSalarySaved] = useState(false);
+  const [deletePlan, setDeletePlan] = useState<any | null>(null);
 
   useEffect(() => {
     if (me) {
@@ -43,7 +46,10 @@ export default function BonusPlansSection() {
     ["me", "bonus-plans", "recurring", "forecast-quarters", "forecast-multi-year", "forecast-risk", "budget-snapshot"]
       .forEach((k) => qc.invalidateQueries({ queryKey: [k] }));
   };
-  const salaryMut = useMutation({ mutationFn: authApi.updateMe, onSuccess: invalidate });
+  const salaryMut = useMutation({
+    mutationFn: authApi.updateMe,
+    onSuccess: () => { invalidate(); setSalarySaved(true); setTimeout(() => setSalarySaved(false), 2000); },
+  });
   const saveMut = useMutation({
     mutationFn: (d: Draft) => {
       const body = {
@@ -55,7 +61,10 @@ export default function BonusPlansSection() {
     },
     onSuccess: () => { invalidate(); setDraft(null); },
   });
-  const deleteMut = useMutation({ mutationFn: (id: number) => bonusPlansApi.remove(id), onSuccess: invalidate });
+  const deleteMut = useMutation({
+    mutationFn: (id: number) => bonusPlansApi.remove(id),
+    onSuccess: () => { invalidate(); setDeletePlan(null); },
+  });
 
   const edit = (p: any) => setDraft({
     id: p.id, recurring_item_id: String(p.recurring_item_id), target_pct: String(p.target_pct),
@@ -77,10 +86,18 @@ export default function BonusPlansSection() {
         <div><label className="label">Expected yearly raise %</label>
           <input type="number" step="0.1" className="input" value={raise} onChange={(e) => setRaise(e.target.value)} /></div>
       </div>
-      <button className="btn-secondary text-sm" disabled={salaryMut.isPending}
-        onClick={() => salaryMut.mutate({ annual_salary: salary || null, annual_salary_year: salaryYear ? parseInt(salaryYear) : null, annual_raise_pct: raise || null })}>
-        Save salary
-      </button>
+      <div className="flex items-center gap-3">
+        <button className="btn-secondary text-sm" disabled={salaryMut.isPending}
+          onClick={() => salaryMut.mutate({ annual_salary: salary || null, annual_salary_year: salaryYear ? parseInt(salaryYear) : null, annual_raise_pct: raise || null })}>
+          Save salary
+        </button>
+        {salarySaved && <span className="text-sm text-green-600">Saved!</span>}
+      </div>
+      {salaryMut.isError && (
+        <p className="text-xs text-red-500" role="alert">
+          Couldn't save salary settings. Raise must be 0–25% and the year 2000–2100.
+        </p>
+      )}
 
       <div className="space-y-2">
         {plans.map((p: any) => (
@@ -90,7 +107,7 @@ export default function BonusPlansSection() {
               <div className="flex gap-2">
                 <button className="text-xs text-indigo-500 hover:underline" onClick={() => edit(p)}>Edit</button>
                 <button className="text-gray-400 hover:text-red-500" aria-label={`Delete ${p.item_name} plan`}
-                  onClick={() => deleteMut.mutate(p.id)}><Trash2 size={14} /></button>
+                  onClick={() => setDeletePlan(p)}><Trash2 size={14} /></button>
               </div>
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -159,6 +176,18 @@ export default function BonusPlansSection() {
           <Plus size={14} /> Add bonus plan
         </button>
       )}
+
+      <ConfirmDialog
+        open={!!deletePlan}
+        onOpenChange={(open) => !open && setDeletePlan(null)}
+        icon={Trash2}
+        title={`Delete the bonus plan for ${deletePlan?.item_name ?? ""}?`}
+        description="Its fixed ramp amounts are removed too."
+        confirmLabel="Delete"
+        confirmingLabel="Deleting…"
+        isPending={deleteMut.isPending}
+        onConfirm={() => deletePlan && deleteMut.mutate(deletePlan.id)}
+      />
     </div>
   );
 }
