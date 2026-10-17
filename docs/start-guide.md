@@ -169,6 +169,13 @@ Add each bill with its day-of-month. Examples:
 - **Zoom:** drag across the chart to zoom into that stretch of dates; click
   **Reset zoom** or double-click the chart to zoom back out. Long ranges plot
   each stretch's lowest balance, so a dip is never hidden.
+- **Bonuses:** add a yearly income item on the Recurring page for each bonus
+  (frequency Yearly, its pay date), then in **Settings → Tax → Salary &
+  bonuses** set your base salary and expected raise and add a plan for each:
+  target %, whether it's based on last year's salary or one from a few years
+  back, the % withheld, and any fixed amounts for ramp years. The forecast
+  adds each year's net on the pay date, and the gross counts toward the
+  Social Security wage base.
 
 ---
 

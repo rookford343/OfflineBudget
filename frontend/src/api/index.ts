@@ -394,6 +394,14 @@ export const adventuresApi = {
     api.delete(`/adventures/trips/${id}/fund`, { params: { delete_goal: deleteGoal } }).then((r) => r.data),
 };
 
+// ── Bonus Plans ───────────────────────────────────────────────────────────────
+export const bonusPlansApi = {
+  list: () => api.get("/bonus-plans").then((r) => r.data),
+  create: (data: object) => api.post("/bonus-plans", data).then((r) => r.data),
+  update: (id: number, data: object) => api.put(`/bonus-plans/${id}`, data).then((r) => r.data),
+  remove: (id: number) => api.delete(`/bonus-plans/${id}`),
+};
+
 // ── Verification Flags ──────────────────────────────────────────────────────
 export const verificationFlagsApi = {
   list: (params?: { feature?: string; status?: string }) =>

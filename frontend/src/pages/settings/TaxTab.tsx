@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { authApi } from "../../api";
+import BonusPlansSection from "./BonusPlansSection";
 
 export default function TaxTab() {
   const qc = useQueryClient();
@@ -193,6 +194,7 @@ export default function TaxTab() {
           {taxSaved && <span className="text-sm text-green-600">Saved!</span>}
         </div>
       </div>
+      <BonusPlansSection />
     </div>
   );
 }
