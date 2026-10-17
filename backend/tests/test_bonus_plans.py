@@ -1,7 +1,7 @@
 """Bonus plan math: salary by year, gross from target % or a fixed ramp
 amount, net after withholding, and keeping the backing item's amount equal
 to the next payout. All figures are made up."""
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -11,6 +11,8 @@ from backend.services.bonus_plans import (
     bonus_gross, bonus_net, payout_date, plans_by_item, refresh_item_amounts,
     salary_for_year, upcoming_payouts,
 )
+from backend.services.csv_parser import ParsedRow
+from backend.services.import_service import _MATCH_WINDOW_DAYS, build_preview
 
 
 def _user(db, **kw):
@@ -106,3 +108,64 @@ def test_refresh_sets_the_item_amount_to_the_next_net(db_session):
     db_session.refresh(item)
     assert item.amount == Decimal("14000.00")
     assert plans_by_item(db_session, user.id) == {item.id: plan}
+
+
+# ── I1: a late deposit must still match THIS year's plan ────────────────────
+#
+# Bank sync imports once a day at 07:00, so a bonus posting after 07:00 on
+# its payout day, or a few days late, was checked by refresh_item_amounts
+# against NEXT year's net the instant `today > payout_date` -- in a ramp
+# year that can differ enough (0.71x here) to fall outside the import
+# matcher's own +/-15% amount window and never link. Fix: keep this year's
+# payout as the target until _MATCH_WINDOW_DAYS after it.
+
+def _suggested(db, user, description, amount, on):
+    row = ParsedRow(date=on, description=description, amount=Decimal(amount), external_id="x")
+    return build_preview(db, user, [row])[0]
+
+
+def test_refresh_keeps_this_years_net_within_the_match_window(db_session):
+    user, acct = _user(db_session)
+    _, item = _plan(db_session, user, acct, fixed={2027: "12000", 2028: "17000"})
+    payout = payout_date(item, 2027)  # 2027-04-15, a Thursday -- no weekend shift
+
+    refresh_item_amounts(db_session, user, payout + timedelta(days=1))
+
+    db_session.refresh(item)
+    assert item.amount == Decimal("8400.00"), (
+        "this year's net (12,000 gross x 70%) must still be the target the "
+        "day after payout -- not 2028's 11,900.00"
+    )
+
+
+def test_refresh_rolls_to_next_years_net_past_the_match_window(db_session):
+    user, acct = _user(db_session)
+    _, item = _plan(db_session, user, acct, fixed={2027: "12000", 2028: "17000"})
+    payout = payout_date(item, 2027)
+
+    refresh_item_amounts(db_session, user, payout + timedelta(days=_MATCH_WINDOW_DAYS + 1))
+
+    db_session.refresh(item)
+    assert item.amount == Decimal("11900.00"), (
+        "past the matcher's own window, the target rolls to next year's net "
+        "(17,000 gross x 70%)"
+    )
+
+
+def test_a_late_bonus_deposit_still_links_via_the_import_matcher(db_session):
+    """End to end: a bonus that posts the day after payout, in a ramp year
+    where next year's net is far off, must still link through
+    build_preview's suggestion -- the whole point of keeping item.amount at
+    THIS year's net past the payout date."""
+    user, acct = _user(db_session)
+    _, item = _plan(db_session, user, acct, fixed={2027: "12000", 2028: "17000"})
+    payout = payout_date(item, 2027)
+    deposit_date = payout + timedelta(days=1)
+    refresh_item_amounts(db_session, user, deposit_date)
+    db_session.refresh(item)
+    assert item.amount == Decimal("8400.00")
+
+    row = _suggested(db_session, user, "ACME CORP BONUS PAYROLL", "8400.00", deposit_date)
+
+    assert row.suggested_recurring_item_id == item.id
+    assert row.suggested_recurring_item_name == item.name
