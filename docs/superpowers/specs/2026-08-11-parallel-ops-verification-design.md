@@ -88,7 +88,7 @@ needed.
 ## Today's investigation (Household Snapshot)
 
 Not part of the feature build, but the concrete example that prompted it:
-the user's spreadsheet shows Left to Spend $751.20 / Not Saving $REDACTED
+the user's spreadsheet shows Left to Spend $751.20 / Not Saving $400.00
 (updated 8/11); the app showed Left to Spend -$5,551.80.
 
 A live re-sync (triggered during this investigation) confirms Chase
