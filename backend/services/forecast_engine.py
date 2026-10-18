@@ -234,8 +234,8 @@ def _fires_on(item: models.RecurringItem, d: date) -> bool:
     # Quarterly items fire in month_of_year and every third month after it, so
     # month_of_year names the FIRST month of the cycle rather than the only one
     # (3 -> Mar/Jun/Sep/Dec). the user's Stormwater bill is the case this exists
-    # for: Budget!C15 marks it "Qtr" and the sheet charges $14.82 on 9/30 and
-    # 12/31 while carrying $4.94 as the monthly accrual in Budget!B15. Modeling
+    # for: Budget!C15 marks it "Qtr" and the sheet charges $13.50 on 9/30 and
+    # 12/31 while carrying $4.50 as the monthly accrual in Budget!B15. Modeling
     # it as monthly instead put a twelfth of the bill on checking every month --
     # right over a quarter, wrong on any given day.
     if frequency == models.RecurringFrequency.quarterly:
@@ -534,7 +534,7 @@ def build_forecast(
     # link, so without this guard every payoff and estimate was injected into
     # whichever account was being forecast -- forecasting the user's savings drew
     # the Chase payoff and two monthly estimates out of it and ended at
-    # -$REDACTED. Recurring credit_card_payment items are already scoped by
+    # -$14,512.80. Recurring credit_card_payment items are already scoped by
     # their own account_id and are unaffected.
     injects_card_bills = account.type == models.AccountType.checking
     # Cards whose pending_charges came from the bank's pending feed rather
@@ -586,7 +586,7 @@ def build_forecast(
         # been billed yet; add the subscriptions that will still post before
         # the statement closes and the cycle is nearly determined. A flat
         # monthly estimate ignores all of that and overstated the user's 9/25 payoff
-        # by roughly $1,900.
+        # by roughly $1,730.
         #
         # Computed before the stale-payment injection below (not after, as
         # originally written) because a stale `next_payment_date` rolls
@@ -601,7 +601,7 @@ def build_forecast(
         # statement is fully paid, but current_balance can still carry real,
         # already-spent debt that hasn't hit a statement yet (the user's Chase,
         # 2026-08-27: balance_due dropped to $0 right after payoff, while
-        # current_balance still carried $REDACTED of real spend). The
+        # current_balance still carried $5,312.80 of real spend). The
         # original guard required balance_due > 0, so that money silently
         # stopped being planned for the moment a card got paid off -- the
         # forecast fell back to the flat monthly_spend_estimate and
@@ -638,15 +638,15 @@ def build_forecast(
             # Only recognized when balance_due == 0, though -- NOT unconditionally
             # (a first version of this fix was; regression found live
             # 2026-09-02, hours after the user hand-entered a real, current,
-            # non-stale balance_due of $REDACTED due 9/25). balance_due == 0
+            # non-stale balance_due of $6,324.50 due 9/25). balance_due == 0
             # means "nothing billed for the recent close yet", which is
             # exactly the gap this fix exists for. balance_due > 0 means a
-            # real bill for that close ALREADY EXISTS -- the user's $REDACTED IS the
+            # real bill for that close ALREADY EXISTS -- the user's $6,324.50 IS the
             # money from the 8/28 close, injected separately below via
             # next_payment. Recognizing the same close here too made the
             # carried estimate ($REDACTED of spend that will belong to the
             # FOLLOWING cycle, not this one) land on the SAME 9/25 date as
-            # that real payment: $REDACTED and $REDACTED both charged on 9/25,
+            # that real payment: $6,324.50 and $REDACTED both charged on 9/25,
             # double-counting the $REDACTED slice. With balance_due > 0 the
             # forward search below is what's wanted -- it correctly skips to
             # the NEXT unbilled close (9/28, due 10/25), where that new
@@ -711,7 +711,7 @@ def build_forecast(
         # happened and is only waiting on bank sync to confirm it (both use
         # `_next_occurrence_on_or_after(due_day, ...)` anchored near `today`).
         # Injecting the old balance_due there on top of derived_amount would
-        # double-charge the card -- $8,068.46 (the stale, presumably
+        # double-charge the card -- $7,342.90 (the stale, presumably
         # already-paid balance) plus $REDACTED (the next cycle's own carried
         # estimate) on the same day (confirmed live 2026-08-26, crashed the
         # forecast to -$REDACTED). Trust that the payoff happened and fold the
@@ -744,7 +744,7 @@ def build_forecast(
         ):
             # balance_due only, NOT + pending_charges -- the user's real
             # spreadsheet forecast pays off only the last-statement total on
-            # the due date ("2026 Forecast" row 24: "=L23-REDACTED-REDACTED",
+            # the due date ("2026 Forecast" row 24: "=L23-7342.90-143.00",
             # no pending-charges term), and separately counts pending_charges
             # exactly once via budget_snapshot.py's new_spending_total.
             # Adding it here too double-counted it: once in this payoff
@@ -892,7 +892,7 @@ def build_forecast(
         # walk. The `start_date < today` branch above already reverses
         # actuals strictly before today for the same reason -- this mirrors
         # it for the one day that branch doesn't cover. Reproduced live:
-        # $REDACTED - $8,068.46 landed at -$REDACTED without this.
+        # $552.80 - $7,342.90 landed at -$6,796.50 without this.
         today_actuals_sum = sum(
             (Decimal(str(t.amount)) for t in all_actuals if t.date == today),
             Decimal("0"),

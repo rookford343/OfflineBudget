@@ -147,7 +147,7 @@ export default function Budget() {
   // it was set. the user budgets at the level he thinks in (Subscriptions), which
   // is a child of Wants, so filtering to parentless rows would hide every real
   // budget he has. Income categories are dropped outright -- "Income" and
-  // "Salary / Wages" carry $REDACTED allocations that are forecasting inputs,
+  // "Salary / Wages" carry $9,614.80 allocations that are forecasting inputs,
   // not spending limits, and counting them wrecked the headline totals.
   const withBudget = overview.filter(
     r => parseFloat(r.budgeted || "0") > 0 && (r.category_type ?? "expense") === "expense",

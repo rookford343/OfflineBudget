@@ -53,7 +53,7 @@ def leftover_share(item, as_of: date) -> Decimal:
     if item.frequency == models.RecurringFrequency.quarterly:
         # Accrued, not charged: a quarterly bill spreads across the three
         # months it covers, exactly as the sheet does -- Budget!B15 carries
-        # Stormwater at $4.94/mo while the forecast charges the full $14.82
+        # Stormwater at $4.50/mo while the forecast charges the full $13.50
         # once a quarter. Counting the whole bill in its own month would
         # make Leftover lurch every third month.
         return (item.amount / 3).quantize(Decimal("0.01"))
@@ -260,7 +260,7 @@ def _lookahead_minimum(
     A first pass on 2026-08-14 excluded EVERY payoff dip this way and put the
     floor on 8/31 at $REDACTED, which was too generous: it also excluded the
     9/25 estimated payoff, the very event the user needs to see. His sheet includes
-    it -- '2026 Forecast'!L36 is the 9/25 payment at $REDACTED, sitting inside
+    it -- '2026 Forecast'!L36 is the 9/25 payment at $3,204.50, sitting inside
     the B25 range.
 
     The locked payoff still shows up in the balance walk; it is only barred
@@ -314,7 +314,7 @@ def _lookahead_minimum(
     # actuals don't carry it), so the dip silently started counting as the
     # floor again the moment the payoff actually happened. the user's real Chase
     # payoff, 2026-08-27: a real `Transaction` dated today, description
-    # "CC Payment: Chase Sapphire", $8,068.46 -- is_cc_locked=False, floor
+    # "CC Payment: Chase Sapphire", $7,342.90 -- is_cc_locked=False, floor
     # landed on it anyway. Recognize a real payoff the same way
     # `_cc_actual_nearby` already does elsewhere in this codebase: match the
     # card by name/last-four against the transaction's description, not by a
@@ -406,13 +406,13 @@ def compute_budget_snapshot(
     # groceries term (F5) on both sides -- it is added into the pool and then
     # removed again in the same expression -- so it never reaches Left to
     # Spend. Confirmed 2026-08-16 by the $700.00 swing between his two formula
-    # versions: with F5 surviving the sheet read REDACTED, with F5 cancelling it
-    # reads -REDACTED, and -REDACTED is the number he wants.
+    # versions: with F5 surviving the sheet read 300.00, with F5 cancelling it
+    # reads -400.00, and -400.00 is the number he wants.
     # Under "pull_from_savings" the monthly transfer is not a commitment -- the
     # year is funded by a bonus, not by saving out of each paycheck -- so that
     # money stays spendable and Left to Spend reads higher by the savings
     # budget. Under "save_monthly" it leaves the pool, which is the default and
-    # what reconciles to the user's sheet at -REDACTED.
+    # what reconciles to the user's sheet at -400.00.
     parts = leftover_parts(db, user, as_of, extra_items)
     savings_budget = parts.savings_budget
     leftover = parts.leftover
@@ -429,7 +429,7 @@ def compute_budget_snapshot(
     # statement amount; subtracting only balance_due would miss the new,
     # not-yet-statemented spending entirely. current_balance - balance_due
     # + pending_charges is exactly that gap. Read directly from the user's real
-    # spreadsheet 2026-08-09 ("2026 Overview"!B12: "=-REDACTED+REDACTED+REDACTED"
+    # spreadsheet 2026-08-09 ("2026 Overview"!B12: "=-7342.90+9586.65+540.18"
     # -- literally -balance_due + current_balance + pending_charges for
     # Chase Sapphire). Before bank sync this was usually ~0 (current_balance
     # tracked balance_due closely by hand); live sync now keeps
@@ -442,7 +442,7 @@ def compute_budget_snapshot(
     # amount is a payment the user has already budgeted for (it sits in Checking
     # Bills and lands in the forecast on the due date), not money eroding this
     # month's spending room. Confirmed live 2026-08-12: the app showed Left to
-    # Spend -$REDACTED against the spreadsheet's +$REDACTED, a $REDACTED gap almost
+    # Spend -$REDACTED against the spreadsheet's +$751.20, a $8,420 gap almost
     # exactly equal to the $REDACTED of balance_due across both cards. The old
     # test fixture hid this by pre-computing the delta into current_balance
     # and leaving balance_due at 0.
@@ -524,7 +524,7 @@ def compute_budget_snapshot(
     # The shortfall is taken from left_to_spend rather than a trailing average
     # of discretionary spend. A trailing average is available and looks
     # authoritative, but it double-counts against monthly_expenses in ways
-    # that are not reconciled (it read $REDACTED/mo against a $REDACTED pool on
+    # that are not reconciled (it read $7,480/mo against a $REDACTED pool on
     # real data, which cannot be true of an account that is growing).
     # left_to_spend is the figure verified against the user's spreadsheet, so it is
     # the one worth extrapolating from. It is a snapshot at as_of, so it does

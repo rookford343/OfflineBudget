@@ -88,11 +88,11 @@ needed.
 ## Today's investigation (Household Snapshot)
 
 Not part of the feature build, but the concrete example that prompted it:
-the user's spreadsheet shows Left to Spend $REDACTED / Not Saving $REDACTED
-(updated 8/11); the app showed Left to Spend -$REDACTED.
+the user's spreadsheet shows Left to Spend $751.20 / Not Saving $REDACTED
+(updated 8/11); the app showed Left to Spend -$5,551.80.
 
 A live re-sync (triggered during this investigation) confirms Chase
-Sapphire's $REDACTED balance is accurate per Chase itself right now — not
+Sapphire's $8,345.10 balance is accurate per Chase itself right now — not
 stale, not a sync bug. The likely root cause is in
 `backend/services/budget_snapshot.py`: `left_to_spend` (line 169) still
 subtracts the **entire** card balance (`card_balances`), the same
@@ -103,7 +103,7 @@ subtracting the full balance was harmless; live sync now keeps
 `current_balance` accurate to the minute, so the gap is real and material).
 
 Swapping `card_balances` for the same `new_spending_total` term already
-used in `not_saving` gets closer ($REDACTED vs. $REDACTED) but not exact —
+used in `not_saving` gets closer ($1,550.90 vs. $751.20) but not exact —
 a second factor is still unaccounted for. Not shipping a guessed fix on a
 financial formula that's still off by ~$1,000. Once this feature exists,
 logging this exact case through it (or the user sharing the spreadsheet's actual

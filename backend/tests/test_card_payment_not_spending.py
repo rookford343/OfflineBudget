@@ -6,7 +6,7 @@ whole statement.
 
 These rows arrive on the charge side (positive amount) rather than netting out
 like a refund. Found live 2026-08-12: one "AUTOMATIC PAYMENT - THANK" row of
-$REDACTED was the single largest line in the user's card spending and the top entry
+$8,968.70 was the single largest line in the user's card spending and the top entry
 in the weekly email his wife reads. The checking-side mirror image was already
 excluded via card_matching.card_matches_description; this pins the card side.
 """
@@ -49,7 +49,7 @@ def _seed(db):
     db.add(user)
     db.flush()
     card = models.CreditCard(
-        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=28, due_day=25,
     )
     db.add(card)
@@ -61,7 +61,7 @@ def _seed(db):
         ),
         models.CreditCardTransaction(
             card_id=card.id, user_id=user.id, date=date(2026, 7, 24),
-            amount=Decimal("REDACTED"), merchant="AUTOMATIC PAYMENT - THANK",
+            amount=Decimal("8968.70"), merchant="AUTOMATIC PAYMENT - THANK",
         ),
     ])
     db.commit()
@@ -74,7 +74,7 @@ def test_payment_excluded_from_category_totals(db_session):
     totals = category_totals_for_range(db_session, user.id, date(2026, 7, 1), date(2026, 7, 31))
 
     assert sum(totals.values()) == Decimal("120.00"), (
-        "the $REDACTED payment must not appear as spending"
+        "the $8,968.70 payment must not appear as spending"
     )
 
 

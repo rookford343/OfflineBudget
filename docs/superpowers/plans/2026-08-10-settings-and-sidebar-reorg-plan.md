@@ -1663,15 +1663,15 @@ export default function TaxTab() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
             <div>
               <label className="label">Mortgage Interest (Form 1098)</label>
-              <input type="number" step="0.01" className="input" placeholder="e.g. REDACTED" value={taxMortgageInterest} onChange={e => setTaxMortgageInterest(e.target.value)} />
+              <input type="number" step="0.01" className="input" placeholder="e.g. 28460.50" value={taxMortgageInterest} onChange={e => setTaxMortgageInterest(e.target.value)} />
             </div>
             <div>
               <label className="label">Charitable Donations</label>
-              <input type="number" step="0.01" className="input" placeholder="e.g. REDACTED" value={taxDonations} onChange={e => setTaxDonations(e.target.value)} />
+              <input type="number" step="0.01" className="input" placeholder="e.g. 14200.00" value={taxDonations} onChange={e => setTaxDonations(e.target.value)} />
             </div>
             <div>
               <label className="label">State &amp; Local Taxes (SALT)</label>
-              <input type="number" step="0.01" className="input" placeholder="e.g. REDACTED" value={taxSalt} onChange={e => setTaxSalt(e.target.value)} />
+              <input type="number" step="0.01" className="input" placeholder="e.g. 8320.60" value={taxSalt} onChange={e => setTaxSalt(e.target.value)} />
             </div>
             <div>
               <label className="label">Property Taxes</label>
@@ -1679,7 +1679,7 @@ export default function TaxTab() {
             </div>
             <div>
               <label className="label">Other Deductions (vehicle tax, etc.)</label>
-              <input type="number" step="0.01" className="input" placeholder="e.g. REDACTED" value={taxOther} onChange={e => setTaxOther(e.target.value)} />
+              <input type="number" step="0.01" className="input" placeholder="e.g. 650.00" value={taxOther} onChange={e => setTaxOther(e.target.value)} />
             </div>
           </div>
         </div>

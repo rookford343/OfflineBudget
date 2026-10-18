@@ -23,7 +23,7 @@ def test_emergency_fund_flag_round_trips_including_unsetting(db_session):
     user = models.User(username="e", hashed_password="x", display_name="E")
     db_session.add(user); db_session.flush()
     acct = models.Account(user_id=user.id, name="MM", type=models.AccountType.money_market,
-                          current_balance=Decimal("REDACTED"))
+                          current_balance=Decimal("20770.30"))
     db_session.add(acct); db_session.commit()
     c = _client(db_session, user)
 
@@ -36,19 +36,19 @@ def test_emergency_fund_flag_round_trips_including_unsetting(db_session):
 
 def test_emergency_fund_is_held_out_of_available_savings(db_session):
     """the user's Money Market is an emergency fund. Counting it made available
-    savings read $REDACTED when only $REDACTED was really available."""
+    savings read $44,560.80 when only $23,790.50 was really available."""
     user = models.User(username="e2", hashed_password="x", display_name="E")
     db_session.add(user); db_session.flush()
     checking = models.Account(user_id=user.id, name="Chk", type=models.AccountType.checking,
                               current_balance=Decimal("1000.00"))
     savings = models.Account(user_id=user.id, name="Sav", type=models.AccountType.savings,
-                             current_balance=Decimal("REDACTED"))
+                             current_balance=Decimal("23790.50"))
     mm = models.Account(user_id=user.id, name="MM", type=models.AccountType.money_market,
-                        current_balance=Decimal("REDACTED"), is_emergency_fund=True)
+                        current_balance=Decimal("20770.30"), is_emergency_fund=True)
     db_session.add_all([checking, savings, mm]); db_session.commit()
 
     entry = type("E", (), {"date": date(2026, 8, 7), "projected_balance": Decimal("5120.66"), "transactions": []})()
     with patch("backend.services.budget_snapshot.build_forecast", return_value=[entry]):
         snap = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
-    assert snap.savings_balance == Decimal("REDACTED")
+    assert snap.savings_balance == Decimal("23790.50")

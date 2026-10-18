@@ -1661,4 +1661,4 @@ git commit -m "Add Suggested Transfer Increment setting to Preferences"
 
 ## Post-Plan Note
 
-Adding the actual Rivian R2 down payment as a `PlannedExpense` (~$REDACTED, target date within Q3 2026 per the user's stated Sept/Oct-leaning window) is a data-entry step, not a code task — done via the existing Planned Expenses UI (or the existing `POST /planned-expenses` endpoint directly) once this plan ships, so the new suggestion logic has something real to act on immediately.
+Adding the actual Rivian R2 down payment as a `PlannedExpense` (~$23,000, target date within Q3 2026 per the user's stated Sept/Oct-leaning window) is a data-entry step, not a code task — done via the existing Planned Expenses UI (or the existing `POST /planned-expenses` endpoint directly) once this plan ships, so the new suggestion logic has something real to act on immediately.

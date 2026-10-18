@@ -17,7 +17,7 @@ NOT_SAVINGS = or_(
 #
 # These reach the card table with a positive (charge-side) amount, so they
 # inflate spend rather than netting out. Found live 2026-08-12: a single
-# "AUTOMATIC PAYMENT - THANK" row of $REDACTED was the largest line in the user's
+# "AUTOMATIC PAYMENT - THANK" row of $8,968.70 was the largest line in the user's
 # card spending and the top entry in the weekly email's merchant list. The
 # checking side already excludes the mirror-image debit via
 # card_matching.card_matches_description; this is the card-side counterpart.
@@ -67,7 +67,7 @@ def is_real_checking_spend(description: str | None, active_cards: list) -> bool:
       - A credit-card payoff ("CHASE CREDIT CRD AUTOPAY"). The charges it
         settles were already counted individually on the card side, so
         counting the payment double-counts the entire statement. Live on
-        2026-08-15 this was $REDACTED -- by far the largest "merchant" in
+        2026-08-15 this was $8,968.70 -- by far the largest "merchant" in
         the user's July list, above his mortgage.
       - An internal transfer ("Online Transfer to CHK ...0054"). It never
         leaves the household at all, yet showed up as the top August
@@ -278,8 +278,8 @@ def filter_real_spend(db: Session, user_id: int, rows: list) -> list:
     category_totals_for_range.
 
     Those endpoints are exactly where this kept getting missed. On the user's real
-    data the Trends chart reported ~$REDACTED for April 2026; $REDACTED of it was
-    a single "Online Transfer to SAV" and another $REDACTED a Chase autopay --
+    data the Trends chart reported ~$52,800 for April 2026; $29,200 of it was
+    a single "Online Transfer to SAV" and another $5,380 a Chase autopay --
     neither a dollar of spending. Same defect the Spending page had, in a
     different query, because each endpoint filtered `amount < 0` itself.
     """

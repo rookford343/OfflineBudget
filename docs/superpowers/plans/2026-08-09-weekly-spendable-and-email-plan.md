@@ -666,7 +666,7 @@ In `backend/tests/test_budget_snapshot.py`, in `test_left_to_spend_and_not_savin
     # left_to_spend/not_saving formulas, which are unchanged.
 ```
 
-(i.e. remove `assert snapshot.left_to_spend_weekly == Decimal("REDACTED")`, keep the other three assertions in that test as-is.)
+(i.e. remove `assert snapshot.left_to_spend_weekly == Decimal("348.30")`, keep the other three assertions in that test as-is.)
 
 Delete the entire `test_weekly_allowance_uses_full_amount_in_final_week_of_month` test function -- its premise ("collapse to the full amount when <=7 days remain") was specific to the old `_weekly_allowance` helper, which no longer computes `left_to_spend_weekly`. `weeks_remaining_in_month`'s fractional-week behavior is covered by `test_spendable_pacer.py`.
 
@@ -900,9 +900,9 @@ import backend.models as models
 
 user = models.User(username='t', display_name='the user')
 snap = BudgetSnapshot(
-    as_of=date.today(), leftover=Decimal('2500'), left_to_spend=Decimal('REDACTED'),
+    as_of=date.today(), leftover=Decimal('2500'), left_to_spend=Decimal('1243.85'),
     left_to_spend_weekly=Decimal('412.00'), spendable_today=Decimal('58.86'),
-    days_left_in_week=7, on_pace=True, not_saving=Decimal('REDACTED'),
+    days_left_in_week=7, on_pace=True, not_saving=Decimal('1652.90'),
     not_saving_weekly=Decimal('180.00'), days_remaining_in_month=20,
     cards=[], categories=[], top_merchants=[],
 )

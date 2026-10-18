@@ -15,7 +15,7 @@ def client(db_session):
     db_session.refresh(user)
 
     card = models.CreditCard(
-        user_id=user.id, name="Chase", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase", credit_limit=Decimal("27500.00"),
         statement_day=28, due_day=25, pending_charges=Decimal("0"),
     )
     db_session.add(card)

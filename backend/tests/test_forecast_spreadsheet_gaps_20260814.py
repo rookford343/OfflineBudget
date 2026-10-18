@@ -481,7 +481,7 @@ def test_an_estimated_payoff_can_still_be_the_floor(db_session):
     """Only the LOCKED payoff is excluded. A later cycle's estimate is still
     in flux and still responsive to what the user spends, so it is exactly the
     event he needs the floor to show -- his sheet keeps the 9/25 payment
-    ($REDACTED) inside the B25 range while excluding the 8/25 locked one.
+    ($3,204.50) inside the B25 range while excluding the 8/25 locked one.
 
     Dates relative to date.today() -- the hardcoded next_payment_date this
     test used to carry (2026-08-25) went stale relative to itself once
@@ -721,8 +721,8 @@ def test_the_locked_payoff_is_flagged_and_the_estimate_is_not(db_session):
 
 
 def test_balance_due_at_zero_still_carries_forward_real_debt(db_session):
-    """the user's real case, 2026-08-27: Chase Sapphire's $8,068.46 statement was
-    paid off (balance_due -> 0), but $REDACTED of real, already-spent debt
+    """the user's real case, 2026-08-27: Chase Sapphire's $7,342.90 statement was
+    paid off (balance_due -> 0), but $5,312.80 of real, already-spent debt
     remains on current_balance -- money already spent, just not yet
     statemented. The carried-balance derivation's guard required
     balance_due > 0, so once it dropped to 0 the derivation went silent
@@ -735,7 +735,7 @@ def test_balance_due_at_zero_still_carries_forward_real_debt(db_session):
     user = _user(db_session, username="zerobalance")
     account = _checking(db_session, user, balance="60000.00")
     _card(db_session, user, name="Chase", statement_day=cycles.statement_day, due_day=cycles.due_day,
-          current_balance=Decimal("REDACTED"), balance_due=Decimal("0"),
+          current_balance=Decimal("5312.80"), balance_due=Decimal("0"),
           next_payment_date=cycles.cycle1_due, monthly_spend_estimate=Decimal("5500.00"))
     db_session.commit()
 
@@ -744,7 +744,7 @@ def test_balance_due_at_zero_still_carries_forward_real_debt(db_session):
 
     cycle1 = [amt for d, amt in estimates.items() if d == cycles.cycle1_due]
     assert cycle1, "the next cycle must still plan for the real carried debt, not go silent"
-    assert cycle1 == [Decimal("-REDACTED")], (
+    assert cycle1 == [Decimal("-5312.80")], (
         f"balance_due at 0 must not silence the carried-balance derivation -- "
         f"current_balance is real, already-spent debt regardless, got {cycle1}"
     )
@@ -767,20 +767,20 @@ def test_a_same_day_actual_is_not_double_counted_when_start_date_is_today(db_ses
     branch (`else: balance = current_balance`) skipped that reversal entirely,
     so a same-day actual got applied twice: once already baked into
     current_balance, once again when the walk's first day re-applies
-    `actuals_today`. Reproduced exactly: $REDACTED - $8,068.46 landed at
-    -$REDACTED, matching what the live risk alert showed."""
+    `actuals_today`. Reproduced exactly: $552.80 - $7,342.90 landed at
+    -$6,796.50, matching what the live risk alert showed."""
     user = _user(db_session, username="sameday")
-    account = _checking(db_session, user, balance="REDACTED")
+    account = _checking(db_session, user, balance="552.80")
     today = date.today()
     db_session.add(models.Transaction(
         user_id=user.id, account_id=account.id, date=today,
-        amount=Decimal("-REDACTED"), description="CC Payment: Chase Sapphire",
+        amount=Decimal("-7342.90"), description="CC Payment: Chase Sapphire",
         is_actual=True,
     ))
     db_session.commit()
 
     entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=3))
-    assert entries[0].projected_balance == Decimal("REDACTED"), (
+    assert entries[0].projected_balance == Decimal("552.80"), (
         f"a same-day actual must be applied exactly once, not baked into the "
         f"opening balance AND re-applied in the walk, got {entries[0].projected_balance}"
     )

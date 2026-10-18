@@ -77,10 +77,10 @@ RULES: list[tuple[str, list[str]]] = [
     # Zelle -- none of which is a spending category, and all of which the
     # spending helpers already exclude by other means.
     ("Church / Tithe", [
-        "MERCYROAD",     # $1,300/mo, the largest single uncategorized checking line
+        "MERCYROAD",     # $1,180/mo, the largest single uncategorized checking line
     ]),
     ("Vehicles", [
-        "TO AUTO LOAN",  # the Rivian R1T payment, $REDACTED/mo
+        "TO AUTO LOAN",  # the Rivian R1T payment, $398.20/mo
     ]),
 ]
 

@@ -23,15 +23,15 @@ def _user_with_checking(db, username="carduser"):
 
 
 def test_card_row_breaks_out_balance_upcoming_payoff_and_cycle_spend(db_session):
-    """the user's real Chase figures: a $REDACTED balance is two different things
-    stacked -- $REDACTED of already-statemented debt that gets paid on the
-    due date, and $REDACTED of new spend since that statement closed. The
+    """the user's real Chase figures: a $8,413.20 balance is two different things
+    stacked -- $6,324.50 of already-statemented debt that gets paid on the
+    due date, and $2,088.70 of new spend since that statement closed. The
     email showed only the blended total, which says nothing actionable."""
     user, account = _user_with_checking(db_session)
     db_session.add(models.CreditCard(
-        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=28, due_day=25,
-        current_balance=Decimal("REDACTED"), balance_due=Decimal("REDACTED"),
+        current_balance=Decimal("8413.20"), balance_due=Decimal("6324.50"),
         pending_charges=Decimal("0"),
     ))
     db_session.commit()
@@ -39,9 +39,9 @@ def test_card_row_breaks_out_balance_upcoming_payoff_and_cycle_spend(db_session)
     html, text = generate_daily_summary(db_session, user)
 
     for body in (html, text):
-        assert "$REDACTED" in body, "current balance"
-        assert "$REDACTED" in body, "upcoming payoff (balance_due)"
-        assert "$REDACTED" in body, "spend so far this cycle"
+        assert "$8,413.20" in body, "current balance"
+        assert "$6,324.50" in body, "upcoming payoff (balance_due)"
+        assert "$2,088.70" in body, "spend so far this cycle"
 
 
 def test_cycle_spend_includes_pending_charges(db_session):
@@ -64,7 +64,7 @@ def test_cycle_spend_includes_pending_charges(db_session):
 
 
 def test_cycle_spend_going_negative_shows_zero_and_flags_stale_statement(db_session):
-    """the user's real Apple Card: $REDACTED balance against a $REDACTED balance_due
+    """the user's real Apple Card: $47.40 balance against a $143.20 balance_due
     whose next_payment_date still said May -- balance_due is manual-entry
     only, so it goes stale after a payment and drives the subtraction
     negative. A negative "spent this cycle" is really a staleness signal,
@@ -73,7 +73,7 @@ def test_cycle_spend_going_negative_shows_zero_and_flags_stale_statement(db_sess
     db_session.add(models.CreditCard(
         user_id=user.id, name="Apple Card", credit_limit=Decimal("5000.00"),
         statement_day=31, due_day=25,
-        current_balance=Decimal("REDACTED"), balance_due=Decimal("REDACTED"),
+        current_balance=Decimal("47.40"), balance_due=Decimal("143.20"),
         pending_charges=Decimal("0"),
     ))
     db_session.commit()
@@ -81,7 +81,7 @@ def test_cycle_spend_going_negative_shows_zero_and_flags_stale_statement(db_sess
     html, text = generate_daily_summary(db_session, user)
 
     for body in (html, text):
-        assert "-$REDACTED" not in body and "−$REDACTED" not in body, "never render the negative"
+        assert "-$95.80" not in body and "−$95.80" not in body, "never render the negative"
         assert "stale" in body.lower(), "flag the stale statement figure"
 
 

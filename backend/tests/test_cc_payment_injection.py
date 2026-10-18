@@ -18,7 +18,7 @@ def test_cc_payment_injection_excludes_pending_charges(db_session):
     """Corrected 2026-08-09 after reading the user's real spreadsheet directly:
     the forecast's payoff projection pays off only balance_due (the last
     closed statement), matching "2026 Forecast" row 24
-    ("=L23-REDACTED-REDACTED" -- no pending-charges term). pending_charges is
+    ("=L23-7342.90-143.00" -- no pending-charges term). pending_charges is
     counted exactly once, downstream, via
     budget_snapshot.py's new_spending_total. Including it here too used to
     double-count it.
@@ -35,7 +35,7 @@ def test_cc_payment_injection_excludes_pending_charges(db_session):
     due_date = today + timedelta(days=10)  # in the future -- next_payment_date is not stale
     user, checking = _make_user_and_checking(db_session)
     card = models.CreditCard(
-        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=due_date.day, due_day=due_date.day, balance_due=Decimal("1000.00"),
         next_payment_date=due_date, pending_charges=Decimal("250.00"),
     )
@@ -55,7 +55,7 @@ def test_cc_payment_injection_unaffected_when_pending_charges_zero(db_session):
     due_date = today + timedelta(days=10)
     user, checking = _make_user_and_checking(db_session)
     card = models.CreditCard(
-        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=due_date.day, due_day=due_date.day, balance_due=Decimal("1000.00"),
         next_payment_date=due_date,
     )

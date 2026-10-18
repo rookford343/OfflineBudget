@@ -55,12 +55,12 @@ def test_checking_autopay_reduces_matching_card_balance(db_session):
 
     rows = [schemas.ImportConfirmRow(
         date=date(2026, 7, 27), description="CHASE CREDIT CRD AUTOPAY PPD ID: 4760039224",
-        amount=Decimal("-REDACTED"), is_transfer=True,
+        amount=Decimal("-8968.70"), is_transfer=True,
     )]
 
     run_import(db_session, user, rows, account_id=checking.id, card_id=None)
 
-    assert card.current_balance == Decimal("0.00")  # 100.00 - REDACTED, floored at 0
+    assert card.current_balance == Decimal("0.00")  # 100.00 - 8968.70, floored at 0
 
 
 def test_bank_sync_autopay_reduces_matching_card_balance_without_manual_tag(db_session):
@@ -78,7 +78,7 @@ def test_bank_sync_autopay_reduces_matching_card_balance_without_manual_tag(db_s
 
     rows = [schemas.ImportConfirmRow(
         date=date(2026, 8, 26), description="CHASE CREDIT CRD AUTOPAY PPD ID: 4760039224",
-        amount=Decimal("-REDACTED"),  # is_transfer left at its False default -- no rule tagged it
+        amount=Decimal("-8968.70"),  # is_transfer left at its False default -- no rule tagged it
     )]
 
     run_import(
@@ -86,7 +86,7 @@ def test_bank_sync_autopay_reduces_matching_card_balance_without_manual_tag(db_s
         source=models.TransactionSource.bank_sync,
     )
 
-    assert card.current_balance == Decimal("0.00")  # 100.00 - REDACTED, floored at 0
+    assert card.current_balance == Decimal("0.00")  # 100.00 - 8968.70, floored at 0
     assert card.balance_as_of == datetime(2026, 8, 26, 0, 0)
 
 

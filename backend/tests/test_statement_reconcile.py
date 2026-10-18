@@ -45,7 +45,7 @@ def _make_card(db, *, username="dan", **overrides):
     db.add(user)
     db.flush()
     defaults = dict(
-        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=28, due_day=25,
         current_balance=Decimal("0.00"), balance_due=Decimal("0.00"),
     )
@@ -63,16 +63,16 @@ def _credit(db, card, user_id, *, amount, on):
 
 
 def test_full_payment_clears_balance_due_and_advances_next_payment_date(db_session):
-    """Chase's exact live case: statement closed 8/28, due 9/25 at $REDACTED.
-    A $REDACTED autopay plus a $45.00 refund sum to exactly the statement --
+    """Chase's exact live case: statement closed 8/28, due 9/25 at $6,324.50.
+    A $6,280.00 autopay plus a $44.50 refund sum to exactly the statement --
     full coverage clears it and rolls the next cycle to 10/25."""
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("REDACTED"),
+        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6324.50"),
         current_balance=Decimal("0.00"),
     )
-    _credit(db_session, card, user.id, amount=Decimal("-45.00"), on=date(2026, 9, 4))
-    _credit(db_session, card, user.id, amount=Decimal("-REDACTED"), on=date(2026, 9, 25))
+    _credit(db_session, card, user.id, amount=Decimal("-44.50"), on=date(2026, 9, 4))
+    _credit(db_session, card, user.id, amount=Decimal("-6280.00"), on=date(2026, 9, 25))
     db_session.commit()
 
     cleared = reconcile_statement_payment(db_session, card, date(2026, 9, 30))
@@ -87,13 +87,13 @@ def test_full_payment_clears_balance_due_and_advances_next_payment_date(db_sessi
 @pytest.mark.parametrize("balance_due,credit,credit_on,entered_at", [
     # The close date is 8/28 (the occurrence strictly before 9/25's
     # next_payment_date); a credit ON it belongs to the prior cycle.
-    pytest.param("REDACTED", "-REDACTED", date(2026, 8, 28), None, id="credit_on_close_date"),
+    pytest.param("6324.50", "-6324.50", date(2026, 8, 28), None, id="credit_on_close_date"),
     # A partial payment must not reduce balance_due: that would double-subtract
     # once a later real payoff supersedes it. statement_stale_reason covers it.
-    pytest.param("REDACTED", "-3000.00", date(2026, 9, 10), None, id="partial_payment"),
+    pytest.param("6324.50", "-3000.00", date(2026, 9, 10), None, id="partial_payment"),
     # Rule 1: a credit after the close but before balance_due was last
     # entered is already reflected in the entered figure.
-    pytest.param("REDACTED", "-REDACTED", date(2026, 9, 5), datetime(2026, 9, 10, 12, 0), id="credit_before_statement_entered"),
+    pytest.param("6324.50", "-6324.50", date(2026, 9, 5), datetime(2026, 9, 10, 12, 0), id="credit_before_statement_entered"),
     # Rule 1 is strict (date > entered date): a same-day credit may already be
     # in the entered figure, so it's excluded; the stale warning covers it.
     pytest.param("500.00", "-500.00", date(2026, 9, 10), datetime(2026, 9, 10, 12, 0), id="credit_on_day_statement_entered"),
@@ -116,7 +116,7 @@ def test_credits_that_must_not_clear_the_statement(db_session, balance_due, cred
 def test_no_credits_makes_no_change(db_session):
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("REDACTED"),
+        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6324.50"),
     )
     db_session.commit()
 
@@ -124,15 +124,15 @@ def test_no_credits_makes_no_change(db_session):
 
     assert cleared is False
     db_session.refresh(card)
-    assert card.balance_due == Decimal("REDACTED")
+    assert card.balance_due == Decimal("6324.50")
 
 
 def test_idempotent_second_call_is_a_no_op(db_session):
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("REDACTED"),
+        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6324.50"),
     )
-    _credit(db_session, card, user.id, amount=Decimal("-REDACTED"), on=date(2026, 9, 25))
+    _credit(db_session, card, user.id, amount=Decimal("-6324.50"), on=date(2026, 9, 25))
     db_session.commit()
 
     first = reconcile_statement_payment(db_session, card, date(2026, 9, 30))
@@ -150,7 +150,7 @@ def test_idempotent_second_call_is_a_no_op(db_session):
 def test_another_cards_credits_do_not_count(db_session):
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("REDACTED"),
+        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6324.50"),
     )
     other_card = models.CreditCard(
         user_id=user.id, name="Other Card", credit_limit=Decimal("5000.00"),
@@ -158,24 +158,24 @@ def test_another_cards_credits_do_not_count(db_session):
     )
     db_session.add(other_card)
     db_session.flush()
-    _credit(db_session, other_card, user.id, amount=Decimal("-REDACTED"), on=date(2026, 9, 25))
+    _credit(db_session, other_card, user.id, amount=Decimal("-6324.50"), on=date(2026, 9, 25))
     db_session.commit()
 
     cleared = reconcile_statement_payment(db_session, card, date(2026, 9, 30))
 
     assert cleared is False
     db_session.refresh(card)
-    assert card.balance_due == Decimal("REDACTED")
+    assert card.balance_due == Decimal("6324.50")
 
 
 def test_another_users_credits_do_not_count(db_session):
     user, card = _make_card(
         db_session, username="dan", statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("REDACTED"),
+        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6324.50"),
     )
     other_user, other_card = _make_card(
         db_session, username="other", statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("REDACTED"),
+        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6324.50"),
     )
     # Scoping bug would be: a query that filters by card_id alone without
     # user_id would still be safe here since card_id differs -- so instead
@@ -183,14 +183,14 @@ def test_another_users_credits_do_not_count(db_session):
     # card's id but tagged with the OTHER user's id (can't happen via the
     # real app, but proves the query really filters on user_id and not just
     # card_id, per the brief's explicit scoping requirement).
-    _credit(db_session, card, other_user.id, amount=Decimal("-REDACTED"), on=date(2026, 9, 25))
+    _credit(db_session, card, other_user.id, amount=Decimal("-6324.50"), on=date(2026, 9, 25))
     db_session.commit()
 
     cleared = reconcile_statement_payment(db_session, card, date(2026, 9, 30))
 
     assert cleared is False
     db_session.refresh(card)
-    assert card.balance_due == Decimal("REDACTED")
+    assert card.balance_due == Decimal("6324.50")
 
 
 # v1's test_next_payment_date_none_falls_back_to_today was removed in v2:
@@ -205,10 +205,10 @@ def test_reconcile_preserves_payment_sent_pending_sync_clearing(db_session):
     update_card/record_payment already do."""
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("REDACTED"),
-        payment_sent_pending_sync=True, payment_sent_amount=Decimal("REDACTED"),
+        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6324.50"),
+        payment_sent_pending_sync=True, payment_sent_amount=Decimal("6324.50"),
     )
-    _credit(db_session, card, user.id, amount=Decimal("-REDACTED"), on=date(2026, 9, 25))
+    _credit(db_session, card, user.id, amount=Decimal("-6324.50"), on=date(2026, 9, 25))
     db_session.commit()
 
     cleared = reconcile_statement_payment(db_session, card, date(2026, 9, 30))
@@ -252,7 +252,7 @@ def test_reconcile_all_cards_returns_names_of_cleared_cards(db_session):
 # ── statement_stale_reason ────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("next_payment,balance_due,current,as_of,expected", [
-    pytest.param(date(2026, 9, 25), "REDACTED", "0.00", date(2026, 9, 20), "balance_below_statement", id="balance_below_statement"),
+    pytest.param(date(2026, 9, 25), "6324.50", "0.00", date(2026, 9, 20), "balance_below_statement", id="balance_below_statement"),
     pytest.param(date(2026, 9, 25), "500.00", "5000.00", date(2026, 9, 30), "due_date_passed", id="due_date_passed"),
     pytest.param(date(2026, 10, 25), "500.00", "5000.00", date(2026, 9, 20), None, id="healthy"),
     pytest.param(date(2026, 8, 25), "0", "100.00", date(2026, 9, 20), None, id="nothing_due"),
@@ -274,7 +274,7 @@ def test_left_to_spend_note_flags_a_stale_card_with_no_digits(db_session):
     since ExplainChild.note renders unmasked on the frontend."""
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("REDACTED"),
+        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6324.50"),
         current_balance=Decimal("0.00"), pending_charges=Decimal("0"),
     )
     checking = models.Account(
@@ -393,11 +393,11 @@ def test_chase_live_case_with_freshness_stamp_still_clears(db_session):
     that day, so they still prove full payment."""
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 9, 25), balance_due=Decimal("REDACTED"),
+        next_payment_date=date(2026, 9, 25), balance_due=Decimal("6324.50"),
         balance_due_updated_at=datetime(2026, 9, 2, 14, 0),
     )
-    _credit(db_session, card, user.id, amount=Decimal("-45.00"), on=date(2026, 9, 4))
-    _credit(db_session, card, user.id, amount=Decimal("-REDACTED"), on=date(2026, 9, 25))
+    _credit(db_session, card, user.id, amount=Decimal("-44.50"), on=date(2026, 9, 4))
+    _credit(db_session, card, user.id, amount=Decimal("-6280.00"), on=date(2026, 9, 25))
     db_session.commit()
 
     assert reconcile_statement_payment(db_session, card, date(2026, 9, 30)) is True
@@ -411,7 +411,7 @@ def test_stale_due_date_never_clears_even_with_ample_credits(db_session):
     5/25) is not trustworthy enough to reconcile against."""
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
-        next_payment_date=date(2026, 5, 25), balance_due=Decimal("REDACTED"),
+        next_payment_date=date(2026, 5, 25), balance_due=Decimal("261.50"),
     )
     _credit(db_session, card, user.id, amount=Decimal("-5000.00"), on=date(2026, 5, 10))
     _credit(db_session, card, user.id, amount=Decimal("-5000.00"), on=date(2026, 9, 10))
@@ -419,7 +419,7 @@ def test_stale_due_date_never_clears_even_with_ample_credits(db_session):
 
     assert reconcile_statement_payment(db_session, card, date(2026, 9, 30)) is False
     db_session.refresh(card)
-    assert card.balance_due == Decimal("REDACTED")
+    assert card.balance_due == Decimal("261.50")
     assert card.next_payment_date == date(2026, 5, 25)
     assert card.balance_due_updated_at is None
 

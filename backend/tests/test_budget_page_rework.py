@@ -128,7 +128,7 @@ def test_cannot_delete_another_users_allocation(db_session):
 
 def test_overview_reports_category_type_so_income_rows_can_be_dropped(db_session):
     """The Budget page must be able to tell income apart from expense. the user's
-    "Income" and "Salary / Wages" carry $REDACTED allocations that are
+    "Income" and "Salary / Wages" carry $9,614.80 allocations that are
     forecasting inputs, not spending limits, and they wrecked the totals."""
     user, acct, card, wants, subs = _seed(db_session)
     income = models.Category(user_id=user.id, name="Salary", type=models.CategoryType.income)

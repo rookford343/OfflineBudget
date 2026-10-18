@@ -27,20 +27,20 @@ def test_create_and_list_a_flag(client):
         "feature": "household_snapshot",
         "reference_type": "account",
         "reference_id": 3,
-        "observed": {"left_to_spend": "-REDACTED", "flagged_field": "left_to_spend"},
-        "expected_value": REDACTED,
-        "note": "Spreadsheet says $REDACTED",
+        "observed": {"left_to_spend": "-5551.80", "flagged_field": "left_to_spend"},
+        "expected_value": 751.20,
+        "note": "Spreadsheet says $751.20",
     })
     assert resp.status_code == 201
     body = resp.json()
     assert body["feature"] == "household_snapshot"
     assert body["status"] == "open"
-    assert Decimal(str(body["expected_value"])) == Decimal("REDACTED")
+    assert Decimal(str(body["expected_value"])) == Decimal("751.20")
 
     resp = test_client.get("/verification-flags")
     listed = resp.json()
     assert len(listed) == 1
-    assert listed[0]["note"] == "Spreadsheet says $REDACTED"
+    assert listed[0]["note"] == "Spreadsheet says $751.20"
 
 
 def test_list_filters_by_feature_and_status(client):
@@ -102,12 +102,12 @@ def test_observed_json_round_trips_through_the_api(client):
     test_client, user = client
     resp = test_client.post("/verification-flags", json={
         "feature": "household_snapshot",
-        "observed": {"left_to_spend": "-REDACTED", "flagged_field": "left_to_spend"},
+        "observed": {"left_to_spend": "-5551.80", "flagged_field": "left_to_spend"},
     })
     created = resp.json()
 
     import json
-    assert json.loads(created["observed_json"]) == {"left_to_spend": "-REDACTED", "flagged_field": "left_to_spend"}
+    assert json.loads(created["observed_json"]) == {"left_to_spend": "-5551.80", "flagged_field": "left_to_spend"}
 
     listed = test_client.get("/verification-flags").json()
-    assert json.loads(listed[0]["observed_json"]) == {"left_to_spend": "-REDACTED", "flagged_field": "left_to_spend"}
+    assert json.loads(listed[0]["observed_json"]) == {"left_to_spend": "-5551.80", "flagged_field": "left_to_spend"}

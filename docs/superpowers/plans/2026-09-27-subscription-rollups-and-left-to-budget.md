@@ -623,7 +623,7 @@ def leftover_share(item, as_of: date) -> Decimal:
     if item.frequency == models.RecurringFrequency.quarterly:
         # Accrued, not charged: a quarterly bill spreads across the three
         # months it covers, exactly as the sheet does -- Budget!B15 carries
-        # Stormwater at $4.94/mo while the forecast charges the full $14.82
+        # Stormwater at $4.50/mo while the forecast charges the full $13.50
         # once a quarter. Counting the whole bill in its own month would
         # make Leftover lurch every third month.
         return (item.amount / 3).quantize(Decimal("0.01"))

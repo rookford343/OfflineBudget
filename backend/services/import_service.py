@@ -338,7 +338,7 @@ def _find_duplicate_transaction(
     date. A bank or card CSV export carries the transaction date while
     SimpleFIN reports the *post* date, routinely 1-2 days later, so exact-date
     matching let sync re-import history a CSV had already loaded -- confirmed
-    live 2026-08-12: 130 card transactions ($6,701.23) were double-counted
+    live 2026-08-12: 118 card transactions ($REDACTED) were double-counted
     across 2026-07-10..2026-08-04 this way, inflating the Household Snapshot's
     category totals and the weekly email. Matching is 1:1 via `consumed`, so
     widening the window cannot swallow a genuine repeat charge.
@@ -492,7 +492,7 @@ def run_import(
             # sync eventually caught up -- days during which the forecast
             # planned to pay off debt that checking had already paid off.
             # Confirmed live 2026-09-01: Chase Sapphire sat at $REDACTED six
-            # days after a $7,916.93 autopay because is_transfer stayed False.
+            # days after a $7,212.80 autopay because is_transfer stayed False.
             if row.is_transfer or source == models.TransactionSource.bank_sync:
                 for card in db.query(models.CreditCard).filter_by(user_id=user.id).all():
                     if card_matches_description(card, row.description):

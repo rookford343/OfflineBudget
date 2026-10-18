@@ -17,18 +17,18 @@ def _seed_spreadsheet_scenario(db):
 
     checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("10000.00"))
     # the user's real spreadsheet cell for this scenario (2026-08-07): "2026
-    # Overview"!B12 = -REDACTED+REDACTED+REDACTED = REDACTED, i.e. the card term
-    # both formulas consume is new-spending-since-statement, NOT the card's
-    # full running balance. Modeled here with the three real columns rather
-    # than by pre-baking REDACTED into current_balance: the old fixture did
-    # the latter with balance_due=0, which made the two candidate formulas
-    # indistinguishable and hid a live error in left_to_spend roughly the size
-    # of the card's balance_due.
+    # Overview"!B12 = -balance_due + current_balance + pending_charges, i.e.
+    # the card term both formulas consume is new-spending-since-statement,
+    # NOT the card's full running balance. Modeled here with the three real
+    # columns rather than by pre-baking that total into current_balance: the
+    # old fixture did the latter with balance_due=0, which made the two
+    # candidate formulas indistinguishable and hid a live error in
+    # left_to_spend roughly the size of the card's balance_due.
     card = models.CreditCard(
-        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=28, due_day=25,
-        current_balance=Decimal("REDACTED"), balance_due=Decimal("REDACTED"),
-        pending_charges=Decimal("REDACTED"), next_payment_date=date(2026, 8, 25),
+        current_balance=Decimal("9586.65"), balance_due=Decimal("7342.90"),
+        pending_charges=Decimal("540.18"), next_payment_date=date(2026, 8, 25),
     )
     db.add_all([checking, card])
     db.flush()
@@ -44,23 +44,23 @@ def _seed_spreadsheet_scenario(db):
         models.BudgetAllocation(user_id=user.id, category_id=groceries_cat.id, year=2026, month=0, budgeted_amount=Decimal("700.00")),
     ])
 
-    # Income: Budget!B7 = 13732.295 (two paychecks + bonus/12; simplified to
-    # one recurring item of the same total for this test -- the formula only
-    # needs the monthly total, not the paycheck split).
+    # Income: Budget!B7 (two paychecks + bonus/12; simplified to one recurring
+    # item of the same total for this test -- the formula only needs the
+    # monthly total, not the paycheck split).
     db.add(models.RecurringItem(
-        user_id=user.id, account_id=checking.id, name="Income", amount=Decimal("13732.295"),
+        user_id=user.id, account_id=checking.id, name="Income", amount=Decimal("12480.65"),
         type=models.RecurringType.income, frequency=models.RecurringFrequency.monthly,
         day_of_month=15, start_date=date(2026, 1, 1),
     ))
 
-    # Checking Bills (Budget!B10:B18, total F1 = 6129.553333) + Tithing
-    # (Budget!F4 = 1300, modeled as a checking recurring item like the real app).
+    # Checking Bills (Budget!B10:B18) + Tithing (Budget!F4, modeled as a
+    # checking recurring item like the real app).
     checking_bills = [
-        ("Chevy Insurance", "REDACTED", 2), ("Duke (Electric)", "180.00", 8),
-        ("Rivian R1T", "REDACTED", 17), ("Phone", "REDACTED", 18),
-        ("Mortgage", "REDACTED", 23), ("Stormwater", "4.94", 1),
-        ("HOA Fees", "58.33333333", 1), ("Rivian R2", "500.00", 1),
-        ("House Cleaning", "150.00", 1), ("Tithing", "1300.00", 15),
+        ("Chevy Insurance", "176.50", 2), ("Duke (Electric)", "180.00", 8),
+        ("Rivian R1T", "398.20", 17), ("Phone", "108.60", 18),
+        ("Mortgage", "3284.15", 23), ("Stormwater", "4.50", 1),
+        ("HOA Fees", "54.16666667", 1), ("Rivian R2", "460.00", 1),
+        ("House Cleaning", "140.00", 1), ("Tithing", "1180.00", 15),
     ]
     for name, amount, day in checking_bills:
         db.add(models.RecurringItem(
@@ -69,16 +69,16 @@ def _seed_spreadsheet_scenario(db):
             day_of_month=day, start_date=date(2026, 1, 1),
         ))
 
-    # Credit Card Bills (Budget!B22:C41, total F2 = REDACTED) -- recurring
-    # subscriptions charged to the card, not checking (card_id set).
+    # Credit Card Bills (Budget!B22:C41) -- recurring subscriptions charged to
+    # the card, not checking (card_id set).
     card_bills = [
-        ("Peloton", "22.63", 2), ("Vitamins", "200.00", 5), ("Home Internet", "REDACTED", 6),
-        ("Ozwell", "REDACTED", 8), ("Stormwater CC", "20.00", 11), ("Partner Apple Music", "10.99", 12),
-        ("Greenix", "84.00", 12), ("Canopy", "REDACTED", 15), ("HBO", "REDACTED", 15),
-        ("Citizens Energy", "200.00", 17), ("Spotify", "10.99", 18), ("Vet", "REDACTED", 18),
-        ("Skin Twins", "160.00", 20), ("Trash (WM)", "15.00", 21), ("Quip", "REDACTED", 23),
-        ("Oura Ring", "5.99", 25), ("Hulu", "5.00", 28), ("Netflix", "19.99", 29),
-        ("Apple", "49.93", 30), ("Grass Cutting", "REDACTED", 30),
+        ("Peloton", "20.90", 2), ("Vitamins", "185.00", 5), ("Home Internet", "54.99", 6),
+        ("Ozwell", "118.70", 8), ("Stormwater CC", "18.50", 11), ("Partner Apple Music", "9.99", 12),
+        ("Greenix", "76.50", 12), ("Canopy", "12.00", 15), ("HBO", "16.99", 15),
+        ("Citizens Energy", "182.00", 17), ("Spotify", "11.99", 18), ("Vet", "79.60", 18),
+        ("Skin Twins", "148.00", 20), ("Trash (WM)", "13.75", 21), ("Quip", "11.70", 23),
+        ("Oura Ring", "5.49", 25), ("Hulu", "7.99", 28), ("Netflix", "17.99", 29),
+        ("Apple", "45.40", 30), ("Grass Cutting", "268.00", 30),
     ]
     for name, amount, day in card_bills:
         db.add(models.RecurringItem(
@@ -114,7 +114,7 @@ def test_left_to_spend_and_safety_margin_match_spreadsheet_exactly(db_session):
     # balance_due change moves it the other way through new_spending_total.
     # Our Decimal(14,2) columns round each input to cents up front, which is
     # why it can sit a cent off a spreadsheet that rounds only for display.
-    assert snapshot.left_to_spend == Decimal("REDACTED")
+    assert snapshot.left_to_spend == Decimal("966.01")
     # left_to_spend_weekly is no longer derived from left_to_spend -- it's
     # the transaction-driven weekly pacer now (see test_spendable_pacer.py).
     # Not asserted here; this test only covers the spreadsheet-verified
@@ -130,8 +130,8 @@ def test_left_to_spend_and_safety_margin_match_spreadsheet_exactly(db_session):
     # not yet re-verified against a live spreadsheet cell -- see
     # budget_snapshot.py's note that quarter_min itself still needs a fresh
     # reconciliation pass before this can be trusted to the cent.
-    assert snapshot.safety_margin == Decimal("REDACTED")
-    assert snapshot.safety_margin_weekly == Decimal("REDACTED")
+    assert snapshot.safety_margin == Decimal("4076.07")
+    assert snapshot.safety_margin_weekly == Decimal("1141.30")
 
 
 def test_no_active_cards_gives_zero_card_balance(db_session):
@@ -225,7 +225,7 @@ def test_left_to_spend_ignores_already_statemented_balance(db_session):
             current_balance=Decimal("10000.00"),
         )
         card = models.CreditCard(
-            user_id=user.id, name="Card", credit_limit=Decimal("REDACTED"),
+            user_id=user.id, name="Card", credit_limit=Decimal("27500.00"),
             statement_day=28, due_day=25,
             current_balance=Decimal(current_balance), balance_due=Decimal(balance_due),
             next_payment_date=date(2026, 8, 25),
@@ -236,7 +236,7 @@ def test_left_to_spend_ignores_already_statemented_balance(db_session):
 
     # Both carry exactly $500 of new, un-statemented spending.
     fresh_user, fresh_checking = _seed("freshstmt", "0.00", "500.00")
-    heavy_user, heavy_checking = _seed("heavystmt", "REDACTED", "REDACTED")
+    heavy_user, heavy_checking = _seed("heavystmt", "7342.90", "7842.90")
 
     with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5000.00")):
         fresh = compute_budget_snapshot(db_session, fresh_user, fresh_checking.id, as_of=date(2026, 8, 12))
@@ -302,8 +302,8 @@ def test_weekly_figures_are_the_monthly_ones_prorated(db_session):
     of the month remaining -- the method the user's spreadsheet uses.
 
     Verified against the sheet 2026-08-16 with 2.2857 weeks left (share
-    0.4375): Left to Spend -REDACTED -> -REDACTED and Safety Margin REDACTED ->
-    REDACTED, both to the cent. Note the invariant is on MAGNITUDE, not order:
+    0.4375): Left to Spend -400.00 -> -175.00 and Safety Margin 2400.00 ->
+    1050.00, both to the cent. Note the invariant is on MAGNITUDE, not order:
     with a negative pool the weekly figure is numerically larger than the
     monthly one, which is correct and is why an earlier `week <= month`
     assertion was wrong.
@@ -325,8 +325,8 @@ def test_weekly_proration_matches_dans_spreadsheet_to_the_cent():
     from backend.services.budget_snapshot import _weekly_allowance
 
     as_of = date(2026, 8, 16)  # 16 days remain -> 2.2857 weeks -> share 0.4375
-    assert _weekly_allowance(Decimal("-REDACTED"), as_of)[0] == Decimal("-REDACTED")
-    assert _weekly_allowance(Decimal("REDACTED"), as_of)[0] == Decimal("REDACTED")
+    assert _weekly_allowance(Decimal("-400.00"), as_of)[0] == Decimal("-175.00")
+    assert _weekly_allowance(Decimal("2400.00"), as_of)[0] == Decimal("1050.00")
 
 
 def test_over_budget_names_the_savings_transfer_to_skip(db_session):
@@ -381,8 +381,8 @@ def test_groceries_budget_is_removed_from_the_spendable_pool(db_session):
 
     the user's sheet cancels its groceries term (F5) on both sides of the formula,
     so it never reaches Left to Spend. Verified 2026-08-16 by the $700.00
-    swing between his two formula versions: F5 surviving read REDACTED, F5
-    cancelling reads -REDACTED, and -REDACTED is the one he wants. Raising the
+    swing between his two formula versions: F5 surviving read 300.00, F5
+    cancelling reads -400.00, and -400.00 is the one he wants. Raising the
     groceries budget must therefore LOWER Left to Spend one-for-one.
     """
     user, checking, card = _seed_spreadsheet_scenario(db_session)

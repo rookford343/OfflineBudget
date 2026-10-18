@@ -6,7 +6,7 @@ matcher learned about post dates (see import_service._DATE_WINDOW_DAYS).
 A card CSV export carries the transaction date; SimpleFIN reports the *post*
 date, routinely 1-2 days later. The old matcher required an exact date match,
 so every charge already loaded from CSV was re-imported on the next sync.
-Found live 2026-08-12: 130 pairs, $6,701.23, dated 2026-07-10..2026-08-04 --
+Found live 2026-08-12: 118 pairs, $REDACTED, dated 2026-07-10..2026-08-04 --
 which inflated the Household Snapshot's category totals and the weekly
 spending email.
 

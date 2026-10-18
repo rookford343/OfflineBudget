@@ -2,9 +2,9 @@
 (the user, 2026-08-15: transfers counted as spending, and card payoff showing up
 under Merchants where it double-counts every charge it settles).
 
-Measured on the user's real data before the fix: July "spending" was $REDACTED,
-of which $REDACTED was a Chase autopay ($REDACTED), an Apple Card payment
-($REDACTED), and two $1,000 self-transfers. 46% of the number was noise, and
+Measured on the user's real data before the fix: July "spending" was $24,208.50,
+of which $11,135.90 was a Chase autopay ($8,968.70), an Apple Card payment
+($167.20), and two $1,000 self-transfers. 46% of the number was noise, and
 the card payoff outranked his mortgage as the top "merchant".
 
 The logic already existed in spendable_pacer.py and powered the Dashboard
@@ -76,7 +76,7 @@ def test_ordinary_purchases_are_still_spend():
 
 def test_merchant_totals_excludes_payoff_and_transfer(db_session):
     user, account, card = _setup(db_session)
-    _txn(db_session, user, account, "CHASE CREDIT CRD AUTOPAY  PPD ID: 476", "-REDACTED")
+    _txn(db_session, user, account, "CHASE CREDIT CRD AUTOPAY  PPD ID: 476", "-8968.70")
     _txn(db_session, user, account, "Online Transfer to CHK ...0054", "-1000.00")
     _txn(db_session, user, account, "KROGER #5001", "-120.00")
     db_session.commit()
@@ -96,7 +96,7 @@ def test_category_totals_excludes_payoff_and_transfer(db_session):
     db_session.add(groceries)
     db_session.flush()
 
-    _txn(db_session, user, account, "CHASE CREDIT CRD AUTOPAY", "-REDACTED")
+    _txn(db_session, user, account, "CHASE CREDIT CRD AUTOPAY", "-8968.70")
     _txn(db_session, user, account, "Online Transfer to SAV ...8452", "-500.00")
     t = _txn(db_session, user, account, "KROGER #5001", "-120.00")
     t.category_id = groceries.id

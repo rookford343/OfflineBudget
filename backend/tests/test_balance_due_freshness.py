@@ -22,7 +22,7 @@ def client(db_session):
     db_session.refresh(user)
 
     card = models.CreditCard(
-        user_id=user.id, name="Chase", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase", credit_limit=Decimal("27500.00"),
         statement_day=28, due_day=25, balance_due=Decimal("0"),
     )
     db_session.add(card)
@@ -40,7 +40,7 @@ def test_patching_balance_due_stamps_the_freshness_timestamp(client, db_session)
     test_client, user, card = client
     assert card.balance_due_updated_at is None
 
-    resp = test_client.patch(f"/credit-cards/{card.id}", json={"balance_due": "REDACTED"})
+    resp = test_client.patch(f"/credit-cards/{card.id}", json={"balance_due": "6324.50"})
     assert resp.status_code == 200
     assert resp.json()["balance_due_updated_at"] is not None
 
@@ -53,7 +53,7 @@ def test_patching_balance_due_back_to_zero_still_stamps(client, db_session):
     needed'), balance_due hitting 0 is itself a real, dated fact -- a
     statement just got paid off -- so it stamps too, it does not clear."""
     test_client, user, card = client
-    card.balance_due = Decimal("REDACTED")
+    card.balance_due = Decimal("6324.50")
     from datetime import datetime, timedelta
     old_stamp = datetime.utcnow() - timedelta(days=3)
     card.balance_due_updated_at = old_stamp
@@ -116,13 +116,13 @@ def test_repatching_the_same_balance_due_value_restamps(client, db_session):
     the entered figure. Edits that don't send balance_due still don't stamp
     (test_patching_an_unrelated_field_does_not_stamp_balance_due)."""
     test_client, user, card = client
-    card.balance_due = Decimal("REDACTED")
+    card.balance_due = Decimal("6324.50")
     from datetime import datetime, timedelta
     old_stamp = datetime.utcnow() - timedelta(days=3)
     card.balance_due_updated_at = old_stamp
     db_session.commit()
 
-    resp = test_client.patch(f"/credit-cards/{card.id}", json={"balance_due": "REDACTED"})
+    resp = test_client.patch(f"/credit-cards/{card.id}", json={"balance_due": "6324.50"})
     assert resp.status_code == 200
 
     db_session.refresh(card)

@@ -15,9 +15,9 @@ def client(db_session):
     db_session.refresh(user)
 
     card = models.CreditCard(
-        user_id=user.id, name="Chase", credit_limit=Decimal("REDACTED"),
-        statement_day=28, due_day=25, balance_due=Decimal("REDACTED"),
-        current_balance=Decimal("REDACTED"),
+        user_id=user.id, name="Chase", credit_limit=Decimal("27500.00"),
+        statement_day=28, due_day=25, balance_due=Decimal("7212.80"),
+        current_balance=Decimal("7212.80"),
     )
     db_session.add(card)
     db_session.commit()
@@ -37,11 +37,11 @@ def test_mark_payment_sent_snapshots_balance_due(client, db_session):
     assert resp.status_code == 200
     body = resp.json()
     assert body["payment_sent_pending_sync"] is True
-    assert Decimal(str(body["payment_sent_amount"])) == Decimal("REDACTED")
+    assert Decimal(str(body["payment_sent_amount"])) == Decimal("7212.80")
 
     db_session.refresh(card)
     assert card.payment_sent_pending_sync is True
-    assert card.payment_sent_amount == Decimal("REDACTED")
+    assert card.payment_sent_amount == Decimal("7212.80")
 
 
 def test_mark_payment_sent_rejects_zero_balance_due(client, db_session):
@@ -56,7 +56,7 @@ def test_mark_payment_sent_rejects_zero_balance_due(client, db_session):
 def test_mark_payment_sent_rejects_already_pending(client, db_session):
     test_client, user, card = client
     card.payment_sent_pending_sync = True
-    card.payment_sent_amount = Decimal("REDACTED")
+    card.payment_sent_amount = Decimal("7212.80")
     db_session.commit()
 
     resp = test_client.post(f"/credit-cards/{card.id}/mark-payment-sent")
@@ -66,7 +66,7 @@ def test_mark_payment_sent_rejects_already_pending(client, db_session):
 def test_clear_payment_sent(client, db_session):
     test_client, user, card = client
     card.payment_sent_pending_sync = True
-    card.payment_sent_amount = Decimal("REDACTED")
+    card.payment_sent_amount = Decimal("7212.80")
     db_session.commit()
 
     resp = test_client.post(f"/credit-cards/{card.id}/clear-payment-sent")
@@ -83,17 +83,17 @@ def test_clear_payment_sent(client, db_session):
 def test_record_payment_clears_a_pending_flag(client, db_session):
     """The flag exists to bridge the gap until the real payment posts.
     record_payment posting a DIFFERENT amount than the snapshot (matching
-    2026-08-27's real case: $8,068.46 guessed vs $7,916.93 real autopay)
+    2026-08-27's real case: $7,342.90 guessed vs $7,212.80 real autopay)
     must still clear it -- the whole point is not needing exact-amount
     agreement."""
     test_client, user, card = client
     card.payment_sent_pending_sync = True
-    card.payment_sent_amount = Decimal("REDACTED")
+    card.payment_sent_amount = Decimal("7342.90")
     db_session.commit()
 
     checking = models.Account(
         user_id=user.id, name="Checking", type=models.AccountType.checking,
-        current_balance=Decimal("REDACTED"),
+        current_balance=Decimal("548.30"),
     )
     db_session.add(checking)
     db_session.commit()
@@ -102,7 +102,7 @@ def test_record_payment_clears_a_pending_flag(client, db_session):
     resp = test_client.post(f"/credit-cards/{card.id}/payment", json={
         "checking_account_id": checking.id,
         "date": "2026-08-26",
-        "amount": "REDACTED",
+        "amount": "7212.80",
         "notes": "",
     })
     assert resp.status_code == 201

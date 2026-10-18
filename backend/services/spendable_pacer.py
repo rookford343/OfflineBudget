@@ -239,7 +239,7 @@ class WeeklySpendable:
     # The month-level figure this week's number is a share of. Exposed so the
     # UI can show week and month from ONE calculation: pairing the pacer's
     # weekly value with the legacy balance-derived left_to_spend showed
-    # $REDACTED for the week against $REDACTED for the month -- a week larger
+    # $552.80 for the week against $355.10 for the month -- a week larger
     # than the month it sits inside.
     remaining_this_month: Decimal
 
@@ -290,8 +290,8 @@ def compute_weekly_spendable(db: Session, user_id: int, leftover: Decimal, as_of
     # ratio lands in (0, 1] and |this_week_target| <= |remaining_pool| falls out
     # structurally -- for BOTH signs, with no clamp. That is the whole point:
     # a min() clamp only bounds a positive pool. On a negative pool min() picks
-    # the MORE negative branch, inflating the deficit (-$REDACTED shown against
-    # a true -$REDACTED on real July 2026 data) and charging a mid-month
+    # the MORE negative branch, inflating the deficit (-$19,530.70 shown against
+    # a true -$16,820.40 on real July 2026 data) and charging a mid-month
     # deficit in full to every remaining week instead of amortizing it.
     #
     # One proportional formula now covers every week position -- leading stub

@@ -3,7 +3,7 @@ checking on expected_date, only when the card's statement covering it gets
 paid off.
 
 Found live 2026-08-13: reconciling a forecast gap against the user's spreadsheet
-traced partly to "Holland Vacation" ($REDACTED), a real planned purchase the user
+traced partly to "Holland Vacation" ($875.40), a real planned purchase the user
 actually puts on his Chase card -- the app was subtracting it from checking
 on the day of the trip, while in reality checking isn't touched until Chase's
 statement gets paid, roughly a month later.
@@ -33,7 +33,7 @@ def _seed(db, *, statement_day: int = 28, due_day: int = 25):
         current_balance=Decimal("5000.00"),
     )
     card = models.CreditCard(
-        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=statement_day, due_day=due_day,
     )
     db.add_all([account, card])
@@ -57,14 +57,14 @@ def test_charge_the_day_before_a_due_date_still_rolls_to_next_cycle(db_session):
     user, account, card = _seed(db_session)
     db_session.add(models.PlannedExpense(
         user_id=user.id, card_id=card.id, name="Holland Vacation",
-        amount=Decimal("REDACTED"), expected_date=date(2026, 8, 24),
+        amount=Decimal("875.40"), expected_date=date(2026, 8, 24),
     ))
     db_session.commit()
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 1), date(2026, 9, 30))
 
     assert _balance_on(entries, date(2026, 8, 25)) == Decimal("5000.00"), "must not be paid off on the imminent due date"
-    assert _balance_on(entries, date(2026, 9, 25)) == Decimal("REDACTED"), "belongs to the following cycle instead"
+    assert _balance_on(entries, date(2026, 9, 25)) == Decimal("4124.60"), "belongs to the following cycle instead"
     assert _txn_names(entries, date(2026, 9, 25)) == ["Holland Vacation (via Chase Sapphire)"]
 
 
@@ -149,7 +149,7 @@ def test_next_occurrence_on_or_after_handles_rollover_and_short_months():
 
 def test_card_payoff_date_matches_dans_real_card():
     card = models.CreditCard(
-        user_id=1, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
+        user_id=1, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=28, due_day=25,
     )
     # Entire 7/29-8/28 cycle -> due 9/25, regardless of where in it.

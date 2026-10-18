@@ -177,8 +177,8 @@ def test_verification_flag_round_trips_observed_json(db_session):
         feature=models.VerificationFeature.household_snapshot,
         reference_type="account",
         reference_id=3,
-        observed_json=json.dumps({"left_to_spend": "REDACTED", "flagged_field": "left_to_spend"}),
-        expected_value=Decimal("REDACTED"),
+        observed_json=json.dumps({"left_to_spend": "751.20", "flagged_field": "left_to_spend"}),
+        expected_value=Decimal("751.20"),
         note="Spreadsheet says this",
     )
     db_session.add(flag)
@@ -187,7 +187,7 @@ def test_verification_flag_round_trips_observed_json(db_session):
 
     assert flag.status == models.VerificationFlagStatus.open
     assert flag.resolved_at is None
-    assert json.loads(flag.observed_json) == {"left_to_spend": "REDACTED", "flagged_field": "left_to_spend"}
+    assert json.loads(flag.observed_json) == {"left_to_spend": "751.20", "flagged_field": "left_to_spend"}
 ```
 
 - [ ] **Step 5: Run the test**
@@ -339,20 +339,20 @@ def test_create_and_list_a_flag(client):
         "feature": "household_snapshot",
         "reference_type": "account",
         "reference_id": 3,
-        "observed": {"left_to_spend": "-REDACTED", "flagged_field": "left_to_spend"},
-        "expected_value": REDACTED,
-        "note": "Spreadsheet says $REDACTED",
+        "observed": {"left_to_spend": "-5551.80", "flagged_field": "left_to_spend"},
+        "expected_value": 751.20,
+        "note": "Spreadsheet says $751.20",
     })
     assert resp.status_code == 201
     body = resp.json()
     assert body["feature"] == "household_snapshot"
     assert body["status"] == "open"
-    assert Decimal(str(body["expected_value"])) == Decimal("REDACTED")
+    assert Decimal(str(body["expected_value"])) == Decimal("751.20")
 
     resp = test_client.get("/verification-flags")
     listed = resp.json()
     assert len(listed) == 1
-    assert listed[0]["note"] == "Spreadsheet says $REDACTED"
+    assert listed[0]["note"] == "Spreadsheet says $751.20"
 
 
 def test_list_filters_by_feature_and_status(client):

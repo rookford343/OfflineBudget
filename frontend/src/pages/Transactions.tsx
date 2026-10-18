@@ -330,7 +330,7 @@ export default function Transactions() {
       externalId: t.external_id ?? null,
       categoryName: categoryNameMap[t.category_id] ?? null,
       notes: t.notes ?? null,
-      // Naming the recurring item a row settles is what turns "another $REDACTED
+      // Naming the recurring item a row settles is what turns "another $398.20
       // debit" into "that's the Rivian payment" without opening anything.
       recurringName: recurringNameMap[t.recurring_item_id] ?? null,
       isActual: t.is_actual !== false,

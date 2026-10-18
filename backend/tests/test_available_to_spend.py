@@ -97,18 +97,18 @@ def test_discretionary_checking_still_counts(db_session):
 
 def test_fresh_pending_charges_count_toward_spent_this_month(db_session):
     """Real case, 2026-09-02: Chase showed $0.00 Spent So Far the same day
-    the user confirmed $REDACTED of real new spend, because that spend hadn't
+    the user confirmed $470.90 of real new spend, because that spend hadn't
     itemized into credit_card_transactions yet -- every other place in the
     app answering "how much has really been spent" (budget_snapshot.py's
     new_spending_total, forecast_engine.py's carried balance) already reads
     pending_charges; this endpoint didn't."""
     from datetime import datetime
     user, acct, card = _seed(db_session)
-    card.pending_charges = Decimal("REDACTED")
+    card.pending_charges = Decimal("470.90")
     card.pending_charges_updated_at = datetime.utcnow()
     db_session.commit()
 
-    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("REDACTED")
+    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("470.90")
 
 
 def test_pending_charges_add_on_top_of_itemized_card_spend(db_session):
@@ -132,7 +132,7 @@ def test_stale_pending_charges_do_not_count(db_session):
     freshness window _fresh_pending_charges already enforces elsewhere."""
     from datetime import datetime, timedelta
     user, acct, card = _seed(db_session)
-    card.pending_charges = Decimal("REDACTED")
+    card.pending_charges = Decimal("470.90")
     card.pending_charges_updated_at = datetime.utcnow() - timedelta(days=10)
     db_session.commit()
 
@@ -144,7 +144,7 @@ def test_pending_charges_with_no_timestamp_do_not_count(db_session):
     stale rather than silently trusted -- matches _fresh_pending_charges'
     own behavior for this exact case."""
     user, acct, card = _seed(db_session)
-    card.pending_charges = Decimal("REDACTED")
+    card.pending_charges = Decimal("470.90")
     card.pending_charges_updated_at = None
     db_session.commit()
 

@@ -2,8 +2,8 @@
 
 Before `direction`, the forecast forced every planned event negative
 (`signed = -abs(pe.amount)`), so a known one-off inflow had nowhere to live:
-the user's spreadsheet forecast carries the April bonus (+$REDACTED on 4/15),
-Airbnb money from family (+$1,300 on 7/21), and eBay payouts as explicit rows,
+the user's spreadsheet forecast carries the April bonus (+$30,340.20 on 4/15),
+Airbnb money from family (+$1,225 on 7/21), and eBay payouts as explicit rows,
 none of which the app could represent.
 """
 import pytest
@@ -36,17 +36,17 @@ def test_outflow_is_the_default_and_subtracts(db_session):
     user, account = _seed(db_session, "pe_out")
     db_session.add(models.PlannedExpense(
         user_id=user.id, account_id=account.id, name="Vacation",
-        amount=Decimal("REDACTED"), expected_date=date(2026, 9, 15),
+        amount=Decimal("875.40"), expected_date=date(2026, 9, 15),
     ))
     db_session.commit()
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 9, 14), date(2026, 9, 16))
 
-    assert _balance_on(entries, date(2026, 9, 15)) == Decimal("REDACTED")  # 1000 - REDACTED
+    assert _balance_on(entries, date(2026, 9, 15)) == Decimal("124.60")  # 1000 - 875.40
 
 
 @pytest.mark.parametrize("name,amount,on,start,expected", [
-    pytest.param("Bonus", "REDACTED", date(2026, 4, 15), date(2026, 4, 14), "REDACTED", id="inflow_adds"),
+    pytest.param("Bonus", "30340.20", date(2026, 4, 15), date(2026, 4, 14), "31340.20", id="inflow_adds"),
     # Amounts are re-signed from `direction`, not trusted as stored, so an
     # inflow entered as a negative number still reads as money in.
     pytest.param("Refund", "-500.00", date(2026, 5, 10), date(2026, 5, 10), "1500.00", id="direction_wins_over_stored_sign"),
@@ -71,7 +71,7 @@ def test_inflow_is_reported_as_income_with_a_positive_amount(db_session):
     user, account = _seed(db_session, "pe_in_shape")
     db_session.add(models.PlannedExpense(
         user_id=user.id, account_id=account.id, name="Airbnb from Mom",
-        amount=Decimal("1300.00"), expected_date=date(2026, 7, 21),
+        amount=Decimal("1225.00"), expected_date=date(2026, 7, 21),
         direction=models.PlannedDirection.inflow,
     ))
     db_session.commit()
@@ -80,7 +80,7 @@ def test_inflow_is_reported_as_income_with_a_positive_amount(db_session):
     txns = entries[0].transactions
 
     assert len(txns) == 1
-    assert txns[0].amount == Decimal("1300.00")
+    assert txns[0].amount == Decimal("1225.00")
     assert txns[0].type == "income"
     assert txns[0].is_planned is True
     assert txns[0].is_actual is False

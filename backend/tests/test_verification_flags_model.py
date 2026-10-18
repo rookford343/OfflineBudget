@@ -13,8 +13,8 @@ def test_verification_flag_round_trips_observed_json(db_session):
         feature=models.VerificationFeature.household_snapshot,
         reference_type="account",
         reference_id=3,
-        observed_json=json.dumps({"left_to_spend": "REDACTED", "flagged_field": "left_to_spend"}),
-        expected_value=Decimal("REDACTED"),
+        observed_json=json.dumps({"left_to_spend": "751.20", "flagged_field": "left_to_spend"}),
+        expected_value=Decimal("751.20"),
         note="Spreadsheet says this",
     )
     db_session.add(flag)
@@ -23,4 +23,4 @@ def test_verification_flag_round_trips_observed_json(db_session):
 
     assert flag.status == models.VerificationFlagStatus.open
     assert flag.resolved_at is None
-    assert json.loads(flag.observed_json) == {"left_to_spend": "REDACTED", "flagged_field": "left_to_spend"}
+    assert json.loads(flag.observed_json) == {"left_to_spend": "751.20", "flagged_field": "left_to_spend"}

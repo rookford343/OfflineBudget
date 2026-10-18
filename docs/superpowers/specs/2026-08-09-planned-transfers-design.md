@@ -4,7 +4,7 @@
 
 The forecast now correctly flags a future negative-balance risk (fixed 2026-08-09), but stops there — it doesn't help the user act on it. Two concrete gaps:
 
-1. A known future cost (Rivian R2 down payment, ~$21k, target Q3 2026, no firm date yet) isn't modeled at all, so the forecast can't warn about it.
+1. A known future cost (Rivian R2 down payment, ~$23k, target Q3 2026, no firm date yet) isn't modeled at all, so the forecast can't warn about it.
 2. When a risk IS detected, there's no way to plan a fix. `BufferTransferRule` (the existing automatic transfer mechanism) is the wrong tool here — it silently assumes a transfer happens on schedule with no confirmation step. OfflineBudget has no bank-write access (SimpleFIN is read-only, and manual transfers happen in the user's real banking app), so any transfer the app "models" is really a *plan the user has to go execute himself* — the app must never let that plan fade into the background unconfirmed.
 
 ## Goals
@@ -26,7 +26,7 @@ The forecast now correctly flags a future negative-balance risk (fixed 2026-08-0
 
 ### Data model
 
-**New `User.transfer_increment`** (`Numeric(14,2)`, default `1000.00`) — follows the existing pattern of per-user settings as columns on `User` (e.g. `ss_gross_per_paycheck`). Editable in Settings → Preferences. Suggested transfer amounts round UP to this increment (`ceil(shortfall / increment) * increment`) so a suggestion is always a clean, bankable number, not "$REDACTED."
+**New `User.transfer_increment`** (`Numeric(14,2)`, default `1000.00`) — follows the existing pattern of per-user settings as columns on `User` (e.g. `ss_gross_per_paycheck`). Editable in Settings → Preferences. Suggested transfer amounts round UP to this increment (`ceil(shortfall / increment) * increment`) so a suggestion is always a clean, bankable number, not "$19,348.20."
 
 **New `PlannedTransfer` table**:
 ```
@@ -64,16 +64,16 @@ A new check (piggybacked on the existing daily bank-sync job, `_run_bank_sync` i
 ## Data Flow
 
 ```
-the user adds "Rivian R2 Down Payment" as a PlannedExpense ($REDACTED, target date in Q3 2026)
+the user adds "Rivian R2 Down Payment" as a PlannedExpense ($23,000, target date in Q3 2026)
   -> feeds into build_forecast (already wired) -> find_balance_risk detects the future dip
 
 GET /forecast/risk also runs the new suggestion check
   -> no active PlannedTransfer covers this risk -> computes suggested_transfer
-  -> RiskBanner shows "Suggested: move $REDACTED Savings -> Checking by <date> [Accept] [Dismiss]"
+  -> RiskBanner shows "Suggested: move $24,000 Savings -> Checking by <date> [Accept] [Dismiss]"
 
 the user clicks Accept -> POST creates a PlannedTransfer (status=pending, suggested=true)
   -> build_forecast injects it -> chart/risk banner shows the shortfall resolved
-  -> persistent reminder banner appears on Dashboard + Forecast: "Move $REDACTED ... [Mark Scheduled] [Edit] [Delete]"
+  -> persistent reminder banner appears on Dashboard + Forecast: "Move $24,000 ... [Mark Scheduled] [Edit] [Delete]"
 
 the user actually makes the transfer in his real bank, clicks "Mark Scheduled"
   -> status=scheduled -> reminder banner re-labels but stays visible

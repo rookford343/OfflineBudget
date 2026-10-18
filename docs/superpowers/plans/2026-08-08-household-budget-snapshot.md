@@ -12,7 +12,7 @@
 
 - `pending_charges` is **not** part of the Left-to-Spend/Not-saving math — that math uses `CreditCard.current_balance` only. `pending_charges` only affects the Forecast's CC-payment injection. Do not conflate the two.
 - No auto-reset of `pending_charges` — it's a plain field the user manages himself.
-- The golden-value regression test must reproduce the user's real spreadsheet numbers as of `2026-08-07`: `left_to_spend_weekly == REDACTED`, `not_saving == REDACTED`, `not_saving_weekly == REDACTED` exactly, and `left_to_spend == REDACTED` (one cent above the spreadsheet's displayed `REDACTED` — a verified benign Decimal(14,2)-storage-vs-Excel-float rounding-order artifact, not an error; see Task 3's implementation for the full explanation).
+- The golden-value regression test must reproduce the user's real spreadsheet numbers as of `2026-08-07`: `left_to_spend_weekly == 348.30`, `not_saving == 1652.90`, `not_saving_weekly == 462.80` exactly, and `left_to_spend == 1243.85` (one cent above the spreadsheet's displayed `1243.70` — a verified benign Decimal(14,2)-storage-vs-Excel-float rounding-order artifact, not an error; see Task 3's implementation for the full explanation).
 - `Not Saving` is confirmed to intentionally react to `pending_charges` via its `QuarterMinimum` term (which is forecast-derived, and the forecast includes `pending_charges` per Task 2) — this matches the user's stated purpose for the field. `Left to Spend` never reacts to it, since it doesn't use `QuarterMinimum`. Do not "fix" `Not Saving` to ignore `pending_charges`.
 - Follow existing conventions exactly: SQLAlchemy `Mapped[...]` style in `backend/models.py`, Pydantic `BaseModel` style in `backend/schemas.py`, the `upgrade_schema()` `ALTER TABLE` list pattern in `backend/database.py` for new columns, React Query + Tailwind `card`/gradient conventions in the frontend pages.
 - Daily summary email (`generate_daily_summary`) is out of scope — only the weekly digest gets the new content and visual refresh.
@@ -199,7 +199,7 @@ def _make_user_and_checking(db):
 def test_cc_payment_injection_includes_pending_charges(db_session):
     user, checking = _make_user_and_checking(db_session)
     card = models.CreditCard(
-        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=28, due_day=25, balance_due=Decimal("1000.00"),
         next_payment_date=date(2026, 8, 25), pending_charges=Decimal("250.00"),
     )
@@ -217,7 +217,7 @@ def test_cc_payment_injection_includes_pending_charges(db_session):
 def test_cc_payment_injection_unaffected_when_pending_charges_zero(db_session):
     user, checking = _make_user_and_checking(db_session)
     card = models.CreditCard(
-        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
+        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=28, due_day=25, balance_due=Decimal("1000.00"),
         next_payment_date=date(2026, 8, 25),
     )
@@ -336,8 +336,8 @@ def _seed_spreadsheet_scenario(db):
 
     checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("10000.00"))
     card = models.CreditCard(
-        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("REDACTED"),
-        statement_day=28, due_day=25, current_balance=Decimal("REDACTED"),
+        user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
+        statement_day=28, due_day=25, current_balance=Decimal("1473.80"),
     )
     db.add_all([checking, card])
     db.flush()
@@ -353,23 +353,23 @@ def _seed_spreadsheet_scenario(db):
         models.BudgetAllocation(user_id=user.id, category_id=groceries_cat.id, year=2026, month=0, budgeted_amount=Decimal("700.00")),
     ])
 
-    # Income: Budget!B7 = 13732.295 (two paychecks + bonus/12; simplified to
+    # Income: Budget!B7 = 12480.65 (two paychecks + bonus/12; simplified to
     # one recurring item of the same total for this test -- the formula only
     # needs the monthly total, not the paycheck split).
     db.add(models.RecurringItem(
-        user_id=user.id, account_id=checking.id, name="Income", amount=Decimal("13732.295"),
+        user_id=user.id, account_id=checking.id, name="Income", amount=Decimal("12480.65"),
         type=models.RecurringType.income, frequency=models.RecurringFrequency.monthly,
         day_of_month=15, start_date=date(2026, 1, 1),
     ))
 
-    # Checking Bills (Budget!B10:B18, total F1 = 6129.553333) + Tithing
-    # (Budget!F4 = 1300, modeled as a checking recurring item like the real app).
+    # Checking Bills (Budget!B10:B18, total F1 = 5584.116667) + Tithing
+    # (Budget!F4 = 1180, modeled as a checking recurring item like the real app).
     checking_bills = [
-        ("Chevy Insurance", "REDACTED", 2), ("Duke (Electric)", "180.00", 8),
-        ("Rivian R1T", "REDACTED", 17), ("Phone", "REDACTED", 18),
-        ("Mortgage", "REDACTED", 23), ("Stormwater", "4.94", 1),
-        ("HOA Fees", "58.33333333", 1), ("Rivian R2", "500.00", 1),
-        ("House Cleaning", "150.00", 1), ("Tithing", "1300.00", 15),
+        ("Chevy Insurance", "176.50", 2), ("Duke (Electric)", "180.00", 8),
+        ("Rivian R1T", "398.20", 17), ("Phone", "108.60", 18),
+        ("Mortgage", "3284.15", 23), ("Stormwater", "4.50", 1),
+        ("HOA Fees", "54.16666667", 1), ("Rivian R2", "460.00", 1),
+        ("House Cleaning", "140.00", 1), ("Tithing", "1180.00", 15),
     ]
     for name, amount, day in checking_bills:
         db.add(models.RecurringItem(
@@ -378,16 +378,16 @@ def _seed_spreadsheet_scenario(db):
             day_of_month=day, start_date=date(2026, 1, 1),
         ))
 
-    # Credit Card Bills (Budget!B22:C41, total F2 = REDACTED) -- recurring
+    # Credit Card Bills (Budget!B22:C41, total F2 = 1324.90) -- recurring
     # subscriptions charged to the card, not checking (card_id set).
     card_bills = [
-        ("Peloton", "22.63", 2), ("Vitamins", "200.00", 5), ("Home Internet", "REDACTED", 6),
-        ("Ozwell", "REDACTED", 8), ("Stormwater CC", "20.00", 11), ("Partner Apple Music", "10.99", 12),
-        ("Greenix", "84.00", 12), ("Canopy", "REDACTED", 15), ("HBO", "REDACTED", 15),
-        ("Citizens Energy", "200.00", 17), ("Spotify", "10.99", 18), ("Vet", "REDACTED", 18),
-        ("Skin Twins", "160.00", 20), ("Trash (WM)", "15.00", 21), ("Quip", "REDACTED", 23),
-        ("Oura Ring", "5.99", 25), ("Hulu", "5.00", 28), ("Netflix", "19.99", 29),
-        ("Apple", "49.93", 30), ("Grass Cutting", "REDACTED", 30),
+        ("Peloton", "20.90", 2), ("Vitamins", "185.00", 5), ("Home Internet", "54.99", 6),
+        ("Ozwell", "118.70", 8), ("Stormwater CC", "18.50", 11), ("Partner Apple Music", "9.99", 12),
+        ("Greenix", "76.50", 12), ("Canopy", "12.00", 15), ("HBO", "16.99", 15),
+        ("Citizens Energy", "182.00", 17), ("Spotify", "11.99", 18), ("Vet", "79.60", 18),
+        ("Skin Twins", "148.00", 20), ("Trash (WM)", "13.75", 21), ("Quip", "11.70", 23),
+        ("Oura Ring", "5.49", 25), ("Hulu", "7.99", 28), ("Netflix", "17.99", 29),
+        ("Apple", "45.40", 30), ("Grass Cutting", "268.00", 30),
     ]
     for name, amount, day in card_bills:
         db.add(models.RecurringItem(
@@ -418,10 +418,10 @@ def test_left_to_spend_and_not_saving_match_spreadsheet_exactly(db_session):
     with patch("backend.services.budget_snapshot.build_quarters", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
-    assert snapshot.left_to_spend == Decimal("REDACTED")
-    assert snapshot.left_to_spend_weekly == Decimal("REDACTED")
-    assert snapshot.not_saving == Decimal("REDACTED")
-    assert snapshot.not_saving_weekly == Decimal("REDACTED")
+    assert snapshot.left_to_spend == Decimal("1243.70")
+    assert snapshot.left_to_spend_weekly == Decimal("348.30")
+    assert snapshot.not_saving == Decimal("1652.90")
+    assert snapshot.not_saving_weekly == Decimal("462.80")
 
 
 def test_weekly_allowance_uses_full_amount_in_final_week_of_month(db_session):

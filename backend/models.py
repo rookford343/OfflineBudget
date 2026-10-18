@@ -190,8 +190,8 @@ class Account(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # An emergency fund is savings you are deliberately not planning to spend,
     # so it must not pad any "can I cover this?" figure. the user's Money Market is
-    # exactly this: counting it made the reserve look covered by $REDACTED
-    # when only $REDACTED was really available for it. Account TYPE can't
+    # exactly this: counting it made the reserve look covered by $44,560.80
+    # when only $23,790.50 was really available for it. Account TYPE can't
     # carry this -- money_market vs savings is about the product, not intent.
     is_emergency_fund: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(Text)
@@ -227,8 +227,8 @@ class Category(Base):
     # Discretionary = spending the user can actually decide about this month
     # (Shopping, Food & Drinks, Entertainment). Fixed = committed before the
     # month starts (Mortgage, Tithe, Insurance). Mixing them made the
-    # Spending page headline Mortgage $REDACTED and Tithe $1,300 as if they were
-    # choices, burying the ~$1,500 that is actually steerable. Mirrors the
+    # Spending page headline Mortgage $3,995 and Tithe $1,180 as if they were
+    # choices, burying the ~$1,360 that is actually steerable. Mirrors the
     # discretionary grid in the user's spreadsheet ('2026 Overview'!E3:E8).
     is_discretionary: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0", nullable=False)
 
@@ -687,7 +687,7 @@ class PlannedExpense(Base):
 
     `direction` makes this usable for money arriving as well as leaving. Before
     it, the forecast forced every row negative, so there was no way to model a
-    known one-off inflow -- the user's April bonus ($REDACTED), Airbnb money from
+    known one-off inflow -- the user's April bonus ($30,340.20), Airbnb money from
     family, or an eBay payout, all of which his spreadsheet forecast carries as
     explicit rows. Recurring income belongs in RecurringItem; this is for
     one-time amounts. Defaults to `outflow`, so existing rows are unaffected.
@@ -718,12 +718,12 @@ class PlannedExpense(Base):
     # expected to come from there. Recording the funding source HERE, rather
     # than as a separate PlannedTransfer, is the whole point: the two dates
     # can't drift apart. the user moved the R2 purchase from 09-15 to 10-06 and its
-    # standalone $REDACTED transfer stayed behind, leaving three weeks of
-    # forecast showing $REDACTED of checking that was already spoken for.
+    # standalone $24,000 transfer stayed behind, leaving three weeks of
+    # forecast showing $38,120 of checking that was already spoken for.
     #
     # funding_amount is separate from `amount` because the transfer is usually
-    # a round number that doesn't match the purchase to the cent ($REDACTED moved
-    # for a $REDACTED car). Null means "move exactly the purchase amount".
+    # a round number that doesn't match the purchase to the cent ($24,000 moved
+    # for a $23,000 car). Null means "move exactly the purchase amount".
     # funding_lead_days shifts the transfer earlier than the purchase, since
     # money generally has to land before it can be spent.
     funding_account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))

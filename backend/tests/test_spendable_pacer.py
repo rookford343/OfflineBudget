@@ -160,11 +160,11 @@ def test_card_refunds_net_against_charges(db_session, merchant, charge, refund, 
     # Regression: an uncategorized 'CHASE CREDIT CRD AUTOPAY' debit is a card
     # PAYMENT whose charges were already counted card-side; it alone once
     # drove Spendable this week deeply negative.
-    pytest.param("Chase Sapphire", "1312", "20000.00", "-REDACTED",
+    pytest.param("Chase Sapphire", "1312", "20000.00", "-8968.70",
                  "CHASE CREDIT CRD AUTOPAY                    PPD ID: 4760039224", id="chase_autopay"),
     # 'APPLECARD GSBANK PAYMENT' matches 'Apple Card' on its compacted name,
     # with no last_four to fall back on.
-    pytest.param("Apple Card", "", "5000.00", "-REDACTED",
+    pytest.param("Apple Card", "", "5000.00", "-167.20",
                  "APPLECARD GSBANK PAYMENT    16069006        WEB ID: 9999999999", id="apple_card_name_token"),
 ])
 def test_excludes_a_card_autopay_debit(db_session, card_name, last_four, limit, amount, description):
@@ -537,7 +537,7 @@ def test_trailing_partial_week_with_a_negative_pool_is_not_inflated(db_session):
     """Regression: the old `min(target, remaining_pool)` clamp was sign-naive.
     For a NEGATIVE pool min() picks the MORE negative branch, so instead of
     bounding the deficit it inflated it -- on real July 31 2026 data it showed
-    -$REDACTED against a true -$REDACTED.
+    -$19,530.70 against a true -$16,820.40.
 
     Nov 29 2026 (Sunday) opens the month's final 2-day stretch (Nov 30 is a
     Monday), so weeks_left = 2/7 and this week's clipped days = 2 -> ratio 1.
@@ -640,8 +640,8 @@ def test_week_never_exceeds_the_month_it_belongs_to(db_session):
 
     Regression: the dashboard paired the pacer's weekly value with the legacy
     balance-derived `left_to_spend`, which is a different calculation on a
-    different basis. On the user's real data that read "$REDACTED spendable this
-    week" above "$REDACTED this month" -- a week bigger than its own month.
+    different basis. On the user's real data that read "$552.80 spendable this
+    week" above "$355.10 this month" -- a week bigger than its own month.
     """
     from backend.services.spendable_pacer import compute_weekly_spendable
 

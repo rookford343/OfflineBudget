@@ -62,8 +62,8 @@ simple manual number per card.
 
 Confirmed by decoding the actual Excel formulas in `2026 Overview!B17:C18`
 and `Budget!F1:F6`, and reproducing the user's real numbers
-($REDACTED / $REDACTED / $REDACTED / $REDACTED as of 2026-08-07 — `left_to_spend`
-is one cent above the spreadsheet's displayed $REDACTED; verified as a
+($1,243.85 / $348.30 / $1,652.90 / $462.80 as of 2026-08-07 — `left_to_spend`
+is one cent above the spreadsheet's displayed $1,243.70; verified as a
 benign rounding-order artifact, Decimal(14,2) storage rounds inputs to
 cents before summing, Excel's cell keeps full float precision throughout
 and only rounds for display):
@@ -206,8 +206,8 @@ The core test is a **golden-value regression** against the user's real spreadshe
 numbers: seed a test user with the same recurring items, budget
 allocations, and card balance the user's spreadsheet describes, call
 `compute_budget_snapshot(..., as_of=date(2026, 8, 7))`, and assert
-`left_to_spend == REDACTED`, `left_to_spend_weekly == REDACTED`,
-`not_saving == REDACTED`, `not_saving_weekly == REDACTED` (rounded to cents).
+`left_to_spend == 1243.70`, `left_to_spend_weekly == 348.30`,
+`not_saving == 1652.90`, `not_saving_weekly == 462.80` (rounded to cents).
 This is a stronger guarantee than a synthetic scenario: if the formula
 drifts from the user's actual mental model, this test catches it immediately.
 
