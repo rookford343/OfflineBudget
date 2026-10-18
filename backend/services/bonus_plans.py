@@ -65,6 +65,20 @@ def plans_by_item(db: Session, user_id: int) -> dict[int, models.BonusPlan]:
     return {p.recurring_item_id: p for p in plans}
 
 
+def is_bonus_shaped(item: models.RecurringItem) -> bool:
+    """True when a RecurringItem is still shaped the way a BonusPlan can be
+    attached to: a yearly income item. A BonusPlan can only be attached at
+    creation time (routers/bonus_plans.py's _own_item), but nothing stops
+    the user from editing that same item into a different type or
+    frequency afterward on the Recurring page. Both the forecast engine's
+    bonus_plans filter and refresh_item_amounts call this so the two can't
+    drift on what counts as a live bonus item."""
+    return (
+        item.type == models.RecurringType.income
+        and item.frequency == models.RecurringFrequency.yearly
+    )
+
+
 def upcoming_payouts(plan: models.BonusPlan, user: models.User, today: date, count: int = 3) -> list[dict]:
     item = plan.recurring_item
     year = today.year if payout_date(item, today.year) >= today else today.year + 1
@@ -96,12 +110,20 @@ def refresh_item_amounts(db: Session, user: models.User, today: date) -> None:
     A no-op -- no commit -- when the user has no bonus plans, so callers that
     run across every user regardless of whether they use this feature (the
     scheduler sweep, PATCH /auth/me) don't open a write transaction for
-    accounts with nothing to refresh."""
+    accounts with nothing to refresh.
+
+    Skips any plan whose recurring_item is no longer bonus-shaped (see
+    is_bonus_shaped) -- the forecast engine already ignores such an item's
+    plan entirely, so overwriting its amount here would fight whatever the
+    user just edited it to (e.g. a monthly item) on every save and every
+    scheduler sweep."""
     plans = plans_by_item(db, user.id)
     if not plans:
         return
     effective_today = today - timedelta(days=_MATCH_WINDOW_DAYS)
     for plan in plans.values():
+        if not is_bonus_shaped(plan.recurring_item):
+            continue
         nxt = upcoming_payouts(plan, user, effective_today, count=1)[0]
         if nxt["net"] is not None and nxt["net"] > 0:
             plan.recurring_item.amount = nxt["net"]

@@ -229,6 +229,48 @@ def test_commit_route_returns_409_not_500_on_scenario_commit_conflict(db_session
     assert item_row.scenario.status == "draft"
 
 
+def test_commit_route_returns_409_when_scenario_tweaks_a_bonus_item(db_session):
+    """Bug: commit_scenario also raises ScenarioBonusPlanOverride when an
+    override targets a recurring item that has a BonusPlan -- that exception
+    fell through commit_item's except clauses the same way
+    ScenarioCommitConflict/ScenarioDuplicateOverride did above, 500ing
+    instead of a clean 409."""
+    db = db_session
+    user = _user(db, "bonused")
+    account = _account(db, user, "10000.00")
+    bonus_item = models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Spring Bonus",
+        amount=Decimal("1000.00"), type=models.RecurringType.income,
+        frequency=models.RecurringFrequency.yearly, month_of_year=4,
+        day_of_month=15, start_date=date(2026, 1, 1),
+    )
+    db.add(bonus_item)
+    db.flush()
+    db.add(models.BonusPlan(
+        user_id=user.id, recurring_item_id=bonus_item.id,
+        target_pct=Decimal("10"), withholding_pct=Decimal("30"),
+    ))
+    db.commit()
+
+    c = _client(db, user)
+    item = c.post("/wish-list/items", json={"name": "Grill", "price": "200.00"}).json()
+    c.post(f"/wish-list/items/{item['id']}/options", json={"label": "Full", "method": "full_checking"})
+    wish_scenario_id = db.query(models.WishItem).filter_by(id=item["id"]).one().scenario_id
+    db.add(models.ScenarioOverride(
+        scenario_id=wish_scenario_id, recurring_item_id=bonus_item.id, amount_delta=Decimal("-50.00"),
+    ))
+    db.commit()
+
+    response = c.post(f"/wish-list/items/{item['id']}/commit")
+
+    assert response.status_code == 409
+    assert "bonus plan" in response.json()["detail"]
+    db.refresh(bonus_item)
+    assert bonus_item.amount == Decimal("1000.00")  # untouched by the refused commit
+    item_row = db.query(models.WishItem).filter_by(id=item["id"]).one()
+    assert item_row.scenario.status == "draft"
+
+
 def test_uncommit_route_returns_409_not_500_when_scenario_proposed_item_has_posted_payments(db_session):
     """Bug: uncommit_wish calls scenario_service.uncommit_scenario, which can
     raise ScenarioPaymentsPosted/ScenarioUncommitBlocked for a committed

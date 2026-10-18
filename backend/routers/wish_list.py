@@ -261,6 +261,13 @@ def commit_item(item_id: int, account_id: int | None = Query(None), db: Session 
             detail=f"Cannot commit: this scenario has more than one amount tweak on "
                    f"item '{e.item_name}'.",
         ) from None
+    except scenario_service.ScenarioBonusPlanOverride as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot commit: item '{e.item_name}' has a bonus plan. "
+                   "Edit the bonus plan instead of a scenario tweak.",
+        ) from None
 
 
 @router.post("/items/{item_id}/uncommit")

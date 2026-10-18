@@ -347,21 +347,21 @@ def build_forecast(
 
     # SS paycheck boost setup
     user = db.query(models.User).filter(models.User.id == user_id).first()
-    from backend.services.bonus_plans import bonus_gross, bonus_net, plans_by_item
+    from backend.services.bonus_plans import bonus_gross, bonus_net, is_bonus_shaped, plans_by_item
     # A BonusPlan can only be attached to a yearly income item at creation
     # time (routers/bonus_plans.py's _own_item), but nothing stops the user
     # from editing that same item into a different type or frequency
-    # afterward on the Recurring page. Filtered here, once, so every
-    # downstream use of bonus_plans -- the day-walk's own amount lookup
-    # below, the paycheck-tag skip, and the checkpoint-mode SS bonus
-    # reconciliation further down -- agrees with what the item actually is
-    # right now, instead of applying the plan's net to an item that no
-    # longer qualifies (e.g. firing it every month instead of once a year).
+    # afterward on the Recurring page. Filtered here, once, via the same
+    # is_bonus_shaped() guard refresh_item_amounts uses, so every downstream
+    # use of bonus_plans -- the day-walk's own amount lookup below, the
+    # paycheck-tag skip, and the checkpoint-mode SS bonus reconciliation
+    # further down -- agrees with what the item actually is right now,
+    # instead of applying the plan's net to an item that no longer
+    # qualifies (e.g. firing it every month instead of once a year).
     bonus_plans = {
         item_id: plan
         for item_id, plan in (plans_by_item(db, user_id) if user else {}).items()
-        if plan.recurring_item.type == models.RecurringType.income
-        and plan.recurring_item.frequency == models.RecurringFrequency.yearly
+        if is_bonus_shaped(plan.recurring_item)
     }
     ss_paycheck_item_ids: set[int] = set()
     ss_remaining_gross: Decimal | None = None

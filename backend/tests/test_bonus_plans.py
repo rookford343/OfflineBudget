@@ -110,6 +110,26 @@ def test_refresh_sets_the_item_amount_to_the_next_net(db_session):
     assert plans_by_item(db_session, user.id) == {item.id: plan}
 
 
+def test_refresh_skips_an_item_no_longer_shaped_like_a_bonus(db_session):
+    """Mirrors forecast_engine.py's own bonus_plans filter (is_bonus_shaped):
+    a BonusPlan can only be attached to a yearly income item at creation
+    time, but nothing stops the user from editing that same item into a
+    different frequency afterward on the Recurring page. The engine already
+    ignores such a plan entirely, so refresh_item_amounts must stop
+    overwriting the item's amount too, or the two would disagree on what
+    the item currently is."""
+    user, acct = _user(db_session)
+    _, item = _plan(db_session, user, acct)
+    item.frequency = models.RecurringFrequency.monthly
+    item.amount = Decimal("42.00")
+    db_session.commit()
+
+    refresh_item_amounts(db_session, user, date(2026, 10, 16))
+
+    db_session.refresh(item)
+    assert item.amount == Decimal("42.00")
+
+
 # ── I1: a late deposit must still match THIS year's plan ────────────────────
 #
 # Bank sync imports once a day at 07:00, so a bonus posting after 07:00 on
