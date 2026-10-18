@@ -402,9 +402,9 @@ def build_forecast(
         # item holds the NET amount that lands in checking, while
         # ss_gross_per_paycheck is gross. Net runs roughly 55-85% of gross after
         # tax, retirement, and benefits, so the old two-sided 0.9..1.1 band
-        # could never match a real paycheck -- the user's is REDACTED/REDACTED = 0.705,
+        # could never match a real paycheck -- the user's is 4895.60/6932.14 = 0.706,
         # which meant the boost silently never fired for anyone and left Q4 2026
-        # about $REDACTED (6 paychecks x $533) low against his spreadsheet.
+        # about $2,460 (6 paychecks x $410) low against his spreadsheet.
         # Confirmed live 2026-08-12.
         #
         # The lower bound stays well above incidental recurring income (a
@@ -995,9 +995,9 @@ def build_forecast(
     # because the wage base is a calendar-year quantity. Scoping it to the
     # window instead made the answer depend on the window: /forecast/risk asks
     # for today..+90 and would see zero prior paychecks, so it never applied the
-    # boost and ran ~$533 short per paycheck against the Jan-anchored
+    # boost and ran ~$410 short per paycheck against the Jan-anchored
     # /forecast/quarters the chart draws. That put a false at-risk alert
-    # (-$REDACTED on 2026-08-25) under a chart whose trough was +$REDACTED on the
+    # (-$175.20 on 2026-08-25) under a chart whose trough was +$REDACTED on the
     # very same day. Found live 2026-08-12.
     #
     # Counted, not summed: SS is withheld on gross, while the stored actual is
@@ -1136,7 +1136,7 @@ def build_forecast(
 
             # A known real statement wins over the modelled amount for its own
             # due date only. the user's Duke Electric is modelled at $180.00/month
-            # while the bill due 2026-09-08 is $REDACTED; editing the item would
+            # while the bill due 2026-09-08 is $214.07; editing the item would
             # rewrite every future month to a September-only number and lose
             # the estimate the forecast needs for October onward.
             actual_override = bill_actuals.get((item.id, current))

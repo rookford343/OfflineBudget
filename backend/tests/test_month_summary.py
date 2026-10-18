@@ -155,14 +155,14 @@ def test_override_replaces_amount_and_flags_overridden(db_session):
     )
     db_session.add(models.BillAmountOverride(
         user_id=user.id, recurring_item_id=item.id,
-        due_date=date(2026, 6, 8), actual_amount=Decimal("REDACTED"),
+        due_date=date(2026, 6, 8), actual_amount=Decimal("214.07"),
     ))
     db_session.commit()
 
     summary = build_month_summary(db_session, user.id, 2026, 6)
 
     row = next(o for o in summary.monthly_bills if o.name == "Electric")
-    assert row.amount == Decimal("REDACTED")
+    assert row.amount == Decimal("214.07")
     assert row.overridden is True
 
 

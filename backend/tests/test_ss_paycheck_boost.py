@@ -5,7 +5,7 @@ and every later paycheck deposits more. the user's spreadsheet models this by ha
 ('2026 Forecast' Q4 paychecks are "+Budget!$B$2+Salary!O31").
 
 The feature shipped with no test and was inert in three separate ways, all
-found live 2026-08-12 -- together worth ~$REDACTED of Q4 2026 error and a false
+found live 2026-08-12 -- together worth ~$2,460 of Q4 2026 error and a false
 projected overdraft. Each is pinned below.
 """
 from datetime import date
@@ -14,9 +14,9 @@ from backend import models
 from backend.services.forecast_engine import build_forecast
 
 
-GROSS = Decimal("REDACTED")
-NET = Decimal("REDACTED")
-BOOST = (GROSS * Decimal("0.062")).quantize(Decimal("0.01"))  # REDACTED
+GROSS = Decimal("6932.14")
+NET = Decimal("4895.60")
+BOOST = (GROSS * Decimal("0.062")).quantize(Decimal("0.01"))  # 429.79
 
 
 def _seed(db, name=None, *, wage_base: str, bonus_ytd: str = "0", paychecks_received: int = 0):
@@ -65,10 +65,10 @@ def _paychecks(entries):
 
 def test_boost_applies_to_a_net_paycheck(db_session):
     """A recurring income item holds the NET deposit, while
-    ss_gross_per_paycheck is gross -- here REDACTED/REDACTED = 0.705. The
+    ss_gross_per_paycheck is gross -- here 4895.60/6932.14 = 0.706. The
     original 0.9..1.1 tagging band could not match any real paycheck, so no
     item was ever treated as one and the boost never fired for anybody."""
-    user, account = _seed(db_session, wage_base="REDACTED")  # exactly 2 paychecks of gross
+    user, account = _seed(db_session, wage_base="13864.28")  # exactly 2 paychecks of gross
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 4, 30))
     amounts = [amt for _, amt in _paychecks(entries)]
@@ -88,7 +88,7 @@ def test_wage_base_draws_down_by_gross_not_by_the_net_deposit(db_session):
     wage_base is set to just over two paychecks of GROSS, so the boost must
     arrive on the third. Under the old net drawdown it would not arrive until
     the fourth."""
-    user, account = _seed(db_session, wage_base="REDACTED")
+    user, account = _seed(db_session, wage_base="13864.29")
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 6, 30))
     checks = _paychecks(entries)
@@ -108,7 +108,7 @@ def test_paychecks_already_received_count_against_the_wage_base(db_session):
 
     Two paychecks' worth of base, two already received -- so the very first
     projected paycheck must already be boosted."""
-    user, account = _seed(db_session, wage_base="REDACTED", paychecks_received=2)
+    user, account = _seed(db_session, wage_base="13864.28", paychecks_received=2)
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 12, 31))
     checks = _paychecks(entries)
@@ -127,8 +127,8 @@ def test_boost_does_not_depend_on_the_forecast_window_start(db_session):
     sees no prior paychecks) disagree with /forecast/quarters (Jan..Dec) by the
     boost amount on every paycheck -- putting a false at-risk banner above a
     chart whose trough on that very day was comfortably positive. Live on
-    2026-08-12: -$REDACTED vs +$REDACTED for the same date."""
-    user, account = _seed(db_session, "ss_window", wage_base="REDACTED", paychecks_received=2)
+    2026-08-12: -$175.20 vs +$885.60 for the same date."""
+    user, account = _seed(db_session, "ss_window", wage_base="13864.28", paychecks_received=2)
 
     from_january = build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 12, 31))
     from_midyear = build_forecast(db_session, user.id, account.id, date(2026, 4, 1), date(2026, 12, 31))
@@ -149,7 +149,7 @@ def test_bonus_ytd_reduces_the_remaining_base(db_session):
     bonus means the boost lands on the second paycheck. Headroom is set just
     OVER one gross paycheck: the engine boosts the paycheck that crosses the
     base, so exactly-one-paycheck of headroom would boost the first."""
-    user, account = _seed(db_session, wage_base="REDACTED", bonus_ytd="REDACTED")
+    user, account = _seed(db_session, wage_base="13864.29", bonus_ytd="6932.14")
 
     entries = build_forecast(db_session, user.id, account.id, date(2026, 1, 1), date(2026, 5, 31))
     checks = _paychecks(entries)
@@ -187,8 +187,8 @@ def test_no_boost_without_ss_settings(db_session):
 def test_incidental_recurring_income_is_not_treated_as_a_paycheck(db_session):
     """A smoothed bonus twelfth or small rental inflow is far below gross and
     must not draw the wage base down or collect a boost. the user's "Bonus (1/12)"
-    is 1391.31 against REDACTED gross -- a ratio of 0.19."""
-    user, account = _seed(db_session, wage_base="REDACTED")
+    is 1391.31 against 6932.14 gross -- a ratio of 0.20."""
+    user, account = _seed(db_session, wage_base="13864.28")
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Bonus twelfth",
         amount=Decimal("1391.31"), type=models.RecurringType.income,
@@ -211,7 +211,7 @@ def test_boost_stops_at_year_end_and_the_wage_base_resets(db_session):
     """The wage base is per calendar year: once the 2026 base is met every
     later 2026 paycheck is boosted, but SS withholding resumes on January 1.
     It used to stay boosted forever, overstating every later year's income."""
-    user, account = _seed(db_session, wage_base="REDACTED", paychecks_received=10)
+    user, account = _seed(db_session, wage_base="13864.28", paychecks_received=10)
     entries = build_forecast(db_session, user.id, account.id, date(2026, 11, 1), date(2027, 3, 31))
     by_month = {(d.year, d.month): amt for d, amt in _paychecks(entries)}
     assert by_month[(2026, 11)] == NET + BOOST
@@ -226,7 +226,7 @@ def test_upcoming_income_matches_the_forecast(db_session):
     amount and calendar date while the forecast boosted the paycheck and moved
     a weekend payday to Friday."""
     from backend.services.upcoming_bills import upcoming_bills
-    user, account = _seed(db_session, wage_base="REDACTED", paychecks_received=10)
+    user, account = _seed(db_session, wage_base="13864.28", paychecks_received=10)
     bills = upcoming_bills(db_session, user.id, date(2026, 11, 1), 30)
     paychecks = [(b.due_date, b.amount) for b in bills if b.name == "Paycheck"]
     assert paychecks == [(date(2026, 11, 13), NET + BOOST)], "Nov 15 is a Sunday: paid Friday the 13th, boosted"

@@ -150,7 +150,7 @@ def test_existing_override_for_the_due_date_removes_the_prompt(db_session):
     item = _item(db_session, user, acct, statement_day=17, day_of_month=8)
     db_session.add(models.BillAmountOverride(
         user_id=user.id, recurring_item_id=item.id,
-        due_date=date(2026, 11, 8), actual_amount=Decimal("REDACTED"),
+        due_date=date(2026, 11, 8), actual_amount=Decimal("214.07"),
     ))
     db_session.commit()
     assert bills_to_confirm(db_session, user.id, date(2026, 10, 16)) == []

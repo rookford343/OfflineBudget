@@ -207,7 +207,7 @@ def test_existing_breakdown_fields_keep_working_alongside_the_new_ones(client, d
     _item(db_session, user, account, name="Mortgage", amount=Decimal("1850.00"))
     _item(db_session, user, account, name="iPhone Duo", amount=Decimal("57.87"),
           end_date=date(2028, 10, 23))
-    _item(db_session, user, account, name="Paycheck", amount=Decimal("REDACTED"),
+    _item(db_session, user, account, name="Paycheck", amount=Decimal("4895.60"),
           type=models.RecurringType.income)
     db_session.commit()
 

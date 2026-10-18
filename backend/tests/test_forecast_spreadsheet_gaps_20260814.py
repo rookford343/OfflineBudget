@@ -5,8 +5,8 @@ Safety Margin is built on, and the one the user reads before approving a large
 purchase:
 
   1. The SS wage-base boost was granted in full to the paycheck that CROSSED
-     the base, overstating that check by up to $REDACTED and pulling the whole
-     step-up a paycheck early.
+     the base, overstating that check by the full per-check boost instead of
+     just its earned slice, and pulling the whole step-up a paycheck early.
   2. A card whose next_payment_date had gone stale vanished from the forecast
      entirely, taking its real balance_due with it.
   3. Cards with no manual spend estimate projected $0, even when they carried
@@ -22,9 +22,9 @@ from backend import models
 from backend.services.forecast_engine import build_forecast, _next_occurrence_on_or_after
 
 
-GROSS = Decimal("REDACTED")
-NET = Decimal("REDACTED")
-FULL_BOOST = (GROSS * Decimal("0.062")).quantize(Decimal("0.01"))  # REDACTED
+GROSS = Decimal("6932.14")
+NET = Decimal("4895.60")
+FULL_BOOST = (GROSS * Decimal("0.062")).quantize(Decimal("0.01"))  # 429.79
 
 
 def _user(db, **kw):
@@ -94,9 +94,9 @@ def test_crossing_paycheck_gets_only_the_boost_it_earned(db_session):
     between NET and NET + full boost -- never at the full boost.
 
     The wage base here is one paycheck of gross plus $1,000, so check 2 is the
-    crossing one and $REDACTED of it sits above the base: a $REDACTED boost.
-    Before the fix check 2 got the whole $REDACTED."""
-    user = _user(db_session, ss_gross_per_paycheck=GROSS, ss_wage_base=Decimal("REDACTED"), ss_bonus_ytd=Decimal("0"))
+    crossing one and gets pro-rated to just the slice of it above the base.
+    Before the fix check 2 got the whole boost regardless."""
+    user = _user(db_session, ss_gross_per_paycheck=GROSS, ss_wage_base=Decimal("7932.14"), ss_bonus_ytd=Decimal("0"))
     account = _checking(db_session, user)
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Paycheck",
@@ -110,7 +110,7 @@ def test_crossing_paycheck_gets_only_the_boost_it_earned(db_session):
 
     assert len(checks) >= 3
     assert checks[0][1] == NET, "nothing crossed yet on the first check"
-    partial = (Decimal("REDACTED") * Decimal("0.062")).quantize(Decimal("0.01"))
+    partial = (Decimal("5932.14") * Decimal("0.062")).quantize(Decimal("0.01"))
     assert checks[1][1] == NET + partial, (
         f"the crossing paycheck must be pro-rated to {partial}, not given the full {FULL_BOOST}"
     )
@@ -789,7 +789,7 @@ def test_a_same_day_actual_is_not_double_counted_when_start_date_is_today(db_ses
 # --- 7. SS wage-base checkpoint (the user, 2026-08-14) ------------------------
 
 def _checkpoint_user(db, *, withheld_ytd: str, as_of: date, wage_base: str = "184500.00",
-                      gross_per_check: str = "REDACTED", paycheck_day: int = 31,
+                      gross_per_check: str = "6932.14", paycheck_day: int = 31,
                       username: str = "checkpoint"):
     user = _user(
         db, username=username,
@@ -801,7 +801,7 @@ def _checkpoint_user(db, *, withheld_ytd: str, as_of: date, wage_base: str = "18
     account = _checking(db, user)
     db.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Paycheck",
-        amount=Decimal("REDACTED"), type=models.RecurringType.income,
+        amount=Decimal("4895.60"), type=models.RecurringType.income,
         frequency=models.RecurringFrequency.monthly,
         day_of_month=paycheck_day, start_date=date(2026, 1, 1),
     ))
@@ -810,17 +810,17 @@ def _checkpoint_user(db, *, withheld_ytd: str, as_of: date, wage_base: str = "18
 
 
 def test_checkpoint_recovers_gross_from_withheld_tax(db_session):
-    """$REDACTED withheld as of 8/14 implies $REDACTED gross, still
-    $REDACTED under the $184,500 base -- the checkpoint date's
-    own paycheck must get NO boost, and the crossing lands on the NEXT one."""
+    """$10,794.31 withheld as of 8/14 implies $174,101.77 gross, still
+    $10,398.23 under the $184,500 base -- the checkpoint date's
+    own paycheck must get NO boost, and the crossing lands on a later one."""
     user, account = _checkpoint_user(
-        db_session, withheld_ytd="REDACTED", as_of=date(2026, 8, 14), paycheck_day=31,
+        db_session, withheld_ytd="10794.31", as_of=date(2026, 8, 14), paycheck_day=31,
     )
     # A same-day paycheck recurring item to exercise the "checkpoint coincides
     # with a still-projected day" branch directly.
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Checkpoint day check",
-        amount=Decimal("REDACTED"), type=models.RecurringType.income,
+        amount=Decimal("4895.60"), type=models.RecurringType.income,
         frequency=models.RecurringFrequency.monthly,
         day_of_month=14, start_date=date(2026, 1, 1),
     ))
@@ -830,11 +830,11 @@ def test_checkpoint_recovers_gross_from_withheld_tax(db_session):
     on_checkpoint = _named(entries, "Checkpoint day check")
     later = _named(entries, "Paycheck")
 
-    assert on_checkpoint and on_checkpoint[0][1] == Decimal("REDACTED"), (
+    assert on_checkpoint and on_checkpoint[0][1] == Decimal("4895.60"), (
         "the checkpoint date's own paycheck must get no boost -- it is already "
         "fully accounted for inside the checkpoint figure"
     )
-    assert any(amt > Decimal("REDACTED") for _, amt in later), (
+    assert any(amt > Decimal("4895.60") for _, amt in later), (
         "the crossing must still arrive on a later paycheck"
     )
 
@@ -844,14 +844,14 @@ def test_checkpoint_takes_priority_over_legacy_bonus_ytd(db_session):
     strictly preferred, since it is the more direct measurement."""
     user = _user(
         db_session, username="both",
-        ss_gross_per_paycheck=Decimal("REDACTED"), ss_wage_base=Decimal("184500.00"),
+        ss_gross_per_paycheck=Decimal("6932.14"), ss_wage_base=Decimal("184500.00"),
         ss_bonus_ytd=Decimal("0"),  # legacy field implying the base is nowhere close to hit
-        ss_withheld_ytd=Decimal("REDACTED"), ss_withheld_ytd_as_of=date(2026, 8, 14),  # implies ~$184,500 -- essentially AT the base
+        ss_withheld_ytd=Decimal("11408.00"), ss_withheld_ytd_as_of=date(2026, 8, 14),  # implies ~$184,500 -- essentially AT the base
     )
     account = _checking(db_session, user)
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Paycheck",
-        amount=Decimal("REDACTED"), type=models.RecurringType.income,
+        amount=Decimal("4895.60"), type=models.RecurringType.income,
         frequency=models.RecurringFrequency.monthly,
         day_of_month=31, start_date=date(2026, 1, 1),
     ))
@@ -859,7 +859,7 @@ def test_checkpoint_takes_priority_over_legacy_bonus_ytd(db_session):
 
     checks = _named(build_forecast(db_session, user.id, account.id, date(2026, 8, 1), date(2026, 9, 30)), "Paycheck")
 
-    assert checks[0][1] > Decimal("REDACTED"), (
+    assert checks[0][1] > Decimal("4895.60"), (
         "the checkpoint (nearly at the base) must win over ss_bonus_ytd=0 (nowhere near it)"
     )
 
@@ -868,13 +868,13 @@ def test_no_checkpoint_falls_back_to_legacy_bonus_ytd(db_session):
     """Existing users without a checkpoint must see no behavior change."""
     user = _user(
         db_session, username="legacy",
-        ss_gross_per_paycheck=Decimal("REDACTED"), ss_wage_base=Decimal("REDACTED"),
+        ss_gross_per_paycheck=Decimal("6932.14"), ss_wage_base=Decimal("13864.28"),
         ss_bonus_ytd=Decimal("0"),
     )
     account = _checking(db_session, user)
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=account.id, name="Paycheck",
-        amount=Decimal("REDACTED"), type=models.RecurringType.income,
+        amount=Decimal("4895.60"), type=models.RecurringType.income,
         frequency=models.RecurringFrequency.monthly,
         day_of_month=15, start_date=date(2026, 1, 1),
     ))

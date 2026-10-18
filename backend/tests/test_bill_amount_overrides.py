@@ -64,15 +64,15 @@ def _amount_on(db, user, acct, target: date, name: str):
 
 def test_override_replaces_the_projected_amount_on_its_own_date(db_session):
     """the user's real case: Duke Electric modelled at $180.00/month, a statement
-    due one month came in at $REDACTED."""
+    due one month came in at $214.07."""
     user, acct, item = _seed(db_session)
     due = _next_due()
     db_session.add(models.BillAmountOverride(
         user_id=user.id, recurring_item_id=item.id,
-        due_date=due, actual_amount=Decimal("REDACTED")))
+        due_date=due, actual_amount=Decimal("214.07")))
     db_session.commit()
 
-    assert _amount_on(db_session, user, acct, due, "Duke Electric") == Decimal("-REDACTED")
+    assert _amount_on(db_session, user, acct, due, "Duke Electric") == Decimal("-214.07")
 
 
 def test_other_months_keep_the_modelled_amount(db_session):
@@ -88,7 +88,7 @@ def test_other_months_keep_the_modelled_amount(db_session):
     next_month = _adjust_for_weekend(_next_occurrence_on_or_after(8, raw_due + timedelta(days=1)))
     db_session.add(models.BillAmountOverride(
         user_id=user.id, recurring_item_id=item.id,
-        due_date=due, actual_amount=Decimal("REDACTED")))
+        due_date=due, actual_amount=Decimal("214.07")))
     db_session.commit()
 
     assert _amount_on(db_session, user, acct, next_month, "Duke Electric") == Decimal("-180.00")
@@ -100,7 +100,7 @@ def test_upsert_restates_rather_than_conflicting(db_session):
     not require delete-then-recreate."""
     user, acct, item = _seed(db_session)
     c = _client(db_session, user)
-    payload = {"recurring_item_id": item.id, "due_date": _next_due().isoformat(), "actual_amount": "REDACTED"}
+    payload = {"recurring_item_id": item.id, "due_date": _next_due().isoformat(), "actual_amount": "214.07"}
 
     first = c.post("/bill-overrides", json=payload)
     assert first.status_code == 201
@@ -118,10 +118,10 @@ def test_response_carries_the_projection_for_comparison(db_session):
     user, acct, item = _seed(db_session)
     c = _client(db_session, user)
     r = c.post("/bill-overrides", json={
-        "recurring_item_id": item.id, "due_date": _next_due().isoformat(), "actual_amount": "REDACTED"}).json()
+        "recurring_item_id": item.id, "due_date": _next_due().isoformat(), "actual_amount": "214.07"}).json()
 
     assert Decimal(r["projected_amount"]) == Decimal("180.00")
-    assert Decimal(r["actual_amount"]) == Decimal("REDACTED")
+    assert Decimal(r["actual_amount"]) == Decimal("214.07")
     assert r["recurring_item_name"] == "Duke Electric"
 
 
@@ -130,8 +130,8 @@ def test_deleting_an_override_restores_the_projection(db_session):
     c = _client(db_session, user)
     due = _next_due()
     created = c.post("/bill-overrides", json={
-        "recurring_item_id": item.id, "due_date": due.isoformat(), "actual_amount": "REDACTED"}).json()
-    assert _amount_on(db_session, user, acct, due, "Duke Electric") == Decimal("-REDACTED")
+        "recurring_item_id": item.id, "due_date": due.isoformat(), "actual_amount": "214.07"}).json()
+    assert _amount_on(db_session, user, acct, due, "Duke Electric") == Decimal("-214.07")
 
     assert c.delete(f"/bill-overrides/{created['id']}").status_code == 204
     assert _amount_on(db_session, user, acct, due, "Duke Electric") == Decimal("-180.00")
@@ -157,7 +157,7 @@ def test_past_due_dates_are_hidden_from_the_upcoming_list(db_session):
                                   actual_amount=Decimal("100.00")),
         models.BillAmountOverride(user_id=user.id, recurring_item_id=item.id,
                                   due_date=date.today() + timedelta(days=10),
-                                  actual_amount=Decimal("REDACTED")),
+                                  actual_amount=Decimal("214.07")),
     ])
     db_session.commit()
     c = _client(db_session, user)

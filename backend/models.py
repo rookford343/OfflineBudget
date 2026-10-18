@@ -630,7 +630,7 @@ class BillAmountOverride(Base):
     A RecurringItem carries a single typical amount, which is the right shape
     for planning but wrong the moment the actual bill arrives: the user's Duke
     Electric is modelled at $180.00/month while the statement due 2026-09-08
-    is $REDACTED. Editing the recurring item itself would be lossy -- it would
+    is $214.07. Editing the recurring item itself would be lossy -- it would
     silently rewrite every future month to a number that is only true for
     September, and lose the estimate the forecast should fall back to
     afterwards.

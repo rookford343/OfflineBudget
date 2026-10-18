@@ -126,16 +126,16 @@ def test_burn_totals_split_ongoing_from_temporary_and_ignore_income(client, db_s
     """The point of the split: "what my life costs" shouldn't be inflated by
     a device payment that rolls off, and a paycheck isn't burn at all."""
     test_client, user, account = client
-    _item(db_session, user, account, name="Mortgage", amount=Decimal("REDACTED"))
+    _item(db_session, user, account, name="Mortgage", amount=Decimal("3284.15"))
     _item(db_session, user, account, name="iPhone Duo", amount=Decimal("57.87"),
           end_date=date(2028, 10, 23))
-    _item(db_session, user, account, name="Paycheck", amount=Decimal("REDACTED"),
+    _item(db_session, user, account, name="Paycheck", amount=Decimal("4895.60"),
           type=models.RecurringType.income)
     db_session.commit()
 
     body = test_client.get("/recurring/breakdown").json()
 
-    assert Decimal(body["ongoing_monthly"]) == Decimal("REDACTED")
+    assert Decimal(body["ongoing_monthly"]) == Decimal("3284.15")
     assert Decimal(body["ending_monthly"]) == Decimal("57.87")
 
 

@@ -2,7 +2,7 @@
 
 A RecurringItem carries one typical amount, which is right for planning and
 wrong the moment the real bill lands: Duke Electric is modelled at $180.00/mo
-while the statement due 2026-09-08 is $REDACTED. Editing the item would rewrite
+while the statement due 2026-09-08 is $214.07. Editing the item would rewrite
 every future month to a September-only number and lose the estimate the
 forecast still needs for October. These records pin the real amount to a
 single due date and leave the model alone.

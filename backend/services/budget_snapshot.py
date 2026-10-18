@@ -486,7 +486,7 @@ def compute_budget_snapshot(
     # This formula is right -- resolved 2026-08-13 after two rounds against
     # the user's spreadsheet. The app's original $REDACTED vs the sheet's $REDACTED on
     # 8/25 traced to real gaps in the app's data, not this formula:
-    #   1. "Holland Vacation" (-$REDACTED) is a real purchase the user puts on his
+    #   1. "Holland Vacation" (-$875.40) is a real purchase the user puts on his
     #      Chase card, but PlannedExpense had no way to route a one-off to a
     #      card -- see forecast_engine.py's card_planned_by_date, added to
     #      fix exactly this. It now waits for Chase's real payoff cycle
@@ -500,7 +500,7 @@ def compute_budget_snapshot(
     #      The sheet still hardcodes a 9/15 crossing, a manual guess from
     #      when it was last written by hand -- the app is ahead of the
     #      sheet here, not behind it, and this is expected to stay a
-    #      permanent (small, ~$533/paycheck) divergence until the user updates
+    #      permanent (small, ~$410/paycheck) divergence until the user updates
     #      the sheet formula to match.
     safety_margin = quarter_min - cc_budget_total + charged_so_far
 
@@ -508,11 +508,11 @@ def compute_budget_snapshot(
 
     # Both weekly figures prorate their own monthly value by the same share of
     # the month remaining. This is the model the user's spreadsheet uses, confirmed
-    # to the cent against it on 2026-08-16: Left to Spend -REDACTED * 0.4375 =
-    # -REDACTED and Safety Margin REDACTED * 0.4375 = REDACTED, where 0.4375 is
+    # to the cent against it on 2026-08-16: Left to Spend -400.00 * 0.4375 =
+    # -175.00 and Safety Margin 2400.00 * 0.4375 = 1050.00, where 0.4375 is
     # one week of the 2.2857 remaining. The transaction-driven pacer below is
     # a different model -- it re-slices the pool each Sunday, so the number
-    # jumps at a week boundary (Sat -REDACTED -> Sun REDACTED on real data) and
+    # jumps at a week boundary (Sat -40.00 -> Sun 600.00 on real data) and
     # never lines up with the sheet. Kept for spendable_today's pacing detail
     # and because it does catch discretionary checking spend that
     # left_to_spend is blind to, but it is no longer the headline number.
