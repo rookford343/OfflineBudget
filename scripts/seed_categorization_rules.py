@@ -80,7 +80,7 @@ RULES: list[tuple[str, list[str]]] = [
         "MERCYROAD",     # $1,180/mo, the largest single uncategorized checking line
     ]),
     ("Vehicles", [
-        "TO AUTO LOAN",  # the Rivian R1T payment, $398.20/mo
+        "TO AUTO LOAN",  # the Rivian R1T payment, $400.00/mo
     ]),
 ]
 

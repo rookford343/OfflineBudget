@@ -147,7 +147,7 @@ export default function Budget() {
   // it was set. the user budgets at the level he thinks in (Subscriptions), which
   // is a child of Wants, so filtering to parentless rows would hide every real
   // budget he has. Income categories are dropped outright -- "Income" and
-  // "Salary / Wages" carry $9,614.80 allocations that are forecasting inputs,
+  // "Salary / Wages" carry $9,600.00 allocations that are forecasting inputs,
   // not spending limits, and counting them wrecked the headline totals.
   const withBudget = overview.filter(
     r => parseFloat(r.budgeted || "0") > 0 && (r.category_type ?? "expense") === "expense",
@@ -155,7 +155,7 @@ export default function Budget() {
 
   // When a parent AND its children are both budgeted, the parent governs and
   // the children fold into it. the user's real data budgets Necessities at
-  // $REDACTED and also Mortgage/Rent, Groceries and Vehicles beneath it;
+  // $5,000.00 and also Mortgage/Rent, Groceries and Vehicles beneath it;
   // summing all four counted the same dollars twice. This is also the
   // behaviour he asked for -- a handful of broad lines to hit rather than a
   // limit per sub-category, with the detail still one expand away.
@@ -174,7 +174,7 @@ export default function Budget() {
   // budgeted parent is already covered by that line, and a PARENT of budgeted
   // children is too -- its actual_total is their rolled-up spend, so offering
   // to budget it would double-count. Without the second check the demo data
-  // offered Necessities ($REDACTED), Wants and Charity as unbudgeted while
+  // offered Necessities ($3,400.00), Wants and Charity as unbudgeted while
   // every category beneath them already had a line.
   const budgetedParentIds = new Set(budgetRows.map(r => r.parent_id).filter(Boolean));
   const unbudgeted = overview

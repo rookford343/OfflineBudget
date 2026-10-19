@@ -22,7 +22,7 @@ from backend.services.card_matching import card_matches_description
 # missing its actual and get folded into today's opening balance anyway,
 # rather than silently vanishing from the forecast until bank sync catches
 # up. Bank aggregators lag real-world posting by days -- observed live
-# 2026-09-01: a $REDACTED paycheck scheduled Aug 31 sat unconfirmed for a
+# 2026-09-01: a $5,000.00 paycheck scheduled Aug 31 sat unconfirmed for a
 # full day past "today" with the forecast never accounting for it, because
 # the day-walk below never visits a date before start_date. Matches the
 # frontend Pending list's own lookback window (Transactions.tsx,
@@ -382,8 +382,8 @@ def build_forecast(
             # SS as of that stub -- correct through every raise in the year
             # with no reconstruction, unlike ss_bonus_ytd below. the user's April
             # raise alone misdated the 2026 crossing by a full paycheck under
-            # the old method (found 2026-08-14, YTD withheld $REDACTED as of
-            # the 8/14 check implies gross $REDACTED, still $REDACTED under
+            # the old method (found 2026-08-14, YTD withheld $8,500.00 as of
+            # the 8/14 check implies gross $138,000.00, still $1,000.00 under
             # the $184,500 base -- crossing is 8/31, not 8/14).
             SS_EMPLOYEE_RATE = Decimal("0.062")
             gross_ytd_at_checkpoint = (user.ss_withheld_ytd / SS_EMPLOYEE_RATE).quantize(Decimal("0.01"))
@@ -394,7 +394,7 @@ def build_forecast(
             ss_remaining_gross = user.ss_wage_base - ss_bonus_ytd
         # Quantized like the monthly interest credit -- it is a dollar amount
         # landing in an account, and unrounded it produced paychecks of
-        # $6,600.00112.
+        # $5,000.00112.
         ss_boost_per_check = (ss_gross * Decimal("0.062")).quantize(Decimal("0.01"))
         # Which recurring income items are paychecks (and so stop having Social
         # Security withheld once the wage base is hit)? Compared against
@@ -402,7 +402,7 @@ def build_forecast(
         # item holds the NET amount that lands in checking, while
         # ss_gross_per_paycheck is gross. Net runs roughly 55-85% of gross after
         # tax, retirement, and benefits, so the old two-sided 0.9..1.1 band
-        # could never match a real paycheck -- the user's is 4895.60/6932.14 = 0.706,
+        # could never match a real paycheck -- the user's is 5000.00/7000.00 = 0.714,
         # which meant the boost silently never fired for anyone and left Q4 2026
         # about $2,460 (6 paychecks x $410) low against his spreadsheet.
         # Confirmed live 2026-08-12.
@@ -534,7 +534,7 @@ def build_forecast(
     # link, so without this guard every payoff and estimate was injected into
     # whichever account was being forecast -- forecasting the user's savings drew
     # the Chase payoff and two monthly estimates out of it and ended at
-    # -$14,512.80. Recurring credit_card_payment items are already scoped by
+    # -$15,000.00. Recurring credit_card_payment items are already scoped by
     # their own account_id and are unaffected.
     injects_card_bills = account.type == models.AccountType.checking
     # Cards whose pending_charges came from the bank's pending feed rather
@@ -579,8 +579,8 @@ def build_forecast(
 
         # The cycle right after a locked payoff is not a guess -- most of it is
         # already sitting on the card. the user derives it exactly this way
-        # (2026-08-14): "based on current balance due on 8/25 of $REDACTED and
-        # running balance of $REDACTED we get the forecast for next credit
+        # (2026-08-14): "based on current balance due on 8/25 of $7,000.00 and
+        # running balance of $10,000.00 we get the forecast for next credit
         # card due date which would be 9/25." The gap between running balance
         # and statemented balance is spending already made that simply has not
         # been billed yet; add the subscriptions that will still post before
@@ -601,7 +601,7 @@ def build_forecast(
         # statement is fully paid, but current_balance can still carry real,
         # already-spent debt that hasn't hit a statement yet (the user's Chase,
         # 2026-08-27: balance_due dropped to $0 right after payoff, while
-        # current_balance still carried $5,312.80 of real spend). The
+        # current_balance still carried $5,000.00 of real spend). The
         # original guard required balance_due > 0, so that money silently
         # stopped being planned for the moment a card got paid off -- the
         # forecast fell back to the flat monthly_spend_estimate and
@@ -638,16 +638,16 @@ def build_forecast(
             # Only recognized when balance_due == 0, though -- NOT unconditionally
             # (a first version of this fix was; regression found live
             # 2026-09-02, hours after the user hand-entered a real, current,
-            # non-stale balance_due of $6,324.50 due 9/25). balance_due == 0
+            # non-stale balance_due of $6,000.00 due 9/25). balance_due == 0
             # means "nothing billed for the recent close yet", which is
             # exactly the gap this fix exists for. balance_due > 0 means a
-            # real bill for that close ALREADY EXISTS -- the user's $6,324.50 IS the
+            # real bill for that close ALREADY EXISTS -- the user's $6,000.00 IS the
             # money from the 8/28 close, injected separately below via
             # next_payment. Recognizing the same close here too made the
-            # carried estimate ($REDACTED of spend that will belong to the
+            # carried estimate ($1,000.00 of spend that will belong to the
             # FOLLOWING cycle, not this one) land on the SAME 9/25 date as
-            # that real payment: $6,324.50 and $REDACTED both charged on 9/25,
-            # double-counting the $REDACTED slice. With balance_due > 0 the
+            # that real payment: $6,000.00 and $1,000.00 both charged on 9/25,
+            # double-counting the $1,000.00 slice. With balance_due > 0 the
             # forward search below is what's wanted -- it correctly skips to
             # the NEXT unbilled close (9/28, due 10/25), where that new
             # spend actually belongs. the user's own worked example (2026-08-14,
@@ -711,10 +711,10 @@ def build_forecast(
         # happened and is only waiting on bank sync to confirm it (both use
         # `_next_occurrence_on_or_after(due_day, ...)` anchored near `today`).
         # Injecting the old balance_due there on top of derived_amount would
-        # double-charge the card -- $7,342.90 (the stale, presumably
-        # already-paid balance) plus $REDACTED (the next cycle's own carried
+        # double-charge the card -- $7,500.00 (the stale, presumably
+        # already-paid balance) plus $5,000.00 (the next cycle's own carried
         # estimate) on the same day (confirmed live 2026-08-26, crashed the
-        # forecast to -$REDACTED). Trust that the payoff happened and fold the
+        # forecast to -$3,500.00). Trust that the payoff happened and fold the
         # two into one line rather than dropping either: the carried figure
         # IS the real, known money (current_balance minus the last statement,
         # both hard numbers) plus a small subscription projection, so it
@@ -744,7 +744,7 @@ def build_forecast(
         ):
             # balance_due only, NOT + pending_charges -- the user's real
             # spreadsheet forecast pays off only the last-statement total on
-            # the due date ("2026 Forecast" row 24: "=L23-7342.90-143.00",
+            # the due date ("2026 Forecast" row 24: "=L23-5000.00-100.00",
             # no pending-charges term), and separately counts pending_charges
             # exactly once via budget_snapshot.py's new_spending_total.
             # Adding it here too double-counted it: once in this payoff
@@ -892,7 +892,7 @@ def build_forecast(
         # walk. The `start_date < today` branch above already reverses
         # actuals strictly before today for the same reason -- this mirrors
         # it for the one day that branch doesn't cover. Reproduced live:
-        # $552.80 - $7,342.90 landed at -$6,796.50 without this.
+        # $500.00 - $7,500.00 landed at -$7,000.00 without this.
         today_actuals_sum = sum(
             (Decimal(str(t.amount)) for t in all_actuals if t.date == today),
             Decimal("0"),
@@ -1003,7 +1003,7 @@ def build_forecast(
     # for today..+90 and would see zero prior paychecks, so it never applied the
     # boost and ran ~$410 short per paycheck against the Jan-anchored
     # /forecast/quarters the chart draws. That put a false at-risk alert
-    # (-$175.20 on 2026-08-25) under a chart whose trough was +$REDACTED on the
+    # (-$200.00 on 2026-08-25) under a chart whose trough was +$1,000.00 on the
     # very same day. Found live 2026-08-12.
     #
     # Counted, not summed: SS is withheld on gross, while the stored actual is
@@ -1179,7 +1179,7 @@ def build_forecast(
                     # Draw down by GROSS, not item.amount -- the wage base is a
                     # gross-wages figure, while item.amount is the net deposit.
                     # Decrementing by net stretched the run-up ~40% too far
-                    # (the user: 118,260 remaining / REDACTED net = 19.5 paychecks,
+                    # (the user: 118,260 remaining / 5,000.00 net = 19.5 paychecks,
                     # landing in late Oct 2027 instead of autumn 2026), so the
                     # boost never arrived inside the forecast window at all.
                     ss_remaining_gross -= ss_gross
@@ -1188,7 +1188,7 @@ def build_forecast(
                         # The CROSSING paycheck only gets a partial boost: SS is
                         # still withheld on the wages up to the base, and only
                         # the remainder above it comes back. Granting the full
-                        # $REDACTED here overstated that one check and, worse,
+                        # $500.00 here overstated that one check and, worse,
                         # pulled the whole step-up a paycheck early -- caught
                         # 2026-08-14 reconciling to Budget.xlsx, where the app
                         # boosted the 8/14 check while the sheet held flat until

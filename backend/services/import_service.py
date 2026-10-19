@@ -326,7 +326,7 @@ def _find_duplicate_transaction(
 
     Rows that carry the provider's own transaction id (bank sync) match on that
     id, because the legacy (date, amount, description) heuristic silently
-    collapses two genuinely distinct same-day charges -- two identical $4.50
+    collapses two genuinely distinct same-day charges -- two identical $5.00
     coffees -- into one. When the id doesn't match anything, we still fall back
     to the heuristic but restricted to rows that predate this column
     (external_id IS NULL), so upgrading an existing database doesn't re-import
@@ -338,7 +338,7 @@ def _find_duplicate_transaction(
     date. A bank or card CSV export carries the transaction date while
     SimpleFIN reports the *post* date, routinely 1-2 days later, so exact-date
     matching let sync re-import history a CSV had already loaded -- confirmed
-    live 2026-08-12: 118 card transactions ($REDACTED) were double-counted
+    live 2026-08-12: 118 card transactions ($6,000.00) were double-counted
     across 2026-07-10..2026-08-04 this way, inflating the Household Snapshot's
     category totals and the weekly email. Matching is 1:1 via `consumed`, so
     widening the window cannot swallow a genuine repeat charge.
@@ -435,8 +435,8 @@ def run_import(
     # External ids already inserted earlier in THIS batch. The dedup queries
     # below only see committed/flushed rows, and this session runs with
     # autoflush=False (database.py) -- so when SimpleFIN hands back the same
-    # transaction twice in one sync call (real incident, 2026-09-12: MAGBAK
-    # STOR $74.11 landed as two separate CreditCardTransaction rows), the
+    # transaction twice in one sync call (real incident, 2026-09-12: a
+    # merchant charge landed as two separate CreditCardTransaction rows), the
     # second row's query doesn't see the first row's still-unflushed insert
     # and both get created. Cross-sync duplicates (a later call, after the
     # first has committed) were already caught by the DB query; this closes

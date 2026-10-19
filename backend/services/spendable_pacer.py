@@ -133,7 +133,7 @@ def discretionary_spend_checking(db: Session, user_id: int, start: date, end: da
     # list / a marker tuple), so filter the fetched rows instead.
     #
     # Credit-card autopay debits ("CHASE CREDIT CRD AUTOPAY") and internal
-    # transfers ("Online Transfer to CHK ...0054") land in checking as plain
+    # transfers ("Online Transfer to CHK ...XXXX") land in checking as plain
     # uncategorized negatives with no recurring_item_id, so neither existing
     # exclusion catches them -- yet neither is discretionary spend. A card
     # payment is settling charges this pacer ALREADY counted on the card side
@@ -239,7 +239,7 @@ class WeeklySpendable:
     # The month-level figure this week's number is a share of. Exposed so the
     # UI can show week and month from ONE calculation: pairing the pacer's
     # weekly value with the legacy balance-derived left_to_spend showed
-    # $552.80 for the week against $355.10 for the month -- a week larger
+    # $500.00 for the week against $350.00 for the month -- a week larger
     # than the month it sits inside.
     remaining_this_month: Decimal
 
@@ -290,8 +290,8 @@ def compute_weekly_spendable(db: Session, user_id: int, leftover: Decimal, as_of
     # ratio lands in (0, 1] and |this_week_target| <= |remaining_pool| falls out
     # structurally -- for BOTH signs, with no clamp. That is the whole point:
     # a min() clamp only bounds a positive pool. On a negative pool min() picks
-    # the MORE negative branch, inflating the deficit (-$19,530.70 shown against
-    # a true -$16,820.40 on real July 2026 data) and charging a mid-month
+    # the MORE negative branch, inflating the deficit (-$19,500.00 shown against
+    # a true -$16,500.00 on real July 2026 data) and charging a mid-month
     # deficit in full to every remaining week instead of amortizing it.
     #
     # One proportional formula now covers every week position -- leading stub

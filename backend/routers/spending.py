@@ -566,7 +566,7 @@ def available_to_spend(
     # place in this app that answers "how much has really been spent"
     # (budget_snapshot.py's new_spending_total, forecast_engine.py's carried
     # balance) already folds this in; this endpoint didn't, so a real,
-    # already-confirmed charge the user knows about (2026-09-02: $470.90 on
+    # already-confirmed charge the user knows about (2026-09-02: $500.00 on
     # Chase, current_balance already reflects it) stayed invisible here,
     # showing "Spent So Far: $0.00" the same day it happened. Not double-
     # counted against card_spend above: pending_charges is specifically the
@@ -720,9 +720,9 @@ def _range_month_fraction(start: date, end: date) -> Decimal:
 
     Budgets are stored as MONTHLY amounts, so comparing one against a
     multi-month range understated the budget and made every longer range look
-    like a blowout. Live on 2026-08-15 the Spending page reported "$REDACTED
-    over" for a 2.5-month window: $REDACTED spent against a $5,500 budget that
-    was only ever one month's worth. Scaled, that same window is $REDACTED
+    like a blowout. Live on 2026-08-15 the Spending page reported "$7,000.00
+    over" for a 2.5-month window: $12,000 spent against a $5,000 budget that
+    was only ever one month's worth. Scaled, that same window is $12,500
     budgeted -- essentially on target rather than 2.5x over.
     """
     total = Decimal("0")

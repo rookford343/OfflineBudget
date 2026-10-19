@@ -17,7 +17,7 @@ NOT_SAVINGS = or_(
 #
 # These reach the card table with a positive (charge-side) amount, so they
 # inflate spend rather than netting out. Found live 2026-08-12: a single
-# "AUTOMATIC PAYMENT - THANK" row of $8,968.70 was the largest line in the user's
+# "AUTOMATIC PAYMENT - THANK" row of $9,000.00 was the largest line in the user's
 # card spending and the top entry in the weekly email's merchant list. The
 # checking side already excludes the mirror-image debit via
 # card_matching.card_matches_description; this is the card-side counterpart.
@@ -67,9 +67,9 @@ def is_real_checking_spend(description: str | None, active_cards: list) -> bool:
       - A credit-card payoff ("CHASE CREDIT CRD AUTOPAY"). The charges it
         settles were already counted individually on the card side, so
         counting the payment double-counts the entire statement. Live on
-        2026-08-15 this was $8,968.70 -- by far the largest "merchant" in
+        2026-08-15 this was $9,000.00 -- by far the largest "merchant" in
         the user's July list, above his mortgage.
-      - An internal transfer ("Online Transfer to CHK ...0054"). It never
+      - An internal transfer ("Online Transfer to CHK ...XXXX"). It never
         leaves the household at all, yet showed up as the top August
         "merchant" at $1,000.
 

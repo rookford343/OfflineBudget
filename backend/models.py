@@ -676,8 +676,8 @@ class BillAmountOverride(Base):
 
     A RecurringItem carries a single typical amount, which is the right shape
     for planning but wrong the moment the actual bill arrives: the user's Duke
-    Electric is modelled at $180.00/month while the statement due 2026-09-08
-    is $214.07. Editing the recurring item itself would be lossy -- it would
+    Electric is modelled at $200.00/month while the statement due 2026-09-08
+    is $250.00. Editing the recurring item itself would be lossy -- it would
     silently rewrite every future month to a number that is only true for
     September, and lose the estimate the forecast should fall back to
     afterwards.
@@ -734,7 +734,7 @@ class PlannedExpense(Base):
 
     `direction` makes this usable for money arriving as well as leaving. Before
     it, the forecast forced every row negative, so there was no way to model a
-    known one-off inflow -- the user's April bonus ($30,340.20), Airbnb money from
+    known one-off inflow -- the user's April bonus ($30,000.00), Airbnb money from
     family, or an eBay payout, all of which his spreadsheet forecast carries as
     explicit rows. Recurring income belongs in RecurringItem; this is for
     one-time amounts. Defaults to `outflow`, so existing rows are unaffected.

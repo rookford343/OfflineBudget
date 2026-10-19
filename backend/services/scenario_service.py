@@ -508,7 +508,7 @@ def _total_monthly_commitments(
     A temporary commitment (an installment plan, anything with an end_date)
     still costs money every month it's active, and seeing that cost show up
     when a scenario proposes one is the whole point of this feature -- a
-    strip of $57.87/mo that quietly excluded itself because it happens to
+    strip of $50.00/mo that quietly excluded itself because it happens to
     end someday would hide the exact thing being tested.
 
     This is NOT the same total as the Recurring page's Ongoing-vs-Temporary

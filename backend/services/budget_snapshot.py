@@ -258,9 +258,9 @@ def _lookahead_minimum(
     skipped through to the next income event.
 
     A first pass on 2026-08-14 excluded EVERY payoff dip this way and put the
-    floor on 8/31 at $REDACTED, which was too generous: it also excluded the
+    floor on 8/31 at $5,500.00, which was too generous: it also excluded the
     9/25 estimated payoff, the very event the user needs to see. His sheet includes
-    it -- '2026 Forecast'!L36 is the 9/25 payment at $3,204.50, sitting inside
+    it -- '2026 Forecast'!L36 is the 9/25 payment at $3,200.00, sitting inside
     the B25 range.
 
     The locked payoff still shows up in the balance walk; it is only barred
@@ -442,8 +442,8 @@ def compute_budget_snapshot(
     # amount is a payment the user has already budgeted for (it sits in Checking
     # Bills and lands in the forecast on the due date), not money eroding this
     # month's spending room. Confirmed live 2026-08-12: the app showed Left to
-    # Spend -$REDACTED against the spreadsheet's +$751.20, a $8,420 gap almost
-    # exactly equal to the $REDACTED of balance_due across both cards. The old
+    # Spend -$6,500.00 against the spreadsheet's +$750.00, a $8,420 gap almost
+    # exactly equal to the $7,500.00 of balance_due across both cards. The old
     # test fixture hid this by pre-computing the delta into current_balance
     # and leaving balance_due at 0.
     # Computed once per card so this and `card_children` below can never
@@ -524,7 +524,7 @@ def compute_budget_snapshot(
     # The shortfall is taken from left_to_spend rather than a trailing average
     # of discretionary spend. A trailing average is available and looks
     # authoritative, but it double-counts against monthly_expenses in ways
-    # that are not reconciled (it read $7,480/mo against a $REDACTED pool on
+    # that are not reconciled (it read $7,480/mo against a $2,000.00 pool on
     # real data, which cannot be true of an account that is growing).
     # left_to_spend is the figure verified against the user's spreadsheet, so it is
     # the one worth extrapolating from. It is a snapshot at as_of, so it does
