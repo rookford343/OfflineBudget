@@ -151,7 +151,18 @@ class User(Base):
     # the fixed steps, all of it goes here (optionally rounded down) instead
     # of running the steps. Nullable -- unset means run the steps normally
     # even on a shortfall (each fixed step clamped to what remains).
-    bonus_shortfall_account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
+    # use_alter=True + ondelete="SET NULL": accounts.user_id -> users.id
+    # already exists, so this is a SECOND fk forming a cycle between the two
+    # tables. Without use_alter, SQLAlchemy can't topologically sort the
+    # tables for CREATE/DROP ("Can't sort tables ... unresolvable FK cycle").
+    # Without ondelete="SET NULL", deleting a user cascades (via
+    # User.accounts' delete-orphan below) into deleting their accounts
+    # first, including whichever one this column still points at --
+    # IntegrityError. SET NULL means the DB clears this column itself the
+    # moment that account row is deleted, before the user row's own delete.
+    bonus_shortfall_account_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("accounts.id", use_alter=True, ondelete="SET NULL"),
+    )
     bonus_shortfall_round_to: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     other_income: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     federal_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))

@@ -15,15 +15,17 @@ def _step(account_id, kind, value=None, round_to=None):
 # ── round_down ────────────────────────────────────────────────────────────
 
 def test_round_down_floors_to_the_multiple():
-    assert round_down(Decimal("23656"), Decimal("1000")) == Decimal("23000.00")
+    assert round_down(Decimal("23500"), Decimal("1000")) == Decimal("23000.00")
 
 
-def test_round_down_with_no_round_to_just_quantizes_to_cents():
-    assert round_down(Decimal("23656.017"), None) == Decimal("23656.02")
+def test_round_down_with_no_round_to_floors_to_cents():
+    # A true floor, not Python's default ROUND_HALF_EVEN quantize -- .017
+    # must drop to .01, never round up to .02.
+    assert round_down(Decimal("100.017"), None) == Decimal("100.01")
 
 
 def test_round_down_ignores_a_zero_round_to():
-    assert round_down(Decimal("23656"), Decimal("0")) == Decimal("23656.00")
+    assert round_down(Decimal("23500"), Decimal("0")) == Decimal("23500.00")
 
 
 # ── split_bonus ───────────────────────────────────────────────────────────
@@ -38,20 +40,27 @@ WATERFALL = [
 
 
 def test_the_brief_example_moves_fixed_then_rounded_down_rest():
-    result = split_bonus(Decimal("48656.00"), WATERFALL, None, None)
+    result = split_bonus(Decimal("48500.00"), WATERFALL, None, None)
     assert result == [(MM, Decimal("25000.00")), (SAVINGS, Decimal("23000.00"))]
     moved = sum(amt for _, amt in result)
-    assert moved == Decimal("48000.00"), "656.00 stays in checking"
+    assert moved == Decimal("48000.00"), "500.00 stays in checking"
 
 
 def test_a_shortfall_with_a_shortfall_account_set_sends_it_all_there_rounded_down():
-    result = split_bonus(Decimal("20500.00"), WATERFALL, SAVINGS, Decimal("1000"))
-    assert result == [(SAVINGS, Decimal("20000.00"))], "500.00 stays in checking"
+    result = split_bonus(Decimal("19500.00"), WATERFALL, SAVINGS, Decimal("1000"))
+    assert result == [(SAVINGS, Decimal("19000.00"))], "500.00 stays in checking"
+
+
+def test_a_shortfall_rounded_down_below_the_round_to_produces_no_transfer():
+    # 400 floored to the nearest 1,000 is 0 -- a (SAVINGS, 0.00) pair would
+    # be a no-op transfer; it must not appear in the result at all.
+    result = split_bonus(Decimal("400.00"), WATERFALL, SAVINGS, Decimal("1000"))
+    assert result == []
 
 
 def test_a_shortfall_with_no_shortfall_account_clamps_the_fixed_step():
-    result = split_bonus(Decimal("20500.00"), WATERFALL, None, None)
-    assert result == [(MM, Decimal("20500.00"))], (
+    result = split_bonus(Decimal("19500.00"), WATERFALL, None, None)
+    assert result == [(MM, Decimal("19500.00"))], (
         "the fixed step eats the whole bonus; nothing is left for the rest step"
     )
 
@@ -65,7 +74,7 @@ def test_percent_step_rounds_down_against_the_total_not_the_remaining():
 
 def test_a_rest_step_alone_takes_whatever_remains_rounded_down():
     steps = [_step(SAVINGS, "rest", round_to=Decimal("1000"))]
-    result = split_bonus(Decimal("12345.00"), steps, None, None)
+    result = split_bonus(Decimal("12400.00"), steps, None, None)
     assert result == [(SAVINGS, Decimal("12000.00"))]
 
 
@@ -206,6 +215,113 @@ def test_a_destination_equal_to_the_source_account_is_skipped(db_session):
     result = allocation_transfers(db_session, user, date(2027, 1, 1), date(2027, 12, 31))
 
     assert result == {}
+
+
+def test_an_actual_on_the_natural_weekend_date_suppresses_even_across_a_month_boundary(db_session):
+    """2027-05-01 is a Saturday, so the payout shifts back to 2027-04-30 (a
+    Friday) -- a DIFFERENT month than the natural date. A real deposit dated
+    on the natural date (May) must still suppress the Apr-30 projection, even
+    though April's own actuals are empty (mirrors build_forecast's own
+    adj_actual_recurring_ids check for a Friday pull-forward)."""
+    user, checking, mm, savings = _seed_user_and_accounts(db_session, "at6")
+    item, _ = _seed_plan(db_session, user, checking, month=5, day=1, fixed_gross="20000")
+    db_session.add(models.Transaction(
+        user_id=user.id, account_id=checking.id, recurring_item_id=item.id,
+        date=date(2027, 5, 1), amount=Decimal("14000.00"), description="BONUS PAYROLL", is_actual=True,
+    ))
+    db_session.commit()
+    _add_steps(db_session, user, [_step(mm.id, "fixed", Decimal("5000"))])
+
+    result = allocation_transfers(db_session, user, date(2027, 1, 1), date(2027, 12, 31))
+
+    assert result == {}, "the actual landed on the natural (pre-shift) date -- the Apr 30 projection must be suppressed too"
+
+
+def test_an_item_excluded_from_the_forecast_produces_no_transfer(db_session):
+    """include_in_forecast=False means the item is real income but already
+    spoken for -- build_forecast drops it from the day walk entirely, so a
+    transfer "out" of a bonus that was never shown "in" would leave checking
+    looking like it dropped for no reason."""
+    user, checking, mm, savings = _seed_user_and_accounts(db_session, "at7")
+    item, _ = _seed_plan(db_session, user, checking, month=4, day=15, fixed_gross="20000")
+    item.include_in_forecast = False
+    db_session.commit()
+    _add_steps(db_session, user, [_step(mm.id, "fixed", Decimal("5000"))])
+
+    result = allocation_transfers(db_session, user, date(2027, 1, 1), date(2027, 12, 31))
+
+    assert result == {}
+
+
+def test_a_scenario_override_that_reduces_the_bonus_shrinks_the_split(db_session):
+    """The engine computes a projected bonus's amount as
+    bonus_net(...) + override_map.get(item.id, 0) -- the split must run on
+    THAT amount, not the unmodified net, or a what-if scenario that cuts the
+    bonus would still move the old, bigger amount into savings."""
+    user, checking, mm, savings = _seed_user_and_accounts(db_session, "at8")
+    item, _ = _seed_plan(db_session, user, checking, month=4, day=15, fixed_gross="20000", withholding="30")  # net 14,000
+    _add_steps(db_session, user, [_step(mm.id, "fixed", Decimal("5000"))])
+
+    result = allocation_transfers(db_session, user, date(2027, 1, 1), date(2027, 12, 31),
+                                  override_map={item.id: Decimal("-11000.00")})
+
+    [transfer] = result[date(2027, 4, 15)]
+    assert transfer.amount == Decimal("3000.00"), "net 14,000 - 11,000 override = 3,000, below the 5,000 fixed step"
+
+
+def test_a_scenario_override_that_zeroes_the_bonus_skips_the_split_entirely(db_session):
+    user, checking, mm, savings = _seed_user_and_accounts(db_session, "at9")
+    item, _ = _seed_plan(db_session, user, checking, month=4, day=15, fixed_gross="20000", withholding="30")  # net 14,000
+    _add_steps(db_session, user, [_step(mm.id, "fixed", Decimal("5000"))])
+
+    result = allocation_transfers(db_session, user, date(2027, 1, 1), date(2027, 12, 31),
+                                  override_map={item.id: Decimal("-14000.00")})
+
+    assert result == {}, "the override cancels the bonus out entirely -- nothing lands, so nothing to split"
+
+
+def test_an_inactive_destination_account_is_skipped(db_session):
+    user, checking, mm, savings = _seed_user_and_accounts(db_session, "at10")
+    _seed_plan(db_session, user, checking, month=4, day=15, fixed_gross="20000")
+    _add_steps(db_session, user, [_step(mm.id, "fixed", Decimal("5000"))])
+    mm.is_active = False
+    db_session.commit()
+
+    result = allocation_transfers(db_session, user, date(2027, 1, 1), date(2027, 12, 31))
+
+    assert result == {}, "the step's only destination account is inactive -- there's nothing left to split to"
+
+
+def test_an_inactive_source_account_is_skipped(db_session):
+    user, checking, mm, savings = _seed_user_and_accounts(db_session, "at11")
+    _seed_plan(db_session, user, checking, month=4, day=15, fixed_gross="20000")
+    _add_steps(db_session, user, [_step(mm.id, "fixed", Decimal("5000"))])
+    checking.is_active = False
+    db_session.commit()
+
+    result = allocation_transfers(db_session, user, date(2027, 1, 1), date(2027, 12, 31))
+
+    assert result == {}, "the bonus item's own (source) account is inactive -- can't transfer out of a closed account"
+
+
+# ── Important 1: a second users<->accounts fk must not block user deletion ──
+
+def test_a_user_with_a_shortfall_account_set_can_be_deleted(db_session):
+    """users.bonus_shortfall_account_id is a SECOND fk into accounts
+    (accounts.user_id -> users.id already exists). Deleting the user
+    cascades (via User.accounts' delete-orphan) into deleting their accounts
+    FIRST, including whichever one this column still points at -- without
+    ondelete=SET NULL that's an IntegrityError, and without use_alter=True
+    SQLAlchemy can't even sort the two tables for CREATE/DROP (the
+    'unresolvable FK cycle' warning)."""
+    user, checking, mm, savings = _seed_user_and_accounts(db_session, "del1")
+    user.bonus_shortfall_account_id = mm.id
+    db_session.commit()
+
+    db_session.delete(user)
+    db_session.commit()  # must not raise IntegrityError
+
+    assert db_session.query(models.User).filter(models.User.id == user.id).first() is None
 
 
 # ── Engine: the injected transfer appears on both sides of the forecast ───

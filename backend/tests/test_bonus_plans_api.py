@@ -186,6 +186,19 @@ def test_allocation_rejects_a_bad_percent(db_session):
     assert c.put("/bonus-plans/allocation", json=body).status_code == 422
 
 
+def test_allocation_rejects_an_inactive_account(db_session):
+    user, _ = _seed(db_session)
+    mm, _ = _extra_accounts(db_session, user)
+    mm.is_active = False
+    db_session.commit()
+    c = _client(db_session, user)
+    body = {
+        "steps": [{"account_id": mm.id, "kind": "fixed", "value": "1000"}],
+        "shortfall_account_id": None, "shortfall_round_to": None,
+    }
+    assert c.put("/bonus-plans/allocation", json=body).status_code == 422
+
+
 def test_allocation_rejects_another_users_account(db_session):
     user, _ = _seed(db_session, username="owner")
     other, _ = _seed(db_session, username="other")

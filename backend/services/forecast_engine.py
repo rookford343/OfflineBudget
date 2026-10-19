@@ -982,7 +982,7 @@ def build_forecast(
     # _adjust_for_weekend) -- importing it at module scope here would be a
     # circular import.
     from backend.services.bonus_allocation import allocation_transfers
-    bonus_transfers = allocation_transfers(db, user, start_date, end_date) if user else {}
+    bonus_transfers = allocation_transfers(db, user, start_date, end_date, override_map) if user else {}
 
     # Pre-compute which recurring item IDs have linked actuals, and on which dates.
     # Used to suppress projected entries when the actual arrives on a different day.

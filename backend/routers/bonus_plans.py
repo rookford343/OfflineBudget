@@ -79,6 +79,10 @@ def _own_account(db: Session, user: models.User, account_id: int) -> models.Acco
     ).first()
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
+    if not account.is_active:
+        # Same style as _own_item above: right account, but the wrong shape
+        # for this use (a closed account can't be a new allocation target).
+        raise HTTPException(status_code=422, detail="Account is not active")
     return account
 
 

@@ -22,11 +22,12 @@ CENT = Decimal("0.01")
 
 def round_down(amount: Decimal, to: Decimal | None) -> Decimal:
     """Floor `amount` to a multiple of `to` when `to` is set and > 0,
-    otherwise just quantize to cents."""
+    otherwise just floor to cents (not the default ROUND_HALF_EVEN quantize
+    -- this is a floor in both cases, never rounds up)."""
     if to is not None and to > 0:
         steps = (amount / to).to_integral_value(rounding=ROUND_FLOOR)
         return (steps * to).quantize(CENT)
-    return amount.quantize(CENT)
+    return amount.quantize(CENT, rounding=ROUND_FLOOR)
 
 
 def split_bonus(
@@ -40,7 +41,8 @@ def split_bonus(
     fixed_needed = sum((s.value for s in steps if s.kind == "fixed"), Decimal("0"))
 
     if total < fixed_needed and shortfall_account_id is not None:
-        return [(shortfall_account_id, round_down(total, shortfall_round_to))]
+        amt = round_down(total, shortfall_round_to)
+        return [(shortfall_account_id, amt)] if amt > 0 else []
 
     results: list[tuple[int, Decimal]] = []
     remaining = total
@@ -70,14 +72,22 @@ class AllocationTransfer:
 
 def allocation_transfers(
     db: Session, user: models.User, start: date, end: date,
+    override_map: dict[int, Decimal] | None = None,
 ) -> dict[date, list[AllocationTransfer]]:
     """Every bonus payout in [start, end], grouped by (shifted payout date,
-    source account) and split per the user's steps/shortfall settings."""
+    source account) and split per the user's steps/shortfall settings.
+
+    `override_map` is forecast_engine.build_forecast's own recurring_item_id
+    -> amount_delta map (scenario overrides) -- passed through so a scenario
+    that changes a bonus's amount changes what gets split too, instead of
+    this always splitting the real, unmodified net."""
     # Deferred imports -- forecast_engine.py imports this module at call time
     # (to splice the result into its day walk), so importing it back at
     # module scope here would be a circular import.
     from backend.services.bonus_plans import bonus_gross, bonus_net, is_bonus_shaped, payout_date, plans_by_item
     from backend.services.forecast_engine import _adjust_for_weekend
+
+    override_map = override_map or {}
 
     steps = (
         db.query(models.BonusAllocationStep)
@@ -90,12 +100,32 @@ def allocation_transfers(
     if not steps and shortfall_account_id is None:
         return {}
 
-    accounts = {a.id: a for a in db.query(models.Account).filter(models.Account.user_id == user.id).all()}
+    # Active accounts only -- a step, the shortfall account, or a bonus
+    # item's own account that's been deactivated since is skipped below
+    # rather than moving money to/from a closed account.
+    accounts = {
+        a.id: a for a in db.query(models.Account).filter(
+            models.Account.user_id == user.id, models.Account.is_active == True,
+        ).all()
+    }
+    steps = [s for s in steps if s.account_id in accounts]
+    if shortfall_account_id is not None and shortfall_account_id not in accounts:
+        shortfall_account_id = None
+        shortfall_round_to = None
+    if not steps and shortfall_account_id is None:
+        return {}
 
     groups: dict[tuple[date, int], Decimal] = {}
     for item_id, plan in plans_by_item(db, user.id).items():
         item = plan.recurring_item
-        if not is_bonus_shaped(item) or not item.is_active:
+        # Mirrors build_forecast's own filters exactly: is_bonus_shaped +
+        # is_active (the plan/forecast guard), include_in_forecast (the
+        # engine drops these from the day walk entirely -- see
+        # build_forecast's recurring_items comprehension), and now the
+        # item's own account must still be active too.
+        if not is_bonus_shaped(item) or not item.is_active or not item.include_in_forecast:
+            continue
+        if item.account_id not in accounts:
             continue
 
         actual_dates = [
@@ -118,13 +148,24 @@ def allocation_transfers(
             shifted_date = _adjust_for_weekend(natural_date)
             if shifted_date < start or shifted_date > end:
                 continue
-            if any(d.year == shifted_date.year and d.month == shifted_date.month for d in actual_dates):
+            # Mirrors build_forecast's two actual-suppression checks: the
+            # shifted (Friday) date's month in general, AND the natural
+            # Sat/Sun date's own month specifically -- a shift that crosses
+            # a month boundary (e.g. a May 1 Saturday payout pulled back to
+            # Apr 30) would otherwise miss an actual dated on the real May 1.
+            if any(
+                (d.year == shifted_date.year and d.month == shifted_date.month)
+                or (d.year == natural_date.year and d.month == natural_date.month)
+                for d in actual_dates
+            ):
                 continue
 
             gross = bonus_gross(plan, user, year)
             if gross is None:
                 continue
-            net = bonus_net(plan, gross)
+            net = bonus_net(plan, gross) + override_map.get(item.id, Decimal("0"))
+            if net <= 0:
+                continue
 
             key = (shifted_date, item.account_id)
             groups[key] = groups.get(key, Decimal("0")) + net

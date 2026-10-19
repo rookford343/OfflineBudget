@@ -301,7 +301,7 @@ def upgrade_schema():
         "ALTER TABLE users ADD COLUMN annual_raise_pct NUMERIC(6,3)",
         # Bonus allocation -- see services/bonus_allocation.py. bonus_allocation_steps
         # is a new table, created by create_all.
-        "ALTER TABLE users ADD COLUMN bonus_shortfall_account_id INTEGER REFERENCES accounts(id)",
+        "ALTER TABLE users ADD COLUMN bonus_shortfall_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
         "ALTER TABLE users ADD COLUMN bonus_shortfall_round_to NUMERIC(14,2)",
     ]
     with engine.connect() as conn:
