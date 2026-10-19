@@ -2297,3 +2297,67 @@ class BonusPlanOut(BaseModel):
     withholding_pct: Decimal
     years: list[BonusPlanYearIn]
     upcoming: list[BonusPayoutOut]
+
+
+# ── Bonus allocation (services/bonus_allocation.py) ──────────────────────────
+
+class BonusAllocationStepIn(BaseModel):
+    account_id: int
+    kind: str  # "fixed" | "percent" | "rest"
+    value: Optional[Decimal] = None
+    round_to: Optional[Decimal] = None
+
+    @field_validator("kind")
+    @classmethod
+    def kind_valid(cls, v: str) -> str:
+        if v not in ("fixed", "percent", "rest"):
+            raise ValueError("kind must be one of fixed, percent, rest")
+        return v
+
+    @field_validator("round_to")
+    @classmethod
+    def round_to_positive(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is not None and v <= 0:
+            raise ValueError("round_to must be greater than 0 when set")
+        return v
+
+    @model_validator(mode="after")
+    def _value_matches_kind(self):
+        if self.kind == "fixed":
+            if self.value is None or self.value <= 0:
+                raise ValueError("a fixed step needs a value greater than 0")
+        elif self.kind == "percent":
+            if self.value is None or not (Decimal("0") < self.value <= Decimal("100")):
+                raise ValueError("a percent step needs a value between 0 and 100")
+        elif self.value is not None:  # rest
+            raise ValueError("a rest step must have a null value")
+        return self
+
+
+class BonusAllocationIn(BaseModel):
+    steps: list[BonusAllocationStepIn] = []
+    shortfall_account_id: Optional[int] = None
+    shortfall_round_to: Optional[Decimal] = None
+
+    @field_validator("shortfall_round_to")
+    @classmethod
+    def shortfall_round_to_positive(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is not None and v <= 0:
+            raise ValueError("shortfall_round_to must be greater than 0 when set")
+        return v
+
+    @field_validator("steps")
+    @classmethod
+    def at_most_one_rest_and_last(cls, v: list[BonusAllocationStepIn]) -> list[BonusAllocationStepIn]:
+        rest_positions = [i for i, s in enumerate(v) if s.kind == "rest"]
+        if len(rest_positions) > 1:
+            raise ValueError("at most one rest step is allowed")
+        if rest_positions and rest_positions[0] != len(v) - 1:
+            raise ValueError("a rest step must be the last step")
+        return v
+
+
+class BonusAllocationOut(BaseModel):
+    steps: list[BonusAllocationStepIn]
+    shortfall_account_id: Optional[int]
+    shortfall_round_to: Optional[Decimal]

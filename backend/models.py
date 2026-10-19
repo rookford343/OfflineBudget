@@ -147,6 +147,12 @@ class User(Base):
     # (and so a %-of-salary bonus) can be projected.
     annual_salary_year: Mapped[int | None] = mapped_column(Integer)
     annual_raise_pct: Mapped[Decimal | None] = mapped_column(Numeric(6, 3))
+    # Bonus allocation (services/bonus_allocation.py): if a bonus can't cover
+    # the fixed steps, all of it goes here (optionally rounded down) instead
+    # of running the steps. Nullable -- unset means run the steps normally
+    # even on a shortfall (each fixed step clamped to what remains).
+    bonus_shortfall_account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
+    bonus_shortfall_round_to: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     other_income: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     federal_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     state_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
@@ -157,13 +163,22 @@ class User(Base):
     itemized_property_tax: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     itemized_other: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
 
-    accounts: Mapped[list[Account]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    # foreign_keys pins this to accounts.user_id -- bonus_shortfall_account_id
+    # above is a SECOND fk from users to accounts (a chosen destination, not
+    # ownership), which otherwise leaves SQLAlchemy unable to pick a join
+    # condition for this relationship.
+    accounts: Mapped[list[Account]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", foreign_keys="Account.user_id",
+    )
     categories: Mapped[list[Category]] = relationship(back_populates="user", cascade="all, delete-orphan")
     recurring_items: Mapped[list[RecurringItem]] = relationship(back_populates="user", cascade="all, delete-orphan")
     transactions: Mapped[list[Transaction]] = relationship(back_populates="user", cascade="all, delete-orphan")
     credit_cards: Mapped[list[CreditCard]] = relationship(back_populates="user", cascade="all, delete-orphan")
     savings_transfers: Mapped[list[SavingsTransfer]] = relationship(back_populates="user", cascade="all, delete-orphan")
     buffer_transfer_rules: Mapped[list[BufferTransferRule]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    bonus_allocation_steps: Mapped[list["BonusAllocationStep"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", order_by="BonusAllocationStep.position",
+    )
     budget_allocations: Mapped[list[BudgetAllocation]] = relationship(back_populates="user", cascade="all, delete-orphan")
     savings_goals: Mapped[list[SavingsGoal]] = relationship(back_populates="user", cascade="all, delete-orphan")
     manual_assets: Mapped[list[ManualAsset]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -198,7 +213,7 @@ class Account(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    user: Mapped[User] = relationship(back_populates="accounts")
+    user: Mapped[User] = relationship(back_populates="accounts", foreign_keys="Account.user_id")
     transactions: Mapped[list[Transaction]] = relationship(back_populates="account")
     recurring_items: Mapped[list[RecurringItem]] = relationship(back_populates="account")
     outgoing_transfers: Mapped[list[SavingsTransfer]] = relationship(foreign_keys="SavingsTransfer.from_account_id", back_populates="from_account")
@@ -324,6 +339,27 @@ class BonusPlanYear(Base):
     plan_id: Mapped[int] = mapped_column(Integer, ForeignKey("bonus_plans.id", ondelete="CASCADE"), nullable=False)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     gross_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+
+
+class BonusAllocationStep(Base):
+    """One step in the waterfall that moves part of a landed bonus straight
+    to savings accounts, same day (services/bonus_allocation.py). `kind` is
+    "fixed" (value = a dollar amount), "percent" (value = a percent of the
+    bonus), or "rest" (value is null -- whatever remains). `position` orders
+    the waterfall; `round_to`, when set, floors the step's amount to a
+    multiple of it."""
+    __tablename__ = "bonus_allocation_steps"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)  # "fixed" | "percent" | "rest"
+    value: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    round_to: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+
+    user: Mapped[User] = relationship(back_populates="bonus_allocation_steps")
+    account: Mapped[Account] = relationship()
 
 
 class BufferTransferRule(Base):

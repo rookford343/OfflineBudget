@@ -7,6 +7,7 @@ now refuses or neutralizes it.
   - S110 audit middleware: a failing audit write is logged, never silently
     swallowed, and never breaks the request it was auditing.
   - bonus plans: another user's plan or item is 404, never readable or editable.
+  - bonus allocation: another user's account in the allocation steps is 404, and nothing is saved.
 """
 import logging
 from unittest.mock import patch
@@ -235,3 +236,44 @@ def test_bonus_plans_are_user_scoped(db_session):
     assert client(other).put(f"/bonus-plans/{plan_id}", json=body).status_code == 404
     assert client(other).delete(f"/bonus-plans/{plan_id}").status_code == 404
     assert client(other).get("/bonus-plans").json() == []
+
+
+def test_bonus_allocation_is_user_scoped(db_session):
+    """Another user's account named in a bonus allocation step (or as the
+    shortfall account) is 404, never silently saved against the caller's
+    own allocation."""
+    from decimal import Decimal
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from backend import models
+    from backend.dependencies import get_current_user
+    from backend.routers import bonus_plans as bonus_router
+
+    def client(user):
+        app = FastAPI()
+        app.include_router(bonus_router.router)
+        app.dependency_overrides[bonus_router.get_db] = lambda: db_session
+        app.dependency_overrides[get_current_user] = lambda: user
+        return TestClient(app)
+
+    owner = models.User(username="ba-owner", hashed_password="x", display_name="O")
+    other = models.User(username="ba-other", hashed_password="x", display_name="X")
+    db_session.add_all([owner, other])
+    db_session.flush()
+    other_acct = models.Account(user_id=other.id, name="Other's Savings", type=models.AccountType.savings,
+                                current_balance=Decimal("1"))
+    db_session.add(other_acct)
+    db_session.commit()
+
+    body = {
+        "steps": [{"account_id": other_acct.id, "kind": "fixed", "value": "1000"}],
+        "shortfall_account_id": None, "shortfall_round_to": None,
+    }
+    assert client(owner).put("/bonus-plans/allocation", json=body).status_code == 404
+    assert client(owner).get("/bonus-plans/allocation").json()["steps"] == []
+
+    shortfall_body = {
+        "steps": [], "shortfall_account_id": other_acct.id, "shortfall_round_to": None,
+    }
+    assert client(owner).put("/bonus-plans/allocation", json=shortfall_body).status_code == 404
+    assert client(owner).get("/bonus-plans/allocation").json()["shortfall_account_id"] is None

@@ -108,3 +108,107 @@ def test_get_does_not_write_the_refreshed_item_amount(db_session):
     assert c.get("/bonus-plans").status_code == 200
     db_session.refresh(item)
     assert item.amount == Decimal("999.99")
+
+
+# ── /bonus-plans/allocation ──────────────────────────────────────────────
+
+def _extra_accounts(db, user):
+    mm = models.Account(user_id=user.id, name="Money Market", type=models.AccountType.money_market,
+                        current_balance=Decimal("0"))
+    savings = models.Account(user_id=user.id, name="Savings", type=models.AccountType.savings,
+                             current_balance=Decimal("0"))
+    db.add_all([mm, savings])
+    db.commit()
+    return mm, savings
+
+
+def test_allocation_put_then_get_round_trip(db_session):
+    user, _ = _seed(db_session)
+    mm, savings = _extra_accounts(db_session, user)
+    c = _client(db_session, user)
+    body = {
+        "steps": [
+            {"account_id": mm.id, "kind": "fixed", "value": "25000", "round_to": None},
+            {"account_id": savings.id, "kind": "rest", "value": None, "round_to": "1000"},
+        ],
+        "shortfall_account_id": savings.id,
+        "shortfall_round_to": "1000",
+    }
+    r = c.put("/bonus-plans/allocation", json=body)
+    assert r.status_code == 200, r.text
+    assert r.json() == {
+        "steps": [
+            {"account_id": mm.id, "kind": "fixed", "value": "25000.00", "round_to": None},
+            {"account_id": savings.id, "kind": "rest", "value": None, "round_to": "1000.00"},
+        ],
+        "shortfall_account_id": savings.id,
+        "shortfall_round_to": "1000.00",
+    }
+    assert c.get("/bonus-plans/allocation").json() == r.json()
+
+
+def test_allocation_rejects_a_rest_step_not_last(db_session):
+    user, _ = _seed(db_session)
+    mm, savings = _extra_accounts(db_session, user)
+    c = _client(db_session, user)
+    body = {
+        "steps": [
+            {"account_id": savings.id, "kind": "rest"},
+            {"account_id": mm.id, "kind": "fixed", "value": "1000"},
+        ],
+        "shortfall_account_id": None, "shortfall_round_to": None,
+    }
+    assert c.put("/bonus-plans/allocation", json=body).status_code == 422
+
+
+def test_allocation_rejects_two_rest_steps(db_session):
+    user, _ = _seed(db_session)
+    mm, savings = _extra_accounts(db_session, user)
+    c = _client(db_session, user)
+    body = {
+        "steps": [
+            {"account_id": mm.id, "kind": "rest"},
+            {"account_id": savings.id, "kind": "rest"},
+        ],
+        "shortfall_account_id": None, "shortfall_round_to": None,
+    }
+    assert c.put("/bonus-plans/allocation", json=body).status_code == 422
+
+
+def test_allocation_rejects_a_bad_percent(db_session):
+    user, _ = _seed(db_session)
+    mm, _ = _extra_accounts(db_session, user)
+    c = _client(db_session, user)
+    body = {
+        "steps": [{"account_id": mm.id, "kind": "percent", "value": "150"}],
+        "shortfall_account_id": None, "shortfall_round_to": None,
+    }
+    assert c.put("/bonus-plans/allocation", json=body).status_code == 422
+
+
+def test_allocation_rejects_another_users_account(db_session):
+    user, _ = _seed(db_session, username="owner")
+    other, _ = _seed(db_session, username="other")
+    other_mm, _ = _extra_accounts(db_session, other)
+    c = _client(db_session, user)
+    body = {
+        "steps": [{"account_id": other_mm.id, "kind": "fixed", "value": "1000"}],
+        "shortfall_account_id": None, "shortfall_round_to": None,
+    }
+    r = c.put("/bonus-plans/allocation", json=body)
+    assert r.status_code == 404
+    assert c.get("/bonus-plans/allocation").json()["steps"] == []
+
+
+def test_allocation_get_does_not_write(db_session):
+    user, _ = _seed(db_session)
+    mm, _ = _extra_accounts(db_session, user)
+    c = _client(db_session, user)
+    body = {
+        "steps": [{"account_id": mm.id, "kind": "fixed", "value": "1000"}],
+        "shortfall_account_id": None, "shortfall_round_to": None,
+    }
+    assert c.put("/bonus-plans/allocation", json=body).status_code == 200
+    before = c.get("/bonus-plans/allocation").json()
+    assert c.get("/bonus-plans/allocation").status_code == 200
+    assert c.get("/bonus-plans/allocation").json() == before

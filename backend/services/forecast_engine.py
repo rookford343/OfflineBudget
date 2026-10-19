@@ -978,6 +978,12 @@ def build_forecast(
         )
     ).all()
 
+    # Deferred import: bonus_allocation.py imports this module back (for
+    # _adjust_for_weekend) -- importing it at module scope here would be a
+    # circular import.
+    from backend.services.bonus_allocation import allocation_transfers
+    bonus_transfers = allocation_transfers(db, user, start_date, end_date) if user else {}
+
     # Pre-compute which recurring item IDs have linked actuals, and on which dates.
     # Used to suppress projected entries when the actual arrives on a different day.
     actual_by_ri: dict[int, list[date]] = {}
@@ -1398,6 +1404,30 @@ def build_forecast(
                 day_transactions.append(ForecastTransaction(
                     name=f"Planned Transfer to {pt.to_account.name}",
                     amount=-pt.amount,
+                    type="expense",
+                    category_name=None,
+                    is_actual=False,
+                    is_transfer=True,
+                    is_planned_transfer=True,
+                ))
+
+        for bt in bonus_transfers.get(current, []):
+            if bt.to_account_id == account_id:
+                balance += bt.amount
+                day_transactions.append(ForecastTransaction(
+                    name=f"Bonus transfer from {bt.from_name}",
+                    amount=bt.amount,
+                    type="income",
+                    category_name=None,
+                    is_actual=False,
+                    is_transfer=True,
+                    is_planned_transfer=True,
+                ))
+            if bt.from_account_id == account_id:
+                balance -= bt.amount
+                day_transactions.append(ForecastTransaction(
+                    name=f"Bonus transfer to {bt.to_name}",
+                    amount=-bt.amount,
                     type="expense",
                     category_name=None,
                     is_actual=False,

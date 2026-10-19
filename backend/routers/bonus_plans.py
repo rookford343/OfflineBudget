@@ -73,6 +73,39 @@ def _taken(db: Session, item_id: int, except_id: int | None = None) -> bool:
     return q.first() is not None
 
 
+def _own_account(db: Session, user: models.User, account_id: int) -> models.Account:
+    account = db.query(models.Account).filter(
+        models.Account.id == account_id, models.Account.user_id == user.id,
+    ).first()
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return account
+
+
+def _allocation_out(db: Session, user_id: int) -> schemas.BonusAllocationOut:
+    # Takes a plain user_id and re-queries everything through `db` rather
+    # than reading off a `user` object -- get_current_user resolves through
+    # backend.dependencies.get_db, a DIFFERENT session from this router's
+    # own get_db above, so a value just written via `db` would not yet be
+    # visible on a `user` object sourced from that other session. See
+    # update_allocation below.
+    steps = (
+        db.query(models.BonusAllocationStep)
+        .filter(models.BonusAllocationStep.user_id == user_id)
+        .order_by(models.BonusAllocationStep.position)
+        .all()
+    )
+    user_row = db.query(models.User).filter(models.User.id == user_id).first()
+    return schemas.BonusAllocationOut(
+        steps=[
+            schemas.BonusAllocationStepIn(account_id=s.account_id, kind=s.kind, value=s.value, round_to=s.round_to)
+            for s in steps
+        ],
+        shortfall_account_id=user_row.bonus_shortfall_account_id,
+        shortfall_round_to=user_row.bonus_shortfall_round_to,
+    )
+
+
 @router.get("", response_model=list[schemas.BonusPlanOut])
 def list_plans(db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
     # Read-only: GET must never write, or a View Only account could trigger
@@ -96,6 +129,42 @@ def create_plan(body: schemas.BonusPlanIn, db: Session = Depends(get_db),
     refresh_item_amounts(db, user, date.today())
     db.refresh(plan)
     return _out(plan, user)
+
+
+@router.get("/allocation", response_model=schemas.BonusAllocationOut)
+def get_allocation(db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    # Read-only, same rationale as list_plans above: must never write.
+    return _allocation_out(db, user.id)
+
+
+@router.put("/allocation", response_model=schemas.BonusAllocationOut)
+def update_allocation(body: schemas.BonusAllocationIn, db: Session = Depends(get_db),
+                      user: models.User = Depends(get_current_user)):
+    for step in body.steps:
+        _own_account(db, user, step.account_id)
+    if body.shortfall_account_id is not None:
+        _own_account(db, user, body.shortfall_account_id)
+
+    # Everything below goes through `db` (this router's own session), using
+    # only the scalar user.id off the get_current_user object -- see
+    # _allocation_out's comment on why that object's own relationships/
+    # fields can't be trusted to persist through THIS session's commit.
+    user_row = db.query(models.User).filter(models.User.id == user.id).first()
+
+    # Clear + flush + add, same pattern as _apply's plan.years above: flush
+    # the clear's DELETE before the new rows' INSERT so a position collision
+    # with the not-yet-deleted old rows can't happen.
+    db.query(models.BonusAllocationStep).filter(models.BonusAllocationStep.user_id == user.id).delete()
+    db.flush()
+    db.add_all(
+        models.BonusAllocationStep(user_id=user.id, position=position, account_id=step.account_id,
+                                   kind=step.kind, value=step.value, round_to=step.round_to)
+        for position, step in enumerate(body.steps)
+    )
+    user_row.bonus_shortfall_account_id = body.shortfall_account_id
+    user_row.bonus_shortfall_round_to = body.shortfall_round_to
+    db.commit()
+    return _allocation_out(db, user.id)
 
 
 @router.put("/{plan_id}", response_model=schemas.BonusPlanOut)
