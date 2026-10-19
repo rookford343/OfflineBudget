@@ -55,6 +55,16 @@ export default function Forecast() {
     (a: any) => a.is_active !== false && a.type === "savings",
   );
   const [showSavings, setShowSavings] = useState(true);
+  // Default on; remembered per viewer. A private window or blocked storage
+  // just falls back to the in-memory default instead of breaking the page.
+  const [showThreshold, setShowThreshold] = useState<boolean>(() => {
+    try {
+      const v = localStorage.getItem("forecast-show-threshold");
+      return v === null ? true : v === "1";
+    } catch {
+      return true;
+    }
+  });
   const [accountId, setAccountId] = useState<number | null>(null);
   // One Range picker drives everything: which years are fetched (startYear,
   // forecastYears) and which of their quarters are shown (range.keep).
@@ -494,6 +504,10 @@ export default function Forecast() {
   // lookup can't match the wrong year's same-numbered quarter.
   const selectedQuarter = (quarters as any[]).find((q: any) => `${q.year}-${q.quarter}` === expandedQ);
 
+  // Whether either threshold line would actually draw -- the toggle itself
+  // only makes sense when there's something for it to hide.
+  const hasThresholdLine = (lowBalanceThreshold != null && lowBalanceThreshold > 0) || risk?.action_threshold != null;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -649,6 +663,25 @@ export default function Forecast() {
                 Savings ({savingsAccounts.map((a: any) => a.name).join(" + ")})
               </label>
             )}
+            {chartView === "balance" && hasThresholdLine && (
+              <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showThreshold}
+                  onChange={e => {
+                    const checked = e.target.checked;
+                    setShowThreshold(checked);
+                    try {
+                      localStorage.setItem("forecast-show-threshold", checked ? "1" : "0");
+                    } catch {
+                      // storage unavailable -- in-memory state above still drives the chart
+                    }
+                  }}
+                />
+                <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: isDarkMode() ? "#fbbf24" : "#b45309", opacity: 0.45 }} />
+                Low balance line
+              </label>
+            )}
           </div>
           <ResponsiveContainer width="100%" height={280}>
             {chartView === "net" ? (
@@ -715,7 +748,7 @@ export default function Forecast() {
                 {dragFrom && dragTo && (
                   <ReferenceArea yAxisId="left" x1={dragFrom} x2={dragTo} fill="#6366f1" fillOpacity={0.12} />
                 )}
-                {lowBalanceThreshold != null && lowBalanceThreshold > 0 && (
+                {showThreshold && lowBalanceThreshold != null && lowBalanceThreshold > 0 && (
                   <ReferenceLine
                     yAxisId="left"
                     y={lowBalanceThreshold}
@@ -725,7 +758,7 @@ export default function Forecast() {
                     label={{ value: "Low balance threshold", position: "insideBottomRight", fontSize: 11, fontWeight: 600, fill: isDarkMode() ? "#fbbf24" : "#b45309" }}
                   />
                 )}
-                {risk?.action_threshold != null && (
+                {showThreshold && risk?.action_threshold != null && (
                   <ReferenceLine
                     yAxisId="left"
                     y={parseFloat(risk.action_threshold)}
