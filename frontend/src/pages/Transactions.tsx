@@ -118,11 +118,11 @@ interface CategoryCellProps {
   onSave: (id: number | null) => void;
   editingCatId: number | null;
   setEditingCatId: (id: number | null) => void;
-  allCats: any[];
+  categories: any[];
   catMap: Record<number, string>;
 }
 
-function CategoryCell({ txnId, catId, onSave, editingCatId, setEditingCatId, allCats, catMap }: CategoryCellProps) {
+function CategoryCell({ txnId, catId, onSave, editingCatId, setEditingCatId, categories, catMap }: CategoryCellProps) {
   const isEditing = editingCatId === txnId;
   if (isEditing) {
     return (
@@ -137,9 +137,7 @@ function CategoryCell({ txnId, catId, onSave, editingCatId, setEditingCatId, all
         }}
       >
         <option value="">No category</option>
-        {allCats.map((c: any) => (
-          <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
-        ))}
+        <CategoryOptions categories={categories} />
       </select>
     );
   }
@@ -580,9 +578,7 @@ export default function Transactions() {
               onChange={e => setFilterCatId(e.target.value ? parseInt(e.target.value) : null)}
             >
               <option value="">All categories</option>
-              {allCats.map((c: any) => (
-                <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>
-              ))}
+              <CategoryOptions categories={categories as any[]} />
             </select>
           )}
           <input type="number" className="input w-28 text-sm" placeholder="Min $" step="0.01"
@@ -735,7 +731,7 @@ export default function Transactions() {
                         )}
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
-                        <CategoryCell txnId={row.t.id} catId={row.t.category_id} onSave={catId => handleCatChange(row.t.id, catId)} editingCatId={editingCatId} setEditingCatId={setEditingCatId} allCats={allCats} catMap={catMap} />
+                        <CategoryCell txnId={row.t.id} catId={row.t.category_id} onSave={catId => handleCatChange(row.t.id, catId)} editingCatId={editingCatId} setEditingCatId={setEditingCatId} categories={categories as any[]} catMap={catMap} />
                       </td>
                       <td className="px-4 py-3 text-gray-500 hidden md:table-cell">{accountMap[row.t.account_id] ?? "—"}</td>
                       <td className={`px-4 py-3 text-right font-semibold tabular-nums ${parseFloat(row.t.amount) >= 0 ? "text-green-600" : "text-red-600"}`}>
@@ -847,7 +843,7 @@ export default function Transactions() {
                         <div className="truncate flex items-center gap-1.5"><SourceBadge source={t.source} />{t.merchant}</div>
                       </td>
                       <td className="px-4 py-3 hidden sm:table-cell">
-                        <CategoryCell txnId={t.id} catId={t.category_id} onSave={catId => handleCardCatChange(t.id, catId)} editingCatId={editingCatId} setEditingCatId={setEditingCatId} allCats={allCats} catMap={catMap} />
+                        <CategoryCell txnId={t.id} catId={t.category_id} onSave={catId => handleCardCatChange(t.id, catId)} editingCatId={editingCatId} setEditingCatId={setEditingCatId} categories={categories as any[]} catMap={catMap} />
                       </td>
                       <td className="px-4 py-3 text-right font-semibold tabular-nums text-red-600">
                         {fmt(t.amount)}
@@ -1110,7 +1106,7 @@ export default function Transactions() {
                     <Tag size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                     <select className="input pl-8" value={form.category_id} onChange={e => setForm({ ...form, category_id: e.target.value })}>
                       <option value="">None</option>
-                      {allCats.map((c: any) => <option key={c.id} value={c.id}>{c.parent_id ? "  " : ""}{c.name}</option>)}
+                      <CategoryOptions categories={categories as any[]} />
                     </select>
                   </div>
                 </div>
