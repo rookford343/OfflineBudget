@@ -1896,40 +1896,72 @@ class RuleTestResponse(BaseModel):
     matched: bool
 
 
-# ── Left to Budget ────────────────────────────────────────────────────────────
+# ── Budget plan (Set Budgets) ─────────────────────────────────────────────────
 
-class CommittedBill(BaseModel):
-    recurring_item_id: int
+class PlanItem(BaseModel):
+    """One recurring item or planned one-off behind a Committed amount."""
     name: str
-    amount: Decimal
+    amount: Decimal                    # this month's total for the item
+    times: int = 1                     # occurrences this month (weekly bills fire 4-5x)
+    recurring_item_id: Optional[int] = None
+    planned_expense_id: Optional[int] = None
 
 
-class CommittedRow(BaseModel):
+class PlanRow(BaseModel):
     category_id: Optional[int] = None
     category_name: str
-    amount: Decimal
-    items: list[CommittedBill] = []
+    committed: Decimal                 # from Recurring, never typed
+    flexible: Decimal                  # the stored allocation for the month
+    budget: Decimal                    # committed + flexible
+    is_set: bool                       # an allocation governs this month
+    is_assignable: bool = False        # month-only save when carry-forward is off
+    editable: bool = True              # False for a parent's own-bills row and the no-category rows
+    items: list[PlanItem] = []
 
 
-class AssignableRow(BaseModel):
+class PlanGroup(BaseModel):
+    group_id: Optional[int] = None     # the parent category; None for Other / no category
+    group_name: str
+    kind: Literal["parent", "other", "uncategorized"]
+    rows: list[PlanRow]
+    committed: Decimal
+    flexible: Decimal                  # budget - committed
+    budget: Decimal
+    # A budget line stored on the parent itself. It is the GROUP total: the
+    # rows' committed and flexible count inside it, never on top of it.
+    parent_line: Optional[Decimal] = None
+    rest: Decimal = Decimal("0")       # parent_line not yet spoken for by the rows
+    parent_line_short: Decimal = Decimal("0")  # rows exceed parent_line by this much
+
+
+class PlanTrackLine(BaseModel):
+    """One Track Budgets line. Their budgets sum to category_budget_total."""
     category_id: int
     category_name: str
-    assigned: Decimal
-    is_set: bool
+    is_group: bool                     # a parent line: actuals include its children
+    committed: Decimal
+    flexible: Decimal
+    budget: Decimal
+    actual_total: Decimal
+    rollover_enabled: bool = False
+    rollover_balance: Decimal = Decimal("0")
 
 
-class LeftToBudgetOut(BaseModel):
+class BudgetPlanOut(BaseModel):
     year: int
     month: int
-    leftover: Decimal
-    committed: list[CommittedRow]
-    unclassified_count: int
-    unclassified_amount: Decimal
-    assignable: list[AssignableRow]
-    assigned_total: Decimal
-    unassigned: Decimal
+    income_total: Decimal              # Recurring's income + one-off inflows
+    committed_total: Decimal           # Recurring's expenses + one-off outflows
+    flexible_total: Decimal
+    budget_total: Decimal              # committed_total + flexible_total
+    left_to_assign: Decimal            # income - committed - flexible
+    recurring_left_over: Decimal       # /recurring/month-summary left_over; = income - committed
+    category_budget_total: Decimal     # what Track Budgets measures (excludes "Not in a category")
+    unclassified_count: int            # recurring items with no usable category
     carry_forward: bool
-    explain_unassigned: Optional[Explanation] = None
+    groups: list[PlanGroup]
+    lines: list[PlanTrackLine]
+    explain_left_to_assign: Optional[Explanation] = None
 
 
 # ── Recurring Triage ──────────────────────────────────────────────────────────

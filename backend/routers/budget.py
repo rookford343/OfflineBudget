@@ -56,19 +56,21 @@ def budget_overview(
     return compute_overview(db, user.id, year, month)
 
 
-@router.get("/left-to-budget", response_model=schemas.LeftToBudgetOut)
-def left_to_budget(
+@router.get("/plan", response_model=schemas.BudgetPlanOut)
+def budget_plan(
     year: int,
     month: int,
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    """Set Budgets' merged list: Committed (from Recurring) + Flexible =
+    Budget per category, and Income - Committed - Flexible = Left to assign."""
     if not 1 <= month <= 12:
         raise HTTPException(status_code=400, detail="month must be 1-12")
     if not 1 <= year <= 9999:
         raise HTTPException(status_code=400, detail="year must be 1-9999")
-    from backend.services.left_to_budget import compute_left_to_budget
-    return compute_left_to_budget(db, user, year, month)
+    from backend.services.budget_plan import compute_budget_plan
+    return compute_budget_plan(db, user, year, month)
 
 
 @router.post("/rollover/{year}/{month}")

@@ -1,22 +1,8 @@
 from datetime import date
 from decimal import Decimal
 from backend import models
-from backend.services.left_to_budget import compute_left_to_budget
 from backend.services.month_summary import build_month_summary
 from backend.services.explain import replay, children_consistent
-from backend.tests.test_left_to_budget import _seed as seed_ltb
-
-
-def test_unassigned_explanation_replays(db_session):
-    user, cats = seed_ltb(db_session)
-    out = compute_left_to_budget(db_session, user, 2026, 10)
-    ex = out.explain_unassigned
-    assert ex.result == out.unassigned
-    assert replay(ex) == out.unassigned
-    assert children_consistent(ex)
-    assert ex.rows[0].amount == out.leftover
-    subtracted = [r for r in ex.rows if r.op == "subtract"]
-    assert sum((r.amount for r in subtracted), Decimal("0")) == out.assigned_total
 
 
 def _month_seed(db):
