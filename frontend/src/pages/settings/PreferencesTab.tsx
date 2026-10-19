@@ -7,6 +7,7 @@ import { useBalancesHidden, toggleBalancesHidden } from "../../store/balanceVisi
 import { Moon, Sun, Wand2, Flag, Bug, Clock, EyeOff } from "lucide-react";
 import { PINNABLE_ITEMS, loadPinnedNav, PINNED_STORAGE_KEY } from "../../lib/navItems";
 import { parseServerDateTime } from "../../lib/utils";
+import CheckingLevelSection from "./CheckingLevelSection";
 
 export default function PreferencesTab() {
   const dark = useIsDarkMode();
@@ -163,6 +164,9 @@ export default function PreferencesTab() {
           </div>
         </div>
       </div>
+      {/* Top-up rule for the primary checking account, plus the monthly
+          sweep -- the sweep only shows (and only runs) while saving each month. */}
+      <CheckingLevelSection savingsStrategy={savingsStrategy} />
       {/* Zero-based by default: a new month's buckets start unassigned. On,
           an unset month inherits the all-months amount instead. */}
       <div className="pt-3 border-t border-gray-100 dark:border-gray-700">

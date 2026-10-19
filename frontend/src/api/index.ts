@@ -419,3 +419,11 @@ export const verificationFlagsApi = {
   resolve: (id: number, newStatus: "open" | "resolved") =>
     api.patch(`/verification-flags/${id}`, { status: newStatus }).then((r) => r.data),
 };
+
+// ── Checking level (top-up + optional sweep rule) ───────────────────────────
+// One rule per checking account. GET resolves to null when none is set.
+export const checkingLevelApi = {
+  get: (accountId: number) =>
+    api.get("/forecast/checking-level", { params: { account_id: accountId } }).then((r) => r.data),
+  put: (data: object) => api.put("/forecast/checking-level", data).then((r) => r.data),
+};
