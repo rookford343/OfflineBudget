@@ -304,3 +304,70 @@ def test_endpoint_rejects_out_of_range(db_session):
     c = _client(db_session, user)
     assert c.get("/budget/plan", params={"year": 2026, "month": 13}).status_code == 400
     assert c.get("/budget/plan", params={"year": 0, "month": 10}).status_code == 400
+
+
+def test_spending_page_budgeted_equals_the_plan(db_session):
+    """Spending's "of $Y budgeted" reads the plan, so it can't double-count a
+    parent line plus its children and always agrees with Track/Set."""
+    from backend.routers import spending as spending_router_module
+    user, _, cats = _seed(db_session)
+    _add_dining(db_session, user, cats)
+    plan = compute_budget_plan(db_session, user, 2026, 10)
+    app = FastAPI()
+    app.include_router(spending_router_module.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: user
+    r = TestClient(app).get("/spending/by-category", params={"start": "2026-10-01", "end": "2026-10-31"})
+    assert r.status_code == 200
+    body = r.json()
+    tops = {c["category_name"]: c for c in body["categories"]}
+    groups = _groups(plan)
+    assert D(tops["Necessities"]["budgeted"]) == groups["Necessities"].budget == D("3000.00")
+    assert D(tops["Wants"]["budgeted"]) == groups["Wants"].budget == D("840.00")
+    rows = _rows(plan)
+    kids = {k["category_name"]: D(k["budgeted"]) for k in tops["Wants"]["children"]}
+    assert kids["Subscriptions"] == rows["Subscriptions"].budget
+    assert D(tops["Charity"]["budgeted"]) == rows["Charity"].budget
+    # Spending leaves savings-type categories out; everything else matches Track.
+    expense_lines = sum((l.budget for l in plan.lines if l.category_name != "Savings"), D("0"))
+    assert D(body["total_budgeted"]) == expense_lines == D("4340.00")
+
+
+def test_spending_page_scales_the_plan_to_a_partial_month(db_session):
+    from backend.routers import spending as spending_router_module
+    user, _, _ = _seed(db_session)
+    app = FastAPI()
+    app.include_router(spending_router_module.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: user
+    r = TestClient(app).get("/spending/by-category", params={"start": "2026-10-01", "end": "2026-10-15"})
+    tops = {c["category_name"]: D(c["budgeted"]) for c in r.json()["categories"]}
+    assert tops["Necessities"].quantize(D("0.01")) == (D("3000.00") * 15 / 31).quantize(D("0.01"))
+
+
+def test_guard_dashboard_leftover_unchanged_by_classification_and_setting(db_session):
+    """Ported from the retired left_to_budget tests: classifying bills and
+    flipping carry-forward must not move the Dashboard's figures, and building
+    the plan must not either."""
+    from unittest.mock import patch
+    from backend.services.budget_snapshot import compute_budget_snapshot, leftover_parts
+    from backend.tests.test_budget_snapshot import _seed_spreadsheet_scenario, _fake_quarter_min
+    user, checking, _card = _seed_spreadsheet_scenario(db_session)
+    as_of = date(2026, 8, 7)
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        before = compute_budget_snapshot(db_session, user, checking.id, as_of=as_of)
+
+    home = models.Category(user_id=user.id, name="Home", type=E)
+    db_session.add(home); db_session.flush()
+    for item in db_session.query(models.RecurringItem).filter(models.RecurringItem.type == models.RecurringType.expense):
+        item.category_id = home.id
+    user.budget_carry_forward = True
+    db_session.commit()
+    compute_budget_plan(db_session, user, 2026, 8)
+
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        after = compute_budget_snapshot(db_session, user, checking.id, as_of=as_of)
+    assert after.leftover == before.leftover
+    assert after.left_to_spend == before.left_to_spend
+    assert after.safety_margin == before.safety_margin
+    assert leftover_parts(db_session, user, as_of).leftover == before.leftover

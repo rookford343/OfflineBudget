@@ -243,7 +243,7 @@ def compute_budget_plan(db: Session, user: models.User, year: int, month: int) -
             income_children[f"{o.name} (one-off)"] += o.amount
     explain = (
         ExplainBuilder("Left to assign")
-        .start("Income this month", income_total, note="Same income as the Recurring tab",
+        .start("Income this month", income_total, note="Recurring income plus planned inflows",
                children=[ExplainChild(label=k, amount=v) for k, v in income_children.items()])
         .subtract("Committed", committed_total,
                   note="Recurring bills and planned one-offs this month, from the Recurring tab",
@@ -273,3 +273,41 @@ def compute_budget_plan(db: Session, user: models.User, year: int, month: int) -
         lines=lines,
         explain_left_to_assign=explain,
     )
+
+
+def plan_budgets_for_range(db: Session, user: models.User, start, end) -> tuple[dict[int, Decimal], dict[int, Decimal]]:
+    """Plan Budgets for any date range, for the Spending page.
+
+    Returns ({category_id: row Budget}, {top-level category_id: group Budget}).
+    Each month's plan is scaled by the share of that month the range covers,
+    so a full single month reads exactly what Set and Track show. A
+    childless top-level category's group Budget is its own row Budget.
+    """
+    from calendar import monthrange
+    from datetime import date as _date
+
+    rows: dict[int, Decimal] = defaultdict(lambda: ZERO)
+    tops: dict[int, Decimal] = defaultdict(lambda: ZERO)
+    y, m = start.year, start.month
+    while (y, m) <= (end.year, end.month):
+        days = monthrange(y, m)[1]
+        lo, hi = max(_date(y, m, 1), start), min(_date(y, m, days), end)
+        if hi >= lo:
+            share = Decimal((hi - lo).days + 1) / Decimal(days)
+            plan = compute_budget_plan(db, user, y, m)
+            for g in plan.groups:
+                if g.kind == "uncategorized":
+                    continue
+                if g.kind == "parent" and g.group_id is not None:
+                    tops[g.group_id] += g.budget * share
+                for r in g.rows:
+                    if r.category_id is None:
+                        continue
+                    if r.editable:
+                        rows[r.category_id] += r.budget * share
+                    if g.kind == "other":
+                        tops[r.category_id] += r.budget * share
+        m += 1
+        if m > 12:
+            y, m = y + 1, 1
+    return dict(rows), dict(tops)

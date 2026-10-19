@@ -9,7 +9,6 @@ from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.spending_helpers import filter_real_spend, is_card_payment, looks_like_internal_transfer, NOT_SAVINGS, merchant_totals
-from backend.services.budget_buckets import assignable_category_ids, drop_uncarried_defaults
 from backend.services.summary_generator import generate_weekly_digest
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.recent_activity import get_recent_activity
@@ -327,23 +326,15 @@ def spending_by_category(
             sub_breakdown[t.category_id].get(label, Decimal("0")) + t.amount
         )
 
-    # Get budget allocations for period
-    month_numbers = _months_in_range(start, end)
-    budgets = db.query(models.BudgetAllocation).filter(
-        models.BudgetAllocation.user_id == user.id,
-        models.BudgetAllocation.year.in_([start.year, end.year]),
-        models.BudgetAllocation.month.in_([0] + month_numbers),
-    ).all()
-    budgets = drop_uncarried_defaults(budgets, user, assignable_category_ids(db, user.id))
-    budget_by_cat: dict[int, Decimal] = {}
-    for b in sorted(budgets, key=lambda x: x.month):
-        budget_by_cat[b.category_id] = b.budgeted_amount
+    # Budgets come from the Set Budgets plan (Committed from Recurring +
+    # Flexible, a parent line counting as its group's total), scaled to the
+    # range. Reading raw allocations here added a parent line to its
+    # children's lines and disagreed with Track Budgets for the same month.
+    from backend.services.budget_plan import plan_budgets_for_range
+    row_budget, top_budget = plan_budgets_for_range(db, user, start, end)
 
     # Build top-level → sub-categories
     top_categories = [c for c in categories if c.parent_id is None and c.type == "expense"]
-    # Budgets are monthly; the range may be any length. Scale so "spent vs
-    # budgeted" compares like with like -- see _range_month_fraction.
-    months_factor = _range_month_fraction(start, end)
 
     result: list[schemas.SpendingTopLevel] = []
     total_budgeted = Decimal("0")
@@ -356,7 +347,7 @@ def spending_by_category(
         for child in sorted(top.children, key=lambda c: c.sort_order):
             breakdown = sub_breakdown.get(child.id, {})
             actual = sum(breakdown.values(), Decimal("0"))
-            budgeted = budget_by_cat.get(child.id, Decimal("0")) * months_factor
+            budgeted = row_budget.get(child.id, Decimal("0"))
             top_actual += actual
             children_out.append(schemas.SpendingSubCategory(
                 category_id=child.id,
@@ -371,14 +362,9 @@ def spending_by_category(
         # Also catch transactions categorized directly to top-level
         top_direct = sub_breakdown.get(top.id, {})
         top_actual += sum(top_direct.values(), Decimal("0"))
-        # A parent's budget is its own row PLUS its children's. the user budgets at
-        # the leaf ("Wants" has no row of its own; Shopping/Food & Drinks/
-        # Entertainment/Subscriptions under it do), so reading only the parent
-        # row reported "Wants" as $0 budgeted against real spend -- and
-        # understated total_budgeted by the whole $4,050 those leaves carry.
-        top_budgeted = (budget_by_cat.get(top.id, Decimal("0")) + sum(
-            (c.budgeted for c in children_out), Decimal("0")
-        )) * months_factor
+        # The group's Budget from the plan: its rows' Budgets, or its parent
+        # line when that is larger (the line is the group's total).
+        top_budgeted = top_budget.get(top.id, Decimal("0"))
 
         total_budgeted += top_budgeted
         total_actual += top_actual
@@ -406,7 +392,7 @@ def spending_by_category(
             continue
         own_spend = sum(sub_breakdown.get(cat.id, {}).values(), Decimal("0"))
         disc_actual += own_spend
-        disc_budgeted += budget_by_cat.get(cat.id, Decimal("0")) * months_factor
+        disc_budgeted += row_budget.get(cat.id, Decimal("0"))
 
     return schemas.SpendingOverview(
         start_date=start,
@@ -712,46 +698,6 @@ def monthly_summary(
 ):
     from backend.services.summary_generator import generate_summary
     return generate_summary(db, user.id, year, month)
-
-
-def _range_month_fraction(start: date, end: date) -> Decimal:
-    """How many months the [start, end] range covers, counting partial months
-    proportionally. 06/01-08/15 -> 1 + 1 + 15/31 = 2.48.
-
-    Budgets are stored as MONTHLY amounts, so comparing one against a
-    multi-month range understated the budget and made every longer range look
-    like a blowout. Live on 2026-08-15 the Spending page reported "$7,000.00
-    over" for a 2.5-month window: $12,000 spent against a $5,000 budget that
-    was only ever one month's worth. Scaled, that same window is $12,500
-    budgeted -- essentially on target rather than 2.5x over.
-    """
-    total = Decimal("0")
-    y, m = start.year, start.month
-    while (y, m) <= (end.year, end.month):
-        days_in_month = calendar.monthrange(y, m)[1]
-        first = date(y, m, 1)
-        last = date(y, m, days_in_month)
-        lo = max(first, start)
-        hi = min(last, end)
-        if hi >= lo:
-            total += Decimal((hi - lo).days + 1) / Decimal(days_in_month)
-        m += 1
-        if m > 12:
-            m = 1
-            y += 1
-    return total
-
-
-def _months_in_range(start: date, end: date) -> list[int]:
-    months = set()
-    d = start.replace(day=1)
-    while d <= end:
-        months.add(d.month)
-        if d.month == 12:
-            d = d.replace(year=d.year + 1, month=1)
-        else:
-            d = d.replace(month=d.month + 1)
-    return list(months)
 
 
 @router.get("/sankey/{year}/{month}", response_model=schemas.SankeyResponse)
