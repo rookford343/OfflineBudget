@@ -530,7 +530,6 @@ export default function Budget() {
                 </button>
               </div>
             </div>
-            <p className="mb-2 text-right text-xs text-gray-400">Rollover uses your Flexible amount only, not bills.</p>
 
             {adding && (
               <div className="flex flex-wrap items-center gap-2 mb-3 bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2">
@@ -626,7 +625,7 @@ export default function Budget() {
             "Set Budgets is one list. Each category shows Committed, Flexible and Budget. Committed is the bills and planned one-offs that land this month, read from Recurring automatically; you never type it. Flexible is what you add on top (groceries, shopping, a cushion). Budget is the two together.\n\n" +
             "The header reads Income − Committed − Flexible = Left to assign. Income and Committed are the same numbers the Recurring tab shows, so Income − Committed is Recurring's 'Left over'. Green means money is still unassigned; red means you've assigned more than comes in.\n\n" +
             "A budget set on a parent category (for example a group like Necessities) is treated as that group's total: the bills and flexible amounts under it count inside it, never on top of it. Whatever it doesn't cover yet shows as 'Rest of …'. Remove it and the group simply adds up its rows.\n\n" +
-            "Track Budgets measures each line's Budget against what you actually spent. Its budgeted total always equals 'Budget across categories' on Set Budgets; 'available' adds any rolled-over balance on top. Rollover uses your Flexible amount only, not bills.\n\n" +
+            "Track Budgets measures each line's Budget against what you actually spent. Its budgeted total always equals 'Budget across categories' on Set Budgets; 'available' adds any rolled-over balance on top. Rollover carries forward what's left of a category's whole Budget -- Committed and Flexible together, not just Flexible.\n\n" +
             "Flexible amounts are saved as 'every month' by default. The exception is an assignable bucket while carry-forward is off (Settings → Preferences): those are set for the month you're viewing only."
           }
           onClose={() => setShowHelp(false)}

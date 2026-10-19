@@ -100,7 +100,14 @@ def compute_overview(
 
 
 def apply_rollover(db: Session, user_id: int, year: int, month: int) -> int:
-    """Set each rollover-enabled category's rollover_balance to max(0, budgeted - actual) for the given month.
+    """Set each rollover-enabled category's rollover_balance to max(0, Budget - actual) for the given month.
+
+    Budget is the full Set Budgets figure -- Committed (from Recurring) plus
+    Flexible (the stored allocation), including the parent-line max() rule
+    for a group -- not just the stored allocation. A category with bills
+    rolls over what's left of its whole Budget, not only its Flexible slice.
+    Reuses `plan_budgets_for_range` (the same helper the Spending page uses)
+    for that figure rather than recomputing the plan here.
 
     Returns the number of categories updated.
     """
@@ -117,13 +124,20 @@ def apply_rollover(db: Session, user_id: int, year: int, month: int) -> int:
         ).all()
     }
 
+    user = db.get(models.User, user_id)
+    start = date(year, month, 1)
+    end = date(year, month, monthrange(year, month)[1])
+    from backend.services.budget_plan import plan_budgets_for_range
+    row_budget, top_budget = plan_budgets_for_range(db, user, start, end)
+
     updated = 0
     for row in rows:
         if not row.rollover_enabled:
             continue
         cat = cat_map.get(row.category_id)
         if cat:
-            cat.rollover_balance = max(Decimal("0"), row.budgeted - row.actual_total)
+            budget = top_budget.get(row.category_id, row_budget.get(row.category_id, Decimal("0")))
+            cat.rollover_balance = max(Decimal("0"), budget - row.actual_total)
             updated += 1
     db.commit()
     return updated
