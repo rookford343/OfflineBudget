@@ -1,26 +1,29 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { authApi, budgetApi, categoriesApi } from "../api";
-import { fmt } from "../lib/utils";
+import { Link } from "react-router-dom";
+import { budgetApi, categoriesApi } from "../api";
+import { fmt, cx } from "../lib/utils";
 import { Pencil, Check, X, RotateCcw, HelpCircle, ChevronRight, ChevronDown, Plus, Trash2 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
-import LeftToBudgetPanel from "../components/LeftToBudgetPanel";
+import HowCalculated from "../components/HowCalculated";
 import MonthYearPicker from "../components/MonthYearPicker";
 import { CategoryOptions } from "../lib/selectOptions";
+import {
+  availableOf, flexibleSaveMonth, leftToAssignStatus, trackTotals, unbudgetedSpend,
+  type OverviewRow, type PlanTrackLine,
+} from "../lib/budgetPlan";
 
 /**
  * Reworked 2026-08-16 around how the user actually budgets: a handful of
- * top-level lines (Subscriptions $800, Shopping $1,500) that are easier to
- * hit than a dozen sub-limits, each expanding to show the merchants that add
- * up to it. Individual subscriptions aren't categories -- they're merchants
- * -- so the breakdown comes from /budget/category-breakdown rather than from
- * child rows.
+ * top-level lines (Subscriptions, Shopping) that are easier to hit than a
+ * dozen sub-limits, each expanding to show the merchants that add up to it.
  *
- * The previous version rolled child budgets up into their parent and showed
- * a fixed category tree with no way to add or remove a budget line. Deciding
- * what to budget meant leaving for the Spending page to look up what you'd
- * actually spent, so unbudgeted spend is now surfaced here with its own
- * amount as the suggested starting budget.
+ * Reworked again 2026-10-19: Set Budgets is ONE list. Each category shows
+ * Committed (from Recurring, automatic), Flexible (what you add) and Budget
+ * (the two together), and the header reads Income − Committed − Flexible =
+ * Left to assign. It replaces a separate Left to budget panel whose numbers
+ * never reconciled with the list beneath it. All of the math comes from
+ * GET /budget/plan; Track Budgets measures the same per-line Budget.
  */
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -31,49 +34,57 @@ function barColor(pct: number): string {
   return "bg-emerald-500";
 }
 
-interface RowShape {
-  category_id: number;
-  category_name: string;
-  budgeted: string;
-  rollover_enabled?: boolean;
-  rollover_balance?: string;
-  actual_checking: string;
-  actual_cards: string;
-  actual_total: string;
-  parent_id?: number | null;
-  category_type?: string;
-  is_assignable?: boolean;
+interface PlanItem { name: string; amount: string; times: number; recurring_item_id?: number | null; planned_expense_id?: number | null }
+interface PlanRow {
+  category_id: number | null; category_name: string;
+  committed: string; flexible: string; budget: string;
+  is_set: boolean; is_assignable: boolean; editable: boolean; items: PlanItem[];
+}
+interface PlanGroup {
+  group_id: number | null; group_name: string; kind: "parent" | "other" | "uncategorized";
+  rows: PlanRow[]; committed: string; flexible: string; budget: string;
+  parent_line: string | null; rest: string; parent_line_short: string;
+}
+interface Plan {
+  income_total: string; committed_total: string; flexible_total: string; budget_total: string;
+  left_to_assign: string; category_budget_total: string; unclassified_count: number;
+  carry_forward: boolean; groups: PlanGroup[]; lines: PlanTrackLine[]; explain_left_to_assign: any;
 }
 
 type BudgetTab = "track" | "set";
 
+// Shared column layout for the Set list so headers and rows line up.
+const COLS = "grid grid-cols-[minmax(0,1fr)_5.5rem_7rem_5.5rem] sm:grid-cols-[minmax(0,1fr)_7rem_9rem_7rem] items-center gap-2";
+
 export default function Budget() {
   const now = new Date();
   const [showHelp, setShowHelp] = useState(false);
-  // Split into Track (monitoring: progress bars, spend-vs-budget, read-only)
-  // and Set (config: add/edit/delete a line, rollover) tabs (the user, 2026-09-08,
-  // per the Securo comparison notes' flagged principle: "configuration
-  // screens show the number you set; monitoring screens show the number
-  // relative to reality" -- this page used to conflate both in one view.
-  // Defaults to Track since checking progress is the more frequent visit;
-  // Set is the deliberate, occasional switch.
+  // Split into Track (monitoring) and Set (config) tabs (the user,
+  // 2026-09-08): "configuration screens show the number you set; monitoring
+  // screens show the number relative to reality". Track is the default.
   const [tab, setTab] = useState<BudgetTab>("track");
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
-  const [editId, setEditId] = useState<number | null>(null);
+  const [editKey, setEditKey] = useState<string | null>(null);
   const [editAmt, setEditAmt] = useState("");
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [addCat, setAddCat] = useState("");
   const [addAmt, setAddAmt] = useState("");
   const qc = useQueryClient();
 
-  const { data: overview = [], isLoading } = useQuery<RowShape[]>({
+  // Keyed "left-to-budget" on purpose: the Recurring triage inbox, the
+  // Categories tab and the carry-forward setting already invalidate that
+  // prefix whenever they change something this view depends on.
+  const { data: plan, isLoading } = useQuery<Plan>({
+    queryKey: ["left-to-budget", year, month],
+    queryFn: () => budgetApi.plan(year, month),
+  });
+  const { data: overview = [] } = useQuery<OverviewRow[]>({
     queryKey: ["budget-overview", year, month],
     queryFn: () => budgetApi.overview(year, month),
   });
-  // Allocations carry the id that DELETE needs; the overview is keyed by
-  // category and has no way to name the row being removed.
+  // Allocations carry the id that DELETE needs.
   const { data: allocations = [] } = useQuery<any[]>({
     queryKey: ["budget-allocations", year],
     queryFn: () => budgetApi.list(year),
@@ -83,22 +94,17 @@ export default function Budget() {
     queryFn: categoriesApi.list,
   });
 
-  const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
-
   const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ["left-to-budget"] });
     qc.invalidateQueries({ queryKey: ["budget-overview"] });
     qc.invalidateQueries({ queryKey: ["budget-allocations"] });
-    qc.invalidateQueries({ queryKey: ["left-to-budget"] });
   };
 
   const upsertMut = useMutation({
     mutationFn: budgetApi.upsert,
-    onSuccess: () => { invalidate(); setEditId(null); setAdding(false); setAddCat(""); setAddAmt(""); },
+    onSuccess: () => { invalidate(); setEditKey(null); setAdding(false); setAddCat(""); setAddAmt(""); },
   });
-  const deleteMut = useMutation({
-    mutationFn: budgetApi.remove,
-    onSuccess: invalidate,
-  });
+  const deleteMut = useMutation({ mutationFn: budgetApi.remove, onSuccess: invalidate });
   const rolloverToggleMut = useMutation({
     mutationFn: ({ id, enabled }: { id: number; enabled: boolean }) => budgetApi.setCategoryRollover(id, enabled),
     onSuccess: invalidate,
@@ -112,30 +118,27 @@ export default function Budget() {
     onSuccess: invalidate,
   });
 
-  // month: 0 is the "every month" allocation. Budgets are set that way by
-  // default so a new month doesn't silently start unbudgeted. The exception
-  // is an assignable bucket with carry-forward off: the backend ignores its
-  // month=0 row by design (each month is assigned fresh), so a month=0 save
-  // there would silently do nothing -- write the viewed month instead. Until
-  // /auth/me loads, carry-forward is treated as off (its default); a
-  // month-specific row is honored either way, so that errs visible.
+  const carryForward = !!plan?.carry_forward;
   const assignableIds = new Set(overview.filter(r => r.is_assignable).map(r => r.category_id));
-  const monthOnly = (catId: number) => !me?.budget_carry_forward && assignableIds.has(catId);
+  const monthOnly = (catId: number) => flexibleSaveMonth(month, assignableIds.has(catId), carryForward) !== 0;
   const monthLabel = `${MONTHS[month - 1]} ${year}`;
-  function saveEdit(catId: number, amount: string) {
-    upsertMut.mutate({ category_id: catId, year, month: monthOnly(catId) ? month : 0, budgeted_amount: parseFloat(amount) });
+  function save(catId: number, amount: string) {
+    upsertMut.mutate({
+      category_id: catId, year,
+      month: flexibleSaveMonth(month, assignableIds.has(catId), carryForward),
+      budgeted_amount: parseFloat(amount || "0"),
+    });
   }
-  function toggle(id: number) {
+  function toggle(key: string) {
     setExpanded(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      next.has(key) ? next.delete(key) : next.add(key);
       return next;
     });
   }
 
-  // The allocation that governs the viewed month: its month-specific row if
-  // there is one, else the every-month (month=0) row. Other months' rows are
-  // ignored, so the trash button only ever removes what this month shows.
+  // The allocation that governs the viewed month: its month row if there is
+  // one, else the every-month row. The trash button only removes that.
   const allocByCat: Record<number, any> = {};
   allocations.forEach(a => {
     if (a.month === month || (a.month === 0 && allocByCat[a.category_id]?.month !== month)) {
@@ -143,62 +146,15 @@ export default function Budget() {
     }
   });
 
-  // A budget line is an EXPENSE category with an allocation, at whatever level
-  // it was set. the user budgets at the level he thinks in (Subscriptions), which
-  // is a child of Wants, so filtering to parentless rows would hide every real
-  // budget he has. Income categories are dropped outright -- "Income" and
-  // "Salary / Wages" carry $9,600.00 allocations that are forecasting inputs,
-  // not spending limits, and counting them wrecked the headline totals.
-  const withBudget = overview.filter(
-    r => parseFloat(r.budgeted || "0") > 0 && (r.category_type ?? "expense") === "expense",
+  const lines = plan?.lines ?? [];
+  const totals = trackTotals(lines);
+  const unbudgeted = unbudgetedSpend(overview, lines);
+  const shownIds = new Set(
+    (plan?.groups ?? []).flatMap(g => [
+      ...g.rows.filter(r => r.editable && r.category_id != null).map(r => r.category_id as number),
+      ...(g.parent_line != null && g.group_id != null ? [g.group_id] : []),
+    ]),
   );
-
-  // When a parent AND its children are both budgeted, the parent governs and
-  // the children fold into it. the user's real data budgets Necessities at
-  // $5,000.00 and also Mortgage/Rent, Groceries and Vehicles beneath it;
-  // summing all four counted the same dollars twice. This is also the
-  // behaviour he asked for -- a handful of broad lines to hit rather than a
-  // limit per sub-category, with the detail still one expand away.
-  const governedByParent = new Set(
-    withBudget
-      .filter(r => r.parent_id && withBudget.some(p => p.category_id === r.parent_id))
-      .map(r => r.category_id),
-  );
-  const budgetRows = withBudget
-    .filter(r => !governedByParent.has(r.category_id))
-    .sort((a, b) => parseFloat(b.budgeted) - parseFloat(a.budgeted));
-
-  // Spend with no budget behind it. This is the "what should I budget for?"
-  // question, answered in place instead of on the Spending page.
-  // Exclude both directions of an already-budgeted relationship. A child of a
-  // budgeted parent is already covered by that line, and a PARENT of budgeted
-  // children is too -- its actual_total is their rolled-up spend, so offering
-  // to budget it would double-count. Without the second check the demo data
-  // offered Necessities ($3,400.00), Wants and Charity as unbudgeted while
-  // every category beneath them already had a line.
-  const budgetedParentIds = new Set(budgetRows.map(r => r.parent_id).filter(Boolean));
-  const unbudgeted = overview
-    .filter(r => (r.category_type ?? "expense") === "expense")
-    .filter(r => parseFloat(r.budgeted || "0") === 0 && parseFloat(r.actual_total || "0") > 0)
-    .filter(r => !budgetRows.some(b => b.category_id === r.parent_id))
-    .filter(r => !budgetedParentIds.has(r.category_id))
-    .sort((a, b) => parseFloat(b.actual_total) - parseFloat(a.actual_total));
-
-  function availableOf(row: RowShape): number {
-    return parseFloat(row.budgeted || "0") +
-      (row.rollover_enabled ? parseFloat(row.rollover_balance || "0") : 0);
-  }
-
-  const totalAvailable = budgetRows.reduce((s, r) => s + availableOf(r), 0);
-  const totalSpent = budgetRows.reduce((s, r) => s + parseFloat(r.actual_total || "0"), 0);
-  const totalLeft = totalAvailable - totalSpent;
-  const overallPct = totalAvailable > 0 ? (totalSpent / totalAvailable) * 100 : 0;
-  const overCount = budgetRows.filter(r => parseFloat(r.actual_total || "0") > availableOf(r)).length;
-
-  const budgetedIds = new Set(budgetRows.map(r => r.category_id));
-  const addable = categories
-    .filter((c: any) => c.type === "expense" && !budgetedIds.has(c.id))
-    .sort((a: any, b: any) => a.name.localeCompare(b.name));
 
   function Breakdown({ categoryId }: { categoryId: number }) {
     const { data: merchants = [], isLoading: loadingM } = useQuery<any[]>({
@@ -222,79 +178,193 @@ export default function Budget() {
     );
   }
 
-  // Set Budgets (config): the amount you set, editable, plus rollover and
-  // delete. No spent figure, no progress bar -- that's Track's job.
-  function ConfigRow({ row }: { row: RowShape }) {
-    const alloc = allocByCat[row.category_id];
+  /** An inline amount editor. `k` identifies what's being edited. */
+  // Plain render functions, not components: a component declared inside
+  // Budget is a new type on every render, which would remount the input and
+  // drop focus on each keystroke.
+  function amountEditor({ k, value, onSave, title }: { k: string; value: string; onSave: (v: string) => void; title: string }) {
+    if (editKey === k) {
+      return (
+        <div className="flex items-center justify-end gap-1">
+          <input type="number" step="0.01" min="0" aria-label={title}
+            className="input w-20 sm:w-24 py-0.5 text-right text-sm"
+            value={editAmt} onChange={e => setEditAmt(e.target.value)} autoFocus
+            onKeyDown={e => { if (e.key === "Enter") onSave(editAmt); if (e.key === "Escape") setEditKey(null); }} />
+          <button onClick={() => onSave(editAmt)} className="text-emerald-600" aria-label="Save"><Check size={14} /></button>
+          <button onClick={() => setEditKey(null)} className="text-gray-400" aria-label="Cancel"><X size={14} /></button>
+        </div>
+      );
+    }
     return (
-      <div className="flex items-center justify-between gap-3 py-2.5 border-b border-gray-50 dark:border-gray-800 last:border-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="truncate font-medium text-gray-900 dark:text-white">{row.category_name}</span>
-          {monthOnly(row.category_id) && (
-            <span className="shrink-0 text-xs text-gray-400" title="Carry-forward is off, so this bucket is set month by month">
-              for {monthLabel} only
-            </span>
-          )}
-          {row.rollover_enabled && parseFloat(row.rollover_balance || "0") > 0 && (
-            <span className="shrink-0 text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-              +{fmt(parseFloat(row.rollover_balance || "0"))} rolled over
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <label className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 cursor-pointer">
-            <input type="checkbox" checked={!!row.rollover_enabled}
-              onChange={e => rolloverToggleMut.mutate({ id: row.category_id, enabled: e.target.checked })} />
-            Rollover
-          </label>
-          {editId === row.category_id ? (
-            <div className="flex items-center gap-1">
-              <input type="number" step="0.01" className="input w-24 py-0.5 text-right text-sm"
-                value={editAmt} onChange={e => setEditAmt(e.target.value)} autoFocus />
-              <button onClick={() => saveEdit(row.category_id, editAmt)} className="text-emerald-600"><Check size={14} /></button>
-              <button onClick={() => setEditId(null)} className="text-gray-400"><X size={14} /></button>
-            </div>
-          ) : (
-            <>
-              <span className="text-sm tabular-nums text-gray-700 dark:text-gray-300 w-24 text-right">{fmt(row.budgeted)}</span>
-              <button onClick={() => { setEditId(row.category_id); setEditAmt(row.budgeted); }}
-                className="text-gray-300 hover:text-indigo-500" title="Change budget">
-                <Pencil size={12} />
-              </button>
-              {alloc && (
-                <button onClick={() => deleteMut.mutate(alloc.id)}
-                  className="text-gray-300 hover:text-red-500" title="Remove this budget line">
-                  <Trash2 size={12} />
-                </button>
-              )}
-            </>
-          )}
-        </div>
+      <div className="flex items-center justify-end gap-1.5">
+        <span className="text-sm tabular-nums text-gray-700 dark:text-gray-300">{fmt(value)}</span>
+        <button onClick={() => { setEditKey(k); setEditAmt(String(parseFloat(value || "0"))); }}
+          className="text-gray-300 hover:text-indigo-500" title={title} aria-label={title}>
+          <Pencil size={12} />
+        </button>
       </div>
     );
   }
 
-  // Track Budgets (monitoring): the amount you set relative to reality --
-  // progress bar, spent/available, merchant breakdown. Read-only: no edit,
-  // delete, or rollover control here, that's Set's job.
-  function MonitorRow({ row }: { row: RowShape }) {
-    const available = availableOf(row);
-    const spent = parseFloat(row.actual_total || "0");
+  function committedCell(row: PlanRow, k: string) {
+    const has = row.items.length > 0;
+    return (
+      <button type="button" disabled={!has} onClick={() => toggle(k)}
+        className={cx("flex w-full items-center justify-end gap-1 text-sm tabular-nums",
+          has ? "text-gray-700 dark:text-gray-300 hover:text-indigo-500" : "text-gray-400")}
+        aria-label={has ? `${expanded.has(k) ? "Hide" : "Show"} the recurring items behind ${row.category_name}` : undefined}>
+        {has && (expanded.has(k) ? <ChevronDown size={12} /> : <ChevronRight size={12} />)}
+        {fmt(row.committed)}
+      </button>
+    );
+  }
+
+  function planRow(row: PlanRow, group: PlanGroup) {
+    const k = `${group.group_name}:${row.category_id ?? row.category_name}`;
+    const cid = row.category_id;
+    const alloc = cid != null ? allocByCat[cid] : undefined;
+    const ov = cid != null ? overview.find(r => r.category_id === cid) as any : undefined;
+    return (
+      <div className="py-2 border-b border-gray-50 dark:border-gray-800 last:border-0">
+        <div className={COLS}>
+          <div className="flex items-center gap-2 min-w-0 pl-3">
+            <span className="truncate text-sm text-gray-900 dark:text-white">
+              {group.kind === "uncategorized"
+                ? <Link to="/recurring" className="text-amber-600 underline">{row.category_name}</Link>
+                : row.category_name}
+            </span>
+            {row.editable && cid != null && monthOnly(cid) && (
+              <span className="hidden sm:inline shrink-0 text-xs text-gray-400" title="Carry-forward is off, so this bucket is set month by month">
+                {monthLabel} only
+              </span>
+            )}
+          </div>
+          {committedCell(row, k)}
+          {row.editable && cid != null ? (
+            amountEditor({ k: `flex:${cid}`, value: row.flexible, title: `Change flexible amount for ${row.category_name}`,
+              onSave: v => save(cid, v) })
+          ) : (
+            <span className="text-right text-sm tabular-nums text-gray-400">—</span>
+          )}
+          <div className="flex items-center justify-end gap-1.5">
+            <span className="text-sm font-medium tabular-nums text-gray-900 dark:text-white">{fmt(row.budget)}</span>
+            {alloc && row.editable && (
+              <button onClick={() => deleteMut.mutate(alloc.id)}
+                className="text-gray-300 hover:text-red-500" title="Remove the flexible amount (bills stay)"
+                aria-label={`Remove flexible amount for ${row.category_name}`}>
+                <Trash2 size={12} />
+              </button>
+            )}
+          </div>
+        </div>
+        {row.editable && cid != null && (
+          <div className="flex items-center gap-3 pl-3 mt-0.5">
+            <label className="flex items-center gap-1 text-xs text-gray-400 cursor-pointer">
+              <input type="checkbox" checked={!!ov?.rollover_enabled}
+                onChange={e => rolloverToggleMut.mutate({ id: cid, enabled: e.target.checked })} />
+              Rollover
+            </label>
+            {ov?.rollover_enabled && parseFloat(ov?.rollover_balance || "0") > 0 && (
+              <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                +{fmt(parseFloat(ov.rollover_balance))} rolled over
+              </span>
+            )}
+          </div>
+        )}
+        {expanded.has(k) && row.items.length > 0 && (
+          <div className="mt-1 ml-6 space-y-0.5">
+            {row.items.map(i => (
+              <div key={`${i.recurring_item_id ?? "p" + i.planned_expense_id}`}
+                className="flex justify-between gap-3 text-xs text-gray-500 dark:text-gray-400">
+                <span className="truncate">
+                  {i.name}
+                  {i.times > 1 && <span className="ml-1 text-gray-400">×{i.times}</span>}
+                  {i.planned_expense_id != null && <span className="ml-1 text-gray-400">one-off</span>}
+                </span>
+                <span className="tabular-nums shrink-0">{fmt(i.amount)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function groupView(group: PlanGroup) {
+    const gid = group.group_id;
+    const parentAlloc = gid != null ? allocByCat[gid] : undefined;
+    const hasLine = group.parent_line != null;
+    return (
+      <div className="mt-3 first:mt-0">
+        <div className={cx(COLS, "py-1.5 border-b border-gray-200 dark:border-gray-700")}>
+          <span className="truncate text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            {group.group_name}
+          </span>
+          <span className="text-right text-xs tabular-nums text-gray-500">{fmt(group.committed)}</span>
+          <span className="text-right text-xs tabular-nums text-gray-500">{fmt(group.flexible)}</span>
+          <span className="text-right text-xs font-semibold tabular-nums text-gray-700 dark:text-gray-300">{fmt(group.budget)}</span>
+        </div>
+        {hasLine && gid != null && (
+          <div className="py-2 border-b border-gray-50 dark:border-gray-800">
+            <div className={COLS}>
+              <span className="pl-3 text-sm text-gray-900 dark:text-white truncate">{group.group_name} total</span>
+              <span />
+              {amountEditor({ k: `line:${gid}`, value: group.parent_line as string,
+                title: `Change the ${group.group_name} group total`, onSave: v => save(gid, v) })}
+              <div className="flex items-center justify-end">
+                {parentAlloc && (
+                  <button onClick={() => deleteMut.mutate(parentAlloc.id)}
+                    className="text-gray-300 hover:text-red-500" title="Remove the group total; the rows below then add up on their own"
+                    aria-label={`Remove the ${group.group_name} group total`}>
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
+            </div>
+            <p className="pl-3 mt-0.5 text-xs text-gray-400">
+              A line set on {group.group_name} itself counts as the group's total: the bills and flexible amounts below sit inside it, not on top of it.
+              {parseFloat(group.rest) > 0 && <> {fmt(group.rest)} of it isn't assigned to a row yet.</>}
+            </p>
+            {parseFloat(group.parent_line_short) > 0 && (
+              <p className="pl-3 mt-0.5 text-xs text-amber-600 dark:text-amber-400">
+                The rows below need {fmt(group.parent_line_short)} more than this total, so the group's Budget uses the rows.
+              </p>
+            )}
+          </div>
+        )}
+        {group.rows.map(r => <React.Fragment key={`${r.category_id ?? r.category_name}`}>{planRow(r, group)}</React.Fragment>)}
+        {hasLine && parseFloat(group.rest) > 0 && (
+          <div className={cx(COLS, "py-2 border-b border-gray-50 dark:border-gray-800")}>
+            <span className="pl-3 text-sm italic text-gray-500 dark:text-gray-400 truncate">Rest of {group.group_name}</span>
+            <span />
+            <span className="text-right text-sm tabular-nums text-gray-500">{fmt(group.rest)}</span>
+            <span className="text-right text-sm tabular-nums text-gray-500">{fmt(group.rest)}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Track Budgets: the Budget relative to reality. Read-only.
+  function monitorRow(line: PlanTrackLine) {
+    const available = availableOf(line);
+    const spent = parseFloat(line.actual_total || "0");
     const left = available - spent;
     const pct = available > 0 ? (spent / available) * 100 : 0;
-    const isOpen = expanded.has(row.category_id);
-
+    const k = `track:${line.category_id}`;
+    const isOpen = expanded.has(k);
     return (
       <div className="py-3 border-b border-gray-50 dark:border-gray-800 last:border-0">
         <div className="flex items-baseline justify-between gap-3 mb-1.5">
           <div className="flex items-center gap-1.5 min-w-0">
-            <button onClick={() => toggle(row.category_id)} className="text-gray-400 hover:text-indigo-500 shrink-0">
+            <button onClick={() => toggle(k)} className="text-gray-400 hover:text-indigo-500 shrink-0"
+              aria-label={isOpen ? `Collapse ${line.category_name}` : `Expand ${line.category_name}`}>
               {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
             </button>
-            <span className="truncate font-medium text-gray-900 dark:text-white">{row.category_name}</span>
-            {row.rollover_enabled && parseFloat(row.rollover_balance || "0") > 0 && (
+            <span className="truncate font-medium text-gray-900 dark:text-white">{line.category_name}</span>
+            {line.rollover_enabled && parseFloat(line.rollover_balance || "0") > 0 && (
               <span className="shrink-0 text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                +{fmt(parseFloat(row.rollover_balance || "0"))} rolled over
+                +{fmt(parseFloat(line.rollover_balance || "0"))} rolled over
               </span>
             )}
           </div>
@@ -302,7 +372,6 @@ export default function Budget() {
             {fmt(spent)}<span className="text-gray-300 dark:text-gray-400"> / {fmt(available)}</span>
           </span>
         </div>
-
         <div className="flex items-center gap-3">
           <div className="flex-1 h-1.5 rounded-full bg-gray-100 dark:bg-gray-800 overflow-hidden">
             <div className={`h-full rounded-full ${barColor(pct)}`} style={{ width: `${Math.min(pct, 100)}%` }} />
@@ -311,22 +380,21 @@ export default function Budget() {
             {left < 0 ? `${fmt(Math.abs(left))} over` : `${fmt(left)} left`}
           </span>
         </div>
-
-        {isOpen && (
-          <div className="mt-2">
-            <Breakdown categoryId={row.category_id} />
-          </div>
-        )}
+        {isOpen && <div className="mt-2"><Breakdown categoryId={line.category_id} /></div>}
       </div>
     );
   }
+
+  const status = plan ? leftToAssignStatus(plan.left_to_assign) : null;
+  const categoryGroups = (plan?.groups ?? []).filter(g => g.kind !== "uncategorized");
+  const uncategorized = (plan?.groups ?? []).find(g => g.kind === "uncategorized");
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Budget</h2>
-          <button onClick={() => setShowHelp(true)} className="text-gray-300 hover:text-indigo-500">
+          <button onClick={() => setShowHelp(true)} className="text-gray-300 hover:text-indigo-500" aria-label="Help">
             <HelpCircle size={14} />
           </button>
         </div>
@@ -344,55 +412,69 @@ export default function Budget() {
         </div>
       </div>
 
-      {/* Keyed by year-month so switching the month gets a fresh mutation,
-          drafts, and error state instead of one instance's in-flight/failed
-          save from a prior month bleeding into the newly viewed month. */}
-      <LeftToBudgetPanel key={`${year}-${month}`} year={year} month={month} />
-
       {isLoading && <div className="card text-sm text-gray-400">Loading…</div>}
 
-      {/* Track Budgets: the number you set relative to reality -- progress
-          bars, spend-vs-budget, merchant breakdown. Read-only. */}
-      {!isLoading && tab === "track" && (
+      {!isLoading && plan && tab === "track" && (
         <>
           <div className="card bg-gradient-to-br from-indigo-50 to-white dark:from-indigo-950/30 dark:to-transparent">
-            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
-              {MONTHS[month - 1]} {year}
-            </p>
-            <p className={`text-3xl font-bold mt-1 ${totalLeft < 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-              {totalLeft < 0 ? `${fmt(Math.abs(totalLeft))} over` : `${fmt(totalLeft)} left to spend`}
+            <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">{monthLabel}</p>
+            <p className={`text-3xl font-bold mt-1 ${totals.left < 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+              {totals.left < 0 ? `${fmt(Math.abs(totals.left))} over` : `${fmt(totals.left)} left to spend`}
             </p>
             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-              {fmt(totalSpent)} spent of {fmt(totalAvailable)} budgeted
-              {overCount > 0 && <span className="text-red-500"> · {overCount} over budget</span>}
+              {fmt(totals.spent)} spent of {fmt(totals.available)} budgeted
+              {overCount(totals.overCount)}
             </p>
             <div className="mt-3 h-2 rounded-full bg-white/70 dark:bg-gray-800 overflow-hidden">
-              <div className={`h-full rounded-full ${barColor(overallPct)}`} style={{ width: `${Math.min(overallPct, 100)}%` }} />
+              <div className={`h-full rounded-full ${barColor(totals.pct)}`} style={{ width: `${Math.min(totals.pct, 100)}%` }} />
             </div>
           </div>
 
           <div className="card">
             <h3 className="font-semibold text-gray-900 dark:text-white mb-1">Budget lines</h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-              Expand any line to see what made it up. Switch to Set Budgets to add, edit, or remove a line.
+              Each line's budget is its bills from Recurring plus its flexible amount. Expand a line to see what was spent. Switch to Set Budgets to change one.
             </p>
-            {budgetRows.length === 0 && (
-              <p className="text-sm text-gray-400 py-4 text-center">
-                No budget lines yet. Switch to Set Budgets to add one.
-              </p>
+            {lines.length === 0 && (
+              <p className="text-sm text-gray-400 py-4 text-center">No budget lines yet. Switch to Set Budgets to add one.</p>
             )}
-            {budgetRows.map(r => <MonitorRow key={r.category_id} row={r} />)}
+            {lines.map(l => <React.Fragment key={`${l.category_id}:${l.category_name}`}>{monitorRow(l)}</React.Fragment>)}
           </div>
         </>
       )}
 
-      {/* Set Budgets: the number you set. No progress bars, no spent
-          figures -- that's Track's job. */}
-      {!isLoading && tab === "set" && (
+      {!isLoading && plan && status && tab === "set" && (
         <>
+          <div className="card space-y-2">
+            <div className="flex items-baseline justify-between gap-3 flex-wrap">
+              <h3 className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">
+                Left to assign
+                <HowCalculated title="Left to assign" explanations={[plan.explain_left_to_assign]} />
+              </h3>
+              <span className={cx("text-2xl font-bold tabular-nums",
+                status.over ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400")}>
+                {fmt(status.amount)} <span className="text-sm font-medium">{status.label}</span>
+              </span>
+            </div>
+            <p className="text-sm tabular-nums text-gray-600 dark:text-gray-300">
+              <span title="Income this month, as on the Recurring tab">Income {fmt(plan.income_total)}</span>
+              {" − "}<span title="Bills and planned one-offs this month">Committed {fmt(plan.committed_total)}</span>
+              {" − "}<span title="What you've added on top of the bills">Flexible {fmt(plan.flexible_total)}</span>
+              {" = "}<span className="font-semibold">{status.over ? "−" : ""}{fmt(status.amount)}</span>
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Committed comes from <Link to="/recurring" className="underline">Recurring</Link> automatically. Change a bill there and it updates here. Flexible is what you add on top; Budget is the two together.
+            </p>
+            {plan.unclassified_count > 0 && (
+              <Link to="/recurring" className="text-xs text-amber-600 underline">
+                {plan.unclassified_count} recurring {plan.unclassified_count === 1 ? "bill has" : "bills have"} no category
+              </Link>
+            )}
+          </div>
+
           <div className="card">
-            <div className="flex items-center justify-between mb-1">
-              <h3 className="font-semibold text-gray-900 dark:text-white">Budget lines</h3>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-gray-900 dark:text-white">Budgets</h3>
               <div className="flex items-center gap-2">
                 <button onClick={() => applyRolloverMut.mutate()} disabled={applyRolloverMut.isPending}
                   className="btn-secondary text-xs px-2 py-1" title="Carry last month's unspent budget forward">
@@ -403,42 +485,63 @@ export default function Budget() {
                 </button>
               </div>
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-              A few broad lines are easier to hit than many small ones.
-            </p>
 
             {adding && (
               <div className="flex flex-wrap items-center gap-2 mb-3 bg-gray-50 dark:bg-gray-800/50 rounded-md px-3 py-2">
                 <select className="input py-1 text-sm" value={addCat} onChange={e => setAddCat(e.target.value)}>
                   <option value="">Choose a category…</option>
-                  <CategoryOptions categories={categories as any[]} type="expense" exclude={budgetedIds} />
+                  <CategoryOptions categories={categories as any[]} type="expense" exclude={shownIds} />
                 </select>
-                <input type="number" step="0.01" className="input w-28 py-1 text-sm text-right"
-                  placeholder="Amount" value={addAmt} onChange={e => setAddAmt(e.target.value)} />
-                {addCat && monthOnly(Number(addCat)) && (
-                  <span className="text-xs text-gray-400">for {monthLabel} only</span>
-                )}
+                <input type="number" step="0.01" min="0" className="input w-28 py-1 text-sm text-right"
+                  placeholder="Flexible" value={addAmt} onChange={e => setAddAmt(e.target.value)} />
+                {addCat && monthOnly(Number(addCat)) && <span className="text-xs text-gray-400">for {monthLabel} only</span>}
                 <button className="btn-primary text-xs px-2 py-1" disabled={!addCat || !addAmt || upsertMut.isPending}
-                  onClick={() => saveEdit(Number(addCat), addAmt)}>
+                  onClick={() => save(Number(addCat), addAmt)}>
                   {upsertMut.isPending ? "Saving…" : "Add"}
                 </button>
                 <button className="text-xs text-gray-400 hover:text-gray-600" onClick={() => setAdding(false)}>Cancel</button>
               </div>
             )}
 
-            {budgetRows.length === 0 && (
+            <div className={cx(COLS, "pb-1 text-xs font-medium text-gray-400")}>
+              <span>Category</span>
+              <span className="text-right">Committed</span>
+              <span className="text-right">Flexible</span>
+              <span className="text-right">Budget</span>
+            </div>
+            {categoryGroups.length === 0 && (
               <p className="text-sm text-gray-400 py-4 text-center">
-                No budget lines yet. Add one, or start from what you already spend below.
+                No bills or budgets yet. Add a flexible amount, or start from what you already spend below.
               </p>
             )}
-            {budgetRows.map(r => <ConfigRow key={r.category_id} row={r} />)}
+            {categoryGroups.map(g => <React.Fragment key={`${g.kind}:${g.group_id ?? g.group_name}`}>{groupView(g)}</React.Fragment>)}
+            {categoryGroups.length > 0 && (
+              <div className={cx(COLS, "pt-2 mt-2 border-t border-gray-200 dark:border-gray-700 text-sm")}>
+                <span className="font-medium text-gray-700 dark:text-gray-300">Budget across categories</span>
+                <span className="text-right tabular-nums text-gray-500">
+                  {fmt(categoryGroups.reduce((s, g) => s + parseFloat(g.committed), 0))}
+                </span>
+                <span className="text-right tabular-nums text-gray-500">
+                  {fmt(categoryGroups.reduce((s, g) => s + parseFloat(g.flexible), 0))}
+                </span>
+                <span className="text-right font-semibold tabular-nums text-gray-900 dark:text-white">{fmt(plan.category_budget_total)}</span>
+              </div>
+            )}
+            {uncategorized && (
+              <>
+                {groupView(uncategorized)}
+                <p className="pl-3 mt-1 text-xs text-gray-400">
+                  Counted in Committed above, but not in any category, so Track Budgets can't measure it. Give these a category on Recurring.
+                </p>
+              </>
+            )}
           </div>
 
           {unbudgeted.length > 0 && (
             <div className="card">
               <h3 className="font-semibold text-gray-900 dark:text-white">Spending with no budget</h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                What you spent here this month. Budget it at that amount in one click, then adjust.
+                What you spent here this month. Add it as a flexible amount in one click, then adjust.
               </p>
               <div className="space-y-2">
                 {unbudgeted.map(r => (
@@ -448,12 +551,9 @@ export default function Budget() {
                       {monthOnly(r.category_id) && <span className="ml-2 text-xs text-gray-400">for {monthLabel} only</span>}
                     </span>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-sm tabular-nums text-gray-500 dark:text-gray-400">
-                        {fmt(parseFloat(r.actual_total))}
-                      </span>
-                      <button className="btn-secondary text-xs px-2 py-0.5"
-                        disabled={upsertMut.isPending}
-                        onClick={() => saveEdit(r.category_id, r.actual_total)}>
+                      <span className="text-sm tabular-nums text-gray-500 dark:text-gray-400">{fmt(parseFloat(r.actual_total))}</span>
+                      <button className="btn-secondary text-xs px-2 py-0.5" disabled={upsertMut.isPending}
+                        onClick={() => save(r.category_id, r.actual_total)}>
                         {upsertMut.isPending ? "Saving…" : "Budget this"}
                       </button>
                     </div>
@@ -469,14 +569,19 @@ export default function Budget() {
         <HelpPanel
           title="Budget"
           body={
-            "Track Budgets shows the amount you set relative to what you actually spent -- progress bars, spent/left, and the merchants behind each line. Set Budgets is where you add, edit, or remove a line, and turn rollover on or off -- no progress bars there, just the numbers you're setting.\n\n" +
-            "Set a few broad budget lines rather than many small ones — a single Subscriptions budget is easier to hit than a limit per service.\n\n" +
-            "Budgets are saved as 'every month' by default, so a new month never starts unbudgeted. The exception is a bucket you assign from Left to budget while carry-forward is off (Settings → Preferences): those are set for the month you're viewing only. Removing a line is different from setting it to zero: zero means spend nothing here, while removing it means the category simply isn't budgeted.\n\n" +
-            "'Spending with no budget' (on Set Budgets) shows where money went that no line covers, so you can budget it at what you actually spend."
+            "Set Budgets is one list. Each category shows Committed, Flexible and Budget. Committed is the bills and planned one-offs that land this month, read from Recurring automatically; you never type it. Flexible is what you add on top (groceries, shopping, a cushion). Budget is the two together.\n\n" +
+            "The header reads Income − Committed − Flexible = Left to assign. Income and Committed are the same numbers the Recurring tab shows, so Income − Committed is Recurring's 'Left over'. Green means money is still unassigned; red means you've assigned more than comes in.\n\n" +
+            "A budget set on a parent category (for example a group like Necessities) is treated as that group's total: the bills and flexible amounts under it count inside it, never on top of it. Whatever it doesn't cover yet shows as 'Rest of …'. Remove it and the group simply adds up its rows.\n\n" +
+            "Track Budgets measures each line's Budget against what you actually spent. Its total budgeted always equals 'Budget across categories' on Set Budgets.\n\n" +
+            "Flexible amounts are saved as 'every month' by default. The exception is an assignable bucket while carry-forward is off (Settings → Preferences): those are set for the month you're viewing only."
           }
           onClose={() => setShowHelp(false)}
         />
       )}
     </div>
   );
+}
+
+function overCount(n: number): React.ReactNode {
+  return n > 0 ? <span className="text-red-500"> · {n} over budget</span> : null;
 }

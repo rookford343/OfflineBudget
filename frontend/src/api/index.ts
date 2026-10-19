@@ -158,8 +158,8 @@ export const budgetApi = {
   categoryBreakdown: (categoryId: number, year: number, month: number) =>
     api.get("/budget/category-breakdown", { params: { category_id: categoryId, year, month } }).then((r) => r.data),
   remove: (allocationId: number) => api.delete(`/budget/${allocationId}`),
-  leftToBudget: (year: number, month: number) =>
-    api.get("/budget/left-to-budget", { params: { year, month } }).then((r) => r.data),
+  plan: (year: number, month: number) =>
+    api.get("/budget/plan", { params: { year, month } }).then((r) => r.data),
 };
 
 // ── Credit Cards ──────────────────────────────────────────────────────────────
