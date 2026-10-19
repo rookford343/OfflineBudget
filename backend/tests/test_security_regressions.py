@@ -8,6 +8,8 @@ now refuses or neutralizes it.
     swallowed, and never breaks the request it was auditing.
   - bonus plans: another user's plan or item is 404, never readable or editable.
   - bonus allocation: another user's account in the allocation steps is 404, and nothing is saved.
+  - checking level: another user's account (read, topped up, topped up from,
+    or swept to) is 404, and no rule is saved.
 """
 import logging
 from unittest.mock import patch
@@ -277,3 +279,46 @@ def test_bonus_allocation_is_user_scoped(db_session):
     }
     assert client(owner).put("/bonus-plans/allocation", json=shortfall_body).status_code == 404
     assert client(owner).get("/bonus-plans/allocation").json()["shortfall_account_id"] is None
+
+
+def test_checking_level_is_user_scoped(db_session):
+    """Another user's account named anywhere in /forecast/checking-level is
+    404 -- never readable, and never saved into the caller's rule."""
+    from decimal import Decimal
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from backend import models
+    from backend.dependencies import get_current_user, get_db
+    from backend.routers import forecast as forecast_router
+
+    def client(user):
+        app = FastAPI()
+        app.include_router(forecast_router.router)
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_current_user] = lambda: user
+        return TestClient(app)
+
+    owner = models.User(username="cl-owner", hashed_password="x", display_name="O")
+    other = models.User(username="cl-other", hashed_password="x", display_name="X")
+    db_session.add_all([owner, other])
+    db_session.flush()
+    mine = models.Account(user_id=owner.id, name="C", type=models.AccountType.checking, current_balance=Decimal("1"))
+    my_savings = models.Account(user_id=owner.id, name="S", type=models.AccountType.savings, current_balance=Decimal("1"))
+    theirs = models.Account(user_id=other.id, name="Other's Savings", type=models.AccountType.savings,
+                            current_balance=Decimal("1"))
+    db_session.add_all([mine, my_savings, theirs])
+    db_session.commit()
+
+    def body(**over):
+        b = {"from_account_id": my_savings.id, "to_account_id": mine.id, "action_threshold": "500",
+             "target_floor": "1000", "increment": "1000", "check_day": 1, "is_active": True,
+             "sweep_ceiling": None, "sweep_to_account_id": None}
+        b.update(over)
+        return b
+
+    assert client(owner).get(f"/forecast/checking-level?account_id={theirs.id}").status_code == 404
+    assert client(owner).put("/forecast/checking-level", json=body(from_account_id=theirs.id)).status_code == 404
+    assert client(owner).put("/forecast/checking-level", json=body(to_account_id=theirs.id)).status_code == 404
+    assert client(owner).put("/forecast/checking-level",
+                             json=body(sweep_ceiling="3000", sweep_to_account_id=theirs.id)).status_code == 404
+    assert db_session.query(models.BufferTransferRule).count() == 0

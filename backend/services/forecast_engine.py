@@ -11,7 +11,7 @@ from __future__ import annotations
 from calendar import monthrange
 from dataclasses import dataclass
 from datetime import date, timedelta
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from backend import models
@@ -154,43 +154,116 @@ def _compute_transfer_schedule(
     date.today()) would skip that month's check_day entirely, while a
     full-year query (e.g. /forecast/quarters) would catch it, producing
     contradictory numbers for the same account on the same day.
+
+    Top-ups only; see _compute_transfer_schedules for the sweep as well.
+    """
+    topups, _ = _compute_transfer_schedules(
+        db, user_id, rule, start_date, end_date,
+        overrides=overrides, proposal=proposal, include_sweep=False,
+    )
+    return topups
+
+
+def _check_day_in(rule: models.BufferTransferRule, year: int, month: int) -> date:
+    return date(year, month, min(rule.check_day, _last_day_of_month(date(year, month, 1))))
+
+
+def _sweep_active(db: Session, user_id: int, rule: models.BufferTransferRule) -> bool:
+    """The sweep runs only while the user saves each month, and only once a
+    ceiling and destination are set. A ceiling at or below target_floor
+    would sweep money the top-up just brought in, so it's treated as off
+    (the API refuses one; this guards rows written any other way)."""
+    if rule.sweep_ceiling is None or rule.sweep_to_account_id is None:
+        return False
+    if rule.sweep_ceiling <= rule.target_floor:
+        return False
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    return user is not None and user.savings_strategy == "save_monthly"
+
+
+def _compute_transfer_schedules(
+    db: Session,
+    user_id: int,
+    rule: models.BufferTransferRule,
+    start_date: date,
+    end_date: date,
+    overrides: list[dict] | None = None,
+    proposal: ScenarioProposal | None = None,
+    include_sweep: bool = True,
+) -> tuple[dict[date, Decimal], dict[date, Decimal]]:
+    """(top-ups into to_account, sweeps out of it), both keyed by check_day.
+
+    Top-ups are exactly _compute_transfer_schedule's original rule. After
+    each check_day's top-up decision, when the sweep is active
+    (_sweep_active), whole `increment`s of `lowest - sweep_ceiling` move to
+    sweep_to_account -- `lowest` being the lowest balance from this check_day
+    up to the next one, adjusted for every earlier top-up AND sweep. Sizing
+    off the window's LOWEST point is what guarantees the sweep never pushes
+    checking under the ceiling before the next check_day.
+
+    The sweep's last window always runs to the day before the NEXT check_day,
+    even past end_date: sized on a truncated window, a caller whose range
+    ends before the month's low point (e.g. a short risk query) would see a
+    bigger sweep on the same day than a full-year caller does. Top-ups keep
+    their original end_date clipping so their behaviour is unchanged.
     """
     anchor = date(start_date.year, 1, 1)
+    sweeping = include_sweep and _sweep_active(db, user_id, rule)
+
+    # First check_day strictly after end_date: later this month, or next month's.
+    next_cd = _check_day_in(rule, end_date.year, end_date.month)
+    if next_cd <= end_date:
+        following = end_date.replace(day=1) + timedelta(days=32)
+        next_cd = _check_day_in(rule, following.year, following.month)
+    sweep_horizon = next_cd - timedelta(days=1)
+    raw_end = sweep_horizon if sweeping else end_date
+
     raw_entries = build_forecast(
-        db, user_id, rule.to_account_id, anchor, end_date,
+        db, user_id, rule.to_account_id, anchor, raw_end,
         overrides=overrides,
         apply_buffer_transfers=False,
         proposal=proposal,
     )
     if not raw_entries:
-        return {}
+        return {}, {}
 
     check_days: list[date] = []
     cur = anchor
     while cur <= end_date:
-        last_day = _last_day_of_month(cur)
-        cd = date(cur.year, cur.month, min(rule.check_day, last_day))
+        cd = _check_day_in(rule, cur.year, cur.month)
         if anchor <= cd <= end_date:
             check_days.append(cd)
         cur = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
 
-    schedule: dict[date, Decimal] = {}
-    injected_so_far = Decimal("0")
+    topups: dict[date, Decimal] = {}
+    sweeps: dict[date, Decimal] = {}
+    adjusted_so_far = Decimal("0")  # + every earlier top-up, - every earlier sweep
     for i, cd in enumerate(check_days):
-        window_end = check_days[i + 1] - timedelta(days=1) if i + 1 < len(check_days) else end_date
+        is_last = i + 1 >= len(check_days)
+        window_end = end_date if is_last else check_days[i + 1] - timedelta(days=1)
         window = [e for e in raw_entries if cd <= e.date <= window_end]
         if not window:
             continue
-        lowest_raw = min(e.projected_balance for e in window)
-        lowest_adjusted = lowest_raw + injected_so_far
+        lowest_adjusted = min(e.projected_balance for e in window) + adjusted_so_far
         if lowest_adjusted < rule.action_threshold:
             shortfall = rule.target_floor - lowest_adjusted
             steps = int((shortfall / rule.increment).to_integral_value(rounding=ROUND_CEILING))
             amount = rule.increment * steps
-            schedule[cd] = amount
-            injected_so_far += amount
+            topups[cd] = amount
+            adjusted_so_far += amount
 
-    return schedule
+        if not sweeping:
+            continue
+        sweep_end = sweep_horizon if is_last else window_end
+        sweep_window = [e for e in raw_entries if cd <= e.date <= sweep_end]
+        lowest_now = min(e.projected_balance for e in sweep_window) + adjusted_so_far
+        excess = lowest_now - rule.sweep_ceiling
+        if excess >= rule.increment:
+            amount = rule.increment * int((excess / rule.increment).to_integral_value(rounding=ROUND_FLOOR))
+            sweeps[cd] = amount
+            adjusted_so_far -= amount
+
+    return topups, sweeps
 
 
 def _cc_actual_nearby(
@@ -941,29 +1014,36 @@ def build_forecast(
 
     incoming_transfer_schedules: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
     outgoing_transfer_schedules: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
+    # Sweeps: out of the rule's to_account, into its sweep_to_account.
+    sweeps_out: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
+    sweeps_in: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
     if apply_buffer_transfers:
         transfer_rules = db.query(models.BufferTransferRule).options(
             joinedload(models.BufferTransferRule.from_account),
             joinedload(models.BufferTransferRule.to_account),
+            joinedload(models.BufferTransferRule.sweep_to_account),
         ).filter(
             models.BufferTransferRule.user_id == user_id,
             models.BufferTransferRule.is_active == True,
             or_(
                 models.BufferTransferRule.to_account_id == account_id,
                 models.BufferTransferRule.from_account_id == account_id,
+                models.BufferTransferRule.sweep_to_account_id == account_id,
             ),
         ).all()
         for rule in transfer_rules:
-            schedule = _compute_transfer_schedule(
+            schedule, sweeps = _compute_transfer_schedules(
                 db, user_id, rule, start_date, end_date,
                 overrides=overrides, proposal=proposal,
             )
-            if not schedule:
-                continue
-            if rule.to_account_id == account_id:
+            if schedule and rule.to_account_id == account_id:
                 incoming_transfer_schedules.append((rule, schedule))
-            if rule.from_account_id == account_id:
+            if schedule and rule.from_account_id == account_id:
                 outgoing_transfer_schedules.append((rule, schedule))
+            if sweeps and rule.to_account_id == account_id:
+                sweeps_out.append((rule, sweeps))
+            if sweeps and rule.sweep_to_account_id == account_id:
+                sweeps_in.append((rule, sweeps))
 
     planned_transfers = db.query(models.PlannedTransfer).options(
         joinedload(models.PlannedTransfer.from_account),
@@ -1383,6 +1463,34 @@ def build_forecast(
                     category_name=None,
                     is_actual=False,
                     is_transfer=True,
+                ))
+
+        for rule, sweeps in sweeps_out:
+            amt = sweeps.get(current)
+            if amt:
+                balance -= amt
+                day_transactions.append(ForecastTransaction(
+                    name=f"Sweep to {rule.sweep_to_account.name if rule.sweep_to_account else 'Savings'}",
+                    amount=-amt,
+                    type="expense",
+                    category_name=None,
+                    is_actual=False,
+                    is_transfer=True,
+                    is_planned_transfer=True,
+                ))
+
+        for rule, sweeps in sweeps_in:
+            amt = sweeps.get(current)
+            if amt:
+                balance += amt
+                day_transactions.append(ForecastTransaction(
+                    name=f"Sweep from {rule.to_account.name}",
+                    amount=amt,
+                    type="income",
+                    category_name=None,
+                    is_actual=False,
+                    is_transfer=True,
+                    is_planned_transfer=True,
                 ))
 
         for pt in planned_transfers:

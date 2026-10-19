@@ -631,6 +631,63 @@ class BufferTransferRuleOut(BaseModel):
     is_active: bool
 
 
+class CheckingLevelIn(BaseModel):
+    """PUT /forecast/checking-level: the one top-up (+ optional sweep) rule
+    for `to_account_id`. Ownership/active checks live in the router."""
+    from_account_id: int
+    to_account_id: int
+    action_threshold: Decimal
+    target_floor: Decimal
+    increment: Decimal = Decimal("1000.00")
+    check_day: int = 1
+    is_active: bool = True
+    sweep_ceiling: Optional[Decimal] = None
+    sweep_to_account_id: Optional[int] = None
+
+    @field_validator("increment")
+    @classmethod
+    def increment_positive(cls, v):
+        if v <= 0:
+            raise ValueError("increment must be greater than 0")
+        return v
+
+    @field_validator("check_day")
+    @classmethod
+    def check_day_in_range(cls, v):
+        if not (1 <= v <= 28):
+            raise ValueError("check_day must be between 1 and 28")
+        return v
+
+    @model_validator(mode="after")
+    def consistent(self):
+        if self.from_account_id == self.to_account_id:
+            raise ValueError("Top up from a different account than the one being topped up")
+        if self.target_floor < self.action_threshold:
+            raise ValueError("target_floor must be at least action_threshold")
+        if self.sweep_ceiling is not None:
+            if self.sweep_ceiling <= self.target_floor:
+                raise ValueError("sweep_ceiling must be greater than target_floor")
+            if self.sweep_to_account_id is None:
+                raise ValueError("sweep_ceiling needs sweep_to_account_id")
+        if self.sweep_to_account_id is not None and self.sweep_to_account_id == self.to_account_id:
+            raise ValueError("Sweep to a different account than the one being swept")
+        return self
+
+
+class CheckingLevelOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    from_account_id: int
+    to_account_id: int
+    action_threshold: Decimal
+    target_floor: Decimal
+    increment: Decimal
+    check_day: int
+    is_active: bool
+    sweep_ceiling: Optional[Decimal] = None
+    sweep_to_account_id: Optional[int] = None
+
+
 class QuarterSummary(BaseModel):
     quarter: int
     year: int

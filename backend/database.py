@@ -303,6 +303,10 @@ def upgrade_schema():
         # is a new table, created by create_all.
         "ALTER TABLE users ADD COLUMN bonus_shortfall_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
         "ALTER TABLE users ADD COLUMN bonus_shortfall_round_to NUMERIC(14,2)",
+        # "Keep checking at the right level" sweep -- see
+        # forecast_engine._compute_transfer_schedules.
+        "ALTER TABLE buffer_transfer_rules ADD COLUMN sweep_ceiling NUMERIC(14,2)",
+        "ALTER TABLE buffer_transfer_rules ADD COLUMN sweep_to_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
     ]
     with engine.connect() as conn:
         for s in stmts:

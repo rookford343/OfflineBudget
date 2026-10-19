@@ -388,12 +388,24 @@ class BufferTransferRule(Base):
     increment: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     check_day: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Optional sweep: on check_day, move whole `increment`s of what checking
+    # holds above `sweep_ceiling` (at its lowest before the next check_day)
+    # to `sweep_to_account`. Runs only while users.savings_strategy is
+    # "save_monthly" -- see forecast_engine._compute_transfer_schedules.
+    # No FK cycle here (nothing points back at this table), and the rule's
+    # from/to relationships already make a user delete remove rule rows
+    # before account rows; SET NULL is a second line of defence.
+    sweep_ceiling: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    sweep_to_account_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("accounts.id", ondelete="SET NULL"),
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user: Mapped[User] = relationship(back_populates="buffer_transfer_rules")
     from_account: Mapped[Account] = relationship(foreign_keys=[from_account_id], back_populates="outgoing_buffer_rules")
     to_account: Mapped[Account] = relationship(foreign_keys=[to_account_id], back_populates="incoming_buffer_rules")
+    sweep_to_account: Mapped[Account | None] = relationship(foreign_keys=[sweep_to_account_id])
 
 
 # ── Transactions ──────────────────────────────────────────────────────────────

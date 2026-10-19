@@ -108,6 +108,75 @@ def get_forecast_risk(
     )
 
 
+# ── "Keep checking at the right level" ──────────────────────────────────────
+# One BufferTransferRule per to_account: the top-up, plus the optional sweep
+# (forecast_engine._compute_transfer_schedules). Uses backend.dependencies'
+# get_db -- the same session get_current_user came from.
+
+def _owned_account(db: Session, user: models.User, account_id: int, *, must_be_active: bool) -> models.Account:
+    account = db.query(models.Account).filter(
+        models.Account.id == account_id, models.Account.user_id == user.id,
+    ).first()
+    if account is None:
+        raise HTTPException(status_code=404, detail="Account not found")
+    if must_be_active and not account.is_active:
+        raise HTTPException(status_code=422, detail="Account is not active")
+    return account
+
+
+def _checking_level_rule(db: Session, user_id: int, to_account_id: int) -> models.BufferTransferRule | None:
+    # Lowest id first: if older data ever left two rules on one account, the
+    # settings screen always reads and edits the same one.
+    return db.query(models.BufferTransferRule).filter(
+        models.BufferTransferRule.user_id == user_id,
+        models.BufferTransferRule.to_account_id == to_account_id,
+    ).order_by(models.BufferTransferRule.id).first()
+
+
+@router.get("/checking-level", response_model=schemas.CheckingLevelOut | None)
+def get_checking_level(
+    account_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    # Read-only: a View Only login may call GET, so it must never write.
+    _owned_account(db, user, account_id, must_be_active=False)
+    return _checking_level_rule(db, user.id, account_id)
+
+
+@router.put("/checking-level", response_model=schemas.CheckingLevelOut)
+def put_checking_level(
+    body: schemas.CheckingLevelIn,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    # Ownership first (404) for every account named, before any 422 on an
+    # inactive one, so another user's account is never distinguishable.
+    named = [body.from_account_id, body.to_account_id]
+    if body.sweep_to_account_id is not None:
+        named.append(body.sweep_to_account_id)
+    for account_id in named:
+        _owned_account(db, user, account_id, must_be_active=False)
+    for account_id in named:
+        _owned_account(db, user, account_id, must_be_active=True)
+
+    rule = _checking_level_rule(db, user.id, body.to_account_id)
+    if rule is None:
+        rule = models.BufferTransferRule(user_id=user.id, to_account_id=body.to_account_id)
+        db.add(rule)
+    rule.from_account_id = body.from_account_id
+    rule.action_threshold = body.action_threshold
+    rule.target_floor = body.target_floor
+    rule.increment = body.increment
+    rule.check_day = body.check_day
+    rule.is_active = body.is_active
+    rule.sweep_ceiling = body.sweep_ceiling
+    rule.sweep_to_account_id = body.sweep_to_account_id if body.sweep_ceiling is not None else None
+    db.commit()
+    db.refresh(rule)
+    return rule
+
+
 def _attach_quarter_checkpoints(
     quarters: list[schemas.QuarterSummary],
     db: Session,
