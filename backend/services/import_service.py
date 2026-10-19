@@ -491,8 +491,8 @@ def run_import(
             # card's current_balance sat stale until its OWN (slower) bank
             # sync eventually caught up -- days during which the forecast
             # planned to pay off debt that checking had already paid off.
-            # Confirmed live 2026-09-01: Chase Sapphire sat at $REDACTED six
-            # days after a $7,212.80 autopay because is_transfer stayed False.
+            # Confirmed live 2026-09-01: Chase Sapphire sat at $5,000.00 six
+            # days after a $7,000.00 autopay because is_transfer stayed False.
             if row.is_transfer or source == models.TransactionSource.bank_sync:
                 for card in db.query(models.CreditCard).filter_by(user_id=user.id).all():
                     if card_matches_description(card, row.description):

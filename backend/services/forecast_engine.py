@@ -234,8 +234,8 @@ def _fires_on(item: models.RecurringItem, d: date) -> bool:
     # Quarterly items fire in month_of_year and every third month after it, so
     # month_of_year names the FIRST month of the cycle rather than the only one
     # (3 -> Mar/Jun/Sep/Dec). the user's Stormwater bill is the case this exists
-    # for: Budget!C15 marks it "Qtr" and the sheet charges $13.50 on 9/30 and
-    # 12/31 while carrying $4.50 as the monthly accrual in Budget!B15. Modeling
+    # for: Budget!C15 marks it "Qtr" and the sheet charges $15.00 on 9/30 and
+    # 12/31 while carrying $5.00 as the monthly accrual in Budget!B15. Modeling
     # it as monthly instead put a twelfth of the bill on checking every month --
     # right over a quarter, wrong on any given day.
     if frequency == models.RecurringFrequency.quarterly:
@@ -562,7 +562,7 @@ def build_forecast(
             continue
 
         # A next_payment_date that has gone stale must not swallow the balance.
-        # the user's Apple Card sat at 2026-05-25 with $250.25 due while the forecast
+        # the user's Apple Card sat at 2026-05-25 with $250.00 due while the forecast
         # ran August: the window check below never matched, so the card was
         # invisible to the forecast entirely -- no payoff, and no estimate
         # either, because its monthly_spend_estimate was 0. Cards that only sync
@@ -1141,8 +1141,8 @@ def build_forecast(
                         continue
 
             # A known real statement wins over the modelled amount for its own
-            # due date only. the user's Duke Electric is modelled at $180.00/month
-            # while the bill due 2026-09-08 is $214.07; editing the item would
+            # due date only. the user's Duke Electric is modelled at $200.00/month
+            # while the bill due 2026-09-08 is $250.00; editing the item would
             # rewrite every future month to a September-only number and lose
             # the estimate the forecast needs for October onward.
             actual_override = bill_actuals.get((item.id, current))

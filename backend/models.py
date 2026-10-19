@@ -216,8 +216,8 @@ class Account(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # An emergency fund is savings you are deliberately not planning to spend,
     # so it must not pad any "can I cover this?" figure. the user's Money Market is
-    # exactly this: counting it made the reserve look covered by $44,560.80
-    # when only $23,790.50 was really available for it. Account TYPE can't
+    # exactly this: counting it made the reserve look covered by $50,000.00
+    # when only $20,000.00 was really available for it. Account TYPE can't
     # carry this -- money_market vs savings is about the product, not intent.
     is_emergency_fund: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(Text)

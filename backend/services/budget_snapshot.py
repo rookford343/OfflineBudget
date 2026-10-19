@@ -53,7 +53,7 @@ def leftover_share(item, as_of: date) -> Decimal:
     if item.frequency == models.RecurringFrequency.quarterly:
         # Accrued, not charged: a quarterly bill spreads across the three
         # months it covers, exactly as the sheet does -- Budget!B15 carries
-        # Stormwater at $4.50/mo while the forecast charges the full $13.50
+        # Stormwater at $5.00/mo while the forecast charges the full $15.00
         # once a quarter. Counting the whole bill in its own month would
         # make Leftover lurch every third month.
         return (item.amount / 3).quantize(Decimal("0.01"))
@@ -155,7 +155,7 @@ def _card_linked_recurring_items(
     Frequency matters: both callers below treat this list as a set of charges
     landing THIS month, so a yearly item must only appear in its own month.
     Without that filter the annual card subscriptions (Fitbod, Runna,
-    Bitdefender, Apple TV+, Rivian Connect+, Natural Cycles -- $REDACTED/yr)
+    Bitdefender, Apple TV+, Rivian Connect+, Natural Cycles -- $500.00/yr)
     counted as if each were billed monthly, overstating the credit-card bill
     total by that amount in all twelve months. Mirrors _monthly_expenses.
     """
@@ -314,7 +314,7 @@ def _lookahead_minimum(
     # actuals don't carry it), so the dip silently started counting as the
     # floor again the moment the payoff actually happened. the user's real Chase
     # payoff, 2026-08-27: a real `Transaction` dated today, description
-    # "CC Payment: Chase Sapphire", $7,342.90 -- is_cc_locked=False, floor
+    # "CC Payment: Chase Sapphire", $7,500.00 -- is_cc_locked=False, floor
     # landed on it anyway. Recognize a real payoff the same way
     # `_cc_actual_nearby` already does elsewhere in this codebase: match the
     # card by name/last-four against the transaction's description, not by a
@@ -429,12 +429,12 @@ def compute_budget_snapshot(
     # statement amount; subtracting only balance_due would miss the new,
     # not-yet-statemented spending entirely. current_balance - balance_due
     # + pending_charges is exactly that gap. Read directly from the user's real
-    # spreadsheet 2026-08-09 ("2026 Overview"!B12: "=-7342.90+9586.65+540.18"
+    # spreadsheet 2026-08-09 ("2026 Overview"!B12: "=-5000.00+8500.00+500.00"
     # -- literally -balance_due + current_balance + pending_charges for
     # Chase Sapphire). Before bank sync this was usually ~0 (current_balance
     # tracked balance_due closely by hand); live sync now keeps
     # current_balance accurate to the minute, so the gap is real and
-    # material -- confirmed live: Chase Sapphire alone carried a $REDACTED
+    # material -- confirmed live: Chase Sapphire alone carried a $1,500.00
     # gap on 2026-08-09.
     #
     # Left to Spend used to subtract the full sum of current_balance instead,
@@ -484,16 +484,16 @@ def compute_budget_snapshot(
     # make this look symmetric with Left to Spend -- they aren't, by design.
     #
     # This formula is right -- resolved 2026-08-13 after two rounds against
-    # the user's spreadsheet. The app's original $REDACTED vs the sheet's $REDACTED on
+    # the user's spreadsheet. The app's original $300.00 vs the sheet's $650.00 on
     # 8/25 traced to real gaps in the app's data, not this formula:
-    #   1. "Holland Vacation" (-$875.40) is a real purchase the user puts on his
+    #   1. "Holland Vacation" (-$900.00) is a real purchase the user puts on his
     #      Chase card, but PlannedExpense had no way to route a one-off to a
     #      card -- see forecast_engine.py's card_planned_by_date, added to
     #      fix exactly this. It now waits for Chase's real payoff cycle
     #      (statement closes the 28th, due the 25th of the FOLLOWING month --
     #      see _card_payoff_date_for_charge) instead of hitting checking on
     #      the day of the trip. That alone moved the 8/25 quarter minimum
-    #      from $REDACTED to $REDACTED.
+    #      from $300.00 to $1,200.00.
     #   2. The SS wage-base crossing: the app computes it dynamically from
     #      the user's configured ss_wage_base (184,500, confirmed current --
     #      2026 tax data) and his actual paycheck history, landing on 8/14.
