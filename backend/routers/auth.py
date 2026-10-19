@@ -175,5 +175,15 @@ def delete_account(
 ):
     if not verify_password(body.password, current_user.hashed_password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password")
+    # Belt-and-suspenders for users.bonus_shortfall_account_id: the column's
+    # ON DELETE SET NULL (models.py) only protects a DB whose fk was created
+    # (or rebuilt) with that clause. A live SQLite db that got the column via
+    # the pre-fix ALTER TABLE still has ON DELETE NO ACTION, and
+    # upgrade_schema() can't retrofit that -- it swallows "duplicate column"
+    # and never reissues the ALTER. Nulling it here first works on any
+    # schema, old or new, so the cascade into deleting this user's own
+    # accounts below never hits a dangling reference.
+    current_user.bonus_shortfall_account_id = None
+    db.flush()
     db.delete(current_user)
     db.commit()

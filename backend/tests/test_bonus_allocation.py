@@ -324,6 +324,83 @@ def test_a_user_with_a_shortfall_account_set_can_be_deleted(db_session):
     assert db_session.query(models.User).filter(models.User.id == user.id).first() is None
 
 
+def test_deleting_a_user_works_even_on_the_live_pre_fix_schema():
+    """The real data/budget.db already got bonus_shortfall_account_id from
+    the PRE-FIX migration line, which has no ON DELETE clause at all --
+    upgrade_schema() swallows "duplicate column" on every later run, so it
+    can never retrofit ON DELETE SET NULL onto a column that already
+    exists there. The actual guard has to live in application code
+    (routers/auth.py's delete_account nulls the column before deleting),
+    not rely on the fk's own on-delete action -- models.py's fix alone only
+    helps a brand-new database.
+
+    Reproduces that live schema by temporarily clearing the
+    ForeignKeyConstraint's own ondelete (a separate attribute from the
+    ForeignKey object's -- DDL rendering for this table-level constraint
+    reads the constraint's copy, not the column-level one) before building
+    a throwaway engine, so the emitted CREATE TABLE genuinely lacks "ON
+    DELETE SET NULL" -- not just a model that still says it should have
+    one. Restored immediately via try/finally regardless of outcome, since
+    it mutates the shared, module-level Base.metadata.
+
+    Does NOT use the db_session fixture (that engine's tables are already
+    built with the real ondelete baked in before this test body runs);
+    needs its own fresh engine built while the attribute is cleared.
+    Then calls the REAL delete_account route function (not a hand-written
+    equivalent) against it."""
+    from sqlalchemy import create_engine, event, text
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from backend.auth import hash_password
+    from backend.database import Base
+    from backend.routers.auth import delete_account
+    from backend.schemas import DeleteAccountRequest
+
+    constraint = next(iter(models.User.__table__.c.bonus_shortfall_account_id.foreign_keys)).constraint
+    original_ondelete = constraint.ondelete
+    assert original_ondelete == "SET NULL", "models.py's fix changed shape -- update this test"
+
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+    @event.listens_for(engine, "connect")
+    def _fk_pragma(dbapi_conn, _record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    try:
+        constraint.ondelete = None
+        Base.metadata.create_all(bind=engine)
+    finally:
+        constraint.ondelete = original_ondelete
+
+    with engine.connect() as conn:
+        ddl = conn.execute(text(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+        )).scalar()
+    assert "ON DELETE SET NULL" not in ddl, "the pre-fix schema must genuinely lack the clause"
+
+    db = sessionmaker(bind=engine)()
+    try:
+        user = models.User(username="u1", hashed_password=hash_password("correct-password"), display_name="U")
+        db.add(user)
+        db.flush()
+        mm = models.Account(user_id=user.id, name="Money Market", type=models.AccountType.money_market,
+                            current_balance=Decimal("0"))
+        db.add(mm)
+        db.flush()
+        user.bonus_shortfall_account_id = mm.id
+        db.commit()
+
+        delete_account(DeleteAccountRequest(password="correct-password"), db, user)  # must not raise
+
+        assert db.query(models.User).filter(models.User.id == user.id).first() is None
+    finally:
+        db.close()
+        engine.dispose()
+
+
 # ── Engine: the injected transfer appears on both sides of the forecast ───
 
 def _seed_engine(db):
