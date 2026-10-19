@@ -175,7 +175,11 @@ Add each bill with its day-of-month. Examples:
   target %, whether it's based on last year's salary or one from a few years
   back, the % withheld, and any fixed amounts for ramp years. The forecast
   adds each year's net on the pay date, and the gross counts toward the
-  Social Security wage base.
+  Social Security wage base. Below the plan list, **When a bonus lands**
+  lets you set up steps that move part of each bonus from checking to
+  savings accounts on the payout day, plus a shortfall account for when it
+  can't cover them — for example, "$25,000 to Money Market, the rest to
+  Savings rounded down to $1,000. Anything left stays in checking."
 
 ---
 

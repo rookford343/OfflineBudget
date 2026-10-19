@@ -4,6 +4,7 @@ import { authApi, bonusPlansApi, recurringApi } from "../../api";
 import { fmt } from "../../lib/utils";
 import { Plus, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import BonusAllocationSection from "./BonusAllocationSection";
 
 type Draft = {
   id?: number;
@@ -188,6 +189,8 @@ export default function BonusPlansSection() {
         isPending={deleteMut.isPending}
         onConfirm={() => deletePlan && deleteMut.mutate(deletePlan.id)}
       />
+
+      <BonusAllocationSection />
     </div>
   );
 }

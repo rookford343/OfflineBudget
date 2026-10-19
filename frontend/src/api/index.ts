@@ -400,6 +400,8 @@ export const bonusPlansApi = {
   create: (data: object) => api.post("/bonus-plans", data).then((r) => r.data),
   update: (id: number, data: object) => api.put(`/bonus-plans/${id}`, data).then((r) => r.data),
   remove: (id: number) => api.delete(`/bonus-plans/${id}`),
+  getAllocation: () => api.get("/bonus-plans/allocation").then((r) => r.data),
+  putAllocation: (data: object) => api.put("/bonus-plans/allocation", data).then((r) => r.data),
 };
 
 // ── Verification Flags ──────────────────────────────────────────────────────
