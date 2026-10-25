@@ -10,11 +10,23 @@ now refuses or neutralizes it.
   - bonus allocation: another user's account in the allocation steps is 404, and nothing is saved.
   - checking level: another user's account (read, topped up, topped up from,
     or swept to) is 404, and no rule is saved.
+  - plaid token in responses: the Plaid access token never appears in any
+    /bank-sync response body across a link/sync/disconnect flow.
+  - plaid token logging: the access token and PLAID_SECRET never appear in a
+    log line across the exchange, sync and error paths.
+  - plaid auth: /plaid/link-token, /plaid/exchange and /plaid/first-import
+    are 401 anonymous and 403 for a View Only member.
+  - plaid error detail: a failed /plaid/exchange's error detail never echoes
+    the request body (the public token).
+  - plaid link-token ownership: an update-mode link token for another user's
+    connection is 404, never revealing that the connection exists.
 """
 import logging
+from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -322,3 +334,184 @@ def test_checking_level_is_user_scoped(db_session):
     assert client(owner).put("/forecast/checking-level",
                              json=body(sweep_ceiling="3000", sweep_to_account_id=theirs.id)).status_code == 404
     assert db_session.query(models.BufferTransferRule).count() == 0
+
+
+# --- Plaid (2026-10-25): link, exchange, first import -----------------------
+from backend import models
+from backend.dependencies import get_current_user, get_db
+from backend.routers import bank_sync as bank_sync_router_module
+from backend.services import crypto
+from backend.services.plaid_client import PlaidAccount, PlaidError
+from backend.services.plaid_sync_service import PlaidSyncReport, sync_plaid_connection
+
+
+def _plaid_app(db_session, user=None):
+    app = FastAPI()
+    app.include_router(bank_sync_router_module.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    if user is not None:
+        app.dependency_overrides[get_current_user] = lambda: user
+    return TestClient(app)
+
+
+def _plaid_user(db_session, username="dan-plaid"):
+    user = models.User(username=username, hashed_password="x", display_name="D")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+def test_plaid_token_never_in_responses(db_session, monkeypatch):
+    """The Plaid access token is absent from every /bank-sync response body
+    across a full exchange -> link-token -> accounts -> status -> first-import
+    -> disconnect flow."""
+    monkeypatch.setattr(crypto.settings, "BANK_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    user = _plaid_user(db_session)
+    test_client = _plaid_app(db_session, user)
+
+    secret_token = "secret-plaid-access-token-should-never-appear-in-any-response"
+    plaid_accounts = [
+        PlaidAccount(id="acc-1", name="Checking", mask="1111", type="depository", subtype="checking",
+                     current=Decimal("10.00"), available=Decimal("10.00"), limit=None),
+    ]
+    responses = []
+
+    with patch("backend.routers.bank_sync.exchange_public_token", return_value=(secret_token, "item-flow")), \
+         patch("backend.routers.bank_sync.get_plaid_accounts", return_value=plaid_accounts):
+        resp = test_client.post("/bank-sync/plaid/exchange", json={"public_token": "pub-flow"})
+    responses.append(resp)
+    connection_id = resp.json()["connection_id"]
+
+    with patch("backend.routers.bank_sync.create_link_token", return_value="link-tok"):
+        responses.append(test_client.post("/bank-sync/plaid/link-token", json={"connection_id": connection_id}))
+
+    with patch("backend.routers.bank_sync.get_plaid_accounts", return_value=plaid_accounts):
+        responses.append(test_client.get(f"/bank-sync/{connection_id}/accounts"))
+
+    responses.append(test_client.get("/bank-sync/status"))
+
+    report = PlaidSyncReport(imported=0, matched=0, ignored=0, rows=[])
+    with patch("backend.routers.bank_sync.sync_plaid_connection", return_value=report):
+        responses.append(test_client.post(f"/bank-sync/{connection_id}/plaid/first-import?confirm=false"))
+
+    with patch("backend.routers.bank_sync.remove_item"):
+        responses.append(test_client.delete(f"/bank-sync/{connection_id}"))
+
+    for resp in responses:
+        assert secret_token not in resp.text
+
+
+def test_plaid_token_never_logged(caplog, db_session, monkeypatch):
+    """Neither the Plaid access token nor PLAID_SECRET appears in a log line
+    across the exchange (router), a real sync (plaid_sync_service, with only
+    the network edge mocked), and an error path (a failing sync)."""
+    monkeypatch.setattr(crypto.settings, "BANK_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setattr(settings, "PLAID_SECRET", "plaid-secret-should-never-leak-9f8e7d")
+    user = _plaid_user(db_session)
+    test_client = _plaid_app(db_session, user)
+
+    secret_token = "secret-plaid-access-token-should-never-be-logged-a1b2c3"
+
+    with caplog.at_level(logging.DEBUG):
+        with patch("backend.routers.bank_sync.exchange_public_token", return_value=(secret_token, "item-log")), \
+             patch("backend.routers.bank_sync.get_plaid_accounts", return_value=[]):
+            resp = test_client.post("/bank-sync/plaid/exchange", json={"public_token": "pub-log"})
+        connection = db_session.get(models.BankConnection, resp.json()["connection_id"])
+
+        import backend.services.plaid_client as plaid_client_module
+
+        with patch.object(plaid_client_module, "sync_page",
+                          return_value=plaid_client_module.PlaidSyncPage(
+                              added=[], modified=[], removed=[], next_cursor="cursor-1", has_more=False)), \
+             patch.object(plaid_client_module, "get_accounts", return_value=[]), \
+             patch.object(plaid_client_module, "get_last_successful_update", return_value=None), \
+             patch.object(plaid_client_module, "get_card_statements", return_value=[]), \
+             patch.object(plaid_client_module, "refresh_transactions", return_value=None):
+            sync_plaid_connection(db_session, connection, first_import=True)
+
+        with patch.object(plaid_client_module, "sync_page",
+                          side_effect=PlaidError("ITEM_LOGIN_REQUIRED", "reconnect needed")):
+            with pytest.raises(PlaidError):
+                sync_plaid_connection(db_session, connection)
+
+    log_text = "\n".join(r.getMessage() for r in caplog.records)
+    assert secret_token not in log_text
+    assert "plaid-secret-should-never-leak-9f8e7d" not in log_text
+
+
+def test_plaid_endpoints_refuse_viewer_and_anonymous(db_session, monkeypatch):
+    """/plaid/link-token, /plaid/exchange and /plaid/first-import are 401 with
+    no token and 403 for a View Only member -- the same gate every other
+    /bank-sync write already enforces via get_current_user."""
+    monkeypatch.setattr(crypto.settings, "BANK_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    owner = _plaid_user(db_session, "owner-plaid-auth")
+    viewer = models.User(username="viewer-plaid-auth", hashed_password="x", display_name="V",
+                         role=models.UserRole.viewer, linked_to_user_id=owner.id)
+    db_session.add(viewer)
+    db_session.commit()
+    db_session.refresh(viewer)
+
+    connection = models.BankConnection(
+        user_id=owner.id, provider="plaid", access_url_encrypted=crypto.encrypt("plaid-token"),
+    )
+    db_session.add(connection)
+    db_session.commit()
+    db_session.refresh(connection)
+
+    test_client = _plaid_app(db_session)  # no get_current_user override: real auth runs
+
+    def auth(user):
+        return {"Authorization": f"Bearer {create_access_token(user.id, user.username)}"}
+
+    calls = [
+        ("post", "/bank-sync/plaid/link-token", {"connection_id": None}),
+        ("post", "/bank-sync/plaid/exchange", {"public_token": "pub-1"}),
+        ("post", f"/bank-sync/{connection.id}/plaid/first-import?confirm=false", None),
+    ]
+    for method, path, body in calls:
+        kwargs = {"json": body} if body is not None else {}
+        anon_resp = getattr(test_client, method)(path, **kwargs)
+        assert anon_resp.status_code == 401, f"{path} should 401 anonymous, got {anon_resp.status_code}"
+
+        viewer_resp = getattr(test_client, method)(path, headers=auth(viewer), **kwargs)
+        assert viewer_resp.status_code == 403, f"{path} should 403 a viewer, got {viewer_resp.status_code}"
+
+
+def test_plaid_error_detail_has_no_request_body(db_session, monkeypatch):
+    """A mocked /plaid/exchange failure's error detail never echoes the
+    request body (the public token) -- PlaidError's text comes only from
+    Plaid's own error_code/error_message, never the request."""
+    monkeypatch.setattr(crypto.settings, "BANK_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    user = _plaid_user(db_session, "dan-plaid-detail")
+    test_client = _plaid_app(db_session, user)
+
+    secret_public_token = "public-token-should-not-leak-into-the-error-abc123"
+    with patch("backend.routers.bank_sync.exchange_public_token",
+               side_effect=PlaidError("INVALID_PUBLIC_TOKEN", "the public token provided was invalid")):
+        resp = test_client.post("/bank-sync/plaid/exchange", json={"public_token": secret_public_token})
+
+    assert resp.status_code == 422
+    assert secret_public_token not in resp.json()["detail"]
+
+
+def test_plaid_link_token_other_users_connection_404(db_session, monkeypatch):
+    """Requesting an update-mode link token for another user's connection is
+    404 -- the ownership check never reveals that the connection exists."""
+    monkeypatch.setattr(crypto.settings, "BANK_TOKEN_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    owner = _plaid_user(db_session, "owner-plaid-lt")
+    other = _plaid_user(db_session, "other-plaid-lt")
+    connection = models.BankConnection(
+        user_id=owner.id, provider="plaid", access_url_encrypted=crypto.encrypt("plaid-token"),
+    )
+    db_session.add(connection)
+    db_session.commit()
+    db_session.refresh(connection)
+
+    test_client = _plaid_app(db_session, other)
+
+    with patch("backend.routers.bank_sync.create_link_token") as mock_create:
+        resp = test_client.post("/bank-sync/plaid/link-token", json={"connection_id": connection.id})
+
+    assert resp.status_code == 404
+    mock_create.assert_not_called()

@@ -1158,15 +1158,19 @@ class ImportConfirmResponse(BaseModel):
     skipped_duplicates: int
 
 
-# ── Bank Sync (SimpleFIN) ────────────────────────────────────────────────────
+# ── Bank Sync (SimpleFIN + Plaid) ────────────────────────────────────────────
 
 class BankConnectionAccountOut(BaseModel):
-    """One SimpleFIN account discovered on the connection, for the mapping UI."""
+    """One discovered account on the connection, for the mapping UI. `mask`
+    and `kind` (Plaid's subtype, falling back to type) are Plaid-only and
+    None for a SimpleFIN account."""
     simplefin_account_id: str
     name: str
     org_name: str
     balance: Decimal
     currency: str
+    mask: Optional[str] = None
+    kind: Optional[str] = None
 
 
 class BankConnectionConnectRequest(BaseModel):
@@ -1183,6 +1187,9 @@ class BankConnectionLinkRequest(BaseModel):
     simplefin_account_name: str
     local_account_id: Optional[int] = None
     local_credit_card_id: Optional[int] = None
+    # When another active link (any connection, either provider) already
+    # targets the same local account/card, deactivate it instead of 409ing.
+    switch_existing: bool = False
 
 
 class BankConnectionLinkOut(BaseModel):
@@ -1193,11 +1200,13 @@ class BankConnectionLinkOut(BaseModel):
     local_account_id: Optional[int]
     local_credit_card_id: Optional[int]
     last_synced_at: Optional[datetime]
+    is_active: bool
 
 
 class BankConnectionStatusOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
+    provider: str
     status: BankConnectionStatus
     last_synced_at: Optional[datetime]
     last_error: Optional[str]
@@ -1209,6 +1218,38 @@ class BankSyncNowResponse(BaseModel):
     errors: list[str]
     imported: int
     skipped_duplicates: int
+
+
+# ── Bank Sync (Plaid) ─────────────────────────────────────────────────────────
+
+class PlaidLinkTokenRequest(BaseModel):
+    """connection_id present (and owned, provider="plaid") requests an
+    update-mode token for reconnecting that item; absent/None requests a
+    token for a brand-new link."""
+    connection_id: Optional[int] = None
+
+
+class PlaidLinkTokenResponse(BaseModel):
+    link_token: str
+
+
+class PlaidExchangeRequest(BaseModel):
+    public_token: str
+
+
+class PlaidFirstImportRow(BaseModel):
+    date: date
+    amount: Decimal
+    description: str
+    outcome: str  # "imported" | "matched" | "ignored"
+    target: str
+
+
+class PlaidFirstImportResponse(BaseModel):
+    imported: int
+    matched: int
+    ignored: int
+    rows: list[PlaidFirstImportRow]
 
 
 # ── Forecast Day Checkpoints ──────────────────────────────────────────────────
