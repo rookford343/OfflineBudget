@@ -124,7 +124,11 @@ def _parse_transaction(raw: dict) -> PlaidTransaction:
         return PlaidTransaction(
             id=raw["transaction_id"],
             account_id=raw["account_id"],
-            date=_parse_date(raw["date"]),
+            # date is required -- parsed directly (not via _parse_date, which
+            # swallows a bad value into None) so an empty or malformed date
+            # raises and falls into the except below as MALFORMED_RESPONSE,
+            # rather than silently landing in the dataclass as date=None.
+            date=date.fromisoformat(raw["date"]),
             authorized_date=_parse_date(raw.get("authorized_date")),
             amount=-_money(raw["amount"]),
             description=raw.get("original_description") or raw.get("name") or "",

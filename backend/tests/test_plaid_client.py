@@ -67,6 +67,25 @@ def test_amount_sign_flipped():
     assert page.added[1].amount == Decimal("3.00")
 
 
+@pytest.mark.parametrize("bad_date", ["", "not-a-date"])
+def test_malformed_date_raises_malformed_response(bad_date):
+    """A transaction's `date` is required. A bad value must raise, not land
+    silently as `date=None` on the dataclass."""
+    body = {
+        "added": [
+            {
+                "transaction_id": "t1", "account_id": "a1", "date": bad_date,
+                "authorized_date": None, "amount": 5.0, "name": "Bad Date Row",
+                "original_description": None, "merchant_name": None, "pending": False,
+            },
+        ],
+        "modified": [], "removed": [], "next_cursor": "cursor-1", "has_more": False,
+    }
+    with pytest.raises(PlaidError) as exc_info:
+        sync_page(_FAKE_ACCESS_TOKEN, None, transport=_json_transport(body))
+    assert exc_info.value.code == "MALFORMED_RESPONSE"
+
+
 def test_description_prefers_original():
     """original_description wins when present; name is only the fallback."""
     body = {
