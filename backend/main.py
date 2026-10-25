@@ -68,12 +68,12 @@ def _is_digest_day(today: date, digest_day: str) -> bool:
 _BANK_SYNC_HOUR = 7
 _DAILY_SUMMARY_MINUTE = 15
 
-# Afternoon refresh of card links only, for pending charges (2026-10-09).
-# Card links cost one SimpleFIN request each; with the full 7am sync this
-# keeps the day well under the Bridge's 24-request quota. Off the hour on
-# purpose -- SimpleFIN asks clients to pick a random minute, not :00.
-_CARD_REFRESH_HOUR = 15
-_CARD_REFRESH_MINUTE = 17
+# Plaid-only syncs through the day, on top of the 7am full sync (2026-10-25).
+# Plaid's Link already covers both checking and credit-card accounts through
+# one connection, so -- unlike the SimpleFIN-era cards-only afternoon
+# refresh it replaces -- there's no separate cards-only pass; each of these
+# runs is a full sync scoped to providers={"plaid"}.
+_PLAID_EXTRA_HOURS = (11, 15, 19)
 
 # Generous on purpose -- covers "the Mac slept straight through the trigger
 # and only woke hours later." APScheduler fires a missed cron trigger once on
@@ -231,24 +231,25 @@ def _run_bank_sync() -> None:
         _bank_sync_lock.release()
 
 
-def _run_card_refresh() -> None:
-    """Cards-only sync for fresh pending charges. Shares _bank_sync_lock so it
-    can never overlap the full sync or a manual Sync Now (the double-insert
-    race job_locks.py guards against). No missed-run retry: a skipped
-    afternoon refresh is simply picked up by the next 7am sync."""
+def _run_plaid_sync() -> None:
+    """Plaid-only sync for the 11am/3pm/7pm slots. Shares _bank_sync_lock so
+    it can never overlap the 7am full sync or a manual Sync Now (the
+    double-insert race job_locks.py guards against). No missed-run retry: a
+    skipped run is simply picked up by the next scheduled Plaid sync or the
+    next 7am full sync."""
     if not _bank_sync_lock.acquire(blocking=False):
-        logger.info("Card refresh: a bank sync is already running, skipping")
+        logger.info("Plaid sync: a bank sync is already running, skipping")
         return
     try:
         from backend.database import SessionLocal
         from backend.services.bank_sync_service import sync_all
         db = SessionLocal()
         try:
-            sync_all(db, cards_only=True)
+            sync_all(db, providers={"plaid"})
         finally:
             db.close()
-    except Exception as exc:  # noqa: BLE001 -- a failed refresh must not kill the scheduler
-        logger.error("Card refresh failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001 -- a failed sync must not kill the scheduler
+        logger.error("Plaid sync failed: %s", exc)
     finally:
         _bank_sync_lock.release()
 
@@ -361,7 +362,7 @@ _scheduler.add_job(
     misfire_grace_time=_MISFIRE_GRACE_SECONDS,
 )
 _scheduler.add_job(
-    _run_card_refresh, "cron", hour=_CARD_REFRESH_HOUR, minute=_CARD_REFRESH_MINUTE,
+    _run_plaid_sync, "cron", hour=",".join(str(h) for h in _PLAID_EXTRA_HOURS),
     misfire_grace_time=_MISFIRE_GRACE_SECONDS,
 )
 _scheduler.add_job(_scheduler_sweep, "interval", minutes=_SWEEP_MINUTES)

@@ -67,9 +67,8 @@ def sync_connection(
     nothing new" apart from "ran, here's what changed" instead of the
     timestamp-only signal that used to be the only feedback available.
 
-    cards_only limits the run to credit-card links: the afternoon refresh
-    exists for card pending charges and shouldn't spend request quota on
-    bank accounts.
+    cards_only limits the run to credit-card links, skipping bank accounts
+    to conserve request quota on a partial sync.
 
     A Plaid connection goes to plaid_sync_service.sync_plaid_connection, which
     syncs the whole item at once (cards_only doesn't apply). One whose
