@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.csv_parser import ParsedRow
@@ -357,7 +357,10 @@ def _find_duplicate_transaction(
         by_id = db.query(models.Transaction).filter(
             models.Transaction.user_id == user_id,
             models.Transaction.account_id == account_id,
-            models.Transaction.external_id == row.external_id,
+            or_(
+                models.Transaction.external_id == row.external_id,
+                models.Transaction.alt_external_id == row.external_id,
+            ),
         ).first()
         if by_id:
             return by_id
@@ -392,7 +395,10 @@ def _find_duplicate_card_transaction(
         by_id = db.query(models.CreditCardTransaction).filter(
             models.CreditCardTransaction.user_id == user_id,
             models.CreditCardTransaction.card_id == card_id,
-            models.CreditCardTransaction.external_id == row.external_id,
+            or_(
+                models.CreditCardTransaction.external_id == row.external_id,
+                models.CreditCardTransaction.alt_external_id == row.external_id,
+            ),
         ).first()
         if by_id:
             return by_id
