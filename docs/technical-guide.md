@@ -307,7 +307,7 @@ clean — no exec, eval, subprocess or pickle, TLS verified by default — but
 it drags in four extra packages the lockfile doesn't have (including one
 with a single maintainer and no release since 2018), ships as a source
 archive with no wheel so `setup.py` runs at install time, and is roughly
-2,300 generated files for the seven endpoints this app actually calls — all
+2,300 generated files for the eight endpoints this app actually calls — all
 to get typed response models, which targeted parsing plus tests against
 recorded response shapes cover anyway.
 

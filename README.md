@@ -468,10 +468,12 @@ in Transactions with a badge, feed the forecast through the card's pending
 total, and are never counted as spending until they post.
 
 **Statement balances (Plaid).** When a Plaid-linked card's issuer posts a
-new statement, the statement balance, due date and minimum payment fill in
-automatically. The very first statement Plaid sees only records its date —
-any balance you've already entered or paid down stays put until the next
-real statement arrives.
+new statement, the due date and minimum payment fill in automatically —
+even on the very first statement Plaid sees. The statement balance is the
+exception: the first statement only sets the date, due date and minimum
+payment, not the balance. The next new statement after that is the first
+one that fills in the balance, so anything you've already entered or paid
+down stays put until then.
 
 **Switching providers or reconnecting.** Moving an account from SimpleFIN to
 Plaid previews the import first — new, already-covered ("matched", kept as

@@ -151,8 +151,11 @@ SimpleFIN syncs once, at 7am (the old 3:17pm credit-card-only refresh is
 gone — Plaid's more frequent syncing replaced the need for it). **Sync Now**
 in Settings runs everything, on demand, anytime.
 
-**Statement balances.** For cards linked through Plaid, the statement
-balance, due date and minimum payment fill in automatically whenever your
-card issuer posts a *new* statement. The very first statement Plaid sees
-only records its date — not the balance — so any balance you've already
-typed in (or paid down) stays put until the next real statement arrives.
+**Statement balances.** For cards linked through Plaid, the due date and
+minimum payment fill in automatically as soon as Plaid sees a statement —
+including the very first one. The statement *balance* is the one exception:
+the first statement Plaid sees sets the date, due date and minimum payment,
+but leaves the balance alone. Only the next new statement after that fills
+in the balance too. That gap means any balance you've already typed in (or
+paid down) stays put until that next real statement arrives — not the
+first one Plaid happens to see.
