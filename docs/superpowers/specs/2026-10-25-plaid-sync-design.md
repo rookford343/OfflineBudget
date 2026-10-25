@@ -57,8 +57,19 @@ Plaid doesn't list Apple Card, so Apple stays on SimpleFIN.
   same as the SimpleFIN access URL. It is never logged, and never included in an API
   response or an error message.
 - **HTTP client:** no Plaid SDK. A thin `plaid_client.py` built on `httpx` (already pinned)
-  POSTs JSON with `client_id`/`secret` in the body, as Plaid requires. This avoids a new
-  supply-chain dependency.
+  POSTs JSON with `client_id`/`secret` in the body, as Plaid requires.
+  - **Review of `plaid-python` 46.0.0 (2026-10-25):** the code itself is clean. It has no
+    exec, eval, subprocess or pickle; TLS is verified by default; and its only URLs are
+    docstrings.
+  - **Why we still don't use it:**
+    - It brings 4 packages the lockfile doesn't have yet: `urllib3`, `python-dateutil`,
+      `six` and `nulltype`. `nulltype` has a single maintainer and no release since 2018.
+    - It ships as a source archive only, with no wheel, so `setup.py` runs at install time.
+    - It is about 2,300 generated files and 38 MB, to call 7 endpoints.
+    - It has shipped a new major version every 2–4 weeks, so we'd be chasing breaking
+      upgrades.
+  - **What we give up:** typed request and response models. We make up for that by parsing
+    only the fields this spec names, and by testing against recorded response shapes.
 
 ## Data model
 
@@ -163,8 +174,11 @@ The user's rule: existing transactions stay; Plaid supplies everything new, with
 duplicates.
 
 1. **Back up first** with `backup_database()`. A raw `cp` of `budget.db` misses the WAL.
-2. **Switch the links.** Deactivate the three Chase SimpleFIN links (`is_active = false`),
-   then activate the matching Plaid links. Set `cutover_date = 2026-10-25` on the Plaid
+2. **Switch the links.** The user removed Chase from SimpleFIN Bridge on 2026-10-25, after
+   that morning's sync. SimpleFIN's last Chase import is therefore that sync, and the app's
+   three Chase links now fail with "no data for account" on every run (Apple keeps the
+   connection active). The cutover deactivates those three links (`is_active = false`),
+   then activates the matching Plaid links. Set `cutover_date = 2026-10-25` on the Plaid
    connection.
 3. **Import window:**
    - **Older rows:** Plaid's first sync ignores posted rows dated before
