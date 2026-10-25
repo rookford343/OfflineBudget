@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -98,12 +98,15 @@ def _fetch_delta(access_token: str, cursor: str | None) -> _Delta:
             return _Delta(changes, list(removed), cursor)
 
 
-def _utc_naive(value: datetime | None) -> datetime | None:
-    """Plaid's timestamps are tz-aware; the app stores UTC-naive and compares
-    against card.balance_as_of, which raises on an aware/naive mix."""
+def _local_naive(value: datetime | None) -> datetime | None:
+    """Plaid's timestamps are tz-aware. The app's balance dates are
+    local-naive (SimpleFIN's come from datetime.fromtimestamp), and
+    card.balance_as_of raises on an aware/naive mix. Converting to UTC instead
+    would turn a 21:30 ET update into 01:30 the next day and anchor last
+    night's balance to today."""
     if value is None or value.tzinfo is None:
         return value
-    return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value.astimezone().replace(tzinfo=None)
 
 
 def _target_name(db: Session, link: models.BankConnectionAccountLink) -> str:
@@ -151,7 +154,14 @@ def _classify(
 ) -> tuple[Outcome, models.Transaction | models.CreditCardTransaction | None]:
     """Read-only: decides what a posted row would do. Returns the cutover match
     (to receive alt_external_id) when one was found. Shared by the preview and
-    the real run, so the preview reports exactly what a confirm will do."""
+    the real run, so the preview reports exactly what a confirm will do.
+
+    A row already stored under this Plaid id (its own external_id, or an
+    alt_external_id from an earlier cutover match) is "matched" before any
+    zoning: on a replay, find_match would otherwise pair it with a second,
+    unclaimed look-alike row and stamp the same Plaid id on that too."""
+    if _stored_row(db, user_id, link, _pid(txn.id)) is not None:
+        return "matched", None
     if cutover is not None:
         zone = cutover_zone(txn.date, cutover)
         if zone == "ignore":
@@ -257,14 +267,22 @@ def _apply_statements(db: Session, by_account: dict, statements) -> None:
             # Same statement: balance_due may already be reduced by
             # record_payment, so it must not be reset to the statement figure.
             continue
-        if st.last_statement_balance is not None:
+        if st.last_statement_balance is None:
+            # No balance to apply: skip the statement entirely, so the issue
+            # date doesn't advance and a later complete copy still applies.
+            continue
+        if stored is not None:
+            # Strictly newer than a statement we already tracked.
             card.balance_due = st.last_statement_balance
+            card.balance_due_updated_at = datetime.utcnow()
+        # stored is None: the card's first Plaid statement only seeds the
+        # date. Its balance_due predates Plaid and may already be reduced by
+        # record_payment or paid off, so it is left as the user set it.
         card.last_statement_issue_date = st.last_statement_issue_date
         if st.next_payment_due_date is not None:
             card.next_payment_date = st.next_payment_due_date
         if st.minimum_payment_amount is not None:
             card.minimum_payment_amount = st.minimum_payment_amount
-        card.balance_due_updated_at = datetime.utcnow()
 
 
 def _record_error(db: Session, connection: models.BankConnection, exc: Exception) -> None:
@@ -342,7 +360,7 @@ def _run(
 
     # Every remaining Plaid read happens before the first write.
     accounts = {a.id: a for a in plaid_client.get_accounts(access_token)}
-    last_update = _utc_naive(plaid_client.get_last_successful_update(access_token))
+    last_update = _local_naive(plaid_client.get_last_successful_update(access_token))
     statements = plaid_client.get_card_statements(access_token)
 
     imported_by_link: dict[int, int] = {}

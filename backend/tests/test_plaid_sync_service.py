@@ -1,6 +1,7 @@
 """Plaid sync service: transactions/sync pages through the shared import,
 balance, pending and statement logic, plus the previewable first import that
 matches rows SimpleFIN already stored. All figures are invented."""
+import time
 from contextlib import contextmanager
 from datetime import date, datetime, timezone
 from decimal import Decimal
@@ -335,6 +336,42 @@ def test_new_statement_sets_balance_due(db_session):
     assert card.balance_due_updated_at is not None
 
 
+def test_first_statement_seeds_date_keeps_balance_due(db_session):
+    """Existing cards have no stored issue date. Their balance_due predates
+    Plaid and may already be reduced by record_payment, so the first Plaid
+    statement only seeds the dates."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    card.balance_due = Decimal("75.00")
+    db_session.commit()
+    with _patched(_client([_page()], statements=[_statement(date(2026, 4, 5))])):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("75.00")
+    assert card.balance_due_updated_at is None
+    assert card.last_statement_issue_date == date(2026, 4, 5)
+    assert card.next_payment_date == date(2026, 5, 1)
+    assert card.minimum_payment_amount == Decimal("35.00")
+
+
+def test_newer_statement_without_balance_skipped(db_session):
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    card.balance_due = Decimal("100.00")
+    card.last_statement_issue_date = date(2026, 3, 5)
+    db_session.commit()
+    st = _statement(date(2026, 4, 5))
+    st.last_statement_balance = None
+    with _patched(_client([_page()], statements=[st])):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.refresh(card)
+    assert card.last_statement_issue_date == date(2026, 3, 5)
+    assert card.balance_due == Decimal("100.00")
+    assert card.next_payment_date is None
+    assert card.minimum_payment_amount is None
+    assert card.balance_due_updated_at is None
+
+
 def test_same_statement_keeps_reduced_balance_due(db_session):
     user, checking, savings, card, conn = _make_plaid_connection(db_session)
     # record_payment already brought the statement balance down.
@@ -366,11 +403,71 @@ def test_card_balance_not_sign_flipped(db_session):
 
     db_session.refresh(card)
     assert card.current_balance == Decimal("250.00")
-    assert card.balance_as_of == datetime(2026, 4, 6, 14, 0)  # stored UTC-naive
+    local = last_update.astimezone().replace(tzinfo=None)  # stored local-naive, like SimpleFIN
+    assert card.balance_as_of == local
     assert checking.current_balance == Decimal("1234.56")
     assert savings.current_balance == Decimal("777.00")
     cp = db_session.query(models.ForecastDayCheckpoint).one()
-    assert (cp.account_id, cp.date, cp.actual_balance) == (checking.id, date(2026, 4, 6), Decimal("1234.56"))
+    assert (cp.account_id, cp.date, cp.actual_balance) == (checking.id, local.date(), Decimal("1234.56"))
+
+
+@pytest.fixture()
+def eastern_tz(monkeypatch):
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def test_evening_balance_update_anchors_local_date(db_session, eastern_tz):
+    """21:30 ET is 01:30 UTC the next day. A UTC conversion anchored last
+    night's balance to today; the app's balance dates are local-naive."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    accounts = [
+        PlaidAccount(id="p-chk", name="Checking", mask="0001", type="depository", subtype="checking",
+                     current=Decimal("432.10"), available=None, limit=None),
+        PlaidAccount(id="p-card", name="Visa", mask="1234", type="credit", subtype="credit card",
+                     current=Decimal("60.00"), available=None, limit=None),
+    ]
+    last_update = datetime(2026, 4, 7, 1, 30, tzinfo=timezone.utc)  # 2026-04-06 21:30 EDT
+    with _patched(_client([_page()], accounts=accounts, last_update=last_update)):
+        sync_plaid_connection(db_session, conn)
+
+    cp = db_session.query(models.ForecastDayCheckpoint).one()
+    assert cp.date == date(2026, 4, 6)
+    db_session.refresh(card)
+    assert card.balance_as_of == datetime(2026, 4, 6, 21, 30)
+
+
+def test_replayed_cutover_match_is_idempotent(db_session):
+    """A replay (cursor still NULL, or a partial commit) re-sends a row that
+    already matched. It must find its own claimed row by Plaid id, not pair
+    with a second look-alike row."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session, cursor=None)
+    x = models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 3, 15),
+                           amount=Decimal("-5.00"), description="COFFEE SHOP 9", is_actual=True,
+                           source=models.TransactionSource.bank_sync, external_id="sf-x")
+    y = models.Transaction(user_id=user.id, account_id=checking.id, date=date(2026, 3, 17),
+                           amount=Decimal("-5.00"), description="COFFEE SHOP 9", is_actual=True)
+    db_session.add_all([x, y])
+    db_session.commit()
+    replayed = _t("t2", "p-chk", date(2026, 3, 15), "-5.00", "COFFEE SHOP 9")
+
+    with _patched(_client([_page(added=[replayed])])):
+        sync_plaid_connection(db_session, conn, first_import=True)
+    db_session.refresh(x)
+    assert x.alt_external_id == "plaid:t2"
+
+    conn.sync_cursor = None  # the replay
+    db_session.commit()
+    with _patched(_client([_page(added=[replayed])])):
+        report = sync_plaid_connection(db_session, conn, first_import=True)
+
+    db_session.refresh(y)
+    assert y.alt_external_id is None
+    assert (report.imported, report.matched, report.ignored) == (0, 1, 0)
+    assert db_session.query(models.Transaction).count() == 2
 
 
 def test_refresh_called_after_commit(db_session):
