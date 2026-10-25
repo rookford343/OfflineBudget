@@ -3,9 +3,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, cardsApi, bankSyncApi } from "../../api";
 import { fmt, parseServerDateTime } from "../../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../../store/balanceVisibility";
-import { Plus, Pencil, Trash2, X, Check, AlertTriangle, Link } from "lucide-react";
+import { openPlaidLink } from "../../lib/plaidLink";
+import { Plus, Pencil, Trash2, X, Check, AlertTriangle, Link, RefreshCw } from "lucide-react";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
-import { sortCategoryList, byName } from "../../lib/selectOptions";
+import { byName } from "../../lib/selectOptions";
+import PlaidFirstImportPreview from "./PlaidFirstImportPreview";
 
 const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", interest_rate: "", notes: "", is_emergency_fund: false };
 
@@ -20,6 +22,10 @@ export default function AccountsTab() {
   const [setupToken, setSetupToken] = useState("");
   const [pendingConnect, setPendingConnect] = useState<{ connection_id: number; accounts: any[] } | null>(null);
   const [linkTargets, setLinkTargets] = useState<Record<string, string>>({});
+  // Set only when a /link call 409'd because another connection's active
+  // link already targets the same local account/card -- turns that one row
+  // into an inline "switch to this provider?" prompt instead of a dead end.
+  const [switchPrompt, setSwitchPrompt] = useState<{ accountId: string; connectionId: number } | null>(null);
 
   const connectMut = useMutation({
     mutationFn: (token: string) => bankSyncApi.connect(token),
@@ -27,10 +33,27 @@ export default function AccountsTab() {
   });
   const linkMut = useMutation({
     mutationFn: ({ connectionId, data }: any) => bankSyncApi.link(connectionId, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["bank-connections"] }); },
+    onSuccess: (_data, variables: any) => {
+      qc.invalidateQueries({ queryKey: ["bank-connections"] });
+      setSwitchPrompt(null);
+      setLinkTargets((prev) => {
+        const next = { ...prev };
+        delete next[variables.data.simplefin_account_id];
+        return next;
+      });
+    },
+    onError: (err: any, variables: any) => {
+      const existingLinkId = err?.response?.data?.detail?.existing_link_id;
+      if (err?.response?.status === 409 && existingLinkId) {
+        setSwitchPrompt({ accountId: variables.data.simplefin_account_id, connectionId: variables.connectionId });
+      }
+      // Any other failure still reaches the user via the global error toast
+      // (main.tsx's MutationCache.onError) -- nothing else to do here.
+    },
   });
-  // Re-opens the mapping UI for a connection whose /connect response is long
-  // gone -- without this, an unmapped account needs a whole new setup token.
+  // Re-opens the mapping UI for a connection whose /connect or /plaid/exchange
+  // response is long gone -- without this, an unmapped account needs a whole
+  // new setup token (SimpleFIN) or Link session (Plaid).
   const loadAccountsMut = useMutation({
     mutationFn: (connectionId: number) => bankSyncApi.accounts(connectionId),
     onSuccess: (accts: any[], connectionId: number) =>
@@ -61,7 +84,52 @@ export default function AccountsTab() {
     },
   });
 
-  function submitLink(simplefinAccountId: string, simplefinAccountName: string, connectionId: number) {
+  // ── Plaid: connect, reconnect, first-import preview ───────────────────────
+  // A fresh connection: link-token (no connection_id) -> Link -> exchange.
+  // `null` means the user closed Link without finishing -- not an error.
+  const plaidConnectMut = useMutation({
+    mutationFn: async () => {
+      const { link_token } = await bankSyncApi.plaidLinkToken();
+      const opened = await openPlaidLink(link_token);
+      if (!opened) return null;
+      return bankSyncApi.plaidExchange(opened.publicToken);
+    },
+    onSuccess: (data) => {
+      if (!data) return;
+      qc.invalidateQueries({ queryKey: ["bank-connections"] });
+      setPendingConnect(data);
+    },
+  });
+  // Reconnecting an errored item: link-token in update mode -> Link. Plaid
+  // clears the item's error state itself once the re-auth lands; there's no
+  // separate "finish reconnect" call on this backend.
+  const plaidReconnectMut = useMutation({
+    mutationFn: async (connectionId: number) => {
+      const { link_token } = await bankSyncApi.plaidLinkToken(connectionId);
+      return openPlaidLink(link_token);
+    },
+    onSuccess: (opened) => {
+      if (opened) qc.invalidateQueries({ queryKey: ["bank-connections"] });
+    },
+  });
+  const [firstImportPreview, setFirstImportPreview] = useState<{ connectionId: number; data: any } | null>(null);
+  const previewImportMut = useMutation({
+    mutationFn: (connectionId: number) => bankSyncApi.plaidFirstImport(connectionId, false),
+    onSuccess: (data, connectionId) => setFirstImportPreview({ connectionId, data }),
+  });
+  const confirmImportMut = useMutation({
+    mutationFn: (connectionId: number) => bankSyncApi.plaidFirstImport(connectionId, true),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["bank-connections"] });
+      qc.invalidateQueries({ queryKey: ["accounts"] });
+      qc.invalidateQueries({ queryKey: ["credit-cards"] });
+      qc.invalidateQueries({ queryKey: ["cards"] });
+      qc.invalidateQueries({ queryKey: ["recent-activity"] });
+      setFirstImportPreview(null);
+    },
+  });
+
+  function submitLink(simplefinAccountId: string, simplefinAccountName: string, connectionId: number, switchExisting = false) {
     const target = linkTargets[simplefinAccountId];
     if (!target) return;
     const [kind, id] = target.split(":");
@@ -72,6 +140,7 @@ export default function AccountsTab() {
         simplefin_account_name: simplefinAccountName,
         local_account_id: kind === "account" ? parseInt(id) : undefined,
         local_credit_card_id: kind === "card" ? parseInt(id) : undefined,
+        switch_existing: switchExisting,
       },
     });
   }
@@ -164,7 +233,8 @@ export default function AccountsTab() {
         </div>
         <div className="space-y-4">
           <p className="text-xs text-gray-500 dark:text-gray-400">
-            Connects to your bank via SimpleFIN Bridge (~$15/yr, read-only) to pull transactions automatically. Everything syncs at 7am; credit cards sync again at 3:17pm to refresh pending charges.
+            Connects to your bank via SimpleFIN Bridge (~$15/yr, read-only) or Plaid to pull transactions automatically.
+            Plaid accounts sync at 7am, 11am, 3pm and 7pm. SimpleFIN accounts sync at 7am.
           </p>
           {syncResult && (
             <p className="text-xs text-emerald-600 dark:text-emerald-400">
@@ -178,15 +248,39 @@ export default function AccountsTab() {
             <div key={conn.id} className="border border-gray-100 dark:border-gray-700 rounded-lg p-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    Connection #{conn.id} — {conn.status}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      Connection #{conn.id} — {conn.status}
+                    </p>
+                    <span className={conn.provider === "plaid" ? "badge-blue" : "badge-green"}>
+                      {conn.provider === "plaid" ? "Plaid" : "SimpleFIN"}
+                    </span>
+                  </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     {conn.last_synced_at ? `Last synced ${parseServerDateTime(conn.last_synced_at).toLocaleString(undefined, { timeZoneName: "short" })}` : "Never synced"}
                   </p>
                   {conn.last_error && <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1"><AlertTriangle size={12} /> {conn.last_error}</p>}
                 </div>
                 <div className="flex items-center gap-1">
+                  {conn.provider === "plaid" && conn.status === "error" && (
+                    <button
+                      onClick={() => plaidReconnectMut.mutate(conn.id)}
+                      disabled={plaidReconnectMut.isPending}
+                      className="btn-ghost text-xs px-2 py-1 text-indigo-500 hover:bg-indigo-50 flex items-center gap-1"
+                    >
+                      <RefreshCw size={12} />
+                      {plaidReconnectMut.isPending && plaidReconnectMut.variables === conn.id ? "Reconnecting…" : "Reconnect"}
+                    </button>
+                  )}
+                  {conn.provider === "plaid" && conn.links.length > 0 && (
+                    <button
+                      onClick={() => previewImportMut.mutate(conn.id)}
+                      disabled={previewImportMut.isPending}
+                      className="btn-ghost text-xs px-2 py-1 text-indigo-500 hover:bg-indigo-50"
+                    >
+                      {previewImportMut.isPending && previewImportMut.variables === conn.id ? "Loading…" : "Preview first import"}
+                    </button>
+                  )}
                   <button
                     onClick={() => loadAccountsMut.mutate(conn.id)}
                     disabled={loadAccountsMut.isPending}
@@ -200,8 +294,9 @@ export default function AccountsTab() {
               {conn.links.length > 0 && (
                 <div className="mt-2 divide-y divide-gray-100 dark:divide-gray-700">
                   {conn.links.map((l: any) => (
-                    <div key={l.id} className="py-1.5 text-xs text-gray-600 dark:text-gray-300">
+                    <div key={l.id} className={`py-1.5 text-xs ${l.is_active ? "text-gray-600 dark:text-gray-300" : "text-gray-400 dark:text-gray-500"}`}>
                       {l.simplefin_account_name} → {l.local_account_id ? "linked account" : l.local_credit_card_id ? "linked card" : "unlinked"}
+                      {!l.is_active && " (switched to another connection)"}
                     </div>
                   ))}
                 </div>
@@ -214,27 +309,47 @@ export default function AccountsTab() {
               <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Map discovered accounts</p>
               {pendingConnect.accounts.map((a: any) => (
                 <div key={a.simplefin_account_id} className="flex items-center justify-between gap-2">
-                  <span className="text-xs text-gray-600 dark:text-gray-300">{a.org_name} — {a.name} ({fmt(a.balance)})</span>
-                  <select
-                    className="input py-1 text-xs w-40"
-                    value={linkTargets[a.simplefin_account_id] || ""}
-                    onChange={(e) => setLinkTargets({ ...linkTargets, [a.simplefin_account_id]: e.target.value })}
-                  >
-                    <option value="">Select account or card…</option>
-                    <optgroup label="Accounts">
-                      {byName(accounts).map((acc: any) => <option key={`account:${acc.id}`} value={`account:${acc.id}`}>{acc.name}</option>)}
-                    </optgroup>
-                    <optgroup label="Credit Cards">
-                      {cards.map((c: any) => <option key={`card:${c.id}`} value={`card:${c.id}`}>{c.name}</option>)}
-                    </optgroup>
-                  </select>
-                  <button
-                    onClick={() => submitLink(a.simplefin_account_id, a.name, pendingConnect.connection_id)}
-                    disabled={!linkTargets[a.simplefin_account_id]}
-                    className="btn-primary btn-sm text-xs px-2 py-1"
-                  >
-                    Link
-                  </button>
+                  <span className="text-xs text-gray-600 dark:text-gray-300">
+                    {a.mask
+                      ? `${a.name} ••${a.mask} (${a.kind ?? "account"})`
+                      : `${a.org_name} — ${a.name} (${fmt(a.balance)})`}
+                  </span>
+                  {switchPrompt && switchPrompt.accountId === a.simplefin_account_id && switchPrompt.connectionId === pendingConnect.connection_id ? (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-amber-600 dark:text-amber-400">Already synced by SimpleFIN. Switch to Plaid?</span>
+                      <button
+                        onClick={() => submitLink(a.simplefin_account_id, a.name, pendingConnect.connection_id, true)}
+                        disabled={linkMut.isPending}
+                        className="btn-primary btn-sm text-xs px-2 py-1"
+                      >
+                        Switch
+                      </button>
+                      <button onClick={() => setSwitchPrompt(null)} className="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                    </div>
+                  ) : (
+                    <>
+                      <select
+                        className="input py-1 text-xs w-40"
+                        value={linkTargets[a.simplefin_account_id] || ""}
+                        onChange={(e) => setLinkTargets({ ...linkTargets, [a.simplefin_account_id]: e.target.value })}
+                      >
+                        <option value="">Select account or card…</option>
+                        <optgroup label="Accounts">
+                          {byName(accounts).map((acc: any) => <option key={`account:${acc.id}`} value={`account:${acc.id}`}>{acc.name}</option>)}
+                        </optgroup>
+                        <optgroup label="Credit Cards">
+                          {cards.map((c: any) => <option key={`card:${c.id}`} value={`card:${c.id}`}>{c.name}</option>)}
+                        </optgroup>
+                      </select>
+                      <button
+                        onClick={() => submitLink(a.simplefin_account_id, a.name, pendingConnect.connection_id)}
+                        disabled={!linkTargets[a.simplefin_account_id]}
+                        className="btn-primary btn-sm text-xs px-2 py-1"
+                      >
+                        Link
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
               <button onClick={() => setPendingConnect(null)} className="text-xs text-gray-400 hover:text-gray-600">Done</button>
@@ -256,8 +371,16 @@ export default function AccountsTab() {
             >
               {connectMut.isPending ? "Connecting…" : "Connect"}
             </button>
+            <button
+              onClick={() => plaidConnectMut.mutate()}
+              disabled={plaidConnectMut.isPending}
+              className="btn-secondary btn-sm text-xs px-3 py-1.5 whitespace-nowrap"
+            >
+              {plaidConnectMut.isPending ? "Connecting…" : "Connect with Plaid"}
+            </button>
           </div>
           {connectMut.isError && <p className="text-xs text-red-600 dark:text-red-400">{(connectMut.error as any)?.response?.data?.detail || "Failed to connect"}</p>}
+          {plaidConnectMut.isError && <p className="text-xs text-red-600 dark:text-red-400">{(plaidConnectMut.error as any)?.response?.data?.detail || "Failed to connect with Plaid"}</p>}
         </div>
       </div>
 
@@ -332,6 +455,15 @@ export default function AccountsTab() {
         isPending={disconnectMut.isPending}
         onConfirm={() => deleteConnection && disconnectMut.mutate(deleteConnection.id)}
       />
+
+      {firstImportPreview && (
+        <PlaidFirstImportPreview
+          data={firstImportPreview.data}
+          onClose={() => setFirstImportPreview(null)}
+          onConfirm={() => confirmImportMut.mutate(firstImportPreview.connectionId)}
+          confirming={confirmImportMut.isPending}
+        />
+      )}
     </div>
   );
 }

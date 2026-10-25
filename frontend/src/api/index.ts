@@ -33,9 +33,11 @@ export const accountsApi = {
   remove: (id: number) => api.delete(`/accounts/${id}`),
 };
 
-// ── Bank Sync (SimpleFIN) ────────────────────────────────────────────────────
+// ── Bank Sync (SimpleFIN + Plaid) ────────────────────────────────────────────
 export const bankSyncApi = {
   connect: (setup_token: string) => api.post("/bank-sync/connect", { setup_token }).then((r) => r.data),
+  // `data` carries switch_existing: true when the caller is re-submitting
+  // after a 409 told them another connection already owns this target.
   link: (connectionId: number, data: object) => api.post(`/bank-sync/${connectionId}/link`, data).then((r) => r.data),
   // Re-fetch the accounts discovered on an existing connection. `connect`
   // returns them exactly once and the setup token is spent by then, so this is
@@ -44,6 +46,16 @@ export const bankSyncApi = {
   status: () => api.get("/bank-sync/status").then((r) => r.data),
   syncNow: () => api.post("/bank-sync/sync-now").then((r) => r.data),
   schedulerStatus: () => api.get("/bank-sync/scheduler-status").then((r) => r.data),
+  // connection_id present (and owned, provider="plaid") requests an
+  // update-mode token for reconnecting; omitted requests a token for a
+  // brand-new Plaid connection.
+  plaidLinkToken: (connectionId?: number) =>
+    api.post("/bank-sync/plaid/link-token", { connection_id: connectionId }).then((r) => r.data),
+  plaidExchange: (publicToken: string) =>
+    api.post("/bank-sync/plaid/exchange", { public_token: publicToken }).then((r) => r.data),
+  plaidFirstImport: (connectionId: number, confirm: boolean) =>
+    api.post(`/bank-sync/${connectionId}/plaid/first-import`, null, { params: { confirm } }).then((r) => r.data),
+  disconnect: (connectionId: number) => api.delete(`/bank-sync/${connectionId}`),
 };
 
 // ── Server settings (admin only) ──────────────────────────────────────────────
@@ -60,7 +72,6 @@ export const appSettingsApi = {
   runDailySummary: (toSelfOnly: boolean, includeDigest: boolean) =>
     api.post("/settings/run-daily-summary", null,
       { params: { to_self_only: toSelfOnly, include_digest: includeDigest } }).then((r) => r.data),
-  disconnect: (connectionId: number) => api.delete(`/bank-sync/${connectionId}`),
 };
 
 // ── Bill amount overrides ────────────────────────────────────────────────────
