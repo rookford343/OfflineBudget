@@ -40,6 +40,10 @@
 - ✅ Net worth tracking with assets, liabilities, and historical snapshots
 
 ### Other
+- ✅ Automated bank sync via Plaid (Chase-style banks, four syncs a day) and
+  SimpleFIN Bridge (banks Plaid doesn't cover, once a day), including a
+  previewable first-import cutover when switching an account between
+  providers
 - ✅ Credit card tracking with due dates, utilization, and payment recording
 - ✅ Savings goals with progress tracking
 - ✅ Planned expenses
@@ -59,8 +63,25 @@
 
 ### High Priority
 
-**Automated Bank Sync (Plaid)**
-Connect directly to 10,000+ financial institutions via Plaid API. New transactions would sync automatically — no more manual CSV exports. Would use cursor-based incremental fetches and run through the same import pipeline (deduplication, categorization, rules). Requires: `PLAID_CLIENT_ID`, `PLAID_SECRET`, `PLAID_ENV` env vars; encrypted token storage (`cryptography` / Fernet).
+**Recurring-stream drift prompts (Plaid)**
+Plaid's `/transactions/recurring/get` detects recurring outflows on its own,
+independently of this app's own recurring-item matching. Feed its detections
+into the existing amount-drift prompt ("Amounts changed?") so a recurring
+bill Plaid notices before the app does can trigger the same update-or-keep
+flow.
+
+**Purchase-date spending (Plaid)**
+Plaid's `authorized_date` (the day a card charge actually happened) often
+differs from the posted date, especially on credit cards. Use it for
+spending-by-day reports so a purchase shows up on the day it happened rather
+than whenever the bank got around to posting it.
+
+**Statement auto-clear (Plaid)**
+Re-enable automatically marking a credit card's statement as paid once
+Plaid reports the payment. `AUTO_CLEAR_STATEMENTS_IN_SYNC` is off
+deliberately for now (left `False` in the Plaid sync work) — turning it back
+on needs its own look at false-positive risk before it writes balances
+unattended.
 
 **CLI Import Command**
 ```bash

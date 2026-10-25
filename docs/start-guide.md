@@ -496,9 +496,47 @@ reports fresh numbers:
 
 ### Connect your bank (optional)
 
-Bank sync uses [SimpleFIN Bridge](https://beta-bridge.simplefin.org/)
-(about $15/year, read-only). SimpleFIN only reads your accounts; it can't
-move money.
+Bank sync has two providers, and you can mix them — different accounts can
+use different providers, and you can switch an account over later:
+
+- **[Plaid](https://plaid.com/)** — connects most US banks directly with
+  your online-banking login (Plaid never sees the password for banks that
+  support OAuth, Chase included). Syncs several times a day. Plaid doesn't
+  support every card issuer — Apple Card is a notable gap as of this
+  writing, so that one still needs SimpleFIN.
+- **[SimpleFIN Bridge](https://beta-bridge.simplefin.org/)** (about
+  $15/year, read-only) — a smaller aggregator that covers some banks Plaid
+  doesn't, including Apple Card. Syncs about once a day.
+
+Both are pull-only: neither can move money, and the app never sees or
+stores your online-banking password either way.
+
+#### Setting up Plaid
+
+1. Go to [dashboard.plaid.com](https://dashboard.plaid.com/) and sign up as
+   **"Personal use"**. This puts you on the **Trial plan**, which is free
+   and covers up to **10 linked logins** — plenty for a household.
+2. On the dashboard's **Keys** page, copy your `client_id` and the
+   **Production** secret into the backend's `.env`:
+   ```
+   PLAID_CLIENT_ID=...
+   PLAID_SECRET=...
+   PLAID_ENV=production
+   ```
+   The Trial plan runs on `production`, not `sandbox` — restart the backend
+   after editing `.env`.
+3. In the dashboard's **Link customization** settings, turn off every data
+   type beyond **Transactions** and **Liabilities** (Plaid's Link consent
+   screen otherwise also asks for assets, identity and signal, none of
+   which this app uses).
+4. In **Settings → Accounts & Bank Sync**, click **Connect with Plaid** and
+   log in to your bank through the Plaid window that opens.
+5. Map each discovered account to an account or card in the app — see
+   [connecting a bank in the overview](index.md#bank-sync-plaid-and-simplefin)
+   for what happens next (previewing and confirming the first import,
+   reconnecting, and the sync schedule).
+
+#### Setting up SimpleFIN
 
 1. Sign up at SimpleFIN Bridge, connect your bank there, and copy a
    **setup token**.
@@ -506,22 +544,13 @@ move money.
 3. Link each SimpleFIN account to the matching account or credit card in the
    app.
 
-After that, everything is automatic:
-
-| When | What syncs |
-|------|-----------|
-| **7:00am** | Every linked account and card: posted transactions, balances, and card pending charges |
-| **3:17pm** | Credit cards only, to refresh pending charges |
-| **Sync Now** | Everything, whenever you press it |
-
 SimpleFIN asks apps to stay under **24 requests a day**. Each linked account
-or card costs one request per sync, so the schedule above uses about six a day
-for a typical household (checking, savings and two cards). That leaves room
-for a few **Sync Now** presses. SimpleFIN itself refreshes from your bank
-roughly once a day, so syncing more often rarely finds anything new.
+or card costs one request per sync; SimpleFIN itself refreshes from your bank
+roughly once a day, so syncing more often than that rarely finds anything new.
 
-Imported transactions are categorized by your rules and linked to the
-recurring bill they pay, so the forecast stops projecting that bill.
+Imported transactions, from either provider, are categorized by your rules
+and linked to the recurring bill they pay, so the forecast stops projecting
+that bill.
 
 ### When a bill's amount changes
 

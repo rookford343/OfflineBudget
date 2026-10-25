@@ -11,18 +11,21 @@ named so you can check.
 ## The short version
 
 Your ledger lives in one SQLite file on your own machine. The app makes
-**exactly three** outbound network calls in the entire codebase, all of them
+**four** outbound network call sites in the entire codebase, all of them
 optional and all off by default:
 
 | Destination | When | What it carries |
 |---|---|---|
-| SimpleFIN Bridge | Only if you connect a bank | Your access token; returns accounts, posted transactions, and pending card charges |
-| SimpleFIN Bridge | Only if you connect a bank | One-time setup-token claim |
+| SimpleFIN Bridge | Only if you connect a bank via SimpleFIN | Your access token; returns accounts, posted transactions, and pending card charges |
+| SimpleFIN Bridge | Only if you connect a bank via SimpleFIN | One-time setup-token claim |
+| Plaid | Only if you connect a bank via Plaid | Your access token; returns accounts, balances, transactions, and card statement data. The same function also creates and exchanges a Link token (connecting or reconnecting) and removes the item (Disconnect) |
 | Your SMTP server | Only if you configure email | The daily summary email |
 
-There is no telemetry, no analytics, no crash reporting, and no CDN. The
-frontend loads no external fonts, scripts, or stylesheets. If you never
-enable bank sync and never configure SMTP, the app makes **no outbound
+There is no telemetry, no analytics, and no crash reporting. The frontend
+loads no external fonts, scripts, or stylesheets by default — the one
+exception is Plaid's own Link script, from `cdn.plaid.com`, which loads only
+if and when you click **Connect with Plaid** or **Reconnect**. If you never
+connect a bank and never configure SMTP, the app makes **no outbound
 requests at all** — import your transactions by CSV or OFX and nothing ever
 leaves your network.
 
@@ -32,9 +35,11 @@ Verify it yourself:
 grep -rn "httpx\.\|requests\.\|smtplib\|urlopen" backend --include="*.py" | grep -v tests
 ```
 
-The three calls are `httpx.post` (setup-token claim) and `httpx.get` (sync)
-in `simplefin_client.py`, and `smtplib.SMTP` in `email_service.py`. The other
-matching lines are their error handlers and the `smtplib` import.
+The network calls are `httpx.post` (setup-token claim) and `httpx.get`
+(sync) in `simplefin_client.py`, one shared `httpx.Client(...).post()` for
+every Plaid operation in `plaid_client.py`, and `smtplib.SMTP` in
+`email_service.py`. The other matching lines are their error handlers, type
+hints, and imports.
 
 ---
 
@@ -55,7 +60,8 @@ pending charges is kept as history.
 
 **Encrypted at rest** (Fernet, keyed by `APP_ENCRYPTION_KEY`):
 
-- Your SimpleFIN access URL — the credential that can read your bank data
+- Your bank access credential — the SimpleFIN access URL, or the Plaid
+  access token, whichever provider(s) you connect
 - Your SMTP password
 
 Both are decrypted only in memory, at the moment they're used. Neither is
@@ -78,9 +84,17 @@ your finances. Treat it like the sensitive file it is; see Backups below.
 
 ## If you connect a bank
 
-Bank sync uses [SimpleFIN Bridge](https://www.simplefin.org/), a third-party
-aggregation service. This is the one place where a party other than you can
-see your financial data, so it's worth being precise:
+Bank sync has two providers, SimpleFIN and Plaid. This is the one place
+where a party other than you can see your financial data, so it's worth
+being precise about each.
+
+**You never have to use either.** Import CSV or OFX files from your bank
+instead and no third party is involved at any point.
+
+### SimpleFIN
+
+[SimpleFIN Bridge](https://www.simplefin.org/) is a third-party aggregation
+service.
 
 - SimpleFIN holds read-only credentials to the accounts you link and can see
   the transactions and balances on them.
@@ -88,19 +102,42 @@ see your financial data, so it's worth being precise:
   encrypts that, and stores it locally. The token is spent in the exchange.
 - Sync is **pull-only**. Nothing is written back to your bank, and the app
   never sees or stores your online-banking password.
-- The app asks SimpleFIN twice a day: every linked account at 7am, and credit
-  cards again at 3:17pm for pending charges, plus whenever you press
+- The app asks SimpleFIN once a day, at 7am, plus whenever you press
   **Sync Now**.
 - Your budget data, categories, forecasts, and everything you enter in the
   app are never sent to SimpleFIN. The traffic is one-directional: you ask
   for transactions, they answer.
 
-**You never have to use it.** Import CSV or OFX files from your bank instead
-and no third party is involved at any point.
+### Plaid
 
-To disconnect: **Settings → Accounts & Bank Sync → Disconnect**. That
-deletes the stored credential. Revoke access on SimpleFIN's side too if you
-want it fully severed.
+[Plaid](https://plaid.com/) is a larger, bank-grade aggregation service.
+
+- Plaid stores your linked accounts' balance and transaction history on its
+  own servers — that's how it can answer the app's requests without going
+  back to your bank every time. What the app actually asks Plaid for is
+  transactions and liabilities (card statement data); it doesn't request
+  identity, assets or investment data, and the Settings → Link customization
+  step in the setup guide turns those off at the source too.
+- You connect through Plaid Link, a window Plaid itself controls — your
+  online-banking login goes to Plaid (or, for banks that support it, straight
+  to your bank via OAuth), never to this app. What the app receives back is
+  an access token, which it encrypts (Fernet, the same `APP_ENCRYPTION_KEY`
+  as SimpleFIN) and stores locally.
+- Sync is **pull-only**, same as SimpleFIN. Nothing is written back to your
+  bank.
+- The app asks Plaid four times a day — 7am, 11am, 3pm and 7pm — plus
+  whenever you press **Sync Now**.
+- Your budget data, categories, forecasts, and everything you enter in the
+  app are never sent to Plaid.
+- **Revoking access:** either disconnect the connection in the app
+  (**Settings → Accounts & Bank Sync → Disconnect**, which calls Plaid's
+  item-removal API and deletes the stored token), or revoke it directly at
+  [my.plaid.com](https://my.plaid.com/), Plaid's own consumer portal. Either
+  one is enough on its own; doing both is fine too.
+
+To disconnect either provider: **Settings → Accounts & Bank Sync →
+Disconnect**. That deletes the stored credential. For SimpleFIN, you can
+also revoke access on SimpleFIN's side if you want it fully severed.
 
 ---
 

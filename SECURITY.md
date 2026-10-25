@@ -40,13 +40,37 @@ OfflineBudget is designed for **offline / home LAN use**. The threat model is:
 - **`/auth/forgot-password`** is itself rate-limited at **5 attempts per hour per username** to prevent mail-bombing an account's inbox or burning SMTP quota; it always returns 204, even when the limit is hit
 - **Username enumeration** — `/auth/forgot-password` always returns a generic 204 regardless of whether the account exists, so it does not itself reveal whether a username is registered. However, `/auth/register` already returns a distinct `400 "Username already taken"` for existing usernames, so username existence is not actually secret in this app. What `forgot-password`'s constant response *does* hide is narrower: whether that specific account has an email address on file and SMTP configured — i.e. whether requesting a reset will actually result in an email being sent
 
-### Bank Connection Tokens (SimpleFIN)
+### Bank Connection Tokens (SimpleFIN and Plaid)
 
-- If bank sync is enabled, the SimpleFIN access URL (which grants read-only access to your linked bank accounts) is **encrypted at rest** with Fernet (AES-128-CBC + HMAC), using `BANK_TOKEN_ENCRYPTION_KEY` — a dedicated secret, separate from `JWT_SECRET`, generated the same way
+- If bank sync is enabled, the credential that grants read-only access to
+  your linked accounts — the SimpleFIN access URL, or a Plaid access token —
+  is **encrypted at rest** with Fernet (AES-128-CBC + HMAC), using
+  `APP_ENCRYPTION_KEY` (the legacy name `BANK_TOKEN_ENCRYPTION_KEY` is still
+  honored if that's what's already set) — a dedicated secret, separate from
+  `JWT_SECRET`, generated the same way
+- **Plaid-specific secrets:** `PLAID_CLIENT_ID` and `PLAID_SECRET` also live
+  only in `.env`. Neither is ever stored in the database or returned by any
+  API response; `PLAID_ENV` must be `sandbox` or `production` and the app
+  refuses to start on any other value
 - The key lives only in `.env` (gitignored) — never committed, never logged
-- Without `BANK_TOKEN_ENCRYPTION_KEY` set, the `/bank-sync/connect` endpoint refuses to store a token at all rather than falling back to plaintext
-- The sync job runs daily (5am local) and makes outbound HTTPS calls to SimpleFIN's bridge — this is the one deliberate exception to OfflineBudget's "no outbound connections" default, and only applies if you opt in by pasting a SimpleFIN setup token
-- Disconnecting (Settings → Bank Connections → trash icon) deletes the stored token and its account links immediately; it does not touch transactions already imported
+- Without the encryption key set, the `/bank-sync/connect` and
+  `/bank-sync/plaid/exchange` endpoints refuse to store a token at all
+  rather than falling back to plaintext
+- The sync job runs several times a day (7am for both providers; Plaid adds
+  11am, 3pm and 7pm) and makes outbound HTTPS calls to SimpleFIN's bridge
+  and/or Plaid's API — this is the one deliberate exception to
+  OfflineBudget's "no outbound connections" default, and only applies if you
+  opt in by connecting a bank through one or both providers. Plaid's
+  production traffic goes to `production.plaid.com` (or `sandbox.plaid.com`
+  if you set `PLAID_ENV=sandbox`) — built from a fixed map, never from
+  request input
+- **In the frontend:** Plaid's own Link script loads from `cdn.plaid.com`,
+  and only on the Accounts page, only when you click **Connect with Plaid**
+  or **Reconnect** — it's never loaded on page load or anywhere else
+- Disconnecting (Settings → Accounts & Bank Sync → trash icon) deletes the
+  stored token and its account links immediately; for a Plaid connection it
+  also calls Plaid's item-removal API. Neither disconnect path touches
+  transactions already imported
 
 ---
 

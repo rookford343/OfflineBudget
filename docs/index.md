@@ -100,3 +100,59 @@ double-count the whole statement.
 **It should survive a laptop that sleeps.** Scheduled email and bank sync
 both self-heal: a missed trigger fires when the machine wakes, and a periodic
 sweep retries anything that hasn't succeeded today.
+
+---
+
+## Bank sync: Plaid and SimpleFIN
+
+Connecting a bank is optional either way — see [Getting Started](start-guide.md)
+for signing up with each provider. Once you're connected, here's how the two
+behave day to day.
+
+**Connecting and mapping accounts.** Click **Connect with Plaid** in
+**Settings → Accounts & Bank Sync** and log in to your bank through the
+window Plaid opens. The app then lists the accounts it found — checking,
+savings, cards — and you map each one to an account or card already in the
+app. If an account is already synced by SimpleFIN, mapping it in Plaid
+offers **Switch to Plaid** instead of a conflict: one click moves that
+account over, deactivating the old SimpleFIN link rather than deleting it,
+so switching back later is just as easy.
+
+**Previewing and confirming the first import.** The first time Plaid syncs
+a newly-linked account, the app shows you a preview before anything is
+written. Every row is labeled:
+
+- **Imported** — a new transaction, about to be added.
+- **Matched** — the same real-world transaction the app already has (from
+  SimpleFIN, a CSV import, or an earlier sync); it's kept exactly as it is,
+  not duplicated.
+- **Ignored** — too old to matter; see the cutover window below.
+
+Review the preview, then click confirm to apply it for real. Nothing is
+written until you do.
+
+**The cutover window.** When you switch an account to Plaid, Plaid resends
+some history the old provider already had, under its own transaction ids —
+so the app can't just rely on "have I seen this id before." For transactions
+dated from **10 days before** the switch through **3 days after** it, the
+app instead matches by amount, date and description against what's already
+there. A match is left alone; only transactions with no match get imported.
+Anything older than that 10-day window is ignored outright, on the
+assumption your other provider or a CSV import already has it.
+
+**Reconnecting.** Banks occasionally require you to log in again — Chase
+calls this out specifically. When that happens, the connection in
+**Settings → Accounts & Bank Sync** shows an error and a **Reconnect**
+button. Click it, log in again in the window that opens, and syncing
+resumes on the next scheduled run.
+
+**The schedule.** Plaid syncs four times a day — 7am, 11am, 3pm and 7pm.
+SimpleFIN syncs once, at 7am (the old 3:17pm credit-card-only refresh is
+gone — Plaid's more frequent syncing replaced the need for it). **Sync Now**
+in Settings runs everything, on demand, anytime.
+
+**Statement balances.** For cards linked through Plaid, the statement
+balance, due date and minimum payment fill in automatically whenever your
+card issuer posts a *new* statement. The very first statement Plaid sees
+only records its date — not the balance — so any balance you've already
+typed in (or paid down) stays put until the next real statement arrives.

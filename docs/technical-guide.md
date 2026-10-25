@@ -20,7 +20,7 @@ OfflineBudget/
 │   │   ├── forecast.py, goals.py, imports.py, networth.py
 │   │   ├── planned_expenses.py, reconciliation.py, recurring.py
 │   │   ├── rules.py, scenarios.py, spending.py, transactions.py
-│   │   ├── bank_sync.py, adventures.py, wish_list.py, settings.py
+│   │   ├── bank_sync.py (both providers), adventures.py, wish_list.py, settings.py
 │   │   ├── admin.py
 │   │   └── _shared.py  owned_or_404() and reject_nulls(), used by every router
 │   └── services/     Business logic shared by API + CLI
@@ -38,6 +38,9 @@ OfflineBudget/
 │       ├── budget_snapshot.py     Household Snapshot; spending_breakdown(start, end)
 │       ├── bank_sync_service.py   SimpleFIN sync, card pending snapshot
 │       ├── simplefin_client.py    SimpleFIN protocol client (pending=1 for cards)
+│       ├── plaid_client.py        Thin httpx client for Plaid's API (no SDK)
+│       ├── plaid_sync_service.py  Plaid sync: transactions, balances, statements
+│       ├── cutover_match.py       Cross-provider matching for a provider switch
 │       ├── card_matching.py       Card name matcher + looks_like_card_autopay()
 │       ├── primary_account.py     primary_checking(): the account forecasts walk
 │       ├── wish_math.py, wish_plan.py, wish_lifecycle.py   Wish List
@@ -266,24 +269,59 @@ APScheduler jobs registered in `backend/main.py`:
 
 | Job | When | What |
 |-----|------|------|
-| `_run_bank_sync` | 7:00 | `sync_all()`: every linked account and card |
-| `_send_daily_summaries` | :15 past the send hour (default 7) | Daily email, after the sync |
-| `_run_card_refresh` | 15:17 | `sync_all(cards_only=True)`: card links only |
+| `_run_bank_sync` | 7:00 | `sync_all()`: every linked account and card, both providers |
+| `_run_plaid_sync` | 11:00, 15:00, 19:00 (`_PLAID_EXTRA_HOURS`) | `sync_all(providers={"plaid"})`: Plaid links only |
+| `_send_daily_summaries` | :15 past the send hour (default 7) | Daily email, after the 7:00 sync |
 | `_scheduler_sweep` | every 20 min | Retries a job that hasn't succeeded today |
 
-Both sync jobs and **Sync Now** share `job_locks._bank_sync_lock` (a
-non-blocking lock), so two syncs can never run at once; concurrent runs used
-to insert the same transactions twice.
+SimpleFIN only ever runs at 7:00, inside `_run_bank_sync`. The old
+`_run_card_refresh` job (15:17, SimpleFIN cards only) is gone: Plaid's Link
+already covers checking and cards through one connection, and its three
+extra daily runs replace the need for a separate cards-only pass. Every job
+above, plus **Sync Now**, shares `job_locks._bank_sync_lock` (a non-blocking
+lock), so two syncs can never run at once; concurrent runs used to insert the
+same transactions twice.
 
-Each link costs one SimpleFIN request. Card links pass `include_pending=True`;
-pending records come back flagged `pending` and are never imported. Instead
-`_replace_pending_snapshot()` deletes the card's `card_pending_transactions`
-rows and inserts the current pending list, then sets
-`CreditCard.pending_charges` to its total. A card whose issuer has never sent
-pending data is left alone, so a hand-typed figure survives. The function logs
-whether the pending list changed, which shows whether the afternoon run sees
-fresh data. `GET /credit-cards/pending-transactions` serves the snapshot to
-the Transactions page.
+**SimpleFIN.** Each link costs one request. Card links pass
+`include_pending=True`; pending records come back flagged `pending` and are
+never imported. Instead `_replace_pending_snapshot()` deletes the card's
+`card_pending_transactions` rows and inserts the current pending list, then
+sets `CreditCard.pending_charges` to its total. A card whose issuer has
+never sent pending data is left alone, so a hand-typed figure survives.
+`GET /credit-cards/pending-transactions` serves the snapshot to the
+Transactions page.
+
+**Plaid** (`plaid_client.py`, `plaid_sync_service.py`). One run calls
+`/transactions/sync` (paginated, cursor-based), `/accounts/get`,
+`/liabilities/get` for card links, then `/transactions/refresh` last so the
+*next* run's sync picks up whatever that refresh finds — no webhook, no
+in-request waiting. Pending rows (`pending: true`) are never imported; they
+replace the card's pending snapshot the same way SimpleFIN's do. Posted rows
+go through the same `build_preview`/`run_import` pipeline as every other
+source. Plaid transaction ids are stored as `plaid:<transaction_id>` on
+`external_id`, so they can never collide with a SimpleFIN or CSV id.
+
+*No Plaid SDK.* `plaid_client.py` is a thin wrapper over `httpx` (already a
+dependency) instead of `plaid-python`. The SDK's own code reviewed as
+clean — no exec, eval, subprocess or pickle, TLS verified by default — but
+it drags in four extra packages the lockfile doesn't have (including one
+with a single maintainer and no release since 2018), ships as a source
+archive with no wheel so `setup.py` runs at install time, and is roughly
+2,300 generated files for the seven endpoints this app actually calls — all
+to get typed response models, which targeted parsing plus tests against
+recorded response shapes cover anyway.
+
+**Switching a link from SimpleFIN to Plaid.** `cutover_match.py` handles
+re-sent history: for posted rows dated from 10 days before the switch
+through 3 days after, `find_match()` looks for an existing row with the
+same amount, a date within 3 days, and a fuzzy description match, before
+falling back to normal `external_id` dedup. A match keeps the existing row
+as-is and records the Plaid id on it in a new `alt_external_id` column on
+`Transaction`/`CreditCardTransaction`, so a later `modified` or `removed`
+event from Plaid still finds the right row. Rows older than the window are
+ignored outright; rows after it rely on `external_id` dedup only. See
+`docs/superpowers/specs/2026-10-25-plaid-sync-design.md` for the full
+cutover design.
 
 ## Shared Helpers (one place to fix)
 
@@ -331,6 +369,9 @@ the Transactions page.
 | `SMTP_PASS` | *(unset)* | SMTP login password / app password |
 | `SMTP_FROM` | *(unset)* | From address |
 | `DAILY_SUMMARY_HOUR` | `7` | Hour (0–23) to send daily summary emails |
+| `PLAID_CLIENT_ID` | *(unset)* | Plaid client id — Plaid disabled if unset |
+| `PLAID_SECRET` | *(unset)* | Plaid secret for `PLAID_ENV` |
+| `PLAID_ENV` | `production` | Must be `sandbox` or `production`; anything else fails at startup |
 
 ---
 

@@ -78,13 +78,13 @@ Income and bills that repeat, with monthly/quarterly/yearly frequencies.
 | Adventures | Trips priced in cash and points, a points wallet with transfer partners, committed to the forecast |
 | [Spending Analysis](#spending-analysis) | Monthly trends, ranged spending chart, merchant ranking, income flow diagram |
 | [Tax Estimator](#tax-estimator) | Full 2025 federal + state estimate; itemized vs. standard deduction; bracket ladder |
-| [Transaction Import](#transaction-import) | CSV and OFX/QFX upload; auto-categorization; custom rules engine; optional automated bank sync via SimpleFIN |
+| [Transaction Import](#transaction-import) | CSV and OFX/QFX upload; auto-categorization; custom rules engine; optional automated bank sync via Plaid or SimpleFIN |
 | [Credit Cards](#credit-cards) | Balance tracking, due-date reminders, payment recording, per-card spending, pending charges from your bank |
 | [Budget Tracking](#budget-tracking) | Monthly category budgets with rollover; actual vs. budgeted variance |
 | [Reconciliation](#reconciliation) | Link transactions to recurring items; quarterly balance checkpoints |
 | [Net Worth](#net-worth) | Assets and liabilities with historical snapshots |
 | [Savings Goals](#savings-goals) | Track named goals with target amounts and target dates |
-| [Bank Sync](#bank-sync) | Optional sync via SimpleFIN Bridge: everything at 7am, cards again at 3:17pm; pending card charges; self-healing catch-up if the machine was asleep |
+| [Bank Sync](#bank-sync) | Optional sync via Plaid (four times a day) and/or SimpleFIN Bridge (once a day); pending card charges; statement balances filled in automatically for Plaid-linked cards; self-healing catch-up if the machine was asleep |
 | [Settings](#settings-overview) | SMTP, report recipients, and schedule all configurable in the UI; secrets encrypted at rest |
 | [CLI](#cli) | All core operations available from the terminal without running the server |
 
@@ -445,24 +445,39 @@ app refuses to store it rather than falling back to plaintext.
 
 ## Bank Sync
 
-Optional, via [SimpleFIN Bridge](https://beta-bridge.simplefin.org/) (about
-$15/year, read-only). Paste a setup token in **Settings → Accounts & Bank
-Sync** and link each SimpleFIN account to an account or card in the app.
+Optional, via [Plaid](https://plaid.com/) and/or [SimpleFIN
+Bridge](https://beta-bridge.simplefin.org/) (about $15/year, read-only) —
+see [Getting Started](docs/start-guide.md) for setting up either one. Link
+each discovered account to an account or card in the app; an account already
+linked through one provider can switch to the other with one click.
 
-| When | What syncs |
-|------|-----------|
-| 7:00am | Every linked account and card |
-| 3:17pm | Credit cards only, for fresh pending charges |
-| Sync Now | Everything, on demand |
+| Provider | When | What syncs |
+|----------|------|-----------|
+| Plaid | 7am, 11am, 3pm, 7pm | Transactions, balances, pending card charges, card statement fields |
+| SimpleFIN | 7am | Transactions, balances, pending card charges |
+| Either | Sync Now | Everything, on demand |
 
-Each linked account costs one request per sync; SimpleFIN asks for 24 or fewer
-a day, and this schedule uses about six for a typical household.
+Plaid links don't count against SimpleFIN's request budget — SimpleFIN asks
+for 24 or fewer requests a day, one per linked account per sync; a
+Plaid-only household makes no SimpleFIN requests at all.
 
 **Pending card charges.** Each card sync stores the issuer's current pending
 list and replaces it wholesale on the next sync, so a charge that posts drops
 off the list and arrives once as a normal transaction. Pending charges show
 in Transactions with a badge, feed the forecast through the card's pending
 total, and are never counted as spending until they post.
+
+**Statement balances (Plaid).** When a Plaid-linked card's issuer posts a
+new statement, the statement balance, due date and minimum payment fill in
+automatically. The very first statement Plaid sees only records its date —
+any balance you've already entered or paid down stays put until the next
+real statement arrives.
+
+**Switching providers or reconnecting.** Moving an account from SimpleFIN to
+Plaid previews the import first — new, already-covered ("matched", kept as
+one copy) and too-old-to-matter ("ignored") rows are all labeled before you
+confirm anything. If a bank asks for a fresh login, the connection shows an
+error with a **Reconnect** button.
 
 ---
 
@@ -517,6 +532,9 @@ crontab -e
 | `SMTP_PASS` | *(unset)* | SMTP password / app password |
 | `SMTP_FROM` | *(unset)* | From address |
 | `DAILY_SUMMARY_HOUR` | `7` | Hour (0–23) to send daily summary emails |
+| `PLAID_CLIENT_ID` | *(unset)* | Plaid client id — Plaid disabled if unset |
+| `PLAID_SECRET` | *(unset)* | Plaid secret for `PLAID_ENV` |
+| `PLAID_ENV` | `production` | `sandbox` or `production` |
 
 ---
 
