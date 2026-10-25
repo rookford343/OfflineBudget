@@ -478,8 +478,10 @@ down stays put until then.
 **Switching providers or reconnecting.** Moving an account from SimpleFIN to
 Plaid previews the import first — new, already-covered ("matched", kept as
 one copy) and too-old-to-matter ("ignored") rows are all labeled before you
-confirm anything. If a bank asks for a fresh login, the connection shows an
-error with a **Reconnect** button.
+confirm anything. The preview also warns about any account on the bank
+login you haven't mapped, since its transactions are skipped for good once
+you confirm. If a bank asks for a fresh login, the connection shows an
+error with a **Reconnect** button; reconnecting runs a sync straight away.
 
 ---
 

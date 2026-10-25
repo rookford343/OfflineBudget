@@ -113,8 +113,9 @@ behave day to day.
 **Settings → Accounts & Bank Sync** and log in to your bank through the
 window Plaid opens. The app then lists the accounts it found — checking,
 savings, cards — and you map each one to an account or card already in the
-app. If an account is already synced by SimpleFIN, mapping it in Plaid
-offers **Switch to Plaid** instead of a conflict: one click moves that
+app. If an account is already synced by another connection, mapping it
+names that connection ("Already synced by SimpleFIN. Switch to this one?")
+and offers **Switch** instead of a conflict: one click moves that
 account over, deactivating the old SimpleFIN link rather than deleting it,
 so switching back later is just as easy.
 
@@ -131,6 +132,16 @@ written. Every row is labeled:
 Review the preview, then click confirm to apply it for real. Nothing is
 written until you do.
 
+If the preview lists accounts that aren't mapped, map them first (**Map
+more accounts**) unless you really don't want them: once you confirm, their
+transactions are skipped for good. To confirm anyway, tick the checkbox
+under that warning.
+
+Right after you link a bank, Plaid may still be fetching your history. The
+preview then says "Plaid is still fetching your history; try again in a
+minute" and nothing is saved; wait a minute and click **Preview first
+import** again. The button goes away once the first import is done.
+
 **The cutover window.** When you switch an account to Plaid, Plaid resends
 some history the old provider already had, under its own transaction ids —
 so the app can't just rely on "have I seen this id before." For transactions
@@ -140,11 +151,12 @@ there. A match is left alone; only transactions with no match get imported.
 Anything older than that 10-day window is ignored outright, on the
 assumption your other provider or a CSV import already has it.
 
-**Reconnecting.** Banks occasionally require you to log in again — Chase
-calls this out specifically. When that happens, the connection in
-**Settings → Accounts & Bank Sync** shows an error and a **Reconnect**
-button. Click it, log in again in the window that opens, and syncing
-resumes on the next scheduled run.
+**Reconnecting.** Banks occasionally require you to log in again. When
+that happens, the connection in **Settings → Accounts & Bank Sync** shows
+"Your bank needs you to log in again. Use Reconnect in Settings → Accounts."
+and a **Reconnect** button. Click it and log in again in the window that
+opens; the app runs a sync straight away, and the error clears once it
+succeeds.
 
 **The schedule.** Plaid syncs four times a day — 7am, 11am, 3pm and 7pm.
 SimpleFIN syncs once, at 7am (the old 3:17pm credit-card-only refresh is
