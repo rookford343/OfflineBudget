@@ -11,6 +11,14 @@ import PlaidFirstImportPreview from "./PlaidFirstImportPreview";
 
 const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", interest_rate: "", notes: "", is_emergency_fund: false };
 
+// Names the connection that already syncs an account, from the /link 409's
+// `existing_provider`. Unknown or missing falls back to a neutral phrase.
+function providerLabel(provider: string | null): string {
+  if (provider === "simplefin") return "SimpleFIN";
+  if (provider === "plaid") return "Plaid";
+  return "another connection";
+}
+
 export default function AccountsTab() {
   const qc = useQueryClient();
   const balancesHidden = useBalancesHidden();
@@ -25,7 +33,9 @@ export default function AccountsTab() {
   // Set only when a /link call 409'd because another connection's active
   // link already targets the same local account/card -- turns that one row
   // into an inline "switch to this provider?" prompt instead of a dead end.
-  const [switchPrompt, setSwitchPrompt] = useState<{ accountId: string; connectionId: number } | null>(null);
+  const [switchPrompt, setSwitchPrompt] = useState<
+    { accountId: string; connectionId: number; existingProvider: string | null } | null
+  >(null);
 
   const connectMut = useMutation({
     mutationFn: (token: string) => bankSyncApi.connect(token),
@@ -43,9 +53,13 @@ export default function AccountsTab() {
       });
     },
     onError: (err: any, variables: any) => {
-      const existingLinkId = err?.response?.data?.detail?.existing_link_id;
-      if (err?.response?.status === 409 && existingLinkId) {
-        setSwitchPrompt({ accountId: variables.data.simplefin_account_id, connectionId: variables.connectionId });
+      const detail = err?.response?.data?.detail;
+      if (err?.response?.status === 409 && detail?.existing_link_id) {
+        setSwitchPrompt({
+          accountId: variables.data.simplefin_account_id,
+          connectionId: variables.connectionId,
+          existingProvider: detail.existing_provider ?? null,
+        });
       }
       // Any other failure still reaches the user via the global error toast
       // (main.tsx's MutationCache.onError) -- nothing else to do here.
@@ -102,14 +116,20 @@ export default function AccountsTab() {
   });
   // Reconnecting an errored item: link-token in update mode -> Link. Plaid
   // clears the item's error state itself once the re-auth lands; there's no
-  // separate "finish reconnect" call on this backend.
+  // separate "finish reconnect" call on this backend. The connection's own
+  // status only flips back to active on its next sync, so run one now rather
+  // than leave the error showing until the next scheduled slot.
   const plaidReconnectMut = useMutation({
     mutationFn: async (connectionId: number) => {
       const { link_token } = await bankSyncApi.plaidLinkToken(connectionId);
       return openPlaidLink(link_token);
     },
     onSuccess: (opened) => {
-      if (opened) qc.invalidateQueries({ queryKey: ["bank-connections"] });
+      if (!opened) return;
+      qc.invalidateQueries({ queryKey: ["bank-connections"] });
+      // syncNowMut calls bankSyncApi.syncNow() and, on success, invalidates
+      // bank-connections again (plus balances and recent activity).
+      syncNowMut.mutate();
     },
   });
   const [firstImportPreview, setFirstImportPreview] = useState<{ connectionId: number; data: any } | null>(null);
@@ -272,7 +292,7 @@ export default function AccountsTab() {
                       {plaidReconnectMut.isPending && plaidReconnectMut.variables === conn.id ? "Reconnecting…" : "Reconnect"}
                     </button>
                   )}
-                  {conn.provider === "plaid" && conn.links.length > 0 && (
+                  {conn.provider === "plaid" && conn.links.length > 0 && !conn.first_import_done && (
                     <button
                       onClick={() => previewImportMut.mutate(conn.id)}
                       disabled={previewImportMut.isPending}
@@ -316,7 +336,9 @@ export default function AccountsTab() {
                   </span>
                   {switchPrompt && switchPrompt.accountId === a.simplefin_account_id && switchPrompt.connectionId === pendingConnect.connection_id ? (
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs text-amber-600 dark:text-amber-400">Already synced by SimpleFIN. Switch to Plaid?</span>
+                      <span className="text-xs text-amber-600 dark:text-amber-400">
+                        Already synced by {providerLabel(switchPrompt.existingProvider)}. Switch to this one?
+                      </span>
                       <button
                         onClick={() => submitLink(a.simplefin_account_id, a.name, pendingConnect.connection_id, true)}
                         disabled={linkMut.isPending}

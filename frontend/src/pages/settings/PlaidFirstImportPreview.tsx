@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { fmt, fmtDate } from "../../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../../store/balanceVisibility";
-import { X } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 
 interface PlaidFirstImportRow {
   date: string;
@@ -15,6 +16,8 @@ interface PlaidFirstImportData {
   matched: number;
   ignored: number;
   rows: PlaidFirstImportRow[];
+  // The item's accounts with no active link: skipped for good once confirmed.
+  unlinked_accounts?: string[];
 }
 
 function outcomeBadge(outcome: string): string {
@@ -34,6 +37,11 @@ export default function PlaidFirstImportPreview(
   { data: PlaidFirstImportData; onClose: () => void; onConfirm: () => void; confirming: boolean },
 ) {
   const hidden = useBalancesHidden();
+  const unlinked = data.unlinked_accounts ?? [];
+  // Confirming saves Plaid's cursor, so history for an unmapped account can
+  // never be fetched again. Make the user say they understand that.
+  const [acknowledged, setAcknowledged] = useState(false);
+  const canConfirm = unlinked.length === 0 || acknowledged;
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
@@ -47,6 +55,18 @@ export default function PlaidFirstImportPreview(
           <span><span className="font-semibold text-gray-900 dark:text-gray-100">{data.matched}</span> matched</span>
           <span><span className="font-semibold text-gray-900 dark:text-gray-100">{data.ignored}</span> ignored</span>
         </div>
+        {unlinked.length > 0 && (
+          <div className="mb-3 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-2 text-xs text-amber-700 dark:text-amber-300">
+            <p className="flex items-start gap-1">
+              <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+              <span>These accounts aren't mapped and their transactions will be skipped for good: {unlinked.join(", ")}</span>
+            </p>
+            <label className="mt-2 flex items-center gap-2">
+              <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
+              I understand; import without them
+            </label>
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700 -mx-1 px-1">
           {data.rows.map((r, i) => (
             <div key={i} className="py-2 flex items-center justify-between gap-2">
@@ -63,7 +83,7 @@ export default function PlaidFirstImportPreview(
           {data.rows.length === 0 && <p className="text-sm text-gray-400 py-4 text-center">No transactions found</p>}
         </div>
         <div className="flex gap-3 pt-4">
-          <button onClick={onConfirm} disabled={confirming} className="btn-primary flex-1">
+          <button onClick={onConfirm} disabled={confirming || !canConfirm} className="btn-primary flex-1">
             {confirming ? "Importing…" : "Confirm import"}
           </button>
           <button onClick={onClose} disabled={confirming} className="btn-secondary flex-1">Cancel</button>
