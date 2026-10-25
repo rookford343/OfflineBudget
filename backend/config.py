@@ -51,6 +51,16 @@ class Settings(BaseSettings):
     # keep working unchanged -- see app_encryption_key below.
     APP_ENCRYPTION_KEY: str | None = None
 
+    # Plaid (second bank-sync provider, alongside SimpleFIN). Never stored in
+    # the database or returned by any endpoint -- see
+    # docs/superpowers/specs/2026-10-25-plaid-sync-design.md.
+    PLAID_CLIENT_ID: str | None = None
+    PLAID_SECRET: str | None = None
+    # "sandbox" | "production". The base URL is built from this via a fixed
+    # map (never from request input) -- anything else fails fast at startup
+    # rather than silently hitting the wrong Plaid environment.
+    PLAID_ENV: str = "production"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @field_validator("JWT_SECRET")
@@ -63,6 +73,14 @@ class Settings(BaseSettings):
             return value
         logger.warning("JWT_SECRET is not set; using a random one. Set it in .env to keep logins across restarts.")
         return secrets.token_urlsafe(48)
+
+    @field_validator("PLAID_ENV")
+    @classmethod
+    def _plaid_env_must_be_known(cls, value: str) -> str:
+        allowed = {"sandbox", "production"}
+        if value not in allowed:
+            raise ValueError(f"PLAID_ENV must be one of {sorted(allowed)}, got {value!r}")
+        return value
 
     @property
     def allowed_origins_list(self) -> list[str]:

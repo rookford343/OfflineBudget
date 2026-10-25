@@ -1,9 +1,11 @@
-"""Orchestrates SimpleFIN sync: pulls transactions for every linked account
-and feeds them through the existing CSV-import pipeline so dedup, auto-
-categorization, and rules apply identically regardless of source."""
+"""Orchestrates bank sync across providers (SimpleFIN today, Plaid alongside
+it): pulls transactions for every linked account and feeds them through the
+existing CSV-import pipeline so dedup, auto-categorization, and rules apply
+identically regardless of source."""
 from __future__ import annotations
 import json
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
 from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import func
@@ -36,6 +38,20 @@ _INITIAL_LOOKBACK_DAYS = 30  # first sync for a newly-linked account
 _OVERLAP_DAYS = 10
 
 _AUTO_ANCHOR_NOTE = "Auto (bank sync)"
+
+
+@dataclass
+class PendingCharge:
+    """A not-yet-posted charge, provider-agnostic. `amount` uses card
+    convention: positive = charge, negative = refund -- the same convention
+    CardPendingTransaction.amount and CreditCard.pending_charges already use.
+    Each provider's sync caller maps its own transaction shape into this
+    before calling replace_pending_snapshot/apply_card_balance, so the shared
+    helpers below never need to know which provider a charge came from."""
+    external_id: str
+    date: date
+    amount: Decimal
+    merchant: str
 
 
 def sync_connection(
@@ -75,6 +91,7 @@ def sync_connection(
 
     links_q = db.query(models.BankConnectionAccountLink).filter(
         models.BankConnectionAccountLink.connection_id == connection.id,
+        models.BankConnectionAccountLink.is_active == True,
     )
     if cards_only:
         links_q = links_q.filter(models.BankConnectionAccountLink.local_credit_card_id.isnot(None))
@@ -112,8 +129,8 @@ def sync_connection(
     return (total_imported, total_skipped)
 
 
-def _replace_pending_snapshot(
-    db: Session, user: models.User, card: models.CreditCard, pending: list,
+def replace_pending_snapshot(
+    db: Session, user: models.User, card: models.CreditCard, pending: list[PendingCharge],
 ) -> bool:
     """Replace the card's CardPendingTransaction rows with the issuer's
     current pending list and set pending_charges to their total. Returns
@@ -130,19 +147,19 @@ def _replace_pending_snapshot(
     for row in existing:
         db.delete(row)
     now = datetime.utcnow()
-    for t in pending:
-        # SimpleFIN charges are negative; card rows store charges positive.
+    for p in pending:
+        # PendingCharge.amount already uses card convention (positive=charge).
         db.add(models.CardPendingTransaction(
-            user_id=user.id, card_id=card.id, external_id=t.id,
-            date=t.posted.date(), amount=-t.amount, merchant=t.description[:256],
+            user_id=user.id, card_id=card.id, external_id=p.external_id,
+            date=p.date, amount=p.amount, merchant=p.merchant,
             synced_at=now,
         ))
-    card.pending_charges = max(-sum((t.amount for t in pending), Decimal("0")), Decimal("0"))
+    card.pending_charges = max(sum((p.amount for p in pending), Decimal("0")), Decimal("0"))
     card.pending_charges_updated_at = now
     # Measures whether intraday pulls see fresh data (the Bridge refreshes
     # banks roughly daily): if this never logs "changed" on the afternoon
     # run, that run isn't earning its request.
-    after = {t.id for t in pending}
+    after = {p.external_id for p in pending}
     logger.info(
         "Pending snapshot for card %s: %s (%d items, %s)",
         card.id, "changed" if after != before else "unchanged", len(pending), card.pending_charges,
@@ -179,6 +196,142 @@ def _fold_late_transactions_into_anchors(db: Session, user_id: int, account_id: 
             anchor.updated_at = datetime.utcnow()
 
 
+def apply_account_balance(
+    db: Session, user: models.User, account: models.Account,
+    balance: Decimal, balance_date: datetime | None, imported: int,
+) -> None:
+    """The account side of a sync: write the fresh balance and, for a
+    checking account, anchor the forecast to it. Shared by every provider's
+    sync caller -- SimpleFIN today, Plaid alongside it -- so the anchor and
+    late-fold logic can't drift between them."""
+    if imported:
+        db.flush()
+        _fold_late_transactions_into_anchors(db, user.id, account.id)
+    account.current_balance = balance
+    if account.type == models.AccountType.checking:
+        # Anchor the forecast to today's real posted balance on every
+        # sync, not just once a month via the Monthly Accuracy row's
+        # manual "Set actual close" -- forecast_engine.py's day-walk
+        # resets its running balance to whatever ForecastDayCheckpoint
+        # says for a given date, so a fresh one daily is what keeps
+        # drift from compounding for weeks between manual checks.
+        # Only checking accounts feed the forecast walk at all, so a
+        # checkpoint on a savings/money-market link would be inert.
+        # balance_date is the provider's own as-of date for the balance
+        # (can lag the sync run by a day); fall back to today only
+        # when it's missing.
+        checkpoint_date = balance_date.date() if balance_date else date.today()
+        # Anything still projected on checkpoint_date -- a paycheck
+        # that hasn't cleared, a planned purchase's funding transfer --
+        # means the sync ran before that day settled. Checkpointing
+        # anyway silently erases that projection from every day after
+        # it (see has_unsettled_projection's docstring for the two
+        # real incidents this fixes). Skip this sync's checkpoint and
+        # let a later one, after the day settles, anchor it instead.
+        if not has_unsettled_projection(db, user.id, account.id, checkpoint_date):
+            cp = db.query(models.ForecastDayCheckpoint).filter(
+                models.ForecastDayCheckpoint.user_id == user.id,
+                models.ForecastDayCheckpoint.account_id == account.id,
+                models.ForecastDayCheckpoint.date == checkpoint_date,
+            ).first()
+            if cp:
+                cp.actual_balance = balance
+                cp.note = _AUTO_ANCHOR_NOTE
+            else:
+                db.add(models.ForecastDayCheckpoint(
+                    user_id=user.id, account_id=account.id,
+                    date=checkpoint_date, actual_balance=balance,
+                    note=_AUTO_ANCHOR_NOTE,
+                ))
+
+
+def apply_card_balance(
+    db: Session, user: models.User, card: models.CreditCard,
+    balance_owed: Decimal, balance_date: datetime | None,
+    pending: list[PendingCharge], imported: int,
+) -> None:
+    """The card side of a sync: write the fresh balance owed, replace the
+    pending snapshot, and attempt statement reconciliation. `balance_owed` is
+    a positive amount owed -- the SimpleFIN caller passes `-balance` since
+    SimpleFIN reports a card's liability as a negative balance; Plaid already
+    reports it positive. Shared by every provider's sync caller."""
+    # A card issuer's own balance feed can lag real-world posting by
+    # days -- a payment leaves checking (and gets picked up there)
+    # long before the card issuer's own balance reflects it. When
+    # import_service.py's payoff detection already confirmed newer,
+    # dated debt-paid evidence from the checking side (balance_as_of),
+    # a card-side sync with an OLDER or absent balance-date is not
+    # allowed to regress that -- it would silently resurrect debt
+    # checking already proved was paid. No signal on either side
+    # (both None) keeps the pre-existing behavior: always trust it.
+    # Confirmed live 2026-09-01: Chase Sapphire's own feed was still
+    # reporting a pre-payment balance six days after the payment.
+    stale = (
+        balance_date is not None
+        and card.balance_as_of is not None
+        and balance_date < card.balance_as_of
+    )
+    if not stale:
+        # CreditCard.current_balance is a positive amount owed everywhere
+        # else in this codebase (import_service subtracts signed amounts,
+        # utilization_pct divides by credit_limit); balance_owed already
+        # uses that convention.
+        card.current_balance = balance_owed
+        if balance_date is not None:
+            card.balance_as_of = balance_date
+
+        if card.payment_sent_pending_sync:
+            # A fresh sync just wrote real, authoritative data --
+            # whatever it now says, the manual marker is stale by
+            # definition. balance_due is never touched by bank sync
+            # (confirmed: only current_balance is), so this is the
+            # actual reconciliation signal, not balance_due changing.
+            # Without this the flag could never clear from a real
+            # sync at all -- only from record_payment or a manual
+            # edit, which is exactly the workaround this feature
+            # exists to replace. Found in final whole-branch review,
+            # 2026-08-28.
+            card.payment_sent_pending_sync = False
+            card.payment_sent_amount = None
+
+    if not replace_pending_snapshot(db, user, card, pending) and (
+        card.pending_charges and card.pending_charges > 0 and imported > 0
+    ):
+        # No pending feed for this card (some issuers never send one).
+        # the user's call (final whole-branch review, 2026-08-28): only
+        # clear when this sync actually brought in new transactions
+        # for this card -- a balance refresh alone isn't proof the
+        # hand-typed figure is stale, but real posted activity is.
+        # A no-op sync (current_balance unchanged, nothing new
+        # imported) now leaves the pending figure alone, so it keeps
+        # feeding the forecast's second hop and budget_snapshot's
+        # Left to Spend until something real actually supersedes it.
+        card.pending_charges = Decimal("0")
+        card.pending_charges_updated_at = None
+
+    try:
+        # Proves full payment from this card's own transaction
+        # history (payments/refunds import as negative amounts) and
+        # clears a stale balance_due the moment it's provable --
+        # see statement_reconcile.py. Never allowed to fail the
+        # sync it rides along with: a reconcile bug must not take
+        # down the transaction import it has nothing to do with.
+        #
+        # begin_nested() makes it a SAVEPOINT: a DB-level failure
+        # (e.g. a failed flush) rolls back only the reconcile's own
+        # writes. Without it, a failed flush leaves the whole
+        # session needing a rollback, and the commit below would
+        # throw away this sync's current_balance/last_synced_at too.
+        if AUTO_CLEAR_STATEMENTS_IN_SYNC:
+            with db.begin_nested():
+                reconcile_statement_payment(db, card, date.today())
+    except Exception as exc:  # noqa: BLE001 -- isolate this card's reconcile
+        # attempt from the sync it rides along with.
+        logger.error(
+            "Statement reconcile failed for card %s: %s", card.id, exc,
+        )
+
+
 def _sync_link(
     db: Session, user: models.User, access_url: str, link: models.BankConnectionAccountLink,
 ) -> tuple[int, int]:
@@ -196,6 +349,12 @@ def _sync_link(
     # (usually under a new id).
     pending = [t for t in fetched if t.pending]
     txns = [t for t in fetched if not t.pending]
+    # SimpleFIN charges are negative; PendingCharge uses card convention
+    # (positive=charge), same as replace_pending_snapshot's caller contract.
+    pending_charges = [
+        PendingCharge(external_id=t.id, date=t.posted.date(), amount=-t.amount, merchant=t.description[:256])
+        for t in pending
+    ]
 
     if user.debug_capture_raw_bank_data and txns:
         _capture_raw_snapshots(db, user.id, txns)
@@ -237,123 +396,13 @@ def _sync_link(
     if link.local_account_id:
         account = db.get(models.Account, link.local_account_id)
         if account:
-            if imported:
-                db.flush()
-                _fold_late_transactions_into_anchors(db, user.id, account.id)
-            account.current_balance = balance
-            if account.type == models.AccountType.checking:
-                # Anchor the forecast to today's real posted balance on every
-                # sync, not just once a month via the Monthly Accuracy row's
-                # manual "Set actual close" -- forecast_engine.py's day-walk
-                # resets its running balance to whatever ForecastDayCheckpoint
-                # says for a given date, so a fresh one daily is what keeps
-                # drift from compounding for weeks between manual checks.
-                # Only checking accounts feed the forecast walk at all, so a
-                # checkpoint on a savings/money-market link would be inert.
-                # balance_date is SimpleFIN's own as-of date for the balance
-                # (can lag the sync run by a day); fall back to today only
-                # when it's missing.
-                checkpoint_date = balance_date.date() if balance_date else date.today()
-                # Anything still projected on checkpoint_date -- a paycheck
-                # that hasn't cleared, a planned purchase's funding transfer --
-                # means the sync ran before that day settled. Checkpointing
-                # anyway silently erases that projection from every day after
-                # it (see has_unsettled_projection's docstring for the two
-                # real incidents this fixes). Skip this sync's checkpoint and
-                # let a later one, after the day settles, anchor it instead.
-                if not has_unsettled_projection(db, user.id, account.id, checkpoint_date):
-                    cp = db.query(models.ForecastDayCheckpoint).filter(
-                        models.ForecastDayCheckpoint.user_id == user.id,
-                        models.ForecastDayCheckpoint.account_id == account.id,
-                        models.ForecastDayCheckpoint.date == checkpoint_date,
-                    ).first()
-                    if cp:
-                        cp.actual_balance = balance
-                        cp.note = _AUTO_ANCHOR_NOTE
-                    else:
-                        db.add(models.ForecastDayCheckpoint(
-                            user_id=user.id, account_id=account.id,
-                            date=checkpoint_date, actual_balance=balance,
-                            note=_AUTO_ANCHOR_NOTE,
-                        ))
+            apply_account_balance(db, user, account, balance, balance_date, imported)
     elif link.local_credit_card_id:
         card = db.get(models.CreditCard, link.local_credit_card_id)
         if card:
-            # A card issuer's own balance feed can lag real-world posting by
-            # days -- a payment leaves checking (and gets picked up there)
-            # long before the card issuer's own balance reflects it. When
-            # import_service.py's payoff detection already confirmed newer,
-            # dated debt-paid evidence from the checking side (balance_as_of),
-            # a card-side sync with an OLDER or absent balance-date is not
-            # allowed to regress that -- it would silently resurrect debt
-            # checking already proved was paid. No signal on either side
-            # (both None) keeps the pre-existing behavior: always trust it.
-            # Confirmed live 2026-09-01: Chase Sapphire's own feed was still
-            # reporting a pre-payment balance six days after the payment.
-            stale = (
-                balance_date is not None
-                and card.balance_as_of is not None
-                and balance_date < card.balance_as_of
-            )
-            if not stale:
-                # SimpleFIN reports a card's liability as a NEGATIVE balance, but
-                # CreditCard.current_balance is a positive amount owed everywhere
-                # else in this codebase (import_service subtracts signed amounts,
-                # utilization_pct divides by credit_limit). Flip the sign.
-                card.current_balance = -balance
-                if balance_date is not None:
-                    card.balance_as_of = balance_date
-
-                if card.payment_sent_pending_sync:
-                    # A fresh sync just wrote real, authoritative data --
-                    # whatever it now says, the manual marker is stale by
-                    # definition. balance_due is never touched by bank sync
-                    # (confirmed: only current_balance is), so this is the
-                    # actual reconciliation signal, not balance_due changing.
-                    # Without this the flag could never clear from a real
-                    # sync at all -- only from record_payment or a manual
-                    # edit, which is exactly the workaround this feature
-                    # exists to replace. Found in final whole-branch review,
-                    # 2026-08-28.
-                    card.payment_sent_pending_sync = False
-                    card.payment_sent_amount = None
-
-            if not _replace_pending_snapshot(db, user, card, pending) and (
-                card.pending_charges and card.pending_charges > 0 and imported > 0
-            ):
-                # No pending feed for this card (some issuers never send one).
-                # the user's call (final whole-branch review, 2026-08-28): only
-                # clear when this sync actually brought in new transactions
-                # for this card -- a balance refresh alone isn't proof the
-                # hand-typed figure is stale, but real posted activity is.
-                # A no-op sync (current_balance unchanged, nothing new
-                # imported) now leaves the pending figure alone, so it keeps
-                # feeding the forecast's second hop and budget_snapshot's
-                # Left to Spend until something real actually supersedes it.
-                card.pending_charges = Decimal("0")
-                card.pending_charges_updated_at = None
-
-            try:
-                # Proves full payment from this card's own transaction
-                # history (payments/refunds import as negative amounts) and
-                # clears a stale balance_due the moment it's provable --
-                # see statement_reconcile.py. Never allowed to fail the
-                # sync it rides along with: a reconcile bug must not take
-                # down the transaction import it has nothing to do with.
-                #
-                # begin_nested() makes it a SAVEPOINT: a DB-level failure
-                # (e.g. a failed flush) rolls back only the reconcile's own
-                # writes. Without it, a failed flush leaves the whole
-                # session needing a rollback, and the commit below would
-                # throw away this sync's current_balance/last_synced_at too.
-                if AUTO_CLEAR_STATEMENTS_IN_SYNC:
-                    with db.begin_nested():
-                        reconcile_statement_payment(db, card, date.today())
-            except Exception as exc:  # noqa: BLE001 -- isolate this card's reconcile
-                # attempt from the sync it rides along with.
-                logger.error(
-                    "Statement reconcile failed for card %s: %s", card.id, exc,
-                )
+            # SimpleFIN reports a card's liability as a NEGATIVE balance;
+            # apply_card_balance wants a positive amount owed. Flip the sign.
+            apply_card_balance(db, user, card, -balance, balance_date, pending_charges, imported)
 
     link.last_synced_at = datetime.utcnow()
     db.commit()
@@ -383,17 +432,26 @@ def _capture_raw_snapshots(db: Session, user_id: int, txns: list) -> None:
             ))
 
 
-def sync_all(db: Session, *, cards_only: bool = False) -> None:
+def sync_all(db: Session, *, cards_only: bool = False, providers: set[str] | None = None) -> None:
     """Entry point for the daily scheduled job -- syncs every connection the
     user hasn't explicitly disconnected. Errored connections are deliberately
     INCLUDED: sync_connection is the only code path that can flip status back
     to `active`, so excluding `error` would make a single transient failure
     (timeout, bank unreachable) permanent. Isolates each connection so one
     connection's unexpected failure (including a decrypt error or anything
-    sync_connection itself doesn't catch) can never abort the rest of the job."""
-    connections = db.query(models.BankConnection).filter(
+    sync_connection itself doesn't catch) can never abort the rest of the job.
+
+    `providers`, when given, limits the run to connections whose `provider`
+    is in the set (e.g. the Plaid-only four-times-a-day schedule next to a
+    SimpleFIN-only once-a-day one). None (the default) syncs every provider.
+    Inactive links are filtered separately, inside sync_connection's own
+    query -- that's a per-link decision, not a per-connection one."""
+    connections_q = db.query(models.BankConnection).filter(
         models.BankConnection.status != models.BankConnectionStatus.disconnected,
-    ).all()
+    )
+    if providers is not None:
+        connections_q = connections_q.filter(models.BankConnection.provider.in_(providers))
+    connections = connections_q.all()
     for connection in connections:
         try:
             sync_connection(db, connection, cards_only=cards_only)

@@ -307,6 +307,18 @@ def upgrade_schema():
         # forecast_engine._compute_transfer_schedules.
         "ALTER TABLE buffer_transfer_rules ADD COLUMN sweep_ceiling NUMERIC(14,2)",
         "ALTER TABLE buffer_transfer_rules ADD COLUMN sweep_to_account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL",
+        # Plaid as a second bank-sync provider alongside SimpleFIN -- see
+        # models.py's BankConnection/BankConnectionAccountLink/CreditCard and
+        # docs/superpowers/specs/2026-10-25-plaid-sync-design.md.
+        "ALTER TABLE bank_connections ADD COLUMN provider VARCHAR(16) NOT NULL DEFAULT 'simplefin'",
+        "ALTER TABLE bank_connections ADD COLUMN plaid_item_id VARCHAR(128)",
+        "ALTER TABLE bank_connections ADD COLUMN sync_cursor TEXT",
+        "ALTER TABLE bank_connections ADD COLUMN cutover_date DATE",
+        "ALTER TABLE bank_connection_account_links ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1",
+        "ALTER TABLE credit_cards ADD COLUMN last_statement_issue_date DATE",
+        "ALTER TABLE credit_cards ADD COLUMN minimum_payment_amount NUMERIC(14,2)",
+        "ALTER TABLE transactions ADD COLUMN alt_external_id VARCHAR(128)",
+        "ALTER TABLE credit_card_transactions ADD COLUMN alt_external_id VARCHAR(128)",
     ]
     with engine.connect() as conn:
         for s in stmts:

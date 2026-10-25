@@ -427,6 +427,12 @@ class Transaction(Base):
     # Upstream provider's own transaction id (SimpleFIN). NULL for manual entry
     # and CSV/OFX imports, which have no stable external identifier.
     external_id: Mapped[str | None] = mapped_column(String(128))
+    # Set only on a row the Plaid cutover's cross-provider matching matched to
+    # an existing SimpleFIN/CSV row instead of importing a duplicate -- the
+    # Plaid transaction id ("plaid:<transaction_id>"), recorded here so a
+    # later Plaid `modified` or `removed` event can still find this row by
+    # id. NULL otherwise.
+    alt_external_id: Mapped[str | None] = mapped_column(String(128))
     imported_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -451,6 +457,12 @@ class CreditCard(Base):
     current_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     balance_due: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     next_payment_date: Mapped[date | None] = mapped_column(Date)
+    # Plaid /liabilities/get's statement fields -- set when the issue date is
+    # newer than what's stored (see the Statements step of the Plaid sync
+    # design spec). NULL for a card that has never synced a statement from
+    # Plaid.
+    last_statement_issue_date: Mapped[date | None] = mapped_column(Date)
+    minimum_payment_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     monthly_spend_estimate: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     pending_charges: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     payment_sent_pending_sync: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -520,6 +532,10 @@ class CreditCardTransaction(Base):
     # Upstream provider's own transaction id (SimpleFIN). NULL for manual entry
     # and CSV/OFX imports, which have no stable external identifier.
     external_id: Mapped[str | None] = mapped_column(String(128))
+    # Set only on a row the Plaid cutover's cross-provider matching matched to
+    # an existing SimpleFIN/CSV row instead of importing a duplicate -- see
+    # Transaction.alt_external_id above. NULL otherwise.
+    alt_external_id: Mapped[str | None] = mapped_column(String(128))
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     card: Mapped[CreditCard] = relationship(back_populates="card_transactions")
@@ -967,7 +983,7 @@ class MonthlyForecastSnapshot(Base):
     account: Mapped["Account"] = relationship()
 
 
-# ── Bank Sync (SimpleFIN) ───────────────────────────────────────────────────
+# ── Bank Sync (SimpleFIN + Plaid) ───────────────────────────────────────────
 
 class BankConnectionStatus(str, PyEnum):
     active = "active"
@@ -980,11 +996,27 @@ class BankConnection(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    # Encrypted credential for whichever provider this connection uses: the
+    # SimpleFIN access URL, or (provider="plaid") the Plaid access token.
     access_url_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[BankConnectionStatus] = mapped_column(Enum(BankConnectionStatus), default=BankConnectionStatus.active, nullable=False)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # "simplefin" | "plaid" -- which aggregator this connection talks to.
+    # Existing rows default to "simplefin" so the column introduces Plaid
+    # without changing any existing connection's behaviour.
+    provider: Mapped[str] = mapped_column(String(16), default="simplefin", server_default="simplefin", nullable=False)
+    # Plaid's item id, plain text -- it isn't a secret. NULL for a SimpleFIN
+    # connection.
+    plaid_item_id: Mapped[str | None] = mapped_column(String(128))
+    # The Plaid /transactions/sync cursor. NULL until the first successful
+    # sync; saved only after a page of that sync has committed.
+    sync_cursor: Mapped[str | None] = mapped_column(Text)
+    # Set on a Plaid connection that replaced a SimpleFIN one for the same
+    # accounts -- see the Cutover section of the Plaid sync design spec.
+    # NULL for a connection that was never part of a cutover.
+    cutover_date: Mapped[date | None] = mapped_column(Date)
 
     user: Mapped["User"] = relationship()
     links: Mapped[list["BankConnectionAccountLink"]] = relationship(back_populates="connection", cascade="all, delete-orphan")
@@ -996,12 +1028,22 @@ class BankConnectionAccountLink(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     connection_id: Mapped[int] = mapped_column(Integer, ForeignKey("bank_connections.id"), nullable=False)
+    # The provider's own account id for this link -- a SimpleFIN account id,
+    # or (on a connection with provider="plaid") the Plaid account_id. Not
+    # renamed when Plaid was added: both providers hand this straight
+    # through unchanged, and renaming would touch every existing row and
+    # reference for no behavioural gain.
     simplefin_account_id: Mapped[str] = mapped_column(String(128), nullable=False)
     simplefin_account_name: Mapped[str] = mapped_column(String(256), nullable=False)
     local_account_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("accounts.id"))
     local_credit_card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Sync skips an inactive link. The Plaid cutover deactivates a Chase
+    # SimpleFIN link instead of deleting it, so a rollback just flips it
+    # back on; a local account or card should have at most one active link
+    # across both providers at a time.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1", nullable=False)
 
     connection: Mapped["BankConnection"] = relationship(back_populates="links")
     local_account: Mapped["Account | None"] = relationship()
