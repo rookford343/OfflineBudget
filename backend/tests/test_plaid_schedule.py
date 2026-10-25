@@ -56,3 +56,65 @@ def test_plaid_job_only_plaid_provider():
     assert sync_spy.call_args.kwargs == {"providers": {"plaid"}}
     assert job_locks._bank_sync_lock.acquire(blocking=False), "must release the lock after finishing"
     job_locks._bank_sync_lock.release()
+
+
+def _bank_sync_job_run(db_session, monkeypatch):
+    """Runs main._run_bank_sync_locked against `db_session` with sync_all
+    stubbed out, so the connection statuses seeded by the test are what the
+    job reads back. Returns the bank_sync SchedulerRun row."""
+    from backend import models
+    monkeypatch.setattr("backend.database.SessionLocal", lambda: db_session)
+    monkeypatch.setattr(db_session, "close", lambda: None)
+    with patch("backend.services.bank_sync_service.sync_all"):
+        main._run_bank_sync_locked()
+    return db_session.query(models.SchedulerRun).filter_by(job_name="bank_sync").one()
+
+
+def _seed_connection(db_session, provider, status, last_error=None, username=None):
+    from backend import models
+    user = models.User(username=username or provider, hashed_password="x", display_name="u",
+                       is_active=False)
+    db_session.add(user)
+    db_session.flush()
+    db_session.add(models.BankConnection(
+        user_id=user.id, access_url_encrypted="x", provider=provider, status=status, last_error=last_error,
+        sync_cursor="cur-0" if provider == "plaid" else None,
+    ))
+    db_session.commit()
+
+
+def test_errored_plaid_connection_does_not_fail_bank_sync(db_session, monkeypatch, caplog):
+    """An errored Plaid connection (a bank needing a re-login) must not mark
+    the 07:00 bank_sync failed: the sweep would then re-run the full sync,
+    SimpleFIN included, about three times an hour all day. Plaid already has
+    three more runs a day plus the Reconnect button."""
+    from backend import models
+    _seed_connection(db_session, "plaid", models.BankConnectionStatus.error, "needs login")
+    _seed_connection(db_session, "simplefin", models.BankConnectionStatus.active)
+
+    with caplog.at_level("WARNING"):
+        run = _bank_sync_job_run(db_session, monkeypatch)
+
+    assert run.last_success_at is not None
+    assert run.last_error is None
+    assert "needs login" in caplog.text
+
+
+def test_errored_simplefin_connection_still_fails_bank_sync(db_session, monkeypatch):
+    from backend import models
+    _seed_connection(db_session, "plaid", models.BankConnectionStatus.active)
+    _seed_connection(db_session, "simplefin", models.BankConnectionStatus.error, "bridge down")
+
+    run = _bank_sync_job_run(db_session, monkeypatch)
+
+    assert run.last_success_at is None
+    assert "bridge down" in run.last_error
+
+
+def test_plaid_job_logs_and_releases_lock_when_sync_all_raises(caplog):
+    with patch("backend.services.bank_sync_service.sync_all", side_effect=RuntimeError("boom")), \
+         patch("backend.database.SessionLocal"), caplog.at_level("ERROR"):
+        main._run_plaid_sync()  # must not raise
+    assert "Plaid sync failed: boom" in caplog.text
+    assert job_locks._bank_sync_lock.acquire(blocking=False), "must release the lock after a failure"
+    job_locks._bank_sync_lock.release()

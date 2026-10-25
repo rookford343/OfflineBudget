@@ -275,9 +275,22 @@ def _run_bank_sync_locked() -> None:
         # precise signal for "did the sync actually work" than this
         # function's own control flow, which -- like the summary job -- never
         # raises on a per-connection failure.
-        errored = db.query(models.BankConnection).filter(
+        #
+        # Only non-Plaid connections decide the job's outcome. A failed
+        # bank_sync makes the sweep re-run the whole sync (SimpleFIN too) about
+        # three times an hour, which would burn SimpleFIN's daily quota every
+        # time a Plaid bank needs a re-login. Errored Plaid connections are
+        # logged instead: they get three more runs a day and a Reconnect button.
+        all_errored = db.query(models.BankConnection).filter(
             models.BankConnection.status == models.BankConnectionStatus.error,
         ).all()
+        plaid_errored = [c for c in all_errored if c.provider == "plaid"]
+        errored = [c for c in all_errored if c.provider != "plaid"]
+        if plaid_errored:
+            logger.warning(
+                "Bank sync: Plaid connections in error (not retried by the sweep): %s",
+                "; ".join(f"{c.id}: {c.last_error}" for c in plaid_errored),
+            )
         if errored:
             scheduler_state.record_failure(
                 db, "bank_sync", "; ".join(f"{c.id}: {c.last_error}" for c in errored),
