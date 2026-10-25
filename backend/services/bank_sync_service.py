@@ -70,7 +70,25 @@ def sync_connection(
     cards_only limits the run to credit-card links: the afternoon refresh
     exists for card pending charges and shouldn't spend request quota on
     bank accounts.
+
+    A Plaid connection goes to plaid_sync_service.sync_plaid_connection, which
+    syncs the whole item at once (cards_only doesn't apply). One whose
+    sync_cursor is still NULL hasn't had its first import, which only the
+    first-import endpoint may run, so it's skipped untouched here. The
+    returned pair is then (imported, matched).
     """
+    if connection.provider == "plaid":
+        if connection.sync_cursor is None:
+            return (0, 0)
+        # Imported here: plaid_sync_service imports this module's helpers.
+        from backend.services.plaid_sync_service import sync_plaid_connection
+        try:
+            report = sync_plaid_connection(db, connection)
+        except Exception:  # noqa: BLE001 -- already logged and recorded on the
+            # connection by sync_plaid_connection; sync_all must keep going.
+            return (0, 0)
+        return (report.imported, report.matched)
+
     user = db.get(models.User, connection.user_id)
     if not user:
         return (0, 0)
