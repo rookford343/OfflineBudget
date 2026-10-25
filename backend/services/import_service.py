@@ -429,15 +429,20 @@ def run_import(
     card_id: int | None,
     source: models.TransactionSource = models.TransactionSource.csv_import,
     card_source: models.CardTransactionSource = models.CardTransactionSource.csv_import,
+    consumed: set[int] | None = None,
 ) -> schemas.ImportConfirmResponse:
-    """Insert transactions, update balances, and skip duplicates."""
+    """Insert transactions, update balances, and skip duplicates.
+
+    `consumed` optionally seeds the set of stored row ids the heuristic dedup
+    may not pick (the Plaid sync passes the rows its cutover matcher already
+    claimed). It is copied, never mutated."""
     imported = 0
     skipped = 0
     now = datetime.utcnow()
     # Ids already claimed as a duplicate by an earlier row in this batch, so
     # two incoming rows can never both dedupe against the same stored one --
     # see _pick_closest.
-    consumed: set[int] = set()
+    consumed = set(consumed) if consumed else set()
     # External ids already inserted earlier in THIS batch. The dedup queries
     # below only see committed/flushed rows, and this session runs with
     # autoflush=False (database.py) -- so when SimpleFIN hands back the same

@@ -14,6 +14,7 @@ tests can swap in `httpx.MockTransport` instead of hitting the network.
 each call, never cached at import time, so tests can monkeypatch them."""
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -21,6 +22,8 @@ from decimal import Decimal, InvalidOperation
 import httpx
 
 from backend.config import settings
+
+logger = logging.getLogger(__name__)
 
 _BASE_URLS = {
     "sandbox": "https://sandbox.plaid.com",
@@ -49,6 +52,19 @@ class PlaidRateLimited(PlaidError):
 class PlaidNotConfigured(PlaidError):
     """Raised before any network call when PLAID_CLIENT_ID or PLAID_SECRET is
     unset."""
+
+
+class PlaidNotReady(PlaidError):
+    """Raised by the sync service (not by any request) when a first import or
+    its preview runs before Plaid has finished its first pull. Saving the
+    cursor then would let the history arrive later without review."""
+
+    def __init__(self):
+        super().__init__("NOT_READY", "Plaid is still fetching your history; try again in a minute")
+
+
+# `transactions_update_status` values meaning Plaid's first pull is done.
+READY_UPDATE_STATUSES = frozenset({"INITIAL_UPDATE_COMPLETE", "HISTORICAL_UPDATE_COMPLETE"})
 
 
 @dataclass
@@ -91,6 +107,9 @@ class PlaidSyncPage:
     removed: list[str]
     next_cursor: str
     has_more: bool
+    # NOT_READY | INITIAL_UPDATE_COMPLETE | HISTORICAL_UPDATE_COMPLETE, or
+    # None when the response leaves it out.
+    transactions_update_status: str | None = None
 
 
 def _money(value) -> Decimal | None:
@@ -231,6 +250,7 @@ def sync_page(
         removed=removed,
         next_cursor=data.get("next_cursor", ""),
         has_more=bool(data.get("has_more", False)),
+        transactions_update_status=data.get("transactions_update_status"),
     )
 
 
@@ -271,15 +291,19 @@ def get_last_successful_update(
 def get_card_statements(
     access_token: str, *, transport: httpx.BaseTransport | None = None,
 ) -> list[PlaidCardStatement]:
-    """`/liabilities/get`. A link with no liability-eligible account (a
-    checking-only item, or a product the current plan doesn't support) isn't
-    an error from the caller's point of view -- it just has no statements."""
+    """`/liabilities/get`. Statement figures are optional extras, so any
+    failure here other than a 429 (a checking-only item, a product the plan
+    doesn't support, or a Plaid-side error) returns no statements rather than
+    failing the whole sync. Only the code is logged. A 429 still raises, so
+    the run backs off like any other rate limit."""
     try:
         data = _post("/liabilities/get", {"access_token": access_token}, transport)
-    except PlaidError as exc:
-        if not isinstance(exc, PlaidRateLimited) and exc.code in ("PRODUCTS_NOT_SUPPORTED", "NO_LIABILITY_ACCOUNTS"):
-            return []
+    except PlaidRateLimited:
         raise
+    except PlaidError as exc:
+        if exc.code not in ("PRODUCTS_NOT_SUPPORTED", "NO_LIABILITY_ACCOUNTS"):
+            logger.warning("Plaid liabilities unavailable, skipping statements: %s", exc.code)
+        return []
 
     credit = (data.get("liabilities") or {}).get("credit") or []
     statements = []
@@ -292,8 +316,9 @@ def get_card_statements(
                 next_payment_due_date=_parse_date(c.get("next_payment_due_date")),
                 minimum_payment_amount=_money(c.get("minimum_payment_amount")),
             ))
-    except (KeyError, TypeError) as exc:
-        raise PlaidError("MALFORMED_RESPONSE", "Plaid returned a malformed liability record") from exc
+    except (KeyError, TypeError):
+        logger.warning("Plaid liabilities unavailable, skipping statements: MALFORMED_RESPONSE")
+        return []
     return statements
 
 

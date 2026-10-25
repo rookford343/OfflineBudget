@@ -1,7 +1,7 @@
 from datetime import date, date as date_type, datetime
 from decimal import Decimal
 from typing import Literal, Optional
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 from backend import models
 from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus, PlannedTransferStatus, VerificationFeature, VerificationFlagStatus, PlannedDirection
 
@@ -1211,6 +1211,15 @@ class BankConnectionStatusOut(BaseModel):
     last_synced_at: Optional[datetime]
     last_error: Optional[str]
     links: list[BankConnectionLinkOut]
+    # Read off the ORM row only to derive first_import_done; never sent.
+    sync_cursor: Optional[str] = Field(default=None, exclude=True)
+
+    @computed_field
+    @property
+    def first_import_done(self) -> bool:
+        """A Plaid connection's first import has run once its cursor is set
+        (always False for SimpleFIN, which has no cursor)."""
+        return self.sync_cursor is not None
 
 
 class BankSyncNowResponse(BaseModel):
@@ -1250,6 +1259,9 @@ class PlaidFirstImportResponse(BaseModel):
     matched: int
     ignored: int
     rows: list[PlaidFirstImportRow]
+    # Accounts on the item with no active link: their transactions are
+    # skipped for good once the first import saves the cursor.
+    unlinked_accounts: list[str] = []
 
 
 # ── Forecast Day Checkpoints ──────────────────────────────────────────────────

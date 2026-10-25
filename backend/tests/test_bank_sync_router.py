@@ -11,7 +11,7 @@ from backend.routers import bank_sync as bank_sync_router_module
 from backend.dependencies import get_db, get_current_user
 from backend.services import crypto
 from backend.services.job_locks import _bank_sync_lock
-from backend.services.plaid_client import PlaidAccount, PlaidError, PlaidNotConfigured
+from backend.services.plaid_client import PlaidAccount, PlaidError, PlaidNotConfigured, PlaidNotReady
 from backend.services.plaid_sync_service import ImportReportRow, PlaidSyncReport
 from backend.services.simplefin_client import SimpleFinAccount
 
@@ -586,6 +586,7 @@ def test_link_409s_when_another_active_link_targets_the_same_account(client, db_
 
     assert resp.status_code == 409
     assert resp.json()["detail"]["existing_link_id"] == old_link.id
+    assert resp.json()["detail"]["existing_provider"] == "simplefin"
 
 
 def test_link_409s_when_another_active_link_targets_the_same_credit_card(client, db_session):
@@ -693,6 +694,7 @@ def test_first_import_preview_writes_nothing_then_confirm_imports_then_confirmin
         imported=2, matched=1, ignored=0,
         rows=[ImportReportRow(date=date(2026, 10, 1), amount=Decimal("42.50"), description="COFFEE SHOP",
                               outcome="imported", target="Checking")],
+        unlinked_accounts=["Brokerage ••0004"],
     )
 
     def fake_sync(db, conn, *, first_import=False, dry_run=False):
@@ -708,6 +710,7 @@ def test_first_import_preview_writes_nothing_then_confirm_imports_then_confirmin
         "imported": 2, "matched": 1, "ignored": 0,
         "rows": [{"date": "2026-10-01", "amount": "42.50", "description": "COFFEE SHOP",
                   "outcome": "imported", "target": "Checking"}],
+        "unlinked_accounts": ["Brokerage ••0004"],
     }
     mock_sync.assert_called_once()
     # Dry run must not have touched the connection's cursor.
@@ -764,6 +767,32 @@ def test_first_import_preview_maps_plaid_error(client, db_session):
 
     assert resp.status_code == 422
     assert resp.json()["detail"] == "ITEM_LOGIN_REQUIRED: reconnect needed"
+
+
+@pytest.mark.parametrize("confirm", ["false", "true"])
+def test_first_import_409s_while_plaid_is_still_fetching(client, db_session, confirm):
+    test_client, user = client
+    connection = _plaid_connection(db_session, user)
+
+    with patch("backend.routers.bank_sync.sync_plaid_connection", side_effect=PlaidNotReady()):
+        resp = test_client.post(f"/bank-sync/{connection.id}/plaid/first-import?confirm={confirm}")
+
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "Plaid is still fetching your history; try again in a minute"
+    db_session.refresh(connection)
+    assert connection.sync_cursor is None
+    assert _bank_sync_lock.acquire(blocking=False)
+    _bank_sync_lock.release()
+
+
+def test_status_reports_first_import_done(client, db_session):
+    test_client, user = client
+    pending = _plaid_connection(db_session, user)
+    done = _plaid_connection(db_session, user, sync_cursor="cur-1")
+
+    by_id = {c["id"]: c for c in test_client.get("/bank-sync/status").json()}
+    assert by_id[pending.id]["first_import_done"] is False
+    assert by_id[done.id]["first_import_done"] is True
 
 
 def test_first_import_confirm_409s_when_a_sync_is_already_running(client, db_session):

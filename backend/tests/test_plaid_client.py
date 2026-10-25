@@ -244,3 +244,38 @@ def test_get_card_statements_parses_liabilities():
     assert statement.account_id == "a1"
     assert statement.last_statement_balance == Decimal("312.45")
     assert statement.minimum_payment_amount == Decimal("35.00")
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("NOT_READY", "NOT_READY"),
+    ("HISTORICAL_UPDATE_COMPLETE", "HISTORICAL_UPDATE_COMPLETE"),
+    (None, None),
+])
+def test_sync_page_parses_update_status(raw, expected):
+    body = {"added": [], "modified": [], "removed": [], "next_cursor": "cursor-2", "has_more": False}
+    if raw is not None:
+        body["transactions_update_status"] = raw
+    page = sync_page(_FAKE_ACCESS_TOKEN, None, transport=_json_transport(body))
+    assert page.transactions_update_status == expected
+
+
+def test_liabilities_other_error_returns_empty_and_logs_code_only(caplog):
+    """Any non-429 liabilities failure costs only the statement figures, not
+    the whole sync. The log carries the code, never Plaid's message."""
+    body = {"error_code": "INTERNAL_SERVER_ERROR", "error_message": "something private broke"}
+    with caplog.at_level("WARNING"):
+        statements = get_card_statements(_FAKE_ACCESS_TOKEN, transport=_json_transport(body, status_code=500))
+    assert statements == []
+    assert "INTERNAL_SERVER_ERROR" in caplog.text
+    assert "something private broke" not in caplog.text
+
+
+def test_liabilities_rate_limit_still_raises():
+    body = {"error_code": "RATE_LIMIT_EXCEEDED", "error_message": "too many requests"}
+    with pytest.raises(PlaidRateLimited):
+        get_card_statements(_FAKE_ACCESS_TOKEN, transport=_json_transport(body, status_code=429))
+
+
+def test_liabilities_malformed_record_returns_empty():
+    body = {"liabilities": {"credit": [{"last_statement_balance": 12.00}]}}  # no account_id
+    assert get_card_statements(_FAKE_ACCESS_TOKEN, transport=_json_transport(body)) == []

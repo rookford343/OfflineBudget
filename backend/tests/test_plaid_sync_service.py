@@ -12,7 +12,7 @@ import pytest
 from backend import models
 from backend.services.bank_sync_service import sync_all, sync_connection
 from backend.services.plaid_client import (
-    PlaidAccount, PlaidCardStatement, PlaidError, PlaidRateLimited, PlaidSyncPage, PlaidTransaction,
+    PlaidAccount, PlaidCardStatement, PlaidError, PlaidNotReady, PlaidRateLimited, PlaidSyncPage, PlaidTransaction,
 )
 from backend.services.plaid_sync_service import sync_plaid_connection
 
@@ -58,9 +58,9 @@ def _t(tid, account, d, amount, desc, *, pending=False, merchant=None, authorize
                             amount=Decimal(amount), description=desc, merchant_name=merchant, pending=pending)
 
 
-def _page(added=(), modified=(), removed=(), cursor="cur-1", has_more=False):
+def _page(added=(), modified=(), removed=(), cursor="cur-1", has_more=False, status="HISTORICAL_UPDATE_COMPLETE"):
     return PlaidSyncPage(added=list(added), modified=list(modified), removed=list(removed),
-                         next_cursor=cursor, has_more=has_more)
+                         next_cursor=cursor, has_more=has_more, transactions_update_status=status)
 
 
 def _client(pages=None, *, accounts=None, last_update=None, statements=None):
@@ -197,7 +197,10 @@ def test_dry_run_writes_nothing(db_session):
     assert db_session.get(models.CreditCard, card.id).pending_charges == Decimal("15.00")
     assert db_session.get(models.Transaction, existing.id).alt_external_id is None
     client.refresh_transactions.assert_not_called()
-    client.get_accounts.assert_not_called()
+    # The preview reads the item's accounts (to list unmapped ones) but
+    # never the other write-feeding reads.
+    client.get_accounts.assert_called_once_with("tok-dan")
+    client.get_card_statements.assert_not_called()
 
 
 def test_modified_updates_in_place(db_session):
@@ -307,7 +310,7 @@ def test_login_required_sets_error_message(db_session):
     broken = db_session.get(models.BankConnection, broken.id)
     healthy = db_session.get(models.BankConnection, healthy.id)
     assert broken.status == models.BankConnectionStatus.error
-    assert broken.last_error == "Chase needs you to log in again. Use Reconnect in Settings → Accounts."
+    assert broken.last_error == "Your bank needs you to log in again. Use Reconnect in Settings → Accounts."
     assert "tok-a" not in broken.last_error
     assert healthy.status == models.BankConnectionStatus.active
     assert healthy.sync_cursor == "cur-1"
@@ -511,3 +514,113 @@ def test_sync_connection_skips_plaid_without_cursor(db_session):
         imported, _ = sync_connection(db_session, conn)
     assert imported == 1
     client.sync_page.assert_called_once()
+
+
+@pytest.mark.parametrize("mode", [{"first_import": True}, {"first_import": True, "dry_run": True}])
+@pytest.mark.parametrize("status", ["NOT_READY", None])
+def test_first_import_before_plaid_is_ready_writes_nothing(db_session, mode, status):
+    """Right after linking, Plaid's first pull may still be running. A first
+    import (or its preview) then must stop before any write and keep the
+    cursor None, or the 90 days of history would arrive later unreviewed."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session, cursor=None)
+    client = _client([_page(added=[_t("t3", "p-chk", date(2026, 3, 21), "-8.00", "BAKERY")], status=status)])
+    with _patched(client), pytest.raises(PlaidNotReady) as exc_info:
+        sync_plaid_connection(db_session, conn, **mode)
+
+    assert exc_info.value.code == "NOT_READY"
+    db_session.expire_all()
+    stored = db_session.get(models.BankConnection, conn.id)
+    assert stored.sync_cursor is None
+    assert stored.status == models.BankConnectionStatus.active
+    assert stored.last_error is None
+    assert db_session.query(models.Transaction).count() == 0
+    client.get_card_statements.assert_not_called()
+    client.refresh_transactions.assert_not_called()
+
+
+def test_regular_sync_ignores_update_status(db_session):
+    """Once the first import is done, a NOT_READY page (Plaid mid-refresh) is
+    just a normal delta."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    client = _client([_page(added=[_t("t1", "p-chk", date(2026, 4, 1), "-12.34", "COFFEE SHOP")],
+                            status="NOT_READY")])
+    with _patched(client):
+        report = sync_plaid_connection(db_session, conn)
+    assert report.imported == 1
+    assert conn.sync_cursor == "cur-1"
+
+
+def _item_accounts():
+    def acct(pid, name, mask, kind):
+        return PlaidAccount(id=pid, name=name, mask=mask, type=kind, subtype=None,
+                            current=None, available=None, limit=None)
+    return [acct("p-chk", "Checking", "0001", "depository"), acct("p-sav", "Savings", "0002", "depository"),
+            acct("p-card", "Visa", "0003", "credit"), acct("p-extra", "Brokerage", "0004", "investment"),
+            acct("p-nomask", "Second Card", None, "credit")]
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_first_import_reports_unlinked_accounts(db_session, dry_run):
+    """Accounts on the item with no active link lose their history for good
+    once the cursor moves past them, so the first-import report names them."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session, cursor=None)
+    sav_link = db_session.query(models.BankConnectionAccountLink).filter_by(simplefin_account_id="p-sav").one()
+    sav_link.is_active = False
+    db_session.commit()
+    with _patched(_client([_page()], accounts=_item_accounts())):
+        report = sync_plaid_connection(db_session, conn, first_import=True, dry_run=dry_run)
+    assert report.unlinked_accounts == ["Savings ••0002", "Brokerage ••0004", "Second Card"]
+
+
+def test_plaid_claimed_row_not_rematched_on_a_later_run(db_session):
+    """Two identical Plaid charges in the match window, one SimpleFIN row: the
+    first run pairs the row with the first charge. On a later run the second
+    charge must import, not steal the row an earlier Plaid charge owns."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session, cursor=None)
+    existing = _seed_cutover_rows(db_session, user, checking)
+    with _patched(_client([_page(added=[_t("t2", "p-chk", date(2026, 3, 15), "-30.00", "HARDWARE STORE 123")])])):
+        first = sync_plaid_connection(db_session, conn, first_import=True)
+    with _patched(_client([_page(added=[_t("t9", "p-chk", date(2026, 3, 16), "-30.00", "HARDWARE STORE 123")],
+                                 cursor="cur-2")])):
+        second = sync_plaid_connection(db_session, conn)
+
+    assert (first.matched, first.imported) == (1, 0)
+    assert (second.matched, second.imported) == (0, 1)
+    db_session.refresh(existing)
+    assert existing.alt_external_id == "plaid:t2"
+    assert db_session.query(models.Transaction).filter_by(external_id="plaid:t9").count() == 1
+
+
+def test_import_does_not_dedupe_against_a_row_the_matcher_claimed(db_session):
+    """A CSV row (no external id) matched to one Plaid charge must not also
+    swallow an identical second charge in run_import's own heuristic dedup."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session, cursor=None)
+    csv_row = models.Transaction(
+        user_id=user.id, account_id=checking.id, date=date(2026, 3, 15), amount=Decimal("-30.00"),
+        description="HARDWARE STORE 123", is_actual=True, source=models.TransactionSource.csv_import,
+    )
+    db_session.add(csv_row)
+    db_session.commit()
+    pages = [_page(added=[
+        _t("t2", "p-chk", date(2026, 3, 15), "-30.00", "HARDWARE STORE 123"),
+        _t("t9", "p-chk", date(2026, 3, 15), "-30.00", "HARDWARE STORE 123"),
+    ])]
+    with _patched(_client(pages)):
+        report = sync_plaid_connection(db_session, conn, first_import=True)
+
+    assert (report.matched, report.imported) == (1, 1)
+    db_session.refresh(csv_row)
+    assert csv_row.alt_external_id == "plaid:t2"
+    assert db_session.query(models.Transaction).filter_by(external_id="plaid:t9").count() == 1
+
+
+def test_negative_statement_balance_clamped_to_zero(db_session):
+    """A statement closing in credit (an overpayment) means nothing is due."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    card.balance_due = Decimal("100.00")
+    card.last_statement_issue_date = date(2026, 3, 5)
+    db_session.commit()
+    with _patched(_client([_page()], statements=[_statement(date(2026, 4, 5), balance="-15.00")])):
+        sync_plaid_connection(db_session, conn)
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("0")

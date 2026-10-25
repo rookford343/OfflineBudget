@@ -35,11 +35,13 @@ from backend.services.cutover_match import MATCH_DAYS, WINDOW_BEFORE_DAYS, cutov
 from backend.services.import_service import (
     _find_duplicate_card_transaction, _find_duplicate_transaction, build_preview, run_import,
 )
-from backend.services.plaid_client import PlaidError, PlaidRateLimited, PlaidTransaction
+from backend.services.plaid_client import (
+    READY_UPDATE_STATUSES, PlaidAccount, PlaidError, PlaidNotReady, PlaidRateLimited, PlaidTransaction,
+)
 
 logger = logging.getLogger(__name__)
 
-LOGIN_REQUIRED_MESSAGE = "Chase needs you to log in again. Use Reconnect in Settings → Accounts."
+LOGIN_REQUIRED_MESSAGE = "Your bank needs you to log in again. Use Reconnect in Settings → Accounts."
 RATE_LIMITED_MESSAGE = "Plaid rate limit reached; will retry next run"
 _UNEXPECTED_MESSAGE = "Plaid sync failed unexpectedly; see the server log"
 
@@ -61,6 +63,10 @@ class PlaidSyncReport:
     matched: int = 0
     ignored: int = 0
     rows: list[ImportReportRow] = field(default_factory=list)
+    # Display names of the item's accounts with no active link on this
+    # connection. Their rows are skipped, and once the cursor moves past them
+    # that history is gone, so the first-import preview lists them.
+    unlinked_accounts: list[str] = field(default_factory=list)
 
 
 def _pid(transaction_id: str) -> str:
@@ -78,11 +84,18 @@ class _Delta:
     next_cursor: str
 
 
-def _fetch_delta(access_token: str, cursor: str | None) -> _Delta:
+def _fetch_delta(access_token: str, cursor: str | None, *, require_ready: bool = False) -> _Delta:
+    """With `require_ready` (first import and its preview), raises
+    PlaidNotReady when the first page shows Plaid's initial pull isn't done
+    -- before anything is written, so the cursor stays None."""
     changes: dict[str, tuple[str, PlaidTransaction]] = {}
     removed: dict[str, None] = {}  # ordered set
+    first = True
     while True:
         page = plaid_client.sync_page(access_token, cursor)
+        if first and require_ready and page.transactions_update_status not in READY_UPDATE_STATUSES:
+            raise PlaidNotReady()
+        first = False
         for t in page.added:
             changes[t.id] = ("added", t)
             removed.pop(t.id, None)
@@ -183,10 +196,18 @@ def _classify(
     return "imported", None
 
 
-def _import(db: Session, user: models.User, link: models.BankConnectionAccountLink, txns: list[PlaidTransaction]) -> int:
+def _import(
+    db: Session, user: models.User, link: models.BankConnectionAccountLink, txns: list[PlaidTransaction],
+    consumed: set[int],
+) -> int:
     """Mirrors bank_sync_service._sync_link: ParsedRow -> preview -> confirm ->
     run_import. Card rows keep checking convention (negative = charge), the
-    same sign _sync_link passes for SimpleFIN; run_import flips it once."""
+    same sign _sync_link passes for SimpleFIN; run_import flips it once.
+
+    `consumed` is the classify pass's set (rows find_match paired this run,
+    rows already carrying a Plaid id, and heuristic duplicates). Seeding
+    run_import with it keeps its own heuristic dedup from re-using a row the
+    matcher already gave to a different Plaid charge."""
     if not txns:
         return 0
     parsed = [ParsedRow(date=t.date, description=t.description, amount=t.amount, external_id=_pid(t.id))
@@ -204,6 +225,7 @@ def _import(db: Session, user: models.User, link: models.BankConnectionAccountLi
         db, user, confirm,
         account_id=link.local_account_id, card_id=link.local_credit_card_id,
         source=models.TransactionSource.bank_sync, card_source=models.CardTransactionSource.bank_sync,
+        consumed=consumed,
     )
     return result.imported
 
@@ -272,8 +294,9 @@ def _apply_statements(db: Session, by_account: dict, statements) -> None:
             # date doesn't advance and a later complete copy still applies.
             continue
         if stored is not None:
-            # Strictly newer than a statement we already tracked.
-            card.balance_due = st.last_statement_balance
+            # Strictly newer than a statement we already tracked. A statement
+            # that closed in credit (an overpayment) means nothing is due.
+            card.balance_due = max(st.last_statement_balance, Decimal("0"))
             card.balance_due_updated_at = datetime.utcnow()
         # stored is None: the card's first Plaid statement only seeds the
         # date. Its balance_due predates Plaid and may already be reduced by
@@ -317,7 +340,9 @@ def sync_plaid_connection(
         db.rollback()
         code = exc.code if isinstance(exc, PlaidError) else type(exc).__name__
         logger.error("Plaid sync failed for connection %s: %s", connection_id, code)
-        if not dry_run:
+        # NOT_READY isn't a fault with the connection: nothing was written and
+        # the user just tries again in a minute.
+        if not dry_run and not isinstance(exc, PlaidNotReady):
             _record_error(db, connection, exc)
         raise
 
@@ -326,7 +351,7 @@ def _run(
     db: Session, user: models.User, connection: models.BankConnection, *, first_import: bool, dry_run: bool,
 ) -> PlaidSyncReport:
     access_token = decrypt(connection.access_url_encrypted)
-    delta = _fetch_delta(access_token, connection.sync_cursor)
+    delta = _fetch_delta(access_token, connection.sync_cursor, require_ready=first_import or dry_run)
 
     links = db.query(models.BankConnectionAccountLink).filter(
         models.BankConnectionAccountLink.connection_id == connection.id,
@@ -347,6 +372,8 @@ def _run(
     report = PlaidSyncReport()
 
     if dry_run:
+        # A read, so the preview may make it: it lists the unmapped accounts.
+        report.unlinked_accounts = _unlinked_names(plaid_client.get_accounts(access_token), by_account)
         for link in links:
             consumed = _plaid_claimed_ids(db, user.id, link, cutover) if cutover else set()
             target = _target_name(db, link)
@@ -359,7 +386,9 @@ def _run(
         return report
 
     # Every remaining Plaid read happens before the first write.
-    accounts = {a.id: a for a in plaid_client.get_accounts(access_token)}
+    item_accounts = plaid_client.get_accounts(access_token)
+    accounts = {a.id: a for a in item_accounts}
+    report.unlinked_accounts = _unlinked_names(item_accounts, by_account)
     last_update = _local_naive(plaid_client.get_last_successful_update(access_token))
     statements = plaid_client.get_card_statements(access_token)
 
@@ -386,7 +415,7 @@ def _run(
             if outcome == "imported":
                 to_import.append(txn)
             _count(report, txn, outcome, target)
-        imported_by_link[link.id] = _import(db, user, link, to_import)
+        imported_by_link[link.id] = _import(db, user, link, to_import, consumed)
 
     report.imported = sum(imported_by_link.values())
     _apply_removed(db, user.id, links, delta.removed)
@@ -427,6 +456,10 @@ def _run(
         # Best effort: the sync above already succeeded and is committed.
         logger.warning("Plaid refresh request skipped for connection %s: %s", connection.id, exc.code)
     return report
+
+
+def _unlinked_names(item_accounts: list[PlaidAccount], by_account: dict) -> list[str]:
+    return [f"{a.name} ••{a.mask}" if a.mask else a.name for a in item_accounts if a.id not in by_account]
 
 
 def _apply_modified(row, txn: PlaidTransaction) -> None:

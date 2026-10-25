@@ -423,7 +423,8 @@ def test_plaid_token_never_logged(caplog, db_session, monkeypatch):
 
         with patch.object(plaid_client_module, "sync_page",
                           return_value=plaid_client_module.PlaidSyncPage(
-                              added=[], modified=[], removed=[], next_cursor="cursor-1", has_more=False)), \
+                              added=[], modified=[], removed=[], next_cursor="cursor-1", has_more=False,
+                              transactions_update_status="HISTORICAL_UPDATE_COMPLETE")), \
              patch.object(plaid_client_module, "get_accounts", return_value=[]), \
              patch.object(plaid_client_module, "get_last_successful_update", return_value=None), \
              patch.object(plaid_client_module, "get_card_statements", return_value=[]), \

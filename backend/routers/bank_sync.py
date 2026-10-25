@@ -11,7 +11,7 @@ from backend.services.simplefin_client import claim_setup_token, fetch_accounts,
 from backend.services.bank_sync_service import sync_connection
 from backend.services.job_locks import _bank_sync_lock
 from backend.services.plaid_client import (
-    PlaidAccount, PlaidError, PlaidNotConfigured,
+    PlaidAccount, PlaidError, PlaidNotConfigured, PlaidNotReady,
     create_link_token, exchange_public_token, get_accounts as get_plaid_accounts, remove_item,
 )
 from backend.services.plaid_sync_service import sync_plaid_connection
@@ -45,10 +45,14 @@ def _assert_credit_card_owned(db: Session, user_id: int, card_id: int) -> None:
 def _plaid_http_error(exc: PlaidError) -> HTTPException:
     """PlaidNotConfigured -> 400 with the plain "add these env vars" message
     (no error-code prefix: there's nothing to configure around, just .env to
-    edit). Every other PlaidError -> 422 with str(exc) ("CODE: message"),
-    which PlaidError guarantees never carries a token or request body."""
+    edit). PlaidNotReady -> 409 with its plain "try again in a minute"
+    message: nothing was written, the cursor was not saved. Every other
+    PlaidError -> 422 with str(exc) ("CODE: message"), which PlaidError
+    guarantees never carries a token or request body."""
     if isinstance(exc, PlaidNotConfigured):
         return HTTPException(status_code=400, detail=exc.message)
+    if isinstance(exc, PlaidNotReady):
+        return HTTPException(status_code=409, detail=exc.message)
     return HTTPException(status_code=422, detail=str(exc))
 
 
@@ -211,9 +215,11 @@ def link_account(
     if existing_link is not None:
         if not body.switch_existing:
             target_label = "account" if body.local_account_id else "credit card"
+            existing_connection = db.get(models.BankConnection, existing_link.connection_id)
             raise HTTPException(status_code=409, detail={
                 "message": f"This {target_label} is already synced by another connection",
                 "existing_link_id": existing_link.id,
+                "existing_provider": existing_connection.provider if existing_connection else None,
             })
         existing_link.is_active = False
 
@@ -333,6 +339,7 @@ def sync_now(
 def _first_import_response(report) -> schemas.PlaidFirstImportResponse:
     return schemas.PlaidFirstImportResponse(
         imported=report.imported, matched=report.matched, ignored=report.ignored,
+        unlinked_accounts=report.unlinked_accounts,
         rows=[
             schemas.PlaidFirstImportRow(
                 date=r.date, amount=r.amount, description=r.description, outcome=r.outcome, target=r.target,
