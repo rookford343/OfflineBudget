@@ -20,6 +20,9 @@ now refuses or neutralizes it.
     the request body (the public token).
   - plaid link-token ownership: an update-mode link token for another user's
     connection is 404, never revealing that the connection exists.
+  - bank-sync credential audit: /bank-sync/connect and /bank-sync/plaid/exchange
+    request bodies (SimpleFIN setup_token, Plaid public_token) are never
+    captured into audit_logs.body_summary, even when body capture works.
 """
 import logging
 from decimal import Decimal
@@ -516,3 +519,80 @@ def test_plaid_link_token_other_users_connection_404(db_session, monkeypatch):
 
     assert resp.status_code == 404
     mock_create.assert_not_called()
+
+
+# --- Bank-sync credential bodies kept out of the audit log (2026-10-25) -----
+import asyncio
+
+from starlette.requests import Request as _StarletteRequest
+from starlette.responses import Response as _StarletteResponse
+
+
+def _unread_body_request(path: str, body: bytes) -> _StarletteRequest:
+    """A Starlette Request whose ASGI body is still sitting unread in the
+    receive channel -- i.e. what AuditMiddleware.dispatch sees whenever the
+    downstream handler (unlike the stub below) hasn't consumed it first."""
+    consumed = False
+
+    async def receive():
+        nonlocal consumed
+        if consumed:
+            return {"type": "http.disconnect"}
+        consumed = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": path,
+        "headers": [],
+        "query_string": b"",
+    }
+    return _StarletteRequest(scope, receive=receive)
+
+
+async def _call_next_leaves_body_unread(request: _StarletteRequest) -> _StarletteResponse:
+    """Stands in for the real downstream app, except it never reads the
+    request body -- isolating this test from the real consumed-stream bug
+    so body capture succeeds and the skip list can be proven on its own
+    terms, independent of whether that bug is ever fixed."""
+    return _StarletteResponse(status_code=200)
+
+
+@pytest.mark.parametrize("path,field,token", [
+    pytest.param("/bank-sync/connect", "setup_token",
+                 "simplefin-setup-token-should-never-be-logged-a1b2c3", id="simplefin_connect"),
+    pytest.param("/bank-sync/plaid/exchange", "public_token",
+                 "plaid-public-token-should-never-be-logged-d4e5f6", id="plaid_exchange"),
+])
+def test_audit_middleware__bank_sync_credential_body__never_captured(db_session, path, field, token):
+    """Even when body capture works (the stub call_next above leaves the
+    body unread, unlike the real app), /bank-sync/connect and
+    /bank-sync/plaid/exchange are in _SKIP_BODY_PATHS so their credential
+    body never reaches audit_logs.body_summary. A non-skipped control path
+    exercised in the same setup DOES get a body_summary, proving capture
+    works in this harness -- so the None asserted below is the skip list at
+    work, not a harness artifact that would pass regardless."""
+    middleware = AuditMiddleware(app=None)
+
+    with patch("backend.middleware.SessionLocal", return_value=db_session):
+        asyncio.run(middleware.dispatch(
+            _unread_body_request(path, json.dumps({field: token}).encode()),
+            _call_next_leaves_body_unread,
+        ))
+
+        control_path = "/some/other/mutating-endpoint"
+        asyncio.run(middleware.dispatch(
+            _unread_body_request(control_path, b'{"note": "ordinary body"}'),
+            _call_next_leaves_body_unread,
+        ))
+
+    skipped_row = db_session.query(models.AuditLog).filter_by(path=path).one()
+    assert skipped_row.body_summary is None
+
+    control_row = db_session.query(models.AuditLog).filter_by(path=control_path).one()
+    assert control_row.body_summary == '{"note": "ordinary body"}'
+
+    for row in db_session.query(models.AuditLog).all():
+        assert token not in (row.body_summary or "")
+        assert token not in (row.username or "")

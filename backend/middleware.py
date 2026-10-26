@@ -17,11 +17,12 @@ _SKIP_PATHS = {"/health", "/docs", "/redoc", "/openapi.json"}
 # Only log mutating methods (skip GET, HEAD, OPTIONS)
 _LOG_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 
-# Auth paths whose request bodies can carry a raw credential (password,
-# reset token, recovery code). The audit entry itself (method, path, status,
-# duration, user) is still recorded — only body_summary is withheld, so
-# these secrets can never end up persisted to audit_logs in plaintext, even
-# if the body-capture bug above gets "fixed" later.
+# Auth and bank-sync paths whose request bodies can carry a raw credential
+# (password, reset token, recovery code, SimpleFIN setup_token, Plaid
+# public_token). The audit entry itself (method, path, status, duration,
+# user) is still recorded — only body_summary is withheld, so these secrets
+# can never end up persisted to audit_logs in plaintext, even if the
+# body-capture bug above gets "fixed" later.
 _SKIP_BODY_PATHS = {
     "/auth/register",
     "/auth/login",
@@ -31,6 +32,8 @@ _SKIP_BODY_PATHS = {
     "/auth/reset-password",
     "/auth/reset-password-with-code",
     "/auth/me/recovery-code",
+    "/bank-sync/connect",
+    "/bank-sync/plaid/exchange",
 }
 
 
@@ -71,7 +74,9 @@ class AuditMiddleware(BaseHTTPMiddleware):
                     text = body_bytes.decode("utf-8", errors="replace")
                     body_summary = text[:200] if len(text) > 200 else text
             except Exception:  # noqa: BLE001 -- an unreadable body only costs the summary
-                logger.warning("Audit log could not read the request body for %s", request.url.path)
+                # Expected on nearly every call: the body is read here after
+                # call_next already consumed the stream in the handler.
+                logger.debug("Audit log could not read the request body for %s", request.url.path)
 
         db = None
         try:
