@@ -509,6 +509,22 @@ def build_forecast(
     ).all()
     active_cards_by_id = {c.id: c for c in all_active_cards}
 
+    # Card payments the bank still lists as pending on this checking account
+    # (Plaid sync's AccountPendingTransaction snapshot), grouped by the card
+    # they pay. Only card-matching DEBITS count: any other pending debit is
+    # most likely a bill the walk already projects, and subtracting it as
+    # well would charge it twice. Pending credits are left alone too.
+    pending_card_debits: dict[int, list[models.AccountPendingTransaction]] = {}
+    if account.type == models.AccountType.checking:
+        for row in db.query(models.AccountPendingTransaction).filter(
+            models.AccountPendingTransaction.user_id == user_id,
+            models.AccountPendingTransaction.account_id == account_id,
+            models.AccountPendingTransaction.amount < 0,
+        ).order_by(models.AccountPendingTransaction.date, models.AccountPendingTransaction.id).all():
+            paid = next((c for c in all_active_cards if card_matches_description(c, row.description)), None)
+            if paid is not None:
+                pending_card_debits.setdefault(paid.id, []).append(row)
+
     planned = db.query(models.PlannedExpense).options(
         joinedload(models.PlannedExpense.category)
     ).filter(
@@ -624,8 +640,8 @@ def build_forecast(
             continue  # recurring CC payment item already handles this card
 
         if card.payment_sent_pending_sync:
-            # Already subtracted once at the opening-balance seed (Task 1,
-            # forecast_engine.py's current_balance seed). Every injection
+            # Already subtracted once on today (pending_today_lines, after
+            # today's anchor; it was the opening seed once). Every injection
             # path below this point -- locked payoff, carried-forward
             # estimate, flat monthly estimate -- would double it, because
             # marking a card doesn't change next_payment_date or
@@ -822,9 +838,15 @@ def build_forecast(
             # exactly once via budget_snapshot.py's new_spending_total.
             # Adding it here too double-counted it: once in this payoff
             # projection, once again downstream. Confirmed live 2026-08-09.
-            cc_payments.setdefault(next_payment, []).append(
-                (card.name, Decimal(str(card.balance_due)))
+            #
+            # A payment for this statement already pending at the bank is
+            # subtracted today (see pending_today_lines), so only what it
+            # doesn't cover is still to be paid on the due date.
+            still_due = Decimal(str(card.balance_due)) - sum(
+                (-Decimal(str(r.amount)) for r in pending_card_debits.get(card.id, [])), Decimal("0"),
             )
+            if still_due > 0:
+                cc_payments.setdefault(next_payment, []).append((card.name, still_due))
 
         def _covered_by_real_payment(when: date) -> bool:
             """Something better than an estimate already lands in this month --
@@ -918,14 +940,44 @@ def build_forecast(
     # current_balance = opening_balance + sum(all actuals from start_date to yesterday),
     # so opening_balance = current_balance - sum(past actuals).
     current_balance = Decimal(str(account.current_balance))
+
+    # Card payments that have left checking but not posted yet: the bank's
+    # pending card debits, and cards hand-marked payment-sent. Both are
+    # subtracted on TODAY, after today's balance anchor -- not from the
+    # opening seed, as the marker once was. Bank sync anchors today to the
+    # POSTED balance, which by definition excludes them, and the walk applies
+    # a day's anchor last, so a seed subtraction was silently erased by every
+    # sync that anchored today (or any day between the seed and today). A
+    # card with both counts once, at the larger figure: the marker and the
+    # pending debit are the same payment.
+    pending_today_lines: list[ForecastTransaction] = []
     if account.type == models.AccountType.checking:
-        pending_sent = db.query(models.CreditCard).filter(
-            models.CreditCard.user_id == user_id,
-            models.CreditCard.is_active == True,
-            models.CreditCard.payment_sent_pending_sync == True,
-        ).all()
-        for card in pending_sent:
-            current_balance -= Decimal(str(card.payment_sent_amount or 0))
+        for card in all_active_cards:
+            rows = pending_card_debits.get(card.id, [])
+            for r in rows:
+                pending_today_lines.append(ForecastTransaction(
+                    name=f"Pending: {r.description}",
+                    amount=Decimal(str(r.amount)),
+                    type="expense",
+                    category_name=None,
+                    # Bank-reported, not a projection: has_unsettled_projection
+                    # must not hold back today's anchor over it.
+                    is_actual=True,
+                    is_cc_payment=True,
+                ))
+            marker = (
+                Decimal(str(card.payment_sent_amount or 0)) if card.payment_sent_pending_sync else Decimal("0")
+            )
+            pending_total = sum((-Decimal(str(r.amount)) for r in rows), Decimal("0"))
+            if marker > pending_total:
+                pending_today_lines.append(ForecastTransaction(
+                    name=f"Payment sent: {card.name}",
+                    amount=-(marker - pending_total),
+                    type="expense",
+                    category_name=None,
+                    is_actual=True,
+                    is_cc_payment=True,
+                ))
     if start_date < today:
         past_sum = sum(
             Decimal(str(t.amount)) for t in all_actuals if t.date < today
@@ -1547,6 +1599,12 @@ def build_forecast(
         # final balance for the day (and the starting point for the next day).
         if current in day_checkpoint_map:
             balance = day_checkpoint_map[current]
+        # After the anchor, which is the posted balance -- see
+        # pending_today_lines above.
+        if current == today:
+            for line in pending_today_lines:
+                balance += line.amount
+                day_transactions.append(line)
 
         entries.append(ForecastEntry(
             date=current,

@@ -820,3 +820,100 @@ def test_negative_statement_balance_clamped_to_zero(db_session):
         sync_plaid_connection(db_session, conn)
     db_session.refresh(card)
     assert card.balance_due == Decimal("0")
+
+
+# --- Checking pending snapshot (/transactions/get) ---------------------------
+
+def _pending_rows(db, account_id):
+    return sorted(
+        (r.external_id, r.amount, r.description)
+        for r in db.query(models.AccountPendingTransaction).filter(
+            models.AccountPendingTransaction.account_id == account_id,
+        ).all()
+    )
+
+
+def test_checking_pending_snapshot_replaced_each_sync(db_session):
+    """Each sync replaces checking's pending rows with what /transactions/get
+    lists now, so a debit that posted (and dropped off the list) disappears."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    first = _client([_page()])
+    first.get_pending_transactions.return_value = [
+        _t("pa", "p-chk", date(2026, 4, 3), "-300.00", "VISA AUTOPAY", pending=True),
+        _t("pb", "p-chk", date(2026, 4, 3), "-25.00", "X" * 300, pending=True),
+        _t("ps", "p-sav", date(2026, 4, 3), "-9.00", "SAVINGS PENDING", pending=True),
+        _t("pc", "p-card", date(2026, 4, 3), "-8.00", "CARD PENDING", pending=True),
+    ]
+    with _patched(first):
+        sync_plaid_connection(db_session, conn)
+    assert _pending_rows(db_session, checking.id) == [
+        ("plaid:pa", Decimal("-300.00"), "VISA AUTOPAY"),
+        ("plaid:pb", Decimal("-25.00"), "X" * 256),
+    ]
+    assert _pending_rows(db_session, savings.id) == []
+    window = first.get_pending_transactions.call_args
+    assert window.args[0] == "tok-dan"
+    assert (window.args[2] - window.args[1]).days == 14
+    assert window.args[2] == date.today()
+
+    second = _client([_page(cursor="cur-2")])
+    second.get_pending_transactions.return_value = [
+        _t("pb", "p-chk", date(2026, 4, 3), "-25.00", "SMALL DEBIT", pending=True),
+    ]
+    with _patched(second):
+        sync_plaid_connection(db_session, conn)
+    assert _pending_rows(db_session, checking.id) == [("plaid:pb", Decimal("-25.00"), "SMALL DEBIT")]
+
+
+@pytest.mark.parametrize("exc", [
+    PlaidError("INTERNAL_SERVER_ERROR", "something private broke"),
+    PlaidRateLimited("RATE_LIMIT_EXCEEDED", "slow down"),
+])
+def test_checking_pending_fetch_failure_keeps_old_snapshot(db_session, caplog, exc):
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    db_session.add(models.AccountPendingTransaction(
+        user_id=user.id, account_id=checking.id, external_id="plaid:old", date=date(2026, 4, 1),
+        amount=Decimal("-50.00"), description="VISA AUTOPAY", synced_at=datetime(2026, 4, 1),
+    ))
+    db_session.commit()
+    client = _client([_page(added=[_t("t1", "p-chk", date(2026, 4, 1), "-12.34", "COFFEE SHOP")])])
+    client.get_pending_transactions.side_effect = exc
+    with caplog.at_level("WARNING"), _patched(client):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.expire_all()
+    assert _pending_rows(db_session, checking.id) == [("plaid:old", Decimal("-50.00"), "VISA AUTOPAY")]
+    stored = db_session.get(models.BankConnection, conn.id)
+    assert stored.status == models.BankConnectionStatus.active
+    assert stored.last_error is None
+    assert stored.sync_cursor == "cur-1"
+    assert db_session.query(models.Transaction).count() == 1
+    assert exc.code in caplog.text
+    assert exc.message not in caplog.text
+
+
+def test_dry_run_never_fetches_or_writes_checking_pending(db_session):
+    user, checking, savings, card, conn = _make_plaid_connection(db_session, cursor=None)
+    client = _client(_cutover_pages())
+    client.get_pending_transactions.return_value = [
+        _t("pa", "p-chk", date(2026, 3, 22), "-300.00", "VISA AUTOPAY", pending=True),
+    ]
+    with _patched(client):
+        sync_plaid_connection(db_session, conn, first_import=True, dry_run=True)
+    assert db_session.query(models.AccountPendingTransaction).count() == 0
+    client.get_pending_transactions.assert_not_called()
+
+
+def test_checking_pending_skips_inactive_and_non_checking_links(db_session):
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    link = db_session.query(models.BankConnectionAccountLink).filter_by(simplefin_account_id="p-chk").one()
+    link.is_active = False
+    db_session.commit()
+    client = _client([_page()])
+    client.get_pending_transactions.return_value = [
+        _t("pa", "p-chk", date(2026, 4, 3), "-300.00", "VISA AUTOPAY", pending=True),
+        _t("ps", "p-sav", date(2026, 4, 3), "-9.00", "SAVINGS PENDING", pending=True),
+    ]
+    with _patched(client):
+        sync_plaid_connection(db_session, conn)
+    assert db_session.query(models.AccountPendingTransaction).count() == 0

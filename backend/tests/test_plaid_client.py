@@ -279,3 +279,82 @@ def test_liabilities_rate_limit_still_raises():
 def test_liabilities_malformed_record_returns_empty():
     body = {"liabilities": {"credit": [{"last_statement_balance": 12.00}]}}  # no account_id
     assert get_card_statements(_FAKE_ACCESS_TOKEN, transport=_json_transport(body)) == []
+
+
+def _get_row(tid, amount, *, pending, desc="ROW"):
+    return {
+        "transaction_id": tid, "account_id": "a1", "date": "2026-10-20",
+        "authorized_date": None, "amount": amount, "name": desc,
+        "original_description": desc, "merchant_name": None, "pending": pending,
+    }
+
+
+def test_get_pending_transactions_paginates_and_keeps_only_pending():
+    """`/transactions/get` is paged by options.offset until
+    total_transactions rows are read; only pending rows come back, with
+    the usual sign flip (Plaid's positive = money out)."""
+    from datetime import date
+
+    from backend.services.plaid_client import get_pending_transactions
+
+    pages = [
+        {"transactions": [_get_row("p1", 40.0, pending=True, desc="CARD AUTOPAY"),
+                          _get_row("x1", 9.0, pending=False)],
+         "total_transactions": 3},
+        {"transactions": [_get_row("p2", -2.5, pending=True, desc="REFUND")], "total_transactions": 3},
+    ]
+    bodies: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url).endswith("/transactions/get")
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=pages[len(bodies) - 1])
+
+    rows = get_pending_transactions(
+        _FAKE_ACCESS_TOKEN, date(2026, 10, 6), date(2026, 10, 20), transport=httpx.MockTransport(handler),
+    )
+    assert [b["options"]["offset"] for b in bodies] == [0, 2]
+    first = bodies[0]
+    assert first["access_token"] == _FAKE_ACCESS_TOKEN
+    assert first["start_date"] == "2026-10-06"
+    assert first["end_date"] == "2026-10-20"
+    assert first["options"]["count"] == 500
+    assert first["options"]["include_original_description"] is True
+    assert [(r.id, r.amount, r.pending) for r in rows] == [
+        ("p1", Decimal("-40.00"), True), ("p2", Decimal("2.50"), True),
+    ]
+    assert rows[0].description == "CARD AUTOPAY"
+
+
+def test_get_pending_transactions_stops_on_an_empty_page():
+    """A total that overstates what Plaid actually returns can't loop forever."""
+    from datetime import date
+
+    from backend.services.plaid_client import get_pending_transactions
+
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(200, json={"transactions": [], "total_transactions": 10})
+
+    assert get_pending_transactions(
+        _FAKE_ACCESS_TOKEN, date(2026, 10, 6), date(2026, 10, 20), transport=httpx.MockTransport(handler),
+    ) == []
+    assert len(calls) == 1
+
+
+def test_get_pending_transactions_errors_use_the_existing_mapping():
+    from datetime import date
+
+    from backend.services.plaid_client import get_pending_transactions
+
+    body = {"error_code": "RATE_LIMIT_EXCEEDED", "error_message": "too many requests"}
+    with pytest.raises(PlaidRateLimited):
+        get_pending_transactions(_FAKE_ACCESS_TOKEN, date(2026, 10, 6), date(2026, 10, 20),
+                                 transport=_json_transport(body, status_code=429))
+    body = {"error_code": "ITEM_LOGIN_REQUIRED", "error_message": "log in again"}
+    with pytest.raises(PlaidError) as exc_info:
+        get_pending_transactions(_FAKE_ACCESS_TOKEN, date(2026, 10, 6), date(2026, 10, 20),
+                                 transport=_json_transport(body, status_code=400))
+    assert exc_info.value.code == "ITEM_LOGIN_REQUIRED"

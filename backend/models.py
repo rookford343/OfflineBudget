@@ -561,6 +561,25 @@ class CardPendingTransaction(Base):
     synced_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
 
+class AccountPendingTransaction(Base):
+    """What the bank currently lists as pending on a checking account. A full
+    snapshot from Plaid's `/transactions/get`, replaced wholesale on every
+    Plaid sync (`/transactions/sync` only sends each pending row once, so it
+    can't rebuild this list): a debit that posts drops out and arrives as a
+    Transaction instead. Never counted as spending. The forecast subtracts
+    the card-payment debits in it from checking until they post."""
+    __tablename__ = "account_pending_transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True)
+    external_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)  # checking convention: negative=money out
+    description: Mapped[str] = mapped_column(String(256), nullable=False)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+
 class CreditCardImport(Base):
     __tablename__ = "credit_card_imports"
 

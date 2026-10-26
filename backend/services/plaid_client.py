@@ -254,6 +254,35 @@ def sync_page(
     )
 
 
+def get_pending_transactions(
+    access_token: str, start: date, end: date, *, transport: httpx.BaseTransport | None = None,
+) -> list[PlaidTransaction]:
+    """What the bank lists as pending right now, via `/transactions/get`.
+    `/transactions/sync` sends each pending row once, as a delta, so it can't
+    rebuild the full list; this call can. Pages by `options.offset` until
+    `total_transactions` rows are read (or a page comes back empty), and
+    keeps only `pending` rows, sign-flipped by `_parse_transaction`."""
+    rows: list[PlaidTransaction] = []
+    offset = 0
+    while True:
+        body = {
+            "access_token": access_token,
+            "start_date": start.isoformat(),
+            "end_date": end.isoformat(),
+            "options": {"count": 500, "offset": offset, "include_original_description": True},
+        }
+        data = _post("/transactions/get", body, transport)
+        page = data.get("transactions") or []
+        rows.extend(t for t in (_parse_transaction(raw) for raw in page) if t.pending)
+        offset += len(page)
+        try:
+            total = int(data.get("total_transactions") or 0)
+        except (TypeError, ValueError) as exc:
+            raise PlaidError("MALFORMED_RESPONSE", "Plaid returned a malformed transaction total") from exc
+        if not page or offset >= total:
+            return rows
+
+
 def get_accounts(access_token: str, *, transport: httpx.BaseTransport | None = None) -> list[PlaidAccount]:
     data = _post("/accounts/get", {"access_token": access_token}, transport)
     accounts = []

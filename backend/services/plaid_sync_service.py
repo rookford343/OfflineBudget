@@ -4,7 +4,7 @@ uses (see bank_sync_service.py), plus a previewable first import that pairs
 Plaid's rows with the ones SimpleFIN already stored (see cutover_match.py).
 
 Order of a run: fetch every page, then every other Plaid read (accounts,
-item status, liabilities), and only then write. A failure or 429 anywhere in
+item status, liabilities, checking's pending list), and only then write. A failure or 429 anywhere in
 the reads therefore leaves the database and the stored cursor untouched. The
 cursor is saved in the final commit, so a run that dies part-way re-reads
 the same delta next time; external-id dedup makes that replay harmless.
@@ -447,6 +447,7 @@ def _run(
     report.unlinked_accounts = _unlinked_names(item_accounts, by_account)
     last_update = _local_naive(plaid_client.get_last_successful_update(access_token))
     statements = plaid_client.get_card_statements(access_token)
+    checking_pending = _fetch_checking_pending(db, access_token, links)
 
     imported_by_link: dict[int, int] = {}
     for link in links:
@@ -496,6 +497,8 @@ def _run(
                 replace_pending_snapshot(db, user, card, pending)
 
     _apply_statements(db, by_account, statements)
+    if checking_pending is not None:
+        _replace_checking_pending(db, user, links, checking_pending)
 
     now = datetime.utcnow()
     connection.sync_cursor = delta.next_cursor
@@ -512,6 +515,49 @@ def _run(
         # Best effort: the sync above already succeeded and is committed.
         logger.warning("Plaid refresh request skipped for connection %s: %s", connection.id, exc.code)
     return report
+
+
+def _checking_links(db: Session, links) -> list[tuple[models.BankConnectionAccountLink, models.Account]]:
+    """Active links (the caller passes only those) mapped to a checking account."""
+    out = []
+    for link in links:
+        if link.local_account_id:
+            account = db.get(models.Account, link.local_account_id)
+            if account is not None and account.type == models.AccountType.checking:
+                out.append((link, account))
+    return out
+
+
+def _fetch_checking_pending(db: Session, access_token: str, links) -> list[PlaidTransaction] | None:
+    """The bank's current pending list, for the checking snapshot. A read, so
+    it runs with the others before any write. None means "keep the old
+    snapshot": no checking link to fill, or the call failed. A failure here,
+    a 429 included, never fails the sync -- only the code is logged."""
+    if not _checking_links(db, links):
+        return None
+    today = date.today()
+    try:
+        return plaid_client.get_pending_transactions(access_token, today - timedelta(days=14), today)
+    except PlaidError as exc:
+        logger.warning("Plaid pending list unavailable, keeping the last snapshot: %s", exc.code)
+        return None
+
+
+def _replace_checking_pending(db: Session, user: models.User, links, pending: list[PlaidTransaction]) -> None:
+    """Swap each checking account's AccountPendingTransaction rows for the
+    rows Plaid lists under that account now."""
+    now = datetime.utcnow()
+    for link, account in _checking_links(db, links):
+        db.query(models.AccountPendingTransaction).filter(
+            models.AccountPendingTransaction.account_id == account.id,
+        ).delete(synchronize_session=False)
+        for t in pending:
+            if t.account_id != link.simplefin_account_id:
+                continue
+            db.add(models.AccountPendingTransaction(
+                user_id=user.id, account_id=account.id, external_id=_pid(t.id),
+                date=t.date, amount=t.amount, description=t.description[:256], synced_at=now,
+            ))
 
 
 def _unlinked_names(item_accounts: list[PlaidAccount], by_account: dict) -> list[str]:
