@@ -467,6 +467,14 @@ off the list and arrives once as a normal transaction. Pending charges show
 in Transactions with a badge, feed the forecast through the card's pending
 total, and are never counted as spending until they post.
 
+**Pending card payments (Plaid).** A card autopay can sit pending at your
+bank for a day or more, while the card's own feed already shows the
+statement paid. Each Plaid sync also stores checking's current pending list
+and replaces it wholesale next time. Pending checking debits that match one
+of your cards count against today's forecast balance right away, and that
+card's payoff isn't planned a second time. Other pending debits and pending
+credits are left alone until they post.
+
 **Statement balances (Plaid).** When a Plaid-linked card's issuer posts a
 new statement, the due date and minimum payment fill in automatically —
 even on the very first statement Plaid sees. The balance is kept live too:

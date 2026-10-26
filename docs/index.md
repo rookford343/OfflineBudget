@@ -173,3 +173,11 @@ full (autopay, a refund, any combination of the two) clears to $0 right
 away, instead of waiting for the next statement. The recompute only ever
 lowers the figure, never raises it, so a balance you've already typed in
 or paid down by hand is safe until the real payoff posts.
+
+**Pending card payments.** Your bank can show a card payment as pending for
+a day or more before it posts, while the card itself already shows the
+statement paid. Each Plaid sync keeps a copy of checking's pending list, and
+pending debits that match one of your cards come off today's forecast
+balance right away, shown on today as "Pending: …". That card's payoff isn't
+planned again, and once the payment posts it simply drops off the list.
+Other pending debits and any pending credits wait until they post.
