@@ -469,11 +469,14 @@ total, and are never counted as spending until they post.
 
 **Statement balances (Plaid).** When a Plaid-linked card's issuer posts a
 new statement, the due date and minimum payment fill in automatically —
-even on the very first statement Plaid sees. The statement balance is the
-exception: the first statement only sets the date, due date and minimum
-payment, not the balance. The next new statement after that is the first
-one that fills in the balance, so anything you've already entered or paid
-down stays put until then.
+even on the very first statement Plaid sees. The balance is kept live too:
+every Plaid sync recomputes what's still owed on the current statement
+from the issuer's own data — the statement total minus any payment or
+return that's posted since it closed. A statement the issuer shows paid in
+full (autopay, a refund, any combination) clears to $0 right away, instead
+of waiting for the next statement to arrive. The recompute only ever
+lowers balance_due, never raises it, so a figure you've already typed in
+or paid down by hand is safe until the real payoff posts.
 
 **Switching providers or reconnecting.** Moving an account from SimpleFIN to
 Plaid previews the import first — new, already-covered ("matched", kept as

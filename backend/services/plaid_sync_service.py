@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Literal
 
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
@@ -38,6 +38,7 @@ from backend.services.import_service import (
 from backend.services.plaid_client import (
     READY_UPDATE_STATUSES, PlaidAccount, PlaidError, PlaidNotReady, PlaidRateLimited, PlaidTransaction,
 )
+from backend.services.statement_reconcile import _FULL_COVERAGE_SLOP
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +277,43 @@ def _pending_for_card(
     return list(current.values())
 
 
+def _credits_since(db: Session, card: models.CreditCard, issue_date: date) -> Decimal:
+    """Sum of abs(amount) for this card's CreditCardTransaction rows posted
+    after `issue_date` with amount < 0 (positive=charge, negative=payment,
+    refund or return). The issuer's own rule -- confirmed live: a statement
+    closed, a merchant return posted after close, then autopay for the
+    remainder, and the issuer showed that statement paid in full -- treats
+    a return exactly like a payment, so both count here."""
+    total = db.query(func.sum(-models.CreditCardTransaction.amount)).filter(
+        models.CreditCardTransaction.card_id == card.id,
+        models.CreditCardTransaction.user_id == card.user_id,
+        models.CreditCardTransaction.amount < 0,
+        models.CreditCardTransaction.date > issue_date,
+    ).scalar() or Decimal("0")
+    return Decimal(str(total))
+
+
+def _recompute_balance_due(
+    db: Session, card: models.CreditCard, original: Decimal, issue_date: date, cap: Decimal,
+) -> None:
+    """Recompute what's still owed on the CURRENT statement: `original` (the
+    statement balance Plaid reports right now -- never the stored
+    balance_due, which record_payment may have hand-reduced; comparing
+    against the original is what keeps a posting-lag payment from being
+    double counted) minus credits posted after `issue_date`. Within
+    _FULL_COVERAGE_SLOP of full coverage it clears to 0, the same rounding
+    slop reconcile_statement_payment allows; otherwise it's capped at `cap`
+    so this can only lower balance_due, never raise it -- a hand-recorded
+    payment that hasn't posted yet still counts. Stamps
+    balance_due_updated_at only when balance_due actually changes."""
+    remaining = original - _credits_since(db, card, issue_date)
+    previous = Decimal(str(card.balance_due or 0))
+    new_balance_due = Decimal("0") if remaining <= _FULL_COVERAGE_SLOP else min(cap, remaining)
+    if new_balance_due != previous:
+        card.balance_due = new_balance_due
+        card.balance_due_updated_at = datetime.utcnow()
+
+
 def _apply_statements(db: Session, by_account: dict, statements) -> None:
     for st in statements:
         link = by_account.get(st.account_id)
@@ -286,21 +324,39 @@ def _apply_statements(db: Session, by_account: dict, statements) -> None:
             continue
         stored = card.last_statement_issue_date
         if stored is not None and st.last_statement_issue_date <= stored:
-            # Same statement: balance_due may already be reduced by
-            # record_payment, so it must not be reset to the statement figure.
+            # Same statement: recompute what's left from the issuer's
+            # current figure and this card's credits since it closed --
+            # payments and returns alike -- instead of resetting balance_due
+            # to the statement total (record_payment may have already
+            # hand-reduced it) or leaving an already-paid statement standing
+            # until the next one closes.
+            if st.last_statement_balance is not None:
+                original = max(st.last_statement_balance, Decimal("0"))
+                _recompute_balance_due(db, card, original, stored, Decimal(str(card.balance_due or 0)))
             continue
         if st.last_statement_balance is None:
             # No balance to apply: skip the statement entirely, so the issue
             # date doesn't advance and a later complete copy still applies.
             continue
+        original = max(st.last_statement_balance, Decimal("0"))
         if stored is not None:
-            # Strictly newer than a statement we already tracked. A statement
-            # that closed in credit (an overpayment) means nothing is due.
-            card.balance_due = max(st.last_statement_balance, Decimal("0"))
-            card.balance_due_updated_at = datetime.utcnow()
-        # stored is None: the card's first Plaid statement only seeds the
-        # date. Its balance_due predates Plaid and may already be reduced by
-        # record_payment or paid off, so it is left as the user set it.
+            # Strictly newer than a statement we already tracked: start from
+            # this statement's own total (a statement that closed in credit,
+            # an overpayment, means nothing is due), then pay it down with
+            # any credits already posted after ITS close -- this run's own
+            # imported card transactions count, since _apply_statements runs
+            # after they're imported and committed.
+            _recompute_balance_due(db, card, original, st.last_statement_issue_date, original)
+        else:
+            # stored is None: the card's first Plaid statement. Its
+            # balance_due predates Plaid and may already be reduced by
+            # record_payment or paid off, so the cap is whatever is
+            # currently there -- but pay it down against the just-seeded
+            # date too, so a statement that's already fully covered clears
+            # on this very first sync instead of waiting for the next one.
+            _recompute_balance_due(
+                db, card, original, st.last_statement_issue_date, Decimal(str(card.balance_due or 0)),
+            )
         card.last_statement_issue_date = st.last_statement_issue_date
         if st.next_payment_due_date is not None:
             card.next_payment_date = st.next_payment_due_date

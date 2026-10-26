@@ -165,9 +165,11 @@ in Settings runs everything, on demand, anytime.
 
 **Statement balances.** For cards linked through Plaid, the due date and
 minimum payment fill in automatically as soon as Plaid sees a statement —
-including the very first one. The statement *balance* is the one exception:
-the first statement Plaid sees sets the date, due date and minimum payment,
-but leaves the balance alone. Only the next new statement after that fills
-in the balance too. That gap means any balance you've already typed in (or
-paid down) stays put until that next real statement arrives — not the
-first one Plaid happens to see.
+including the very first one. The balance stays live from sync to sync: on
+every Plaid sync the app recomputes what's still owed on the current
+statement from the issuer's own data — the statement total minus any
+payment or return posted since it closed. A card the issuer shows paid in
+full (autopay, a refund, any combination of the two) clears to $0 right
+away, instead of waiting for the next statement. The recompute only ever
+lowers the figure, never raises it, so a balance you've already typed in
+or paid down by hand is safe until the real payoff posts.

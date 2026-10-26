@@ -15,6 +15,7 @@ from backend.services.plaid_client import (
     PlaidAccount, PlaidCardStatement, PlaidError, PlaidNotReady, PlaidRateLimited, PlaidSyncPage, PlaidTransaction,
 )
 from backend.services.plaid_sync_service import sync_plaid_connection
+from backend.services.statement_reconcile import statement_stale_reason
 
 CUTOVER = date(2026, 3, 20)
 
@@ -323,6 +324,16 @@ def _statement(issue, balance="321.00"):
                               minimum_payment_amount=Decimal("35.00"))
 
 
+def _credit(db, card, user, d, amount, merchant="Payment"):
+    """A posted CreditCardTransaction with a NEGATIVE amount -- card
+    convention is positive=charge, negative=payment, refund or return."""
+    row = models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=d,
+                                       amount=Decimal(amount), merchant=merchant)
+    db.add(row)
+    db.commit()
+    return row
+
+
 def test_new_statement_sets_balance_due(db_session):
     user, checking, savings, card, conn = _make_plaid_connection(db_session)
     card.balance_due = Decimal("100.00")
@@ -342,7 +353,13 @@ def test_new_statement_sets_balance_due(db_session):
 def test_first_statement_seeds_date_keeps_balance_due(db_session):
     """Existing cards have no stored issue date. Their balance_due predates
     Plaid and may already be reduced by record_payment, so the first Plaid
-    statement only seeds the dates."""
+    statement seeds the dates and then runs the same credits-since-close
+    paydown as every other sync against the just-seeded date. Updated for
+    the new recompute rule: with no CreditCardTransaction credits posted
+    after the seeded date, remaining (321.00) exceeds the hand-entered
+    balance_due (75.00), and the paydown never raises balance_due -- so the
+    outcome is unchanged (balance_due stays 75.00, untouched) even though
+    it's no longer a hardcoded skip."""
     user, checking, savings, card, conn = _make_plaid_connection(db_session)
     card.balance_due = Decimal("75.00")
     db_session.commit()
@@ -388,6 +405,158 @@ def test_same_statement_keeps_reduced_balance_due(db_session):
     assert card.balance_due == Decimal("50.00")
     assert card.balance_due_updated_at is None
     assert card.minimum_payment_amount is None
+
+
+def test_statement_clears_as_payment_and_return_post_after_close(db_session):
+    """The real shape that drove this fix: a statement closes, a merchant
+    return posts after it, then autopay covers the rest -- the issuer
+    treats both as paying down the SAME statement and shows it paid in
+    full, so balance_due must clear even though no new statement has
+    arrived yet, and the stale-statement warning must not fire just
+    because next_payment_date is now in the past."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    close = date(2026, 4, 5)
+    card.balance_due = Decimal("500.00")
+    card.last_statement_issue_date = close
+    card.current_balance = Decimal("0.00")
+    card.next_payment_date = date(2026, 4, 1)
+    db_session.commit()
+    _credit(db_session, card, user, date(2026, 4, 12), "-20.00", "RETURN")
+    _credit(db_session, card, user, date(2026, 4, 25), "-480.00", "AUTOPAY")
+
+    with _patched(_client([_page()], statements=[_statement(close, balance="500.00")])):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("0")
+    assert statement_stale_reason(card, date(2026, 4, 26)) is None
+
+
+def test_partial_credit_lowers_balance_due(db_session):
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    close = date(2026, 4, 5)
+    card.balance_due = Decimal("500.00")
+    card.last_statement_issue_date = close
+    db_session.commit()
+    _credit(db_session, card, user, date(2026, 4, 10), "-200.00")
+
+    with _patched(_client([_page()], statements=[_statement(close, balance="500.00")])):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("300.00")
+
+
+def test_credit_paydown_never_raises_a_hand_reduced_balance(db_session):
+    """record_payment already brought balance_due down to 100.00. The
+    statement itself still shows 500.00 and only 200.00 of credits have
+    posted since close -- 300.00 still short of the statement total -- so
+    the recompute must not raise balance_due back toward it."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    close = date(2026, 4, 5)
+    card.balance_due = Decimal("100.00")
+    card.last_statement_issue_date = close
+    db_session.commit()
+    _credit(db_session, card, user, date(2026, 4, 10), "-200.00")
+
+    with _patched(_client([_page()], statements=[_statement(close, balance="500.00")])):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("100.00")
+
+
+def test_credit_on_or_before_close_date_ignored(db_session):
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    close = date(2026, 4, 5)
+    card.balance_due = Decimal("500.00")
+    card.last_statement_issue_date = close
+    db_session.commit()
+    _credit(db_session, card, user, close, "-500.00")  # same day as close: doesn't count
+
+    with _patched(_client([_page()], statements=[_statement(close, balance="500.00")])):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("500.00")
+
+
+def test_credit_within_slop_clears_statement(db_session):
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    close = date(2026, 4, 5)
+    card.balance_due = Decimal("500.00")
+    card.last_statement_issue_date = close
+    db_session.commit()
+    _credit(db_session, card, user, date(2026, 4, 10), "-499.50")  # 50c short, within slop
+
+    with _patched(_client([_page()], statements=[_statement(close, balance="500.00")])):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("0")
+
+
+def test_new_statement_only_counts_credits_after_its_own_close(db_session):
+    """A newer statement sets its own total, then pays down only with
+    credits posted after ITS close -- not the prior statement's."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    old_close = date(2026, 3, 5)
+    new_close = date(2026, 4, 5)
+    card.balance_due = Decimal("50.00")
+    card.last_statement_issue_date = old_close
+    db_session.commit()
+    # Between the old and new close: belongs to the OLD statement, must not
+    # count against the new one.
+    _credit(db_session, card, user, date(2026, 3, 20), "-500.00")
+    # After the new statement's own close: this one counts.
+    _credit(db_session, card, user, date(2026, 4, 10), "-100.00")
+
+    with _patched(_client([_page()], statements=[_statement(new_close, balance="321.00")])):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("221.00")
+    assert card.last_statement_issue_date == new_close
+
+
+def test_first_statement_already_covered_clears_to_zero(db_session):
+    """A card's very first Plaid statement that's already fully paid off
+    clears right on this sync -- it doesn't have to wait for a second
+    statement to arrive, unlike the pre-fix behavior."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    card.balance_due = Decimal("75.00")  # pre-Plaid, hand-entered
+    db_session.commit()
+    issue = date(2026, 4, 5)
+    _credit(db_session, card, user, date(2026, 4, 10), "-321.00")
+
+    with _patched(_client([_page()], statements=[_statement(issue, balance="321.00")])):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("0")
+    assert card.last_statement_issue_date == issue
+
+
+def test_balance_due_updated_at_changes_only_when_balance_due_changes(db_session):
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    close = date(2026, 4, 5)
+    card.balance_due = Decimal("500.00")
+    card.last_statement_issue_date = close
+    card.balance_due_updated_at = None
+    db_session.commit()
+
+    with _patched(_client([_page()], statements=[_statement(close, balance="500.00")])):
+        sync_plaid_connection(db_session, conn)
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("500.00")
+    assert card.balance_due_updated_at is None  # unchanged -- no credits posted yet
+
+    _credit(db_session, card, user, date(2026, 4, 10), "-500.00")
+    with _patched(_client([_page(cursor="cur-2")], statements=[_statement(close, balance="500.00")])):
+        sync_plaid_connection(db_session, conn)
+    db_session.refresh(card)
+    assert card.balance_due == Decimal("0")
+    assert card.balance_due_updated_at is not None
 
 
 def test_card_balance_not_sign_flipped(db_session):

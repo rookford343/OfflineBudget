@@ -301,6 +301,22 @@ go through the same `build_preview`/`run_import` pipeline as every other
 source. Plaid transaction ids are stored as `plaid:<transaction_id>` on
 `external_id`, so they can never collide with a SimpleFIN or CSV id.
 
+**Card statement balances.** `/liabilities/get`'s per-card statement feeds
+`_apply_statements` in `plaid_sync_service.py`, which runs after this run's
+own card transactions are imported and committed, so credits posted in the
+same sync count. On every sync -- not just when a new statement arrives --
+it recomputes `CreditCard.balance_due` as the statement's own total
+(`last_statement_balance`, clamped at >= 0, never the stored `balance_due`,
+which `record_payment` may have hand-reduced) minus the sum of
+`CreditCardTransaction` rows with `amount < 0` dated after the statement's
+`last_statement_issue_date` (payments and returns alike -- the issuer's own
+rule). Within `_FULL_COVERAGE_SLOP` ($1, `statement_reconcile.py`) of full
+coverage it clears to 0; otherwise it's capped at the prior balance_due, so
+it can only drop, never rise. A card's first-ever Plaid statement still
+only *seeds* `last_statement_issue_date` (its balance predates Plaid), but
+runs this same recompute against that freshly seeded date, so a statement
+that's already fully paid off clears on that first sync too.
+
 *No Plaid SDK.* `plaid_client.py` is a thin wrapper over `httpx` (already a
 dependency) instead of `plaid-python`. The SDK's own code reviewed as
 clean — no exec, eval, subprocess or pickle, TLS verified by default — but
