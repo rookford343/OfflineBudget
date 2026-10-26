@@ -414,6 +414,33 @@ def test_card_balance_not_sign_flipped(db_session):
     assert (cp.account_id, cp.date, cp.actual_balance) == (checking.id, local.date(), Decimal("1234.56"))
 
 
+def test_card_balance_sync_leaves_a_pending_payment_marker_set(db_session):
+    """Same ruling as bank_sync_service's SimpleFIN path: a card-side balance
+    refresh alone is not evidence the payment posted to checking, so it must
+    leave payment_sent_pending_sync untouched. Only import_service.py's CC
+    payoff detection (checking debit import) clears it now."""
+    user, checking, savings, card, conn = _make_plaid_connection(db_session)
+    card.payment_sent_pending_sync = True
+    card.payment_sent_amount = Decimal("250.00")
+    db_session.commit()
+
+    accounts = [
+        PlaidAccount(id="p-card", name="Visa", mask="1234", type="credit", subtype="credit card",
+                     current=Decimal("250.00"), available=None, limit=Decimal("5000.00")),
+        PlaidAccount(id="p-chk", name="Checking", mask="0001", type="depository", subtype="checking",
+                     current=Decimal("1234.56"), available=None, limit=None),
+        PlaidAccount(id="p-sav", name="Savings", mask="0002", type="depository", subtype="savings",
+                     current=Decimal("777.00"), available=None, limit=None),
+    ]
+    last_update = datetime(2026, 4, 6, 14, 0, tzinfo=timezone.utc)
+    with _patched(_client([_page()], accounts=accounts, last_update=last_update)):
+        sync_plaid_connection(db_session, conn)
+
+    db_session.refresh(card)
+    assert card.payment_sent_pending_sync is True
+    assert card.payment_sent_amount == Decimal("250.00")
+
+
 @pytest.fixture()
 def eastern_tz(monkeypatch):
     monkeypatch.setenv("TZ", "America/New_York")

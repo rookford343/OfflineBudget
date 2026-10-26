@@ -297,19 +297,9 @@ def apply_card_balance(
         if balance_date is not None:
             card.balance_as_of = balance_date
 
-        if card.payment_sent_pending_sync:
-            # A fresh sync just wrote real, authoritative data --
-            # whatever it now says, the manual marker is stale by
-            # definition. balance_due is never touched by bank sync
-            # (confirmed: only current_balance is), so this is the
-            # actual reconciliation signal, not balance_due changing.
-            # Without this the flag could never clear from a real
-            # sync at all -- only from record_payment or a manual
-            # edit, which is exactly the workaround this feature
-            # exists to replace. Found in final whole-branch review,
-            # 2026-08-28.
-            card.payment_sent_pending_sync = False
-            card.payment_sent_amount = None
+    # payment_sent_pending_sync no longer clears here: it now clears when
+    # the payment itself posts to checking -- see import_service.py's
+    # run_import CC-payoff detection.
 
     if not replace_pending_snapshot(db, user, card, pending) and (
         card.pending_charges and card.pending_charges > 0 and imported > 0

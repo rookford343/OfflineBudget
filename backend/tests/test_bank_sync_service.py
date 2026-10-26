@@ -122,11 +122,15 @@ def test_card_sync_applies_balance_once_its_own_feed_catches_up(db_session):
     assert card.balance_as_of == datetime(2026, 8, 28)
 
 
-def test_a_bank_sync_clears_a_pending_marker(db_session):
-    """balance_due is never written by bank sync -- only current_balance
-    is -- so the existing balance_due-based auto-clear (Task 3) can never
-    fire from the real sync this feature was built to wait for. The flag
-    must clear here too, on the signal bank sync actually sends."""
+def test_a_card_balance_sync_leaves_a_pending_marker_set(db_session):
+    """A card-balance sync alone is no longer evidence the payment landed --
+    Plaid's 4x/day cadence cleared the old marker within hours, long before
+    the payment actually posted to checking, leaving checking looking too
+    high in the forecast in the meantime. The marker now only clears when
+    the payment's own debit imports into checking (import_service.py's CC
+    payoff detection), so a plain card-side balance refresh (no new card
+    transactions here, isolating this from that import-side clearing) must
+    leave it untouched."""
     user, card, connection, link = _make_card_connection(db_session)
     card.payment_sent_pending_sync = True
     card.payment_sent_amount = Decimal("500.00")
@@ -137,8 +141,8 @@ def test_a_bank_sync_clears_a_pending_marker(db_session):
         sync_connection(db_session, connection)
 
     db_session.refresh(card)
-    assert card.payment_sent_pending_sync is False
-    assert card.payment_sent_amount is None
+    assert card.payment_sent_pending_sync is True
+    assert card.payment_sent_amount == Decimal("500.00")
 
 
 def test_a_bank_sync_with_no_new_transactions_keeps_pending_charges(db_session):

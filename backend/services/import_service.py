@@ -9,6 +9,7 @@ from backend import models, schemas
 from backend.services.csv_parser import ParsedRow
 from backend.services.auto_categorizer import categorize
 from backend.services.card_matching import card_matches_description
+from backend.services.statement_reconcile import _FULL_COVERAGE_SLOP
 
 # ACH/bank noise suffixes to strip before matching
 _ACH_NOISE = re.compile(
@@ -519,6 +520,30 @@ def run_import(
                         as_of = datetime.combine(row.date, datetime.min.time())
                         if card.balance_as_of is None or as_of > card.balance_as_of:
                             card.balance_as_of = as_of
+
+                        # payment_sent_pending_sync clears here, the moment
+                        # the payment's own debit posts to checking -- not
+                        # on every card-balance sync (bank_sync_service.py's
+                        # apply_card_balance no longer touches it). Plaid's
+                        # 4x/day cadence cleared the old marker within hours,
+                        # long before the payment actually posted, so the
+                        # forecast stopped subtracting it while checking
+                        # still hadn't caught up. A credit (positive amount)
+                        # is a refund/return, not a payment leaving checking,
+                        # so it never touches the marker -- only a debit does.
+                        if row.amount < 0 and card.payment_sent_pending_sync:
+                            remaining = (
+                                Decimal(str(card.payment_sent_amount or 0))
+                                - abs(Decimal(str(row.amount)))
+                            )
+                            if remaining <= _FULL_COVERAGE_SLOP:
+                                card.payment_sent_pending_sync = False
+                                card.payment_sent_amount = None
+                            else:
+                                # Partial/split payment: keep the flag set
+                                # and carry the unmatched remainder forward
+                                # so a later debit can finish clearing it.
+                                card.payment_sent_amount = remaining
                         break
 
             if row.external_id:

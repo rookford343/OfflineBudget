@@ -90,6 +90,134 @@ def test_bank_sync_autopay_reduces_matching_card_balance_without_manual_tag(db_s
     assert card.balance_as_of == datetime(2026, 8, 26, 0, 0)
 
 
+def test_bank_sync_checking_debit_matching_payment_sent_amount_clears_marker(db_session):
+    """payment_sent_pending_sync no longer clears on every card-balance sync
+    (bank_sync_service.py's apply_card_balance stopped doing that -- Plaid's
+    4x/day cadence cleared it within hours, long before the payment actually
+    posted). It now clears here, the moment the payment's own debit imports
+    into checking and matches the snapshotted payment_sent_amount."""
+    user, card = _make_user_and_card(db_session)
+    card.name = "Chase Sapphire"
+    card.payment_sent_pending_sync = True
+    card.payment_sent_amount = Decimal("8968.70")
+    checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("10000.00"))
+    db_session.add(checking)
+    db_session.flush()
+
+    rows = [schemas.ImportConfirmRow(
+        date=date(2026, 8, 26), description="CHASE CREDIT CRD AUTOPAY PPD ID: 4760039224",
+        amount=Decimal("-8968.70"),
+    )]
+
+    run_import(
+        db_session, user, rows, account_id=checking.id, card_id=None,
+        source=models.TransactionSource.bank_sync,
+    )
+
+    assert card.payment_sent_pending_sync is False
+    assert card.payment_sent_amount is None
+
+
+def test_partial_matching_debit_reduces_the_marker_and_keeps_it_set(db_session):
+    """A split/partial payment must not clear the marker outright -- only
+    reduce the remaining snapshot by what actually posted, invented
+    figures."""
+    user, card = _make_user_and_card(db_session)
+    card.name = "Chase Sapphire"
+    card.payment_sent_pending_sync = True
+    card.payment_sent_amount = Decimal("8968.70")
+    checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("10000.00"))
+    db_session.add(checking)
+    db_session.flush()
+
+    rows = [schemas.ImportConfirmRow(
+        date=date(2026, 8, 26), description="CHASE CREDIT CRD AUTOPAY PPD ID: 4760039224",
+        amount=Decimal("-5000.00"),
+    )]
+
+    run_import(
+        db_session, user, rows, account_id=checking.id, card_id=None,
+        source=models.TransactionSource.bank_sync,
+    )
+
+    assert card.payment_sent_pending_sync is True
+    assert card.payment_sent_amount == Decimal("3968.70")
+
+
+def test_a_second_debit_covering_the_remainder_then_clears_the_marker(db_session):
+    """The flip side of the partial-payment test above: once an earlier
+    partial debit has already reduced payment_sent_amount, a later debit
+    covering what's left finishes the clear."""
+    user, card = _make_user_and_card(db_session)
+    card.name = "Chase Sapphire"
+    card.payment_sent_pending_sync = True
+    card.payment_sent_amount = Decimal("3968.70")  # already reduced by an earlier partial debit
+    checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("5000.00"))
+    db_session.add(checking)
+    db_session.flush()
+
+    rows = [schemas.ImportConfirmRow(
+        date=date(2026, 8, 27), description="CHASE CREDIT CRD AUTOPAY PPD ID: 4760039224",
+        amount=Decimal("-3968.70"),
+    )]
+
+    run_import(
+        db_session, user, rows, account_id=checking.id, card_id=None,
+        source=models.TransactionSource.bank_sync,
+    )
+
+    assert card.payment_sent_pending_sync is False
+    assert card.payment_sent_amount is None
+
+
+def test_a_matching_credit_row_leaves_the_payment_sent_marker_untouched(db_session):
+    """A credit (positive amount -- a refund/return) matching the card is not
+    evidence a payment left checking, so it must leave the marker alone even
+    though it still runs through the existing balance-reduction path."""
+    user, card = _make_user_and_card(db_session)
+    card.name = "Chase Sapphire"
+    card.payment_sent_pending_sync = True
+    card.payment_sent_amount = Decimal("8968.70")
+    checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("10000.00"))
+    db_session.add(checking)
+    db_session.flush()
+
+    rows = [schemas.ImportConfirmRow(
+        date=date(2026, 8, 26), description="CHASE CREDIT CRD AUTOPAY REFUND PPD ID: 4760039224",
+        amount=Decimal("46.45"),
+    )]
+
+    run_import(
+        db_session, user, rows, account_id=checking.id, card_id=None,
+        source=models.TransactionSource.bank_sync,
+    )
+
+    assert card.payment_sent_pending_sync is True
+    assert card.payment_sent_amount == Decimal("8968.70")
+
+
+def test_a_non_matching_debit_leaves_the_payment_sent_marker_untouched(db_session):
+    user, card = _make_user_and_card(db_session)
+    card.payment_sent_pending_sync = True
+    card.payment_sent_amount = Decimal("8968.70")
+    checking = models.Account(user_id=user.id, name="Main Checking", type=models.AccountType.checking, current_balance=Decimal("10000.00"))
+    db_session.add(checking)
+    db_session.flush()
+
+    rows = [schemas.ImportConfirmRow(
+        date=date(2026, 8, 26), description="GROCERY MART PURCHASE",
+        amount=Decimal("-120.00"),
+    )]
+
+    run_import(
+        db_session, user, rows, account_id=checking.id, card_id=None,
+        source=models.TransactionSource.bank_sync,
+    )
+
+    assert card.payment_sent_pending_sync is True
+    assert card.payment_sent_amount == Decimal("8968.70")
+
+
 def test_dedupes_across_whitespace_formatting_difference(db_session):
     """Reproduces a live bug (2026-08-08): a bank's CSV export pads ACH
     descriptions with internal whitespace ('PAYROLL     PPD ID: 123'), while
