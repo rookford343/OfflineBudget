@@ -471,9 +471,12 @@ total, and are never counted as spending until they post.
 bank for a day or more, while the card's own feed already shows the
 statement paid. Each Plaid sync also stores checking's current pending list
 and replaces it wholesale next time. Pending checking debits that match one
-of your cards count against today's forecast balance right away, and that
-card's payoff isn't planned a second time. Other pending debits and pending
-credits are left alone until they post.
+of your cards (by last four, or by name when only one card has that name)
+count against today's forecast balance right away, and that card's payoff
+isn't planned a second time. Other pending debits and pending credits are
+left alone until they post. A balance you type in by hand for today is taken
+as already net of them. Switching checking off Plaid or disconnecting Plaid
+clears the list.
 
 **Statement balances (Plaid).** When a Plaid-linked card's issuer posts a
 new statement, the due date and minimum payment fill in automatically —

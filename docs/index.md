@@ -178,6 +178,10 @@ or paid down by hand is safe until the real payoff posts.
 a day or more before it posts, while the card itself already shows the
 statement paid. Each Plaid sync keeps a copy of checking's pending list, and
 pending debits that match one of your cards come off today's forecast
-balance right away, shown on today as "Pending: …". That card's payoff isn't
-planned again, and once the payment posts it simply drops off the list.
-Other pending debits and any pending credits wait until they post.
+balance right away, shown on today as "Pending: …" with a grey **pending**
+badge. That card's payoff isn't planned again, and once the payment posts it
+simply drops off the list. A debit is tied to a card by its last four
+digits, or by name only when no other card shares that name. Other pending
+debits and any pending credits wait until they post. If you type today's
+balance in yourself, the app takes it as already net of pending payments.
+Switching checking away from Plaid, or disconnecting Plaid, clears the list.

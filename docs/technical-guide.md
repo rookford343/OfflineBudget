@@ -308,14 +308,22 @@ days through today, paged by `options.offset`) and keeps only the
 `pending` rows. Before commit it replaces each active checking link's
 `AccountPendingTransaction` rows with that snapshot. If the call fails
 (429 included), the run logs the code, keeps the old snapshot and carries
-on. The preview never calls it. `build_forecast` subtracts the pending
-debits that `card_matches_description` ties to an active card from TODAY,
-as "Pending: …" lines, and lowers that card's locked payoff by the same
-amount. A card also marked `payment_sent_pending_sync` counts once, at the
-larger of the two. Both are applied after today's `ForecastDayCheckpoint`,
-because sync anchors today to the posted balance and the walk applies a
-day's anchor last. The marker used to come off the opening seed, where
-that anchor erased it.
+on. In that case it still deletes the snapshot rows this run imports as
+posted (by `pending_transaction_id`, else a card-matching debit of the same
+amount dated on or after the row). The preview never calls it. Switching a
+link away (`switch_existing`) or deleting the connection drops the
+account's rows, and `build_forecast` reads them only for an account with an
+active Plaid link. It subtracts the pending debits that
+`match_payment_card` ties to exactly one active card (last four first; a
+first name word only when no other card shares it) from TODAY, as
+`is_pending` lines. It lowers that card's locked payoff by the same amount,
+and while the statement still stands, takes any excess off the next cycle's
+carried estimate. A card also marked `payment_sent_pending_sync` counts
+once, at the larger of the two. Both are applied after today's
+`ForecastDayCheckpoint` when it is bank sync's auto anchor (the posted
+balance; the walk applies a day's anchor last), and skipped when today's
+anchor was typed in by hand. The marker used to come off the opening seed,
+where the auto anchor erased it.
 
 **Card statement balances.** `/liabilities/get`'s per-card statement feeds
 `_apply_statements` in `plaid_sync_service.py`, which runs after this run's
