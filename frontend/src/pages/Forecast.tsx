@@ -1251,8 +1251,10 @@ export default function Forecast() {
                     q.days.forEach((d: any, i: number) => {
                       if (dayCheckpointMap[d.date] === undefined) return;
                       if (i === 0) { moved[d.date] = true; return; }
+                      // Pending card payments land after the anchor, so they're not part of what it replaced.
                       const walked = Number(q.days[i - 1].projected_balance)
-                        + d.transactions.reduce((sum: number, t: any) => sum + Number(t.amount), 0);
+                        + d.transactions.filter((t: any) => !t.is_pending)
+                          .reduce((sum: number, t: any) => sum + Number(t.amount), 0);
                       moved[d.date] = Math.abs(Number(dayCheckpointMap[d.date]) - walked) >= 0.005;
                     });
                     return q.days.filter((d: any) => d.transactions.length > 0 || moved[d.date]).map((d: any) => {
@@ -1270,7 +1272,8 @@ export default function Forecast() {
                               {t.amount > 0 ? "+" : ""}{fmt(t.amount)}
                             </span>
                             <span className="text-gray-600">{t.name}</span>
-                            {t.is_actual && <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">actual</span>}
+                            {t.is_pending && <span className="px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300">pending</span>}
+                            {t.is_actual && !t.is_pending && <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300">actual</span>}
                             {!t.is_actual && !t.is_planned && <span className="badge-blue">projected</span>}
                             {t.is_planned && <span className="px-1.5 py-0.5 rounded text-xs bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">planned</span>}
                             {t.is_transfer && <span className="px-1.5 py-0.5 rounded text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">transfer</span>}

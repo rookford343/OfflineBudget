@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from backend import models
 from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
-from backend.services.card_matching import card_matches_description
+from backend.services.card_matching import card_matches_description, match_payment_card
 
 # How many days before "today" a scheduled recurring item can still be
 # missing its actual and get folded into today's opening balance anyway,
@@ -29,6 +29,10 @@ from backend.services.card_matching import card_matches_description
 # PENDING_LOOKBACK_DAYS) for the same reason: a card issuer's balance feed
 # lagged up to ~6 days earlier this same session.
 _UNCONFIRMED_LOOKBACK_DAYS = 7
+
+# The note bank sync stamps on the daily checkpoint it writes (the posted
+# balance). Any other note means the user typed the anchor in.
+AUTO_ANCHOR_NOTE = "Auto (bank sync)"
 
 
 def _last_day_of_month(d: date) -> int:
@@ -514,14 +518,24 @@ def build_forecast(
     # they pay. Only card-matching DEBITS count: any other pending debit is
     # most likely a bill the walk already projects, and subtracting it as
     # well would charge it twice. Pending credits are left alone too.
+    #
+    # Only while an ACTIVE Plaid link feeds this account: nothing else
+    # refreshes the snapshot, and stale rows would be subtracted forever.
     pending_card_debits: dict[int, list[models.AccountPendingTransaction]] = {}
-    if account.type == models.AccountType.checking:
+    plaid_fed = account.type == models.AccountType.checking and db.query(
+        models.BankConnectionAccountLink.id,
+    ).join(models.BankConnection).filter(
+        models.BankConnectionAccountLink.local_account_id == account_id,
+        models.BankConnectionAccountLink.is_active == True,
+        models.BankConnection.provider == "plaid",
+    ).first() is not None
+    if plaid_fed:
         for row in db.query(models.AccountPendingTransaction).filter(
             models.AccountPendingTransaction.user_id == user_id,
             models.AccountPendingTransaction.account_id == account_id,
             models.AccountPendingTransaction.amount < 0,
         ).order_by(models.AccountPendingTransaction.date, models.AccountPendingTransaction.id).all():
-            paid = next((c for c in all_active_cards if card_matches_description(c, row.description)), None)
+            paid = match_payment_card(all_active_cards, row.description)
             if paid is not None:
                 pending_card_debits.setdefault(paid.id, []).append(row)
 
@@ -650,6 +664,19 @@ def build_forecast(
             # payment left checking twice without this guard.
             continue
 
+        # A payment already pending at the bank for this card. It comes off
+        # checking today (pending_today_lines); here it comes off what's still
+        # planned: first the statement payoff, then -- only while the
+        # statement still stands -- any excess off the next cycle's
+        # estimate. Once the card's own feed shows the statement paid
+        # (balance_due 0), the payment is already a credit on the card and
+        # current_balance excludes it, so the estimate needs nothing more.
+        pending_paid = sum(
+            (-Decimal(str(r.amount)) for r in pending_card_debits.get(card.id, [])), Decimal("0"),
+        )
+        statement_due = Decimal(str(card.balance_due or 0))
+        excess_paid = max(pending_paid - statement_due, Decimal("0")) if statement_due > 0 else Decimal("0")
+
         # A next_payment_date that has gone stale must not swallow the balance.
         # the user's Apple Card sat at 2026-05-25 with $250.00 due while the forecast
         # ran August: the window check below never matched, so the card was
@@ -765,6 +792,7 @@ def build_forecast(
             # and counting them here as well charged them twice (found live
             # 2026-10-01). The Forecast page keeps them in the payoff.
             derived_amount = carried + (upcoming if include_unbilled_card_bills else Decimal("0"))
+            derived_amount = max(derived_amount - excess_paid, Decimal("0"))
 
         # Second hop: the cycle right after the one just derived above.
         # There is no "carried" real balance signal for it yet -- that
@@ -842,9 +870,7 @@ def build_forecast(
             # A payment for this statement already pending at the bank is
             # subtracted today (see pending_today_lines), so only what it
             # doesn't cover is still to be paid on the due date.
-            still_due = Decimal(str(card.balance_due)) - sum(
-                (-Decimal(str(r.amount)) for r in pending_card_debits.get(card.id, [])), Decimal("0"),
-            )
+            still_due = statement_due - pending_paid
             if still_due > 0:
                 cc_payments.setdefault(next_payment, []).append((card.name, still_due))
 
@@ -963,6 +989,7 @@ def build_forecast(
                     # Bank-reported, not a projection: has_unsettled_projection
                     # must not hold back today's anchor over it.
                     is_actual=True,
+                    is_pending=True,
                     is_cc_payment=True,
                 ))
             marker = (
@@ -976,6 +1003,7 @@ def build_forecast(
                     type="expense",
                     category_name=None,
                     is_actual=True,
+                    is_pending=True,
                     is_cc_payment=True,
                 ))
     if start_date < today:
@@ -1054,15 +1082,19 @@ def build_forecast(
     # Lookup for CC suppression — keyed by the name stored in cc_payments / cc_estimates_by_date
     card_by_name: dict[str, models.CreditCard] = {(c.name or ""): c for c in all_active_cards}
 
-    day_checkpoint_map: dict[date, Decimal] = {
-        cp.date: cp.actual_balance
-        for cp in db.query(models.ForecastDayCheckpoint).filter(
-            models.ForecastDayCheckpoint.user_id == user_id,
-            models.ForecastDayCheckpoint.account_id == account_id,
-            models.ForecastDayCheckpoint.date >= start_date,
-            models.ForecastDayCheckpoint.date <= end_date,
-        ).all()
-    }
+    day_checkpoints = db.query(models.ForecastDayCheckpoint).filter(
+        models.ForecastDayCheckpoint.user_id == user_id,
+        models.ForecastDayCheckpoint.account_id == account_id,
+        models.ForecastDayCheckpoint.date >= start_date,
+        models.ForecastDayCheckpoint.date <= end_date,
+    ).all()
+    day_checkpoint_map: dict[date, Decimal] = {cp.date: cp.actual_balance for cp in day_checkpoints}
+    # A hand-entered anchor today is the bank's own figure as the user read
+    # it, which already has the pending payments out of it; only bank sync's
+    # auto anchor is the posted balance that still needs them subtracted.
+    todays_anchor_is_manual = any(
+        cp.date == today and cp.note != AUTO_ANCHOR_NOTE for cp in day_checkpoints
+    )
 
     incoming_transfer_schedules: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
     outgoing_transfer_schedules: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
@@ -1601,7 +1633,7 @@ def build_forecast(
             balance = day_checkpoint_map[current]
         # After the anchor, which is the posted balance -- see
         # pending_today_lines above.
-        if current == today:
+        if current == today and not todays_anchor_is_manual:
             for line in pending_today_lines:
                 balance += line.amount
                 day_transactions.append(line)

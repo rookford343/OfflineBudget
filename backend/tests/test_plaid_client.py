@@ -358,3 +358,13 @@ def test_get_pending_transactions_errors_use_the_existing_mapping():
         get_pending_transactions(_FAKE_ACCESS_TOKEN, date(2026, 10, 6), date(2026, 10, 20),
                                  transport=_json_transport(body, status_code=400))
     assert exc_info.value.code == "ITEM_LOGIN_REQUIRED"
+
+
+def test_posted_row_carries_its_pending_transaction_id():
+    posted = _get_row("t9", 40.0, pending=False)
+    posted["pending_transaction_id"] = "p9"
+    body = {"added": [posted, _get_row("t10", 1.0, pending=False)], "modified": [], "removed": [],
+            "next_cursor": "c", "has_more": False}
+    page = sync_page(_FAKE_ACCESS_TOKEN, None, transport=_json_transport(body))
+    assert page.added[0].pending_transaction_id == "p9"
+    assert page.added[1].pending_transaction_id is None

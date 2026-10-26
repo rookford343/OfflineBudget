@@ -56,6 +56,34 @@ def card_matches_description(card: models.CreditCard, description: str) -> bool:
     return False
 
 
+def match_payment_card(cards: list[models.CreditCard], description: str) -> models.CreditCard | None:
+    """The one card a checking debit pays, or None when it can't be pinned
+    to exactly one. Last four wins. Otherwise a card's first name word only
+    counts when no other card in `cards` shares it ("CHASE ... AUTOPAY" with
+    two Chase cards is ambiguous); its whole name with spaces removed always
+    counts. Used where guessing wrong moves real money in the forecast."""
+    by_last_four = [c for c in cards if c.last_four and _matches_whole_word(c.last_four, description or "")]
+    if len(by_last_four) == 1:
+        return by_last_four[0]
+    desc_lower = (description or "").lower()
+    first_tokens: dict[str, int] = {}
+    for c in cards:
+        name = (c.name or "").lower().split()
+        if name:
+            first_tokens[name[0]] = first_tokens.get(name[0], 0) + 1
+    hits = []
+    for c in cards:
+        name = (c.name or "").lower().split()
+        if not name:
+            continue
+        compact = "".join(name)
+        if (first_tokens[name[0]] == 1 and _matches_whole_word(name[0], desc_lower)) or (
+            compact != name[0] and _matches_whole_word(compact, desc_lower)
+        ):
+            hits.append(c)
+    return hits[0] if len(hits) == 1 else None
+
+
 # Bank wordings for a CHECKING debit that pays off a credit card. The one
 # list every importer and the reconciler share. A bare "autopay" is
 # deliberately absent: insurers and utilities also say AUTOPAY, and the CSV/OFX

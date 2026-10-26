@@ -564,6 +564,9 @@ class ForecastTransaction(BaseModel):
     # see forecast_engine.py's ss_boost comment for why a client-side estimate
     # drifted from this by two months.
     is_ss_boosted: bool = False
+    # A bank-reported pending card payment (or a hand-marked payment-sent
+    # card): real money gone from checking, but not posted yet.
+    is_pending: bool = False
 
 
 class ForecastEntry(BaseModel):

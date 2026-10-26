@@ -29,6 +29,7 @@ from backend.services import plaid_client
 from backend.services.bank_sync_service import (
     PendingCharge, apply_account_balance, apply_card_balance, replace_pending_snapshot,
 )
+from backend.services.card_matching import match_payment_card
 from backend.services.crypto import decrypt
 from backend.services.csv_parser import ParsedRow
 from backend.services.cutover_match import MATCH_DAYS, WINDOW_BEFORE_DAYS, cutover_zone, find_match
@@ -499,6 +500,10 @@ def _run(
     _apply_statements(db, by_account, statements)
     if checking_pending is not None:
         _replace_checking_pending(db, user, links, checking_pending)
+    else:
+        # The old snapshot is kept, but not the rows this very sync shows as
+        # posted: those are now actuals and would be counted twice.
+        _drop_posted_from_snapshot(db, user, links, per_link)
 
     now = datetime.utcnow()
     connection.sync_cursor = delta.next_cursor
@@ -558,6 +563,42 @@ def _replace_checking_pending(db: Session, user: models.User, links, pending: li
                 user_id=user.id, account_id=account.id, external_id=_pid(t.id),
                 date=t.date, amount=t.amount, description=t.description[:256], synced_at=now,
             ))
+
+
+def _drop_posted_from_snapshot(
+    db: Session, user: models.User, links, per_link: dict[int, list[tuple[str, PlaidTransaction]]],
+) -> None:
+    """Remove snapshot rows that a posted row in this sync replaces: by
+    Plaid's pending_transaction_id, or, without one, the earliest row with
+    the same amount, dated on or before it, for a posted debit that pays a
+    card."""
+    cards = db.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user.id, models.CreditCard.is_active == True,
+    ).all()
+    for link, account in _checking_links(db, links):
+        rows = db.query(models.AccountPendingTransaction).filter(
+            models.AccountPendingTransaction.account_id == account.id,
+        ).order_by(models.AccountPendingTransaction.date, models.AccountPendingTransaction.id).all()
+        if not rows:
+            continue
+        by_id = {r.external_id: r for r in rows}
+        gone: set[int] = set()
+        for _kind, t in per_link[link.id]:
+            if t.pending:
+                continue
+            if t.pending_transaction_id:
+                row = by_id.get(_pid(t.pending_transaction_id))
+                if row is not None and row.id not in gone:
+                    gone.add(row.id)
+                    db.delete(row)
+                continue
+            if t.amount >= 0 or match_payment_card(cards, t.description) is None:
+                continue
+            row = next((r for r in rows if r.id not in gone and Decimal(str(r.amount)) == t.amount
+                        and r.date <= t.date), None)
+            if row is not None:
+                gone.add(row.id)
+                db.delete(row)
 
 
 def _unlinked_names(item_accounts: list[PlaidAccount], by_account: dict) -> list[str]:

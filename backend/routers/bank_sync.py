@@ -196,6 +196,16 @@ def plaid_exchange(
     )
 
 
+def _drop_checking_pending(db: Session, link: models.BankConnectionAccountLink) -> None:
+    """Only a Plaid sync refreshes an account's pending snapshot. Once the
+    link that fed it stops (switched away or disconnected), the rows would
+    otherwise sit there and be subtracted from the forecast forever."""
+    if link.local_account_id:
+        db.query(models.AccountPendingTransaction).filter(
+            models.AccountPendingTransaction.account_id == link.local_account_id,
+        ).delete(synchronize_session=False)
+
+
 @router.post("/{connection_id}/link", response_model=schemas.BankConnectionLinkOut, status_code=status.HTTP_201_CREATED)
 def link_account(
     connection_id: int,
@@ -222,6 +232,7 @@ def link_account(
                 "existing_provider": existing_connection.provider if existing_connection else None,
             })
         existing_link.is_active = False
+        _drop_checking_pending(db, existing_link)
 
     link = models.BankConnectionAccountLink(
         connection_id=connection.id,
@@ -403,5 +414,7 @@ def disconnect(
             # our own decrypt) is unhappy. Logs the exception TYPE only, per
             # the global rule that nothing here logs raw exception text.
             logger.warning("Plaid remove_item failed for connection %s: %s", connection_id, type(exc).__name__)
+    for link in connection.links:
+        _drop_checking_pending(db, link)
     db.delete(connection)
     db.commit()

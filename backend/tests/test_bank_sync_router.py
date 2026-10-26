@@ -862,3 +862,52 @@ def test_disconnect_plaid_connection_still_deletes_locally_on_an_unexpected_erro
 
     assert resp.status_code == 204
     assert db_session.get(models.BankConnection, connection.id) is None
+
+
+# ── Checking pending snapshot cleanup ────────────────────────────────────────
+
+def _checking_with_plaid_pending(db_session, user):
+    from datetime import datetime
+    account = models.Account(user_id=user.id, name="Checking", type=models.AccountType.checking)
+    db_session.add(account)
+    db_session.flush()
+    plaid = models.BankConnection(user_id=user.id, provider="plaid",
+                                  access_url_encrypted=crypto.encrypt("plaid-token"))
+    db_session.add(plaid)
+    db_session.flush()
+    link = models.BankConnectionAccountLink(connection_id=plaid.id, simplefin_account_id="p-chk",
+                                            simplefin_account_name="Checking", local_account_id=account.id)
+    db_session.add(link)
+    db_session.add(models.AccountPendingTransaction(
+        user_id=user.id, account_id=account.id, external_id="plaid:p1", date=date(2026, 4, 1),
+        amount=Decimal("-50.00"), description="CHASE CREDIT CRD AUTOPAY", synced_at=datetime(2026, 4, 1),
+    ))
+    db_session.commit()
+    return account, plaid, link
+
+
+def test_switching_checking_off_plaid_drops_its_pending_snapshot(client, db_session):
+    """A snapshot nothing refreshes any more would be subtracted forever."""
+    test_client, user = client
+    account, _plaid, old_link = _checking_with_plaid_pending(db_session, user)
+    simplefin = models.BankConnection(user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url"))
+    db_session.add(simplefin)
+    db_session.commit()
+
+    resp = test_client.post(f"/bank-sync/{simplefin.id}/link", json={
+        "simplefin_account_id": "acc-new", "simplefin_account_name": "Checking",
+        "local_account_id": account.id, "switch_existing": True,
+    })
+    assert resp.status_code == 201
+    db_session.refresh(old_link)
+    assert old_link.is_active is False
+    assert db_session.query(models.AccountPendingTransaction).count() == 0
+
+
+def test_disconnecting_plaid_drops_its_checking_pending_snapshot(client, db_session):
+    test_client, user = client
+    _account, plaid, _link = _checking_with_plaid_pending(db_session, user)
+    with patch("backend.routers.bank_sync.remove_item"):
+        resp = test_client.delete(f"/bank-sync/{plaid.id}")
+    assert resp.status_code == 204
+    assert db_session.query(models.AccountPendingTransaction).count() == 0

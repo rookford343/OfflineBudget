@@ -12,10 +12,13 @@ All figures are invented; the repo is public."""
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from backend import models
 from backend.services.forecast_engine import build_forecast
 
 AUTOPAY = "CHASE CREDIT CRD AUTOPAY 1234"
+AUTO_NOTE = "Auto (bank sync)"
 
 
 def _user(db, username="pendingdebits"):
@@ -43,7 +46,26 @@ def _card(db, user, **kw):
     return card
 
 
-def _pending(db, user, account, amount, description=AUTOPAY, ext="plaid:p1", when=None):
+def _plaid_link(db, user, account, *, active=True):
+    connection = models.BankConnection(user_id=user.id, provider="plaid", access_url_encrypted="tok",
+                                       plaid_item_id=f"item-{account.id}-{active}")
+    db.add(connection)
+    db.flush()
+    link = models.BankConnectionAccountLink(connection_id=connection.id, simplefin_account_id="p-chk",
+                                            simplefin_account_name="Checking", local_account_id=account.id,
+                                            is_active=active)
+    db.add(link)
+    db.flush()
+    return connection
+
+
+def _pending(db, user, account, amount, description=AUTOPAY, ext="plaid:p1", when=None, link=True):
+    """A snapshot row; by default also gives the account the active Plaid
+    link that keeps such a snapshot fresh."""
+    if link and not db.query(models.BankConnectionAccountLink).filter_by(
+        local_account_id=account.id, is_active=True,
+    ).first():
+        _plaid_link(db, user, account)
     db.add(models.AccountPendingTransaction(
         user_id=user.id, account_id=account.id, external_id=ext, date=when or date.today(),
         amount=Decimal(amount), description=description, synced_at=datetime(2026, 1, 1),
@@ -51,9 +73,9 @@ def _pending(db, user, account, amount, description=AUTOPAY, ext="plaid:p1", whe
     db.flush()
 
 
-def _anchor(db, user, account, balance, when=None):
+def _anchor(db, user, account, balance, when=None, note=AUTO_NOTE):
     db.add(models.ForecastDayCheckpoint(user_id=user.id, account_id=account.id, date=when or date.today(),
-                                        actual_balance=Decimal(balance), note="auto"))
+                                        actual_balance=Decimal(balance), note=note))
     db.flush()
 
 
@@ -204,22 +226,136 @@ def test_todays_anchor_does_not_erase_the_payment_sent_marker(db_session):
     assert entry.projected_balance == Decimal("700.00")
 
 
-def test_no_double_count_once_the_debit_posts(db_session):
-    """After it posts, the snapshot no longer lists it and the posted balance
-    already includes it: today is just the posted balance."""
+@pytest.mark.parametrize("pending_id", ["p1", None])
+def test_no_double_count_once_the_debit_posts_even_if_the_snapshot_fetch_fails(db_session, pending_id):
+    """The pending debit is in the snapshot; then a sync imports it as posted
+    while that same sync's /transactions/get call fails, so the old snapshot
+    is kept. The posted row must still knock its pending row out, by Plaid's
+    pending_transaction_id or, without one, by a card-matching debit of the
+    same amount dated on or after it. Otherwise it is counted twice."""
+    from unittest.mock import MagicMock, patch
+
+    from backend.services.plaid_client import PlaidError, PlaidAccount, PlaidSyncPage, PlaidTransaction
+    from backend.services.plaid_sync_service import sync_plaid_connection
+
     user = _user(db_session)
-    account = _checking(db_session, user, balance="700.00")
+    account = _checking(db_session, user, balance="1000.00")
     _card(db_session, user)
-    db_session.add(models.Transaction(
-        user_id=user.id, account_id=account.id, date=date.today(), amount=Decimal("-300.00"),
-        description=AUTOPAY, is_actual=True,
-    ))
-    _anchor(db_session, user, account, "700.00")
+    _pending(db_session, user, account, "-300.00")
+    _pending(db_session, user, account, "-75.00", description="GROCERY MART 55", ext="plaid:p2")
+    connection = db_session.query(models.BankConnection).one()
+    connection.cutover_date = date(2026, 1, 1)
+    connection.sync_cursor = "cur-0"
+    db_session.commit()
+
+    today = date.today()
+    entry, _ = _today(db_session, user, account)
+    assert entry.projected_balance == Decimal("700.00")
+
+    posted = PlaidTransaction(id="t1", account_id="p-chk", date=today, authorized_date=None,
+                              amount=Decimal("-300.00"), description=AUTOPAY, merchant_name=None,
+                              pending=False, pending_transaction_id=pending_id)
+    client = MagicMock()
+    client.sync_page.return_value = PlaidSyncPage(added=[posted], modified=[], removed=[], next_cursor="cur-1",
+                                                  has_more=False)
+    client.get_accounts.return_value = [PlaidAccount(id="p-chk", name="Checking", mask=None, type="depository",
+                                                     subtype="checking", current=Decimal("700.00"),
+                                                     available=None, limit=None)]
+    client.get_last_successful_update.return_value = None
+    client.get_card_statements.return_value = []
+    client.get_pending_transactions.side_effect = PlaidError("INTERNAL_SERVER_ERROR", "down")
+    with patch("backend.services.plaid_sync_service.decrypt", side_effect=lambda c: c), \
+         patch("backend.services.plaid_sync_service.plaid_client", client):
+        sync_plaid_connection(db_session, connection)
+
+    remaining = [r.external_id for r in db_session.query(models.AccountPendingTransaction).all()]
+    assert remaining == ["plaid:p2"]
+    entry, _ = _today(db_session, user, account)
+    assert entry.projected_balance == Decimal("700.00")
+
+
+def test_pending_rows_ignored_without_an_active_plaid_link(db_session):
+    """Only an active Plaid link keeps the snapshot fresh. Without one the
+    rows are stale and would be subtracted forever."""
+    user = _user(db_session)
+    account = _checking(db_session, user)
+    _card(db_session, user)
+    _pending(db_session, user, account, "-300.00", link=False)
+    db_session.commit()
+    entry, _ = _today(db_session, user, account)
+    assert entry.projected_balance == Decimal("1000.00")
+
+    _plaid_link(db_session, user, account, active=False)
+    db_session.commit()
+    entry, _ = _today(db_session, user, account)
+    assert entry.projected_balance == Decimal("1000.00")
+
+
+def test_last_four_picks_the_card_when_names_share_a_first_word(db_session):
+    user = _user(db_session)
+    account = _checking(db_session, user)
+    today = date.today()
+    _card(db_session, user, name="Chase Sapphire", last_four="1111", balance_due=Decimal("200.00"),
+          current_balance=Decimal("200.00"), next_payment_date=today + timedelta(days=3))
+    _card(db_session, user, name="Chase Freedom", last_four="2222", balance_due=Decimal("300.00"),
+          current_balance=Decimal("300.00"), next_payment_date=today + timedelta(days=3))
+    _pending(db_session, user, account, "-300.00", description="CHASE CREDIT CRD AUTOPAY 2222")
+    db_session.commit()
+
+    entry, entries = _today(db_session, user, account, end=today + timedelta(days=10))
+    assert entry.projected_balance == Decimal("700.00")
+    payoffs = sorted((t.name, t.amount) for e in entries for t in e.transactions if t.name.startswith("CC "))
+    assert payoffs == [("CC Payment: Chase Sapphire", Decimal("-200.00"))]
+
+
+def test_a_shared_first_word_alone_matches_no_card(db_session):
+    """Two active cards both start with "Chase" and the description has no
+    last four: the debit can't be pinned to either, so it isn't counted."""
+    user = _user(db_session)
+    account = _checking(db_session, user)
+    _card(db_session, user, name="Chase Sapphire", last_four="1111")
+    _card(db_session, user, name="Chase Freedom", last_four="2222")
+    _pending(db_session, user, account, "-300.00", description="CHASE CREDIT CRD AUTOPAY")
     db_session.commit()
 
     entry, _ = _today(db_session, user, account)
+    assert entry.projected_balance == Decimal("1000.00")
+
+
+def test_pending_above_the_statement_comes_off_the_next_cycle_estimate(db_session):
+    """Paying the 300 statement plus 100 of the new cycle: the 300 payoff is
+    dropped and the next cycle's carried estimate (200 on the card beyond
+    the statement) shrinks by the extra 100, so nothing is lost or doubled."""
+    user = _user(db_session)
+    account = _checking(db_session, user)
+    today = date.today()
+    _card(db_session, user, balance_due=Decimal("300.00"), current_balance=Decimal("500.00"),
+          next_payment_date=today + timedelta(days=3))
+    _pending(db_session, user, account, "-400.00")
+    db_session.commit()
+
+    entry, entries = _today(db_session, user, account, end=today + timedelta(days=75))
+    assert entry.projected_balance == Decimal("600.00")
+    card_lines = [(t.name, t.amount) for e in entries for t in e.transactions if t.name.startswith("CC ")]
+    assert card_lines == [("CC Estimate: Chase Sapphire", Decimal("-100.00"))]
+
+
+def test_a_hand_entered_anchor_today_is_not_reduced_again(db_session):
+    """A hand-typed anchor is the bank's available balance, which already
+    has the pending payment out of it. Only bank sync's auto anchor is the
+    posted balance."""
+    user = _user(db_session)
+    account = _checking(db_session, user)
+    today = date.today()
+    _card(db_session, user, balance_due=Decimal("300.00"), current_balance=Decimal("300.00"),
+          next_payment_date=today + timedelta(days=3))
+    _pending(db_session, user, account, "-300.00")
+    _anchor(db_session, user, account, "700.00", note="typed from the bank app")
+    db_session.commit()
+
+    entry, entries = _today(db_session, user, account, end=today + timedelta(days=10))
     assert entry.projected_balance == Decimal("700.00")
-    assert not [t for t in entry.transactions if t.name.startswith("Pending:")]
+    assert entries[-1].projected_balance == Decimal("700.00")
 
 
 def test_pending_line_does_not_block_todays_anchor(db_session):

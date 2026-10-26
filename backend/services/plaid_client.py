@@ -77,6 +77,8 @@ class PlaidTransaction:
     description: str
     merchant_name: str | None
     pending: bool
+    # On a posted row: the id it had while pending, when Plaid links them.
+    pending_transaction_id: str | None = None
 
 
 @dataclass
@@ -153,6 +155,7 @@ def _parse_transaction(raw: dict) -> PlaidTransaction:
             description=raw.get("original_description") or raw.get("name") or "",
             merchant_name=raw.get("merchant_name"),
             pending=bool(raw.get("pending", False)),
+            pending_transaction_id=raw.get("pending_transaction_id") or None,
         )
     except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
         raise PlaidError("MALFORMED_RESPONSE", "Plaid returned a malformed transaction record") from exc

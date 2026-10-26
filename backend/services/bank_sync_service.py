@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.crypto import decrypt
 from backend.services.csv_parser import ParsedRow
-from backend.services.forecast_engine import has_unsettled_projection
+from backend.services.forecast_engine import AUTO_ANCHOR_NOTE, has_unsettled_projection
 from backend.services.import_service import build_preview, run_import
 from backend.services.simplefin_client import fetch_transactions
 from backend.services.statement_reconcile import reconcile_statement_payment
@@ -37,7 +37,7 @@ _INITIAL_LOOKBACK_DAYS = 30  # first sync for a newly-linked account
 # by SimpleFIN's id, so the overlap can't duplicate anything.
 _OVERLAP_DAYS = 10
 
-_AUTO_ANCHOR_NOTE = "Auto (bank sync)"
+_AUTO_ANCHOR_NOTE = AUTO_ANCHOR_NOTE
 
 
 @dataclass
