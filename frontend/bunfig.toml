@@ -1,0 +1,6 @@
+[install]
+# Dependency cooldown: refuse to install any package version published less
+# than 7 days ago. Blocks supply-chain attacks that land and get yanked
+# within days of publishing. Mirrors the uv `exclude-newer = "7 days"`
+# cooldown already enforced for the Python backend (see root CLAUDE.md).
+minimumReleaseAge = 604800

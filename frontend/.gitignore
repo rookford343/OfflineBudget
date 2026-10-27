@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# npm lockfile -- this project uses bun (bun.lock); never regenerate or commit
+# the npm one, it drifts from bun.lock and trips Dependabot on a lockfile
+# nothing actually installs from.
+package-lock.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
