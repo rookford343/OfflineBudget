@@ -29,6 +29,9 @@ from backend.services.card_matching import card_matches_description, match_payme
 # PENDING_LOOKBACK_DAYS) for the same reason: a card issuer's balance feed
 # lagged up to ~6 days earlier this same session.
 _UNCONFIRMED_LOOKBACK_DAYS = 7
+# How far either side of a card payoff's date a posted payment still settles
+# it (_cc_actual_nearby's window).
+_CC_NEARBY_DAYS = 7
 
 # The note bank sync stamps on the daily checkpoint it writes (the posted
 # balance). Any other note means the user typed the anchor in.
@@ -274,7 +277,7 @@ def _cc_actual_nearby(
     card: models.CreditCard,
     target: date,
     actuals_by_date: dict[date, list[models.Transaction]],
-    window: int = 7,
+    window: int = _CC_NEARBY_DAYS,
 ) -> bool:
     """True if an actual transaction matching this card appears within window days of target.
 
@@ -363,7 +366,11 @@ def has_unsettled_projection(db: Session, user_id: int, account_id: int, target:
     projection the engine would apply, so a new projection type can never
     quietly fall outside this guard the way PlannedExpense did.
     """
-    entries = build_forecast(db, user_id, account_id, target, target)
+    # Overdue card payoffs re-planned on today land AFTER today's anchor
+    # (see overdue_payoffs in build_forecast), so the anchor can't erase
+    # them and they must not stop a re-sync from refreshing it.
+    entries = build_forecast(db, user_id, account_id, target, target,
+                             replan_overdue_card_payoffs=False)
     if not entries:
         return False
     return any(not t.is_actual for t in entries[0].transactions)
@@ -403,6 +410,7 @@ def build_forecast(
     apply_buffer_transfers: bool = True,
     proposal: ScenarioProposal | None = None,
     include_unbilled_card_bills: bool = True,
+    replan_overdue_card_payoffs: bool = True,
 ) -> list[ForecastEntry]:
     account: models.Account = db.query(models.Account).filter(
         models.Account.id == account_id,
@@ -640,6 +648,9 @@ def build_forecast(
     recurring_cc_card_ids = {item.card_id for item in recurring_items if item.type == models.RecurringType.credit_card_payment}
     cc_payments: dict[date, list[tuple[str, Decimal]]] = {}
     cc_estimates_by_date: dict[date, list[tuple[str, Decimal]]] = {}
+    # Unpaid statement payoffs whose due date is already behind today (inside
+    # the unconfirmed lookback, so not stale): (card, due date, amount).
+    overdue_payoffs: list[tuple[models.CreditCard, date, Decimal]] = []
     # Card bills are paid from checking. CreditCard has no payment-account
     # link, so without this guard every payoff and estimate was injected into
     # whichever account was being forecast -- forecasting the user's savings drew
@@ -885,6 +896,19 @@ def build_forecast(
                 cc_payments.setdefault(derived_due, []).append((card.name, derived_amount))
         elif (
             next_payment is not None
+            and next_payment < today
+            and card.balance_due and card.balance_due > 0
+            and statement_due - pending_paid > 0
+        ):
+            # Due in the last week (not stale) and still unpaid. Recorded
+            # whether or not the due date is in this window: a window that
+            # starts today never visits it, but still re-plans it after
+            # today's auto anchor (see replan_overdue_on_today).
+            overdue_payoffs.append((card, next_payment, statement_due - pending_paid))
+            if start_date <= next_payment <= end_date:
+                cc_payments.setdefault(next_payment, []).append((card.name, statement_due - pending_paid))
+        elif (
+            next_payment is not None
             and start_date <= next_payment <= end_date
             and card.balance_due and card.balance_due > 0
         ):
@@ -990,6 +1014,21 @@ def build_forecast(
     actuals_by_date: dict[date, list[models.Transaction]] = {}
     for t in all_actuals:
         actuals_by_date.setdefault(t.date, []).append(t)
+
+    # What _cc_actual_nearby checks a card payoff against: its own reach,
+    # not the walk's window. The start=today bridge ends yesterday, so a
+    # payment that posted today (or posts after the window) was invisible
+    # to it: the payoff stayed in while current_balance already had the
+    # payment out, counting it twice.
+    nearby_actuals: dict[date, list[models.Transaction]] = {}
+    for t in db.query(models.Transaction).filter(
+        models.Transaction.user_id == user_id,
+        models.Transaction.account_id == account_id,
+        models.Transaction.is_actual == True,
+        models.Transaction.date >= start_date - timedelta(days=_CC_NEARBY_DAYS),
+        models.Transaction.date <= end_date + timedelta(days=_CC_NEARBY_DAYS),
+    ).all():
+        nearby_actuals.setdefault(t.date, []).append(t)
 
     # When start_date is in the past, reverse past actuals to find the opening balance.
     # current_balance = opening_balance + sum(all actuals from start_date to yesterday),
@@ -1124,6 +1163,33 @@ def build_forecast(
     todays_anchor_is_manual = any(
         cp.date == today and cp.note != AUTO_ANCHOR_NOTE for cp in day_checkpoints
     )
+    # Bank sync's auto anchor today is the POSTED balance, so it erases an
+    # unpaid payoff planned on an earlier due date in this walk although
+    # nothing has paid it. Such a payoff moves to today, after the anchor,
+    # the same way the pending lines do -- unless it already posted. A
+    # hand-entered anchor is the bank's available balance as the user read
+    # it, which already reflects the bank, so it gets nothing.
+    replan_overdue_on_today = (
+        replan_overdue_card_payoffs
+        and today in day_checkpoint_map
+        and not todays_anchor_is_manual
+    )
+    moved_overdue: dict[date, set[str]] = {}
+    overdue_today_lines: list[ForecastTransaction] = []
+    if replan_overdue_on_today:
+        for card, due, amount in overdue_payoffs:
+            if _cc_actual_nearby(card, due, nearby_actuals):
+                continue
+            moved_overdue.setdefault(due, set()).add(card.name)
+            overdue_today_lines.append(ForecastTransaction(
+                name=f"CC Payment: {card.name}",
+                amount=-amount,
+                type="expense",
+                category_name=None,
+                is_actual=False,
+                is_cc_payment=True,
+                is_cc_locked=True,
+            ))
 
     incoming_transfer_schedules: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
     outgoing_transfer_schedules: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
@@ -1503,9 +1569,11 @@ def build_forecast(
             ))
 
         for card_name, amount in cc_payments.get(current, []):
+            if card_name in moved_overdue.get(current, ()):
+                continue  # re-planned on today, after today's auto anchor
             # Suppress if an actual CC payment for this card was imported near this date
             card_obj = card_by_name.get(card_name)
-            if card_obj and _cc_actual_nearby(card_obj, current, actuals_by_date):
+            if card_obj and _cc_actual_nearby(card_obj, current, nearby_actuals):
                 continue
             signed = -amount
             balance += signed
@@ -1520,9 +1588,15 @@ def build_forecast(
             ))
 
         for card_name, amount in cc_estimates_by_date.get(current, []):
+            # An estimate is a guess about a payment still to come; on a date
+            # already behind today it only resurrects a paid or superseded
+            # cycle (a paid month looks unclaimed again once the next
+            # statement arrives).
+            if current < today:
+                continue
             # Suppress if an actual CC payment for this card was imported near this date
             card_obj = card_by_name.get(card_name)
-            if card_obj and _cc_actual_nearby(card_obj, current, actuals_by_date):
+            if card_obj and _cc_actual_nearby(card_obj, current, nearby_actuals):
                 continue
             signed = -amount
             balance += signed
@@ -1664,6 +1738,10 @@ def build_forecast(
         # pending_today_lines above.
         if current == today and not todays_anchor_is_manual:
             for line in pending_today_lines:
+                balance += line.amount
+                day_transactions.append(line)
+        if current == today:
+            for line in overdue_today_lines:
                 balance += line.amount
                 day_transactions.append(line)
 

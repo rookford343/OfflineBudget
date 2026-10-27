@@ -194,7 +194,17 @@ def test_a_stale_next_payment_date_still_gets_its_balance_paid(db_session):
     assert payoffs[0][0].day == 25, "rolled forward to the card's own due day"
 
 
-def test_card_with_no_manual_estimate_projects_its_subscriptions(db_session):
+def _freeze_today(monkeypatch, fixed: date) -> None:
+    """Pin the engine's today: a card estimate is never placed before today,
+    so a fixed-date window must not have slid into the past."""
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return fixed
+    monkeypatch.setattr("backend.services.forecast_engine.date", _FixedDate)
+
+
+def test_card_with_no_manual_estimate_projects_its_subscriptions(db_session, monkeypatch):
     """A card only ever charged by its subscriptions is better forecast from
     those subscriptions than from a balance that syncs monthly at best (the user,
     2026-08-14). $49.93 billed on the 30th closes on that month's statement
@@ -210,6 +220,7 @@ def test_card_with_no_manual_estimate_projects_its_subscriptions(db_session):
     ))
     db_session.commit()
 
+    _freeze_today(monkeypatch, date(2026, 3, 1))
     entries = build_forecast(db_session, user.id, account.id, date(2026, 3, 1), date(2026, 6, 30))
     estimates = _named(entries, "CC Estimate: Apple Card")
 
@@ -239,7 +250,7 @@ def test_a_subscription_charge_never_hits_checking_directly(db_session):
     assert not _named(entries, "Apple"), "the raw card charge must stay off the checking walk"
 
 
-def test_a_manual_estimate_still_wins_over_the_subscriptions(db_session):
+def test_a_manual_estimate_still_wins_over_the_subscriptions(db_session, monkeypatch):
     """Chase carries a $5,500/mo manual estimate because the user spends freely
     from it; its subscriptions alone would badly understate that."""
     user = _user(db_session)
@@ -254,6 +265,7 @@ def test_a_manual_estimate_still_wins_over_the_subscriptions(db_session):
     ))
     db_session.commit()
 
+    _freeze_today(monkeypatch, date(2026, 3, 1))
     entries = build_forecast(db_session, user.id, account.id, date(2026, 3, 1), date(2026, 6, 30))
     estimates = _named(entries, "CC Estimate: Chase Sapphire")
 
@@ -702,7 +714,7 @@ def test_a_close_beyond_the_lookback_window_still_searches_forward(db_session):
     )
 
 
-def test_the_locked_payoff_is_flagged_and_the_estimate_is_not(db_session):
+def test_the_locked_payoff_is_flagged_and_the_estimate_is_not(db_session, monkeypatch):
     """The floor logic keys on is_cc_locked, not on the transaction name."""
     user = _user(db_session, username="flagged")
     account = _checking(db_session, user, balance="60000.00")
@@ -711,6 +723,7 @@ def test_the_locked_payoff_is_flagged_and_the_estimate_is_not(db_session):
           next_payment_date=date(2026, 8, 25), monthly_spend_estimate=Decimal("500.00"))
     db_session.commit()
 
+    _freeze_today(monkeypatch, date(2026, 8, 14))
     entries = build_forecast(db_session, user.id, account.id, date(2026, 8, 14), date(2026, 11, 30))
     flags = {
         t.name.split(":")[0]: t.is_cc_locked

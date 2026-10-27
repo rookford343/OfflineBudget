@@ -20,7 +20,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from backend import models
-from backend.services.forecast_engine import build_forecast
+from backend.services.forecast_engine import AUTO_ANCHOR_NOTE, build_forecast, has_unsettled_projection
 
 TODAY = date(2027, 3, 26)
 DUE = date(2027, 3, 25)  # yesterday
@@ -184,3 +184,142 @@ def test_pending_payoff_replaces_the_unpaid_statement_payoff(db_session, monkeyp
     pending = [(e.date, t.amount) for e in entries for t in e.transactions if t.name.startswith("Pending: ")]
     assert pending == [(TODAY, Decimal("-150.00"))]
     assert entries[-1].projected_balance == Decimal("4850.00")
+
+
+# --- Review fixes: posted-after-window payments, past estimates, auto anchor ---
+
+APPLE_PAY = "APPLECARD GSBANK PAYMENT"
+
+
+def _actual(db, user, account, amount, when, description=APPLE_PAY):
+    db.add(models.Transaction(user_id=user.id, account_id=account.id, date=when, amount=Decimal(amount),
+                              description=description, is_actual=True))
+    db.flush()
+
+
+def _anchor(db, user, account, balance, note=AUTO_ANCHOR_NOTE):
+    db.add(models.ForecastDayCheckpoint(user_id=user.id, account_id=account.id, date=TODAY,
+                                        actual_balance=Decimal(balance), note=note))
+    db.flush()
+
+
+def test_payment_posted_today_is_not_also_planned_by_the_bridge(db_session, monkeypatch):
+    """The start=today bridge ends yesterday, so it never saw today's posted
+    payment and kept the payoff -- counted twice with current_balance."""
+    _freeze(monkeypatch)
+    user, account = _setup(db_session)
+    account.current_balance = Decimal("4850.00")
+    _unpaid_apple(db_session, user, account)
+    _actual(db_session, user, account, "-150.00", TODAY)
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, TODAY, TODAY)
+    assert entries[0].projected_balance == Decimal("4850.00")
+
+
+def test_payment_posting_after_the_bridge_is_not_also_planned(db_session, monkeypatch):
+    _freeze(monkeypatch)
+    user, account = _setup(db_session)
+    _unpaid_apple(db_session, user, account)
+    _actual(db_session, user, account, "-150.00", TODAY + timedelta(days=1))
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, TODAY, TODAY + timedelta(days=3))
+    assert entries[-1].projected_balance == Decimal("4850.00")
+
+
+def test_no_card_estimate_is_placed_before_today(db_session, monkeypatch):
+    """The next statement has arrived (due next month), so this month's paid
+    slot looks unclaimed again; an estimate must not land on a past date."""
+    _freeze(monkeypatch)
+    user, account = _setup(db_session)
+    _paid_chase(db_session, user, balance_due=Decimal("1000.00"), current_balance=Decimal("1000.00"),
+                next_payment_date=date(2027, 4, 25))
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, TODAY - timedelta(days=7), date(2027, 4, 30))
+    assert _card_lines(entries, "Chase Sapphire") == [
+        (date(2027, 4, 25), "CC Payment: Chase Sapphire", Decimal("-1000.00")),
+    ]
+
+
+def test_unposted_overdue_payoff_survives_todays_auto_anchor(db_session, monkeypatch):
+    """The auto anchor is the posted balance, which doesn't have the unpaid
+    payoff out of it: the payoff is re-planned on today, after the anchor."""
+    _freeze(monkeypatch)
+    user, account = _setup(db_session)
+    _unpaid_apple(db_session, user, account)
+    _anchor(db_session, user, account, "5000.00")
+    db_session.commit()
+
+    today_only = build_forecast(db_session, user.id, account.id, TODAY, TODAY)
+    assert today_only[0].projected_balance == Decimal("4850.00")
+
+    week = build_forecast(db_session, user.id, account.id, TODAY - timedelta(days=7), TODAY)
+    assert week[-1].projected_balance == Decimal("4850.00")
+    assert [(d, n, a) for d, n, a in _card_lines(week, "Apple Card")] == [
+        (TODAY, "CC Payment: Apple Card", Decimal("-150.00")),
+    ]
+
+
+def test_hand_entered_anchor_is_not_reduced_by_the_overdue_payoff(db_session, monkeypatch):
+    _freeze(monkeypatch)
+    user, account = _setup(db_session)
+    _unpaid_apple(db_session, user, account)
+    _anchor(db_session, user, account, "4850.00", note="typed by the user")
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, TODAY, TODAY)
+    assert entries[0].projected_balance == Decimal("4850.00")
+
+
+def test_overdue_replan_and_pending_snapshot_count_once(db_session, monkeypatch):
+    _freeze(monkeypatch)
+    user, account = _setup(db_session)
+    _unpaid_apple(db_session, user, account)
+    _pending(db_session, user, account, "-150.00", APPLE_PAY)
+    _anchor(db_session, user, account, "5000.00")
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, TODAY - timedelta(days=7), TODAY)
+    assert entries[-1].projected_balance == Decimal("4850.00")
+    assert _card_lines(entries, "Apple Card") == []
+
+
+def test_overdue_replan_and_payment_sent_marker_count_once(db_session, monkeypatch):
+    _freeze(monkeypatch)
+    user, account = _setup(db_session)
+    card = _unpaid_apple(db_session, user, account)
+    card.payment_sent_pending_sync = True
+    card.payment_sent_amount = Decimal("150.00")
+    _anchor(db_session, user, account, "5000.00")
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, TODAY - timedelta(days=7), TODAY)
+    assert entries[-1].projected_balance == Decimal("4850.00")
+
+
+def test_overdue_replan_skips_a_posted_payment(db_session, monkeypatch):
+    _freeze(monkeypatch)
+    user, account = _setup(db_session)
+    account.current_balance = Decimal("4850.00")
+    _unpaid_apple(db_session, user, account)
+    _actual(db_session, user, account, "-150.00", TODAY)
+    _anchor(db_session, user, account, "4850.00")
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, TODAY - timedelta(days=7), TODAY)
+    assert entries[-1].projected_balance == Decimal("4850.00")
+    assert _card_lines(entries, "Apple Card") == []
+
+
+def test_overdue_replan_does_not_hold_back_todays_anchor(db_session, monkeypatch):
+    """Re-planned after the anchor, so a re-sync must still be free to
+    refresh today's anchor (has_unsettled_projection)."""
+    _freeze(monkeypatch)
+    user, account = _setup(db_session)
+    _unpaid_apple(db_session, user, account)
+    _anchor(db_session, user, account, "5000.00")
+    db_session.commit()
+
+    assert has_unsettled_projection(db_session, user.id, account.id, TODAY) is False
