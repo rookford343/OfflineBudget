@@ -31,6 +31,9 @@ export const accountsApi = {
   create: (data: object) => api.post("/accounts", data).then((r) => r.data),
   update: (id: number, data: object) => api.patch(`/accounts/${id}`, data).then((r) => r.data),
   remove: (id: number) => api.delete(`/accounts/${id}`),
+  // The bank's own pending (not yet posted) list for a Plaid-fed checking
+  // account; empty for any other account.
+  pendingTransactions: (id: number) => api.get(`/accounts/${id}/pending-transactions`).then((r) => r.data),
 };
 
 // ── Bank Sync (SimpleFIN + Plaid) ────────────────────────────────────────────

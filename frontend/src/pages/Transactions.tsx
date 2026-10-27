@@ -110,6 +110,9 @@ interface PendingRow {
   type: string;
   categoryName: string | null;
   isCcPayment: boolean;
+  // "forecast" = a projection not yet posted; "bank_pending" = the bank's
+  // own pending list for checking.
+  source: "forecast" | "bank_pending";
 }
 
 interface CategoryCellProps {
@@ -312,14 +315,37 @@ export default function Transactions() {
     queryFn: () => forecastApi.range(primaryCheckingId, pendingStart, today()),
     enabled: (txnTab === "all" || txnTab === "checking" || txnTab === "card") && !!primaryCheckingId,
   });
-  const pendingRows: PendingRow[] = pendingForecast.flatMap((day: any) =>
-    (day.transactions ?? [])
-      .filter((t: any) => !t.is_actual)
-      .map((t: any) => ({
-        date: day.date, name: t.name, amount: parseFloat(t.amount),
-        type: t.type, categoryName: t.category_name ?? null, isCcPayment: !!t.is_cc_payment,
-      }))
-  ).sort((a, b) => a.date.localeCompare(b.date));
+  // The bank's own pending list for that checking account, shown the same
+  // way as the card issuers' pending rows above. The endpoint returns
+  // nothing unless an active Plaid link keeps the list fresh -- the same
+  // rule the forecast uses before subtracting any of it.
+  const { data: checkingBankPending = [] } = useQuery<any[]>({
+    queryKey: ["account-pending-transactions", primaryCheckingId],
+    queryFn: () => accountsApi.pendingTransactions(primaryCheckingId!),
+    enabled: (txnTab === "all" || txnTab === "checking") && !!primaryCheckingId,
+  });
+  const pendingRows: PendingRow[] = [
+    ...pendingForecast.flatMap((day: any) =>
+      (day.transactions ?? [])
+        // is_pending lines ("Pending: ..." / "Payment sent: ...") are the
+        // forecast's copies of bank-pending payments; the bank's own rows
+        // below are what gets listed, so those copies are skipped here.
+        .filter((t: any) => !t.is_actual && !t.is_pending)
+        .map((t: any) => ({
+          date: day.date, name: t.name, amount: parseFloat(t.amount),
+          type: t.type, categoryName: t.category_name ?? null, isCcPayment: !!t.is_cc_payment,
+          source: "forecast" as const,
+        }))
+    ),
+    ...checkingBankPending.map((p: any) => {
+      const amount = parseFloat(p.amount);
+      return {
+        date: p.date, name: p.description, amount,
+        type: amount >= 0 ? "income" : "expense", categoryName: null, isCcPayment: false,
+        source: "bank_pending" as const,
+      };
+    }),
+  ].sort((a, b) => a.date.localeCompare(b.date));
 
   const unifiedRows: UnifiedRow[] = txnTab === "all" ? [
     ...txns.map((t: any) => ({
@@ -333,13 +359,14 @@ export default function Transactions() {
       recurringName: recurringNameMap[t.recurring_item_id] ?? null,
       isActual: t.is_actual !== false,
     })),
-    // Pending forecast items merged in, sharing the same read-only row shape
+    // Pending items (forecast projections and checking's bank-pending rows)
+    // merged in, sharing the same read-only row shape
     // and "pending" badge the isActual===false branch already renders.
     // Synthetic negative ids (never collide with real transaction ids) since
     // these have no database row.
     ...pendingRows.map((p, i) => ({
       id: -(i + 1), kind: "checking" as const, date: p.date, description: p.name,
-      amount: p.amount, source: "forecast", sourceLabel: accountNameMap[primaryCheckingId] ?? "Checking",
+      amount: p.amount, source: p.source, sourceLabel: accountNameMap[primaryCheckingId] ?? "Checking",
       externalId: null,
       categoryName: p.categoryName ?? (p.isCcPayment ? "Credit Card Payment" : null),
       notes: null, recurringName: null, isActual: false,

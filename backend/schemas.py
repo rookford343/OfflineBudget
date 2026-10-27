@@ -948,6 +948,17 @@ class CardPendingTransactionOut(BaseModel):
     synced_at: datetime
 
 
+class AccountPendingTransactionOut(BaseModel):
+    """A not-yet-posted checking transaction from the bank's pending list."""
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    account_id: int
+    date: date
+    amount: Decimal  # checking convention: negative=money out
+    description: str
+    synced_at: datetime
+
+
 class CardTransactionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

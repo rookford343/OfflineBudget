@@ -4,6 +4,7 @@ from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.routers._shared import owned_or_404
+from backend.services.forecast_engine import pending_snapshot_is_live
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
@@ -40,6 +41,25 @@ def get_account(
 ):
     account = _get_or_404(db, user.id, account_id)
     return account
+
+
+@router.get("/{account_id}/pending-transactions", response_model=list[schemas.AccountPendingTransactionOut])
+def list_pending_transactions(
+    account_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """What the bank currently lists as pending on this account, newest
+    first. Display-only. Empty unless an active Plaid link keeps the
+    snapshot fresh -- the same rule the forecast uses before subtracting
+    any of it, so the page never shows a row the forecast ignores."""
+    account = _get_or_404(db, user.id, account_id)
+    if not pending_snapshot_is_live(db, account):
+        return []
+    return db.query(models.AccountPendingTransaction).filter(
+        models.AccountPendingTransaction.user_id == user.id,
+        models.AccountPendingTransaction.account_id == account.id,
+    ).order_by(models.AccountPendingTransaction.date.desc(), models.AccountPendingTransaction.id).all()
 
 
 @router.patch("/{account_id}", response_model=schemas.AccountOut)

@@ -325,6 +325,20 @@ def _fires_on(item: models.RecurringItem, d: date) -> bool:
     return d.day == target
 
 
+def pending_snapshot_is_live(db: Session, account: models.Account) -> bool:
+    """True when this account's AccountPendingTransaction snapshot is kept
+    fresh: a checking account with an ACTIVE Plaid link. Nothing else
+    refreshes the snapshot, so rows on any other account are stale and must
+    be neither subtracted by the forecast nor shown as pending."""
+    return account.type == models.AccountType.checking and db.query(
+        models.BankConnectionAccountLink.id,
+    ).join(models.BankConnection).filter(
+        models.BankConnectionAccountLink.local_account_id == account.id,
+        models.BankConnectionAccountLink.is_active == True,
+        models.BankConnection.provider == "plaid",
+    ).first() is not None
+
+
 def has_unsettled_projection(db: Session, user_id: int, account_id: int, target: date) -> bool:
     """True if the forecast still projects anything unposted on `target`.
 
@@ -522,14 +536,7 @@ def build_forecast(
     # Only while an ACTIVE Plaid link feeds this account: nothing else
     # refreshes the snapshot, and stale rows would be subtracted forever.
     pending_card_debits: dict[int, list[models.AccountPendingTransaction]] = {}
-    plaid_fed = account.type == models.AccountType.checking and db.query(
-        models.BankConnectionAccountLink.id,
-    ).join(models.BankConnection).filter(
-        models.BankConnectionAccountLink.local_account_id == account_id,
-        models.BankConnectionAccountLink.is_active == True,
-        models.BankConnection.provider == "plaid",
-    ).first() is not None
-    if plaid_fed:
+    if pending_snapshot_is_live(db, account):
         for row in db.query(models.AccountPendingTransaction).filter(
             models.AccountPendingTransaction.user_id == user_id,
             models.AccountPendingTransaction.account_id == account_id,
