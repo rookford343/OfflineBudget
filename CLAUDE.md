@@ -25,3 +25,8 @@ The global "Security gates for AI coding" rules apply here. Project specifics:
   bad input and asserts it is refused.
 - After any "remove unused imports" fix, confirm `uv run python -c "import backend.main, cli.budget"`:
   something may have imported a name through that module.
+- Frontend uses `bun` only (bun.lock, never `frontend/package-lock.json`), pinned exactly where
+  the repo already pins, with a 7-day `minimumReleaseAge` cooldown in `frontend/bunfig.toml`.
+  Transitive-dependency fixes go through `package.json` `overrides`. Pre-push runs
+  `bun install --frozen-lockfile`, `bun audit --audit-level=high`, and `bunx vite build` for
+  `frontend/` (not `tsc -b` -- 35 pre-existing TypeScript errors are tracked debt).

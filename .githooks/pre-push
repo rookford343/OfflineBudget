@@ -14,6 +14,15 @@
 # GitHub code scanning (scripts/codeql_scan.sh), imports the app (an "unused import" autofix once broke a router
 # that imported through another module), and enforces the coverage floor in
 # backend/.coveragerc.
+#
+# It then does the frontend's equivalent of the lockfile/audit checks above:
+# installs frontend/ exactly from bun.lock, audits it for known high/critical
+# vulnerabilities, and confirms the production bundle still builds. This
+# followed Dependabot flagging 65 unaudited frontend vulnerabilities (33
+# high) with nothing gating them before a push (2026-10-27). It does not run
+# `tsc -b` -- 35 pre-existing TypeScript errors in unrelated files are known
+# debt tracked separately, and gating the build on them would block
+# unrelated pushes.
 repo_root=$(git rev-parse --show-toplevel) || exit 1
 cd "$repo_root" || exit 1
 
@@ -52,6 +61,25 @@ cd "$repo_root/backend" || exit 1
 if ! uv run --locked python -m pytest -q --cov --cov-report=term:skip-covered; then
   echo "" >&2
   echo "BLOCKED: tests failing or coverage under the floor in backend/.coveragerc. Push with --no-verify only if you're sure." >&2
+  exit 1
+fi
+
+echo "Frontend: installing from bun.lock..."
+cd "$repo_root/frontend" || exit 1
+if ! bun install --frozen-lockfile; then
+  echo "BLOCKED: frontend/bun.lock is out of date with package.json. Run: bun install" >&2
+  exit 1
+fi
+
+echo "Frontend dependency audit (known vulnerabilities)..."
+if ! bun audit --audit-level=high; then
+  echo "BLOCKED: a locked frontend dependency has a known high/critical vulnerability. Upgrade or override it." >&2
+  exit 1
+fi
+
+echo "Frontend production build..."
+if ! bunx vite build; then
+  echo "BLOCKED: the frontend production build failed." >&2
   exit 1
 fi
 exit 0
