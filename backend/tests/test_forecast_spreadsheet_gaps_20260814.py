@@ -19,7 +19,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 import pytest
 from backend import models
-from backend.services.forecast_engine import build_forecast, _next_occurrence_on_or_after
+from backend.services.forecast_engine import build_forecast, _next_occurrence_on_or_after, _UNCONFIRMED_LOOKBACK_DAYS
 
 
 GROSS = Decimal("6932.14")
@@ -1047,9 +1047,11 @@ def test_the_second_hop_still_works_when_the_first_cycle_used_the_stale_payment_
     convention -- the merged amount depends on today's date via
     _next_occurrence_on_or_after, so it can't be hand-derived without
     running the code. Dates relative to date.today() -- see
-    _RelativeCardCycles; next_payment_date stays a small NEGATIVE offset
-    from today (genuinely stale) rather than using cycles.cycle1_due, since
-    staleness is the one thing this specific test deliberately exercises."""
+    _RelativeCardCycles; next_payment_date stays a NEGATIVE offset from
+    today (genuinely stale) rather than using cycles.cycle1_due, since
+    staleness is the one thing this specific test deliberately exercises.
+    Older than _UNCONFIRMED_LOOKBACK_DAYS: a due date inside that window is
+    an unpaid statement still waiting to post, not a stale one."""
     today = date.today()
     cycles = _RelativeCardCycles(today)
     user = _user(db_session, username="secondhopstalemerge")
@@ -1059,7 +1061,7 @@ def test_the_second_hop_still_works_when_the_first_cycle_used_the_stale_payment_
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),
         pending_charges_updated_at=datetime.utcnow(),
-        next_payment_date=today - timedelta(days=3),  # genuinely stale
+        next_payment_date=today - timedelta(days=_UNCONFIRMED_LOOKBACK_DAYS + 3),  # genuinely stale
         monthly_spend_estimate=Decimal("15000.00"),
     )
     db_session.commit()

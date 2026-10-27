@@ -684,11 +684,33 @@ def build_forecast(
         # either, because its monthly_spend_estimate was 0. Cards that only sync
         # monthly will drift like this by design, so roll a past due date
         # forward to the next real one instead of dropping the money.
+        #
+        # Stale means older than the last _UNCONFIRMED_LOOKBACK_DAYS, though,
+        # not merely past. A statement due a day or two ago and still unpaid
+        # is not stale: its payment just hasn't posted. The walk still visits
+        # that date (the Transactions page's trailing window, and the bridge
+        # behind every start=today forecast), and _cc_actual_nearby drops the
+        # payoff there once the real payment posts. Rolling it a month
+        # forward instead dropped the statement outright and left only the
+        # card's subscription estimate on its due date (Apple Card, found
+        # live 2026-10-26, the day after its due date).
         next_payment = card.next_payment_date
         payment_is_stale = bool(
             next_payment is not None
-            and next_payment < today
+            and next_payment < today - timedelta(days=_UNCONFIRMED_LOOKBACK_DAYS)
             and card.balance_due and card.balance_due > 0
+        )
+        # A due date reached with nothing due belongs to a statement that is
+        # already paid: the card's feed keeps reporting the paid statement's
+        # due date until the next statement arrives. That month gets nothing
+        # -- no payoff, no estimate; the next cycle is planned on the
+        # following due date (derived_due below). Without this the month
+        # looked unclaimed and drew a flat estimate on the paid date (Chase,
+        # found live 2026-10-26).
+        paid_statement_due = bool(
+            next_payment is not None
+            and next_payment <= today
+            and not (card.balance_due and card.balance_due > 0)
         )
         if payment_is_stale:
             next_payment = _next_occurrence_on_or_after(card.due_day, max(today, start_date))
@@ -887,7 +909,7 @@ def build_forecast(
                 next_payment is not None
                 and next_payment.year == when.year
                 and next_payment.month == when.month
-                and bool(card.balance_due and card.balance_due > 0)
+                and (bool(card.balance_due and card.balance_due > 0) or paid_statement_due)
             )
 
         # Already folded into cc_payments above when it merged with the
