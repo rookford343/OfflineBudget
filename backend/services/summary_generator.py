@@ -1,6 +1,6 @@
 import calendar
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_CEILING
 from collections import defaultdict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -15,7 +15,73 @@ _STALE_SYNC_HOURS = 24
 
 
 def _fmt(v: Decimal) -> str:
+    """"$1,234.56" for a non-negative amount, "−$1,234.56" (a real minus
+    sign, U+2212, before the $) for a negative one -- never Python's default
+    "$-1,234.56". Every money figure in the email goes through this (or
+    through fmt(abs(...)) with the sign prepended separately, which already
+    produces the same character)."""
+    if v < 0:
+        return f"−${abs(v):,.2f}"
     return f"${v:,.2f}"
+
+
+def _round_up_to_thousand(amount: Decimal) -> Decimal:
+    """`amount` (always non-negative here) rounded UP to the next whole
+    $1,000 -- 612.40 -> 1000, 1000.00 -> 1000 (already a multiple, so no
+    bump), 1000.01 -> 2000. Used for "Move $Y into checking" -- Y is sized
+    in whole thousands, not to the cent, because that is how the user
+    actually moves money between accounts."""
+    return (amount / Decimal("1000")).to_integral_value(rounding=ROUND_CEILING) * Decimal("1000")
+
+
+def _move_to_checking_line(snap) -> str | None:
+    """"Move $Y into checking by <1st of next month>" when next month's low
+    is projected to dip below $0, else None. Y is the amount that brings
+    that low back to exactly $0, rounded up to the next $1,000."""
+    if snap.next_month_minimum_date is None or snap.next_month_minimum >= 0:
+        return None
+    move_amount = _round_up_to_thousand(-snap.next_month_minimum)
+    move_by = snap.next_month_minimum_date.replace(day=1)
+    return f"Move {_fmt(move_amount)} into checking by {move_by.strftime('%b %-d')}"
+
+
+def _lowest_balance_rows(snap) -> list[tuple[str, Decimal, date]]:
+    """[(label, amount, date), ...] for the "lowest balance" lines below the
+    Household Snapshot cards -- shared ordering/same-date logic for both the
+    HTML and text bodies so the two can never drift apart. `label` is the
+    full "Lowest ..." prefix; the caller formats/colors `amount` and appends
+    " on <date>" itself.
+
+    When next month's low and the 3-month low land on the same date for the
+    same amount, next month's low IS the 3-month low, so this collapses to
+    one combined row instead of two identical-looking ones.
+    """
+    if snap.lookahead_minimum_date is None and snap.next_month_minimum_date is None:
+        return []
+
+    quarter_row = (
+        ("Lowest in the next 3 months", snap.lookahead_minimum, snap.lookahead_minimum_date)
+        if snap.lookahead_minimum_date is not None else None
+    )
+    if snap.next_month_minimum_date is None:
+        return [quarter_row] if quarter_row else []
+
+    nm_label = snap.next_month_label or "next month"
+    same = (
+        quarter_row is not None
+        and snap.next_month_minimum_date == snap.lookahead_minimum_date
+        and snap.next_month_minimum == snap.lookahead_minimum
+    )
+    if same:
+        return [(
+            f"Lowest next month ({nm_label}) and in the next 3 months",
+            snap.next_month_minimum, snap.next_month_minimum_date,
+        )]
+
+    rows = [(f"Lowest next month ({nm_label})", snap.next_month_minimum, snap.next_month_minimum_date)]
+    if quarter_row:
+        rows.append(quarter_row)
+    return rows
 
 
 def _last_txn_dates(db: Session, id_col, date_col, ids: list[int]) -> dict[int, date]:
@@ -286,38 +352,63 @@ def generate_daily_summary(
                 f"Pull {fmt(snap.savings_pull_needed)} from savings</p>"
             )
         spendable_today_sign = "−" if snap.spendable_today < 0 else ""
-        # The quarter trough is the sanity check behind the weekly number: it is
-        # what says whether a big purchase is safe. the user's spreadsheet keeps the
-        # amount and its date together ('2026 Overview'!B23:C27).
-        trough_html = ""
-        if snap.lookahead_minimum_date is not None:
-            trough_color = "#dc2626" if snap.lookahead_minimum < 0 else "#065f46"
-            trough_html = (
-                f"<p style='color:#047857;font-size:12px;margin:12px 0 0;text-align:center'>"
-                f"Lowest projected balance in the next 3 months: "
-                f"<b style='color:{trough_color}'>{fmt(snap.lookahead_minimum)}</b> on "
-                f"{snap.lookahead_minimum_date.strftime('%b %-d')}</p>"
+        # The two "lowest balance" lines (this is the sanity check behind the
+        # weekly numbers -- it is what says whether a big purchase is safe;
+        # the user's spreadsheet keeps the amount and its date together,
+        # '2026 Overview'!B23:C27) plus the move-to-checking line when next
+        # month's low dips below $0. Shared with the text body via
+        # _lowest_balance_rows/_move_to_checking_line so the two can't drift.
+        lowest_rows = _lowest_balance_rows(snap)
+        move_line = _move_to_checking_line(snap)
+        lowest_html_parts: list[str] = []
+        for i, (label, amount, d) in enumerate(lowest_rows):
+            row_color = "#dc2626" if amount < 0 else "#065f46"
+            margin = "12px 0 0" if i == 0 else "6px 0 0"
+            lowest_html_parts.append(
+                f"<p style='color:#047857;font-size:12px;margin:{margin};text-align:center;"
+                f"word-break:break-word;overflow-wrap:break-word'>{label}: "
+                f"<b style='color:{row_color}'>{fmt(amount)}</b> on {d.strftime('%b %-d')}</p>"
             )
+            if i == 0 and move_line:
+                lowest_html_parts.append(
+                    f"<p style='color:#dc2626;font-size:11px;margin:4px 0 0;text-align:center;"
+                    f"word-break:break-word;overflow-wrap:break-word'>{move_line}</p>"
+                )
+        lowest_html = "".join(lowest_html_parts)
+
+        # Cards stay side by side at every width: a two-cell table row with
+        # percentage widths (no spacer cell -- the gap between them is each
+        # cell's own padding, so the two tds still sum to exactly 100% and
+        # never overflow a narrow viewport), mobile-sized text/padding
+        # inline so it works with no media-query support at all, and
+        # word-break/overflow-wrap so a long figure wraps instead of
+        # pushing the card past the screen edge. The @media block in the
+        # <head> only enlarges things back up for wider screens -- it never
+        # carries functionality the inline styles don't already have.
         household_html = f"""
 <div style='background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:16px;margin-bottom:20px'>
   <h3 style='margin:0 0 12px;color:#065f46;font-size:15px'>Household Snapshot</h3>
-  <table style='width:100%;border-collapse:separate' cellspacing='8' cellpadding='0'>
+  <table role='presentation' width='100%' style='width:100%;max-width:100%;border-collapse:collapse' cellspacing='0' cellpadding='0'>
     <tr>
-      <td style='width:50%;background:#ffffff;border-radius:8px;padding:14px;text-align:center;vertical-align:top'>
-        <p style='margin:0 0 6px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Spendable this week</p>
-        <p style='margin:0;color:{spendable_color};font-size:24px;font-weight:700'>{fmt(snap.left_to_spend_weekly)}</p>
-        <p style='margin:6px 0 0;color:{pace_color};font-size:12px'>{spendable_today_sign}{fmt(abs(snap.spendable_today))}/day &middot; {"on pace" if snap.on_pace else "over pace"}</p>
-        <p style='margin:4px 0 0;color:#9ca3af;font-size:11px'>{fmt(snap.left_to_spend)} this month</p>
+      <td width='50%' valign='top' style='width:50%;padding:0 4px 0 0;vertical-align:top'>
+        <div class='ob-card' style='background:#ffffff;border-radius:8px;padding:10px 6px;text-align:center'>
+          <p class='ob-card-label' style='margin:0 0 4px;color:#6b7280;font-size:10px;text-transform:uppercase;letter-spacing:.02em;white-space:normal;word-break:break-word;overflow-wrap:break-word'>Spendable this week</p>
+          <p class='ob-card-figure' style='margin:0;color:{spendable_color};font-size:17px;font-weight:700;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.left_to_spend_weekly)}</p>
+          <p class='ob-card-pace' style='margin:5px 0 0;color:{pace_color};font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{spendable_today_sign}{fmt(abs(snap.spendable_today))}/day &middot; {"on pace" if snap.on_pace else "over pace"}</p>
+          <p class='ob-card-foot' style='margin:3px 0 0;color:#9ca3af;font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.left_to_spend)} this month</p>
+        </div>
       </td>
-      <td style='width:50%;background:#ffffff;border-radius:8px;padding:14px;text-align:center;vertical-align:top'>
-        <p style='margin:0 0 6px;color:#6b7280;font-size:11px;text-transform:uppercase;letter-spacing:.03em'>Safety Margin (this week)</p>
-        <p style='margin:0;color:{margin_color};font-size:24px;font-weight:700'>{fmt(snap.safety_margin_weekly)}</p>
-        <p style='margin:6px 0 0;color:#9ca3af;font-size:11px'>{fmt(snap.safety_margin)} this month</p>
-        {pull_savings_html}
+      <td width='50%' valign='top' style='width:50%;padding:0 0 0 4px;vertical-align:top'>
+        <div class='ob-card' style='background:#ffffff;border-radius:8px;padding:10px 6px;text-align:center'>
+          <p class='ob-card-label' style='margin:0 0 4px;color:#6b7280;font-size:10px;text-transform:uppercase;letter-spacing:.02em;white-space:normal;word-break:break-word;overflow-wrap:break-word'>Safety Margin (this week)</p>
+          <p class='ob-card-figure' style='margin:0;color:{margin_color};font-size:17px;font-weight:700;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.safety_margin_weekly)}</p>
+          <p class='ob-card-foot' style='margin:5px 0 0;color:#9ca3af;font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.safety_margin)} this month</p>
+          {pull_savings_html}
+        </div>
       </td>
     </tr>
   </table>
-  {trough_html}
+  {lowest_html}
 </div>"""
     else:
         household_html = (
@@ -356,7 +447,24 @@ def generate_daily_summary(
     month_section_text = f"{month_title.upper()}\n  Total spent: {fmt(month.total)}\n{month_tables_text}\n"
 
     html = f"""<!DOCTYPE html>
-<html><body style='font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f3f4f6;margin:0;padding:24px 0'>
+<html>
+<head>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<style>
+/* Progressive enhancement only -- every rule above already works with NO
+   media-query support at all (Apple Mail and Gmail both honor this block,
+   but a client that strips <style> just keeps the mobile-sized inline
+   defaults, which is still a correct, non-overflowing render). */
+@media (min-width: 600px) {{
+  .ob-card {{ padding: 14px !important; }}
+  .ob-card-label {{ font-size: 11px !important; letter-spacing: .03em !important; }}
+  .ob-card-figure {{ font-size: 24px !important; }}
+  .ob-card-pace {{ font-size: 12px !important; }}
+  .ob-card-foot {{ font-size: 11px !important; }}
+}}
+</style>
+</head>
+<body style='font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f3f4f6;margin:0;padding:24px 0'>
 <div style='max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;padding:24px;color:#1f2937'>
 <h2 style='color:#4f46e5;margin:0 0 4px;font-size:19px'>OfflineBudget Daily Summary</h2>
 <p style='color:#6b7280;margin:0 0 20px;font-size:13px'>{today.strftime("%A, %B %-d, %Y")}</p>
@@ -393,6 +501,13 @@ def generate_daily_summary(
     card_text = "\n".join(_card_text_row(c) for c in cards) or "  No credit cards"
 
     if snap is not None:
+        # Reuses lowest_rows/move_line computed above for household_html --
+        # same same-date/combined-line/move-line logic, just rendered plain.
+        lowest_text = "".join(
+            f"  {label}: {fmt(amount)} on {d.strftime('%b %-d')}.\n"
+            + (f"  {move_line}.\n" if i == 0 and move_line else "")
+            for i, (label, amount, d) in enumerate(lowest_rows)
+        )
         household_text = (
             "HOUSEHOLD SNAPSHOT\n"
             f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}\n"
@@ -401,11 +516,7 @@ def generate_daily_summary(
                f"  (pull {fmt(snap.savings_pull_needed)} from savings)")
             + "\n"
             f"  Monthly: {fmt(snap.left_to_spend)} left to spend, {fmt(snap.safety_margin)} before your spending starts eating into savings.\n"
-            + (
-                f"  Lowest projected balance in the next 3 months: {fmt(snap.lookahead_minimum)}"
-                f" on {snap.lookahead_minimum_date.strftime('%b %-d')}.\n"
-                if snap.lookahead_minimum_date is not None else ""
-            )
+            + lowest_text
         )
     else:
         household_text = "HOUSEHOLD SNAPSHOT\n  No checking account to compute a snapshot from.\n"

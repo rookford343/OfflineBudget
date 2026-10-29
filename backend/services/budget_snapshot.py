@@ -228,11 +228,61 @@ def floor_mask(days, active_cards) -> list[bool]:
     return mask
 
 
-def _lookahead_minimum(
+class LookaheadWindow(NamedTuple):
+    """The forecast walk + floor_mask built once for the rolling lookahead,
+    plus the 3-month floor read off it. Carrying `days`/`mask` alongside the
+    floor lets a second caller (the email's next-month low) slice the SAME
+    walk instead of re-running build_forecast -- next month always sits
+    inside this window, so there is never a reason to ask forecast_engine
+    twice for the same stretch of days."""
+    minimum: Decimal
+    minimum_date: date | None
+    days: list
+    mask: list[bool]
+
+
+def _months_ahead_end(as_of: date, months: int) -> date:
+    """as_of plus `months` calendar months, clamped to a real day if the
+    target month is shorter (e.g. Jan 31 + 1 month -> Feb 28/29)."""
+    end_month = as_of.month + months
+    end_year = as_of.year + (end_month - 1) // 12
+    end_month = (end_month - 1) % 12 + 1
+    return date(end_year, end_month, min(as_of.day, calendar.monthrange(end_year, end_month)[1]))
+
+
+def _floor_minimum(
+    days: list, mask: list[bool], as_of: date,
+    *, start: date | None = None, end: date | None = None,
+) -> tuple[Decimal, date | None]:
+    """Lowest projected balance among `days` on/after `as_of` (and inside
+    [start, end] if given) that floor_mask doesn't exclude, falling back to
+    the unmasked minimum in that same range if every candidate is masked
+    out, and to no answer at all if the range has no forecast days.
+    `start`/`end` being None (the 3-month caller) reproduces exactly the
+    unbounded-range behaviour this had before the next-month low existed."""
+    def _in_range(d: date) -> bool:
+        if d < as_of:
+            return False
+        if start is not None and d < start:
+            return False
+        if end is not None and d > end:
+            return False
+        return True
+
+    candidates = [day for day, ok in zip(days, mask) if _in_range(day.date) and ok]
+    if not candidates:
+        candidates = [day for day in days if _in_range(day.date)]
+    if not candidates:
+        return Decimal("0"), None
+    low = min(candidates, key=lambda day: day.projected_balance)
+    return low.projected_balance, low.date
+
+
+def _lookahead_window(
     db: Session, user_id: int, account_id: int, as_of: date, months: int = 3,
     *, proposal: ScenarioProposal | None = None,
     overrides: list[dict] | None = None,
-) -> tuple[Decimal, date | None]:
+) -> LookaheadWindow:
     """The lowest projected checking balance over the NEXT `months` months and
     the day it lands, EXCLUDING the dip caused by the LOCKED-IN card payoff.
 
@@ -290,10 +340,7 @@ def _lookahead_minimum(
     subtracts only the recurring card bills not yet charged this month, never
     the statemented balance again.
     """
-    end_month = as_of.month + months
-    end_year = as_of.year + (end_month - 1) // 12
-    end_month = (end_month - 1) % 12 + 1
-    end = date(end_year, end_month, min(as_of.day, calendar.monthrange(end_year, end_month)[1]))
+    end = _months_ahead_end(as_of, months)
 
     # Started early so the skip state below is already settled by `as_of` --
     # asking on the 27th, three days into a payoff dip, must give the same
@@ -306,7 +353,7 @@ def _lookahead_minimum(
         include_unbilled_card_bills=False,
     )
     if not days:
-        return Decimal("0"), None
+        return LookaheadWindow(Decimal("0"), None, [], [])
 
     # A payoff dip is only recognizable via `is_cc_locked` while it's still a
     # PROJECTED line. Once it becomes a real actual transaction -- recorded
@@ -325,14 +372,54 @@ def _lookahead_minimum(
     ).all()
 
     mask = floor_mask(days, active_cards)
-    candidates = [day for day, ok in zip(days, mask) if day.date >= as_of and ok]
+    minimum, minimum_date = _floor_minimum(days, mask, as_of)
+    return LookaheadWindow(minimum, minimum_date, days, mask)
 
-    if not candidates:
-        candidates = [d for d in days if d.date >= as_of]
-    if not candidates:
-        return Decimal("0"), None
-    low = min(candidates, key=lambda day: day.projected_balance)
-    return low.projected_balance, low.date
+
+def _lookahead_minimum(
+    db: Session, user_id: int, account_id: int, as_of: date, months: int = 3,
+    *, proposal: ScenarioProposal | None = None,
+    overrides: list[dict] | None = None,
+) -> tuple[Decimal, date | None]:
+    """Thin wrapper kept for `_lookahead_window`'s existing direct
+    callers/tests, which depend on this exact (amount, date) 2-tuple contract
+    rather than the full window. See `_lookahead_window` for the real logic
+    and its history."""
+    window = _lookahead_window(
+        db, user_id, account_id, as_of, months, proposal=proposal, overrides=overrides,
+    )
+    return window.minimum, window.minimum_date
+
+
+def _next_calendar_month_bounds(as_of: date) -> tuple[date, date, str]:
+    """The calendar month after as_of's own month -- November for an October
+    as_of, January of the FOLLOWING year for a December as_of."""
+    year = as_of.year + (1 if as_of.month == 12 else 0)
+    month = 1 if as_of.month == 12 else as_of.month + 1
+    start = date(year, month, 1)
+    end = date(year, month, calendar.monthrange(year, month)[1])
+    return start, end, start.strftime("%B")
+
+
+def _next_month_minimum(
+    window: LookaheadWindow, as_of: date,
+) -> tuple[Decimal, date | None, date, str]:
+    """The lowest projected checking balance within the calendar month after
+    as_of, read from the SAME days/mask `_lookahead_window` already built --
+    next month always sits inside the rolling 3-month window, so this never
+    triggers a second build_forecast call. Same floor_mask locked-payoff
+    exclusion as the 3-month figure, just restricted to next month's days.
+
+    Returns (minimum, minimum_date, month_start, month_label); month_start
+    (the 1st of next month) is always present, even with no forecast data to
+    report a minimum for, since the email's "move money in by" line needs it
+    independent of where any particular low lands.
+    """
+    start, end, label = _next_calendar_month_bounds(as_of)
+    if not window.days:
+        return Decimal("0"), None, start, label
+    minimum, minimum_date = _floor_minimum(window.days, window.mask, as_of, start=start, end=end)
+    return minimum, minimum_date, start, label
 
 
 def _weekly_allowance(amount: Decimal, as_of: date) -> tuple[Decimal, int]:
@@ -464,8 +551,12 @@ def compute_budget_snapshot(
     cc_budget_total = _cc_budget_total(db, user.id, as_of)
 
     left_to_spend = leftover - new_spending_total + charged_so_far
-    quarter_min, quarter_min_date = _lookahead_minimum(
+    lookahead_window = _lookahead_window(
         db, user.id, account_id, as_of, proposal=proposal, overrides=overrides,
+    )
+    quarter_min, quarter_min_date = lookahead_window.minimum, lookahead_window.minimum_date
+    next_month_min, next_month_min_date, _next_month_start, next_month_label = _next_month_minimum(
+        lookahead_window, as_of,
     )
     # Safety Margin does NOT subtract new_spending_total -- unlike Left to
     # Spend, quarter_min here is a CHECKING-account balance that the new
@@ -672,6 +763,9 @@ def compute_budget_snapshot(
         days_remaining_in_month=days_remaining,
         lookahead_minimum=quarter_min,
         lookahead_minimum_date=quarter_min_date,
+        next_month_minimum=next_month_min,
+        next_month_minimum_date=next_month_min_date,
+        next_month_label=next_month_label,
         explain=explain,
         cards=cards,
         categories=categories,

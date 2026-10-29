@@ -1820,6 +1820,14 @@ class BudgetSnapshot(BaseModel):
     # by side).
     lookahead_minimum: Decimal = Decimal("0")
     lookahead_minimum_date: Optional[date] = None
+    # The same floor, restricted to the calendar month after `as_of` -- the
+    # daily email's "Lowest next month" line, read off the same forecast
+    # walk as lookahead_minimum (see budget_snapshot._next_month_minimum).
+    # API-additive: defaulted so existing callers/fixtures that construct a
+    # BudgetSnapshot without these keep working unchanged.
+    next_month_minimum: Decimal = Decimal("0")
+    next_month_minimum_date: Optional[date] = None
+    next_month_label: Optional[str] = None
     # Receipts for the headline numbers, keyed as in services/budget_snapshot.py.
     explain: dict[str, Explanation] = {}
     cards: list[CardSnapshot]

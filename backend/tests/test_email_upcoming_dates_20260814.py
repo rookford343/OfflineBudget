@@ -161,8 +161,17 @@ def test_daily_summary_upcoming_shows_the_override_amount_not_the_typical_amount
     finally:
         sg.date = orig
 
-    assert "$124.69" in html, "the confirmed actual amount must appear"
-    assert "$100.00" not in html, "the stale typical/planning amount must not appear"
-    assert "actual" in html.lower(), "an is_actual row should carry a muted 'actual' tag"
-    assert "$124.69" in text
-    assert "$100.00" not in text
+    # Scoped to the Upcoming section specifically (rather than the whole
+    # email) -- the Household Snapshot's own figures are unrelated to this
+    # bug and can coincidentally contain the substring "$100.00" (e.g. a
+    # "−$100.00" this-month figure) depending on this fixture's income/
+    # expense totals, which would make a whole-document check flaky for a
+    # reason that has nothing to do with the override bug this test guards.
+    html_upcoming = html[html.index("Upcoming (next 7 days)"): html.index("Credit Cards")]
+    text_upcoming = text[text.index("UPCOMING BILLS"): text.index("CREDIT CARDS")]
+
+    assert "$124.69" in html_upcoming, "the confirmed actual amount must appear"
+    assert "$100.00" not in html_upcoming, "the stale typical/planning amount must not appear"
+    assert "actual" in html_upcoming.lower(), "an is_actual row should carry a muted 'actual' tag"
+    assert "$124.69" in text_upcoming
+    assert "$100.00" not in text_upcoming
