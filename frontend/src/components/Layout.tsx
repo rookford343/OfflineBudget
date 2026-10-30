@@ -11,6 +11,7 @@ import { cx, fmt, firstOfMonth } from "../lib/utils";
 import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
 import { useBalancesHidden, toggleBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { useIsDarkMode, toggleTheme } from "../store/theme";
+import { usePendingBalances } from "../lib/usePendingBalances";
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -106,7 +107,10 @@ export default function Layout() {
     if (!!a.is_emergency_fund !== !!b.is_emergency_fund) return a.is_emergency_fund ? 1 : -1;
     return a.type.localeCompare(b.type) || a.name.localeCompare(b.name);
   });
-  const totalAccountBalance = sortedAccounts.reduce((sum, a: any) => sum + parseFloat(a.current_balance), 0);
+  // Balances as if bank-pending items go through (same figures as the
+  // Dashboard's Checking card); an account with no pending rows is unchanged.
+  const pendingFor = usePendingBalances(accounts as any[]);
+  const totalAccountBalance = sortedAccounts.reduce((sum, a: any) => sum + pendingFor(a).afterPending, 0);
 
   // Net flow this month per account, from the transactions query above.
   const flowByAccount: Record<number, number> = {};
@@ -114,14 +118,16 @@ export default function Layout() {
     flowByAccount[t.account_id] = (flowByAccount[t.account_id] ?? 0) + parseFloat(t.amount);
   });
 
-  // % change = this month's net flow over the balance before it. Null when
+  // % change = this month's net flow (pending included) over the balance
+  // before the month: (after-pending balance - start) / start, where start is
+  // the posted balance minus this month's posted flow. Null when
   // the start-of-month balance is too close to zero for a percentage to be
   // meaningful (avoids a wild or divide-by-near-zero number).
   function pctChangeFor(a: any): number | null {
-    const flow = flowByAccount[a.id] ?? 0;
-    const startBalance = parseFloat(a.current_balance) - flow;
+    const { posted, afterPending } = pendingFor(a);
+    const startBalance = posted - (flowByAccount[a.id] ?? 0);
     if (Math.abs(startBalance) < 0.01) return null;
-    return (flow / startBalance) * 100;
+    return ((afterPending - startBalance) / startBalance) * 100;
   }
 
   return (
@@ -204,6 +210,7 @@ export default function Layout() {
             <ul className="space-y-0.5">
               {(accountsExpanded ? sortedAccounts : sortedAccounts.slice(0, 4)).map((a: any) => {
                 const pct = pctChangeFor(a);
+                const { pending, posted, afterPending } = pendingFor(a);
                 return (
                   <li key={a.id}>
                     <NavLink
@@ -223,9 +230,14 @@ export default function Layout() {
                         <span className="shrink-0 ml-2 text-gray-400 dark:text-gray-500">••••</span>
                       ) : (
                         <div className="shrink-0 ml-2 flex flex-col items-end gap-0.5">
-                          <span className={`tabular-nums ${parseFloat(a.current_balance) < 0 ? "text-red-500 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
-                            {fmt(a.current_balance)}
+                          <span className={`tabular-nums ${afterPending < 0 ? "text-red-500 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+                            {fmt(afterPending)}
                           </span>
+                          {pending.length > 0 && (
+                            <span className="text-[10px] leading-none text-gray-400 dark:text-gray-500 whitespace-nowrap" title={`Posted ${fmt(posted)}`}>
+                              {pending.length} pending
+                            </span>
+                          )}
                           {pct !== null && <TrendBadge pct={pct} />}
                         </div>
                       )}

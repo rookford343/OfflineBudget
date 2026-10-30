@@ -1,7 +1,6 @@
-import { useQueries } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Landmark } from "lucide-react";
-import { accountsApi } from "../api";
+import { usePendingBalances } from "../lib/usePendingBalances";
 import { fmt } from "../lib/utils";
 import { maskIfHidden } from "../store/balanceVisibility";
 
@@ -24,12 +23,7 @@ export function PendingBadge() {
 export default function CheckingBalancesCard({ accounts, hidden }: { accounts: any[]; hidden: boolean }) {
   const navigate = useNavigate();
   const checking = accounts.filter((a) => a.type === "checking" && a.is_active !== false);
-  const pendingQueries = useQueries({
-    queries: checking.map((a) => ({
-      queryKey: ["account-pending-transactions", a.id],
-      queryFn: () => accountsApi.pendingTransactions(a.id),
-    })),
-  });
+  const pendingFor = usePendingBalances(accounts);
   if (checking.length === 0) return null;
   const money = (n: number) => maskIfHidden(hidden, fmt(n));
 
@@ -40,10 +34,8 @@ export default function CheckingBalancesCard({ accounts, hidden }: { accounts: a
         <button onClick={() => navigate("/transactions")} className="text-xs text-indigo-600 hover:underline">Transactions →</button>
       </div>
       <div className="space-y-3">
-        {checking.map((a, i) => {
-          const pending: any[] = pendingQueries[i]?.data ?? [];
-          const posted = parseFloat(a.current_balance);
-          const afterPending = posted + pending.reduce((s, p) => s + parseFloat(p.amount), 0);
+        {checking.map((a) => {
+          const { pending, posted, afterPending } = pendingFor(a);
           return (
             <div key={a.id}>
               <div className="flex items-baseline justify-between gap-4">
