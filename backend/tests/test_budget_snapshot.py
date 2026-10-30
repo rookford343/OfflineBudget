@@ -487,3 +487,37 @@ def _snapshot_for_notes_test(db_session):
     user, checking, card = _seed_spreadsheet_scenario(db_session)
     with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
         return compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+
+# ── safety_margin_today ───────────────────────────────────────────────────────
+
+def test_safety_margin_today_is_the_weekly_figure_prorated_by_days_left(db_session):
+    """safety_margin_today is Safety Margin's own per-day figure -- same
+    shape as spendable_today, just dividing safety_margin_weekly instead of
+    left_to_spend_weekly by the same days_left_in_week."""
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+        snap = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
+
+    assert snap.safety_margin_today == (
+        snap.safety_margin_weekly / Decimal(snap.days_left_in_week)
+    ).quantize(Decimal("0.01"))
+
+
+def test_safety_margin_today_last_week_of_month_and_negative(db_session):
+    """Last week of the month (days_left_in_week == days_remaining_in_month,
+    the same collapse _weekly_allowance applies to safety_margin_weekly
+    itself) with a deeply negative quarter minimum, driving safety_margin
+    negative -- the per-day figure must stay negative and still match the
+    same prorated formula exactly."""
+    user, checking, card = _seed_spreadsheet_scenario(db_session)
+    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("-50000.00")):
+        snap = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 27))  # 5 days remain
+
+    assert snap.days_remaining_in_month <= 7
+    assert snap.safety_margin_weekly == snap.safety_margin, "last week: weekly collapses to the whole amount"
+    assert snap.safety_margin < 0
+    assert snap.safety_margin_today < 0
+    assert snap.safety_margin_today == (
+        snap.safety_margin_weekly / Decimal(snap.days_left_in_week)
+    ).quantize(Decimal("0.01"))

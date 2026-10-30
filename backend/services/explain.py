@@ -16,14 +16,15 @@ class ExplainBuilder:
         self.title = title
         self.rows: list[schemas.ExplainRow] = []
 
-    def _row(self, op, label, amount, note=None, children=None):
+    def _row(self, op, label, amount, note=None, children=None, informational_children=None):
         self.rows.append(schemas.ExplainRow(
             op=op, label=label, amount=amount, note=note, children=children or [],
+            informational_children=informational_children or [],
         ))
         return self
 
-    def start(self, label: str, amount: Decimal, note: str | None = None, children=None):
-        return self._row("start", label, amount, note, children)
+    def start(self, label: str, amount: Decimal, note: str | None = None, children=None, informational_children=None):
+        return self._row("start", label, amount, note, children, informational_children)
 
     def add(self, label: str, amount: Decimal, note: str | None = None, children=None):
         return self._row("add", label, amount, note, children)

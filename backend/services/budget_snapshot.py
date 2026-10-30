@@ -13,7 +13,10 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
 from backend.services.explain import ExplainBuilder
-from backend.services.forecast_engine import build_forecast, ScenarioProposal
+from backend.services.forecast_engine import (
+    build_forecast, ScenarioProposal,
+    _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
+)
 from backend.services.card_matching import card_matches_description
 from backend.services.spendable_pacer import compute_weekly_spendable
 from backend.services.spending_helpers import category_totals_for_range, merchant_totals
@@ -464,6 +467,113 @@ def spending_breakdown(db: Session, user_id: int, start: date, end: date, *, mer
     )
 
 
+def _money(amount: Decimal) -> str:
+    """"$1,234.56" -- every figure embedded in a card-payment basis note is
+    already non-negative by construction (a clamped carried balance, a sum
+    of positive item amounts, an abs()'d one-off, a positive manual/
+    subscription estimate), so this never needs the email's "-$" handling."""
+    return f"${amount:,.2f}"
+
+
+def _cc_basis_note(basis: dict | None) -> str | None:
+    """The receipt behind one CC Payment/CC Estimate line, from the `basis`
+    build_forecast attached to its ForecastTransaction -- see
+    schemas.ForecastTransaction.basis for the shape. Unlike the card_children
+    notes above, these deliberately DO carry figures: the user asked to see
+    exactly what a cycle estimate is built from (2026-10-29), because that's
+    the number that jumped when his Chase statement closed."""
+    if not basis:
+        return None
+    kind = basis.get("kind")
+    if kind == "locked":
+        due = basis.get("due_date")
+        return f"Statement balance, due {due:%b %-d}." if due else "Statement balance."
+    if kind == "flat":
+        return f"Your usual monthly card spending ({_money(basis.get('monthly_amount', Decimal('0')))})."
+    if kind == "subscription_flat":
+        return f"Your usual card subscriptions ({_money(basis.get('monthly_amount', Decimal('0')))})."
+    if kind == "cycle_estimate":
+        pending = basis.get("pending", Decimal("0"))
+        spent_since = basis.get("spent_since_statement", Decimal("0"))
+        statement_date = basis.get("statement_date")
+        subs = basis.get("subscriptions_before_close", Decimal("0"))
+        one_offs = basis.get("one_offs", Decimal("0"))
+        close_date = basis.get("close_date")
+        # Two different stories, kept apart rather than both folded into
+        # "pending": live pending_charges (known, not yet posted) versus
+        # spending that already posted to the card since its last statement
+        # closed but was never itself "pending" (the user's real Apple Card,
+        # 2026-10-30 -- $0 pending, $145.30 carried; calling that "pending"
+        # was wrong).
+        parts = []
+        if pending:
+            parts.append(f"pending now {_money(pending)}")
+        if spent_since:
+            stmt_label = f"the {statement_date:%b %-d} statement" if statement_date else "the last statement"
+            parts.append(f"spent since {stmt_label} {_money(spent_since)}")
+        if subs:
+            close_label = f"the {close_date:%b %-d} close" if close_date else "the close"
+            parts.append(f"subscriptions billing before {close_label} {_money(subs)}")
+        if one_offs:
+            parts.append(f"planned one-offs {_money(one_offs)}")
+        if not parts:
+            parts.append(f"pending now {_money(pending)}")
+        note = " + ".join(parts) + ". This is spending so far; it grows as you spend."
+        return note[:1].upper() + note[1:]
+    return None
+
+
+def _cc_line_children(days: list, start: date, end: date | None) -> list[ExplainChild]:
+    """Every "CC Payment: <card>" / "CC Estimate: <card>" forecast line
+    between `start` and `end` inclusive -- the card payments standing behind
+    a lowest-point figure, each with the note built from its own basis.
+    `days` is the SAME walk `_lookahead_window` already built (passed in by
+    the caller), never a second build_forecast call. Named forecast lines
+    only -- a card-routed one-off planned expense ("<name> (via <card>)")
+    has its own name and is deliberately excluded, matching the user's ask
+    for "every card payment line ('CC Payment' / 'CC Estimate')" specifically."""
+    if end is None:
+        return []
+    out: list[ExplainChild] = []
+    for day in days:
+        if day.date < start or day.date > end:
+            continue
+        for t in day.transactions:
+            if not (t.name.startswith("CC Payment: ") or t.name.startswith("CC Estimate: ")):
+                continue
+            out.append(ExplainChild(
+                label=f"{day.date:%b %-d} — {t.name}", amount=t.amount,
+                note=_cc_basis_note(t.basis),
+            ))
+    return out
+
+
+def _recent_close_children(active_cards: list, as_of: date) -> list[ExplainChild]:
+    """One line per active card whose statement closed in the last 7 days
+    (inclusive, never a close still in the future) -- names the moment a
+    cycle estimate jumps into a locked payoff, which is exactly what the
+    user asked the lowest-point panel to explain (2026-10-29: "the figure
+    jumped when the statement closed")."""
+    out: list[ExplainChild] = []
+    for card in active_cards:
+        if not card.statement_day:
+            continue
+        close = _most_recent_occurrence_on_or_before(card.statement_day, as_of)
+        age = (as_of - close).days
+        if not (0 <= age <= 7):
+            continue
+        due = card.next_payment_date or _next_occurrence_on_or_after(card.due_day, close + timedelta(days=1))
+        out.append(ExplainChild(
+            label=(
+                f"{card.name}'s statement closed {close:%b %-d}: its {_money(card.balance_due or Decimal('0'))} "
+                f"balance is now the locked {due:%b %-d} payment, and the next payment starts again from "
+                "spending so far."
+            ),
+            amount=Decimal("0"),
+        ))
+    return out
+
+
 def compute_budget_snapshot(
     db: Session,
     user: models.User,
@@ -664,6 +774,10 @@ def compute_budget_snapshot(
     # Daily pace divides the same prorated weekly figure, so the two agree.
     days_left_in_week = weekly_spendable.days_left_in_week
     spendable_today = (left_to_spend_weekly / Decimal(days_left_in_week)).quantize(Decimal("0.01"))
+    # Safety Margin's own per-day figure, same shape as spendable_today --
+    # safety_margin_weekly prorated by the same days-left-this-week divisor,
+    # quantized the same way (the user, 2026-10-29).
+    safety_margin_today = (safety_margin_weekly / Decimal(days_left_in_week)).quantize(Decimal("0.01"))
 
     cards = [
         CardSnapshot(
@@ -714,6 +828,15 @@ def compute_budget_snapshot(
         + (f", on {quarter_min_date:%b %-d}" if quarter_min_date else "")
         + ". Excludes the already-scheduled card payoff."
     )
+    # The card payments standing between today and the low point, read off
+    # the SAME walk _lookahead_window already built (lookahead_window.days)
+    # -- never a second build_forecast call. Shared by both "lookahead_minimum"
+    # and "safety_margin" (the user's ask, 2026-10-29): both panels bottom out
+    # at the same quarter_min/quarter_min_date, so they're explained by the
+    # same receipt. The recent-statement-close heads-up is lookahead_minimum
+    # only, per the same ask.
+    cc_line_children = _cc_line_children(lookahead_window.days, as_of, quarter_min_date)
+    lookahead_informational_children = cc_line_children + _recent_close_children(active_cards, as_of)
     explain = {
         "left_to_spend": ExplainBuilder("Left to Spend")
             .start("Leftover", leftover, note="Income after bills, savings and groceries",
@@ -730,7 +853,8 @@ def compute_budget_snapshot(
             .divide("Days left this week", Decimal(days_left_in_week))
             .build(spendable_today),
         "safety_margin": ExplainBuilder("Safety Margin")
-            .start("3-month lowest point", quarter_min, note=low_note)
+            .start("3-month lowest point", quarter_min, note=low_note,
+                   informational_children=cc_line_children)
             .subtract("This month's card bills", cc_budget_total,
                       note="Every recurring subscription charged to a card this month")
             .add("Card bills already charged", charged_so_far,
@@ -738,8 +862,13 @@ def compute_budget_snapshot(
             .build(safety_margin),
         "safety_margin_week": weekly_explanation(
             "Safety Margin (this week)", "Safety Margin", safety_margin, safety_margin_weekly),
+        "safety_margin_today": ExplainBuilder("Safety Margin today")
+            .start("Safety Margin (this week)", safety_margin_weekly)
+            .divide("Days left this week", Decimal(days_left_in_week))
+            .build(safety_margin_today),
         "lookahead_minimum": ExplainBuilder("3-month lowest point")
-            .start("Lowest projected checking balance", quarter_min, note=low_note)
+            .start("Lowest projected checking balance", quarter_min, note=low_note,
+                   informational_children=lookahead_informational_children)
             .build(quarter_min),
     }
 
@@ -760,6 +889,7 @@ def compute_budget_snapshot(
         on_pace=left_to_spend_weekly >= 0,
         safety_margin=safety_margin,
         safety_margin_weekly=safety_margin_weekly,
+        safety_margin_today=safety_margin_today,
         days_remaining_in_month=days_remaining,
         lookahead_minimum=quarter_min,
         lookahead_minimum_date=quarter_min_date,

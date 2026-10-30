@@ -352,6 +352,7 @@ def generate_daily_summary(
                 f"Pull {fmt(snap.savings_pull_needed)} from savings</p>"
             )
         spendable_today_sign = "−" if snap.spendable_today < 0 else ""
+        margin_today_sign = "−" if snap.safety_margin_today < 0 else ""
         # The two "lowest balance" lines (this is the sanity check behind the
         # weekly numbers -- it is what says whether a big purchase is safe;
         # the user's spreadsheet keeps the amount and its date together,
@@ -402,7 +403,8 @@ def generate_daily_summary(
         <div class='ob-card' style='background:#ffffff;border-radius:8px;padding:10px 6px;text-align:center'>
           <p class='ob-card-label' style='margin:0 0 4px;color:#6b7280;font-size:10px;text-transform:uppercase;letter-spacing:.02em;white-space:normal;word-break:break-word;overflow-wrap:break-word'>Safety Margin (this week)</p>
           <p class='ob-card-figure' style='margin:0;color:{margin_color};font-size:17px;font-weight:700;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.safety_margin_weekly)}</p>
-          <p class='ob-card-foot' style='margin:5px 0 0;color:#9ca3af;font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.safety_margin)} this month</p>
+          <p class='ob-card-pace' style='margin:5px 0 0;color:{margin_color};font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{margin_today_sign}{fmt(abs(snap.safety_margin_today))}/day</p>
+          <p class='ob-card-foot' style='margin:3px 0 0;color:#9ca3af;font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.safety_margin)} this month</p>
           {pull_savings_html}
         </div>
       </td>
@@ -512,6 +514,7 @@ def generate_daily_summary(
             "HOUSEHOLD SNAPSHOT\n"
             f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}\n"
             + f"  Safety margin (this week): {fmt(snap.safety_margin_weekly)}"
+            + f" ({margin_today_sign}{fmt(abs(snap.safety_margin_today))}/day)"
             + ("" if snap.savings_pull_needed <= 0 else
                f"  (pull {fmt(snap.savings_pull_needed)} from savings)")
             + "\n"

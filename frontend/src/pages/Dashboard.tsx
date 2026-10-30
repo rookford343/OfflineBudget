@@ -321,16 +321,22 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center justify-center gap-1">
                     Safety Margin (this week)
                     <HowCalculated title="Safety Margin"
-                      explanations={[snapshot.explain?.safety_margin, snapshot.explain?.safety_margin_week]}
+                      explanations={[snapshot.explain?.safety_margin, snapshot.explain?.safety_margin_week, snapshot.explain?.safety_margin_today]}
                       helpText={MARGIN_HELP} />
                   </p>
                   <p className={`text-xl font-bold tabular-nums ${parseFloat(snapshot.safety_margin_weekly) < 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>{fmt(parseFloat(snapshot.safety_margin_weekly))}</p>
+                  <p className={`text-xs mt-1 ${parseFloat(snapshot.safety_margin_today) < 0 ? "text-red-500 dark:text-red-400" : "text-amber-500 dark:text-amber-400"}`}>
+                    {/* Safety Margin's own per-day figure, same shape as
+                        Spendable's $/day line above -- safety_margin_weekly
+                        prorated across the days left this week. */}
+                    {parseFloat(snapshot.safety_margin_today) < 0 ? "−" : ""}{fmt(Math.abs(parseFloat(snapshot.safety_margin_today)))}/day
+                  </p>
                   <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.safety_margin))} this month</p>
                   {/* The other decision boundary: below zero the plan already
                       runs into savings, so money has to come back out. */}
                   {parseFloat(snapshot.savings_pull_needed) > 0 && (
                     <p className="text-[11px] text-red-600 dark:text-red-400 mt-1.5 leading-snug">
-                      Pull {fmt(parseFloat(snapshot.savings_pull_needed))} from savings
+                      Pull {maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.savings_pull_needed)))} from savings
                     </p>
                   )}
                 </div>

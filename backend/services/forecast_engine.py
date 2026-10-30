@@ -646,8 +646,11 @@ def build_forecast(
     # CC payment injections: cards with next_payment_date set, balance_due > 0,
     # and no existing recurring CC payment item already handling this card (avoid double-count).
     recurring_cc_card_ids = {item.card_id for item in recurring_items if item.type == models.RecurringType.credit_card_payment}
-    cc_payments: dict[date, list[tuple[str, Decimal]]] = {}
-    cc_estimates_by_date: dict[date, list[tuple[str, Decimal]]] = {}
+    # Third tuple element is the `basis` dict attached to the ForecastTransaction
+    # these dates eventually render as (see schemas.ForecastTransaction.basis) --
+    # None when nothing richer than the amount itself is known.
+    cc_payments: dict[date, list[tuple[str, Decimal, dict | None]]] = {}
+    cc_estimates_by_date: dict[date, list[tuple[str, Decimal, dict | None]]] = {}
     # Unpaid statement payoffs whose due date is already behind today (inside
     # the unconfirmed lookback, so not stale): (card, due date, amount).
     overdue_payoffs: list[tuple[models.CreditCard, date, Decimal]] = []
@@ -753,6 +756,7 @@ def build_forecast(
         # payment would double it up.
         derived_due: date | None = None
         derived_amount = Decimal("0")
+        derived_basis: dict | None = None
         # balance_due at 0 is not "nothing owed" -- it means the last
         # statement is fully paid, but current_balance can still carry real,
         # already-spent debt that hasn't hit a statement yet (the user's Chase,
@@ -831,8 +835,61 @@ def build_forecast(
             # month's card bills on its own (the user's sheet, '2026 Overview'!B18),
             # and counting them here as well charged them twice (found live
             # 2026-10-01). The Forecast page keeps them in the payoff.
-            derived_amount = carried + (upcoming if include_unbilled_card_bills else Decimal("0"))
+            subscriptions_before_close = upcoming if include_unbilled_card_bills else Decimal("0")
+            derived_amount = carried + subscriptions_before_close
             derived_amount = max(derived_amount - excess_paid, Decimal("0"))
+            # The breakdown behind `derived_amount`, for the explain panel.
+            # `carried` blends two different stories and the note must not
+            # flatten them into one "pending" label: live pending_charges
+            # (money the bank already knows about, not yet posted) versus
+            # spending that already POSTED to current_balance since the last
+            # statement closed but was never itself "pending" (the user's
+            # real Apple Card, 2026-10-30: $0 pending, $145.30 carried --
+            # labeling that "pending" was simply wrong). pending_live is
+            # capped at `carried` so the split can never claim more live
+            # pending than the carried total actually contains (the carried
+            # clamp to >= 0 above can shrink the total below the card's own
+            # pending_charges figure, e.g. a recent overpayment).
+            pending_live = min(Decimal(str(card.pending_charges or 0)), carried)
+            spent_since_statement = carried - pending_live
+            last_close = _most_recent_occurrence_on_or_before(card.statement_day, anchor)
+            # Mirrors the math above exactly, including the excess_paid
+            # trim -- taken off the carried pieces first (spent-since-statement,
+            # then live pending), then off the subscriptions slice -- so
+            # pending + spent_since_statement + subscriptions always nets to
+            # derived_amount pre-one_offs. A card-routed one-off landing on
+            # this exact due date (`derived_due`) is real spending that
+            # belongs to this cycle too, but it renders as its OWN forecast
+            # line below (card_planned_by_date), not folded into
+            # derived_amount -- so one_offs is accurate context here, not an
+            # addend of derived_amount. It is 0 whenever no such one-off
+            # exists, which is the common case (confirmed against the
+            # user's real Chase cycle, 2026-10-29).
+            basis_subscriptions = subscriptions_before_close
+            remaining_excess = excess_paid
+            if remaining_excess > 0:
+                trim = min(spent_since_statement, remaining_excess)
+                spent_since_statement -= trim
+                remaining_excess -= trim
+            if remaining_excess > 0:
+                trim = min(pending_live, remaining_excess)
+                pending_live -= trim
+                remaining_excess -= trim
+            if remaining_excess > 0:
+                basis_subscriptions = max(basis_subscriptions - remaining_excess, Decimal("0"))
+            basis_one_offs = sum(
+                (abs(Decimal(str(pe.amount))) for pe, c in card_planned_by_date.get(derived_due, []) if c.id == card.id),
+                Decimal("0"),
+            )
+            derived_basis = {
+                "kind": "cycle_estimate",
+                "pending": pending_live,
+                "spent_since_statement": spent_since_statement,
+                "statement_date": last_close,
+                "subscriptions_before_close": basis_subscriptions,
+                "one_offs": basis_one_offs,
+                "close_date": next_close,
+            }
 
         # Second hop: the cycle right after the one just derived above.
         # There is no "carried" real balance signal for it yet -- that
@@ -862,6 +919,18 @@ def build_forecast(
                 Decimal("0") if card.id in bank_feed_pending_card_ids
                 else _fresh_pending_charges(card, today)
             )
+        # No carried balance and no subscriptions-before-close signal exists
+        # for this hop yet (see comment above) -- the whole amount, when
+        # there is one, is the fresh pending-charges read.
+        second_basis: dict | None = (
+            {
+                "kind": "cycle_estimate", "pending": second_amount,
+                "spent_since_statement": Decimal("0"), "statement_date": None,
+                "subscriptions_before_close": Decimal("0"), "one_offs": Decimal("0"),
+                "close_date": second_close,
+            }
+            if second_due is not None else None
+        )
 
         # A stale next_payment_date rolled forward lands on the exact date
         # derived_due just computed above whenever the real payoff already
@@ -893,7 +962,7 @@ def build_forecast(
 
         if payment_double_counts_derived:
             if start_date <= derived_due <= end_date:
-                cc_payments.setdefault(derived_due, []).append((card.name, derived_amount))
+                cc_payments.setdefault(derived_due, []).append((card.name, derived_amount, derived_basis))
         elif (
             next_payment is not None
             and next_payment < today
@@ -906,7 +975,9 @@ def build_forecast(
             # today's auto anchor (see replan_overdue_on_today).
             overdue_payoffs.append((card, next_payment, statement_due - pending_paid))
             if start_date <= next_payment <= end_date:
-                cc_payments.setdefault(next_payment, []).append((card.name, statement_due - pending_paid))
+                cc_payments.setdefault(next_payment, []).append(
+                    (card.name, statement_due - pending_paid, {"kind": "locked", "due_date": next_payment}),
+                )
         elif (
             next_payment is not None
             and start_date <= next_payment <= end_date
@@ -925,7 +996,9 @@ def build_forecast(
             # doesn't cover is still to be paid on the due date.
             still_due = statement_due - pending_paid
             if still_due > 0:
-                cc_payments.setdefault(next_payment, []).append((card.name, still_due))
+                cc_payments.setdefault(next_payment, []).append(
+                    (card.name, still_due, {"kind": "locked", "due_date": next_payment}),
+                )
 
         def _covered_by_real_payment(when: date) -> bool:
             """Something better than an estimate already lands in this month --
@@ -952,26 +1025,27 @@ def build_forecast(
             and start_date <= derived_due <= end_date
             and derived_amount > 0
         ):
-            cc_estimates_by_date.setdefault(derived_due, []).append((card.name, derived_amount))
+            cc_estimates_by_date.setdefault(derived_due, []).append((card.name, derived_amount, derived_basis))
 
         if (
             second_due is not None
             and start_date <= second_due <= end_date
             and second_amount > 0
         ):
-            cc_estimates_by_date.setdefault(second_due, []).append((card.name, second_amount))
+            cc_estimates_by_date.setdefault(second_due, []).append((card.name, second_amount, second_basis))
 
         if card.monthly_spend_estimate and card.monthly_spend_estimate > 0:
             # A manually-set estimate wins: it is the user's own read on a card he
             # spends freely from (Chase, $5,500/mo), which subscriptions alone
             # would badly understate.
             estimate = Decimal(str(card.monthly_spend_estimate))
+            flat_basis = {"kind": "flat", "monthly_amount": estimate}
             cur = date(start_date.year, start_date.month, 1)
             while cur <= end_date:
                 due_day = min(card.due_day, _last_day_of_month(cur))
                 inject_date = date(cur.year, cur.month, due_day)
                 if start_date <= inject_date <= end_date and not _covered_by_real_payment(inject_date):
-                    cc_estimates_by_date.setdefault(inject_date, []).append((card.name, estimate))
+                    cc_estimates_by_date.setdefault(inject_date, []).append((card.name, estimate, flat_basis))
                 cur = date(cur.year + 1, 1, 1) if cur.month == 12 else date(cur.year, cur.month + 1, 1)
         else:
             # No manual estimate: build one from the subscriptions actually
@@ -991,7 +1065,9 @@ def build_forecast(
                 by_payoff[payoff] = by_payoff.get(payoff, Decimal("0")) + amount
             for payoff, amount in sorted(by_payoff.items()):
                 if start_date <= payoff <= end_date and not _covered_by_real_payment(payoff):
-                    cc_estimates_by_date.setdefault(payoff, []).append((card.name, amount))
+                    cc_estimates_by_date.setdefault(payoff, []).append(
+                        (card.name, amount, {"kind": "subscription_flat", "monthly_amount": amount}),
+                    )
 
     # Build override map: recurring_item_id -> amount_delta
     override_map: dict[int, Decimal] = {}
@@ -1189,6 +1265,7 @@ def build_forecast(
                 is_actual=False,
                 is_cc_payment=True,
                 is_cc_locked=True,
+                basis={"kind": "locked", "due_date": due},
             ))
 
     incoming_transfer_schedules: list[tuple[models.BufferTransferRule, dict[date, Decimal]]] = []
@@ -1568,7 +1645,7 @@ def build_forecast(
                 is_cc_payment=True,
             ))
 
-        for card_name, amount in cc_payments.get(current, []):
+        for card_name, amount, basis in cc_payments.get(current, []):
             if card_name in moved_overdue.get(current, ()):
                 continue  # re-planned on today, after today's auto anchor
             # Suppress if an actual CC payment for this card was imported near this date
@@ -1585,9 +1662,10 @@ def build_forecast(
                 is_actual=False,
                 is_cc_payment=True,
                 is_cc_locked=True,
+                basis=basis,
             ))
 
-        for card_name, amount in cc_estimates_by_date.get(current, []):
+        for card_name, amount, basis in cc_estimates_by_date.get(current, []):
             # An estimate is a guess about a payment still to come; on a date
             # already behind today it only resurrects a paid or superseded
             # cycle (a paid month looks unclaimed again once the next
@@ -1607,6 +1685,7 @@ def build_forecast(
                 category_name="Credit Card Estimate",
                 is_actual=False,
                 is_cc_payment=True,
+                basis=basis,
             ))
 
         interest_rate = getattr(account, "interest_rate", None)

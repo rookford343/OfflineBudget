@@ -22,6 +22,12 @@ class ExplainRow(BaseModel):
     amount: Decimal          # for "divide": the exact divisor, never rounded
     note: Optional[str] = None
     children: list[ExplainChild] = []
+    # Additional child rows that are purely descriptive -- e.g. the card
+    # payment/estimate lines behind a lowest-point figure. Deliberately kept
+    # OUT of `children` (whose amounts must sum to `amount`, enforced by
+    # explain.children_consistent) because these don't: they're a receipt
+    # for what's driving the number, not an arithmetic breakdown of it.
+    informational_children: list[ExplainChild] = []
 
 
 class Explanation(BaseModel):
@@ -567,6 +573,26 @@ class ForecastTransaction(BaseModel):
     # A bank-reported pending card payment (or a hand-marked payment-sent
     # card): real money gone from checking, but not posted yet.
     is_pending: bool = False
+    # The breakdown behind a "CC Payment"/"CC Estimate" line's own amount,
+    # set at the exact point in build_forecast where that amount is
+    # computed -- so a caller (budget_snapshot's lowest-point explain) can
+    # describe the figure without re-deriving it or re-running the forecast.
+    # Shape is one of:
+    #   {"kind": "locked", "due_date": date}
+    #   {"kind": "cycle_estimate", "pending": Decimal,
+    #    "spent_since_statement": Decimal, "statement_date": date | None,
+    #    "subscriptions_before_close": Decimal, "one_offs": Decimal,
+    #    "close_date": date | None}
+    #    -- "pending" is live pending_charges (known, not yet posted);
+    #    "spent_since_statement" is spending already POSTED to the card
+    #    since its last statement closed but never itself "pending" --
+    #    kept apart because they read very differently in the note
+    #    (confirmed live 2026-10-30: the user's Apple Card had $0 pending
+    #    and $145.30 carried, and labeling that $145.30 "pending" was wrong).
+    #   {"kind": "flat", "monthly_amount": Decimal}
+    #   {"kind": "subscription_flat", "monthly_amount": Decimal}
+    # None on every other transaction (actuals, planned items, transfers, ...).
+    basis: Optional[dict] = None
 
 
 class ForecastEntry(BaseModel):
@@ -1813,6 +1839,12 @@ class BudgetSnapshot(BaseModel):
     # already runs into savings even before anything unexpected happens.
     safety_margin: Decimal
     safety_margin_weekly: Decimal
+    # safety_margin_weekly / days_left_in_week -- the Safety Margin twin of
+    # spendable_today, same quantization rule (including the last-week
+    # case). Defaulted so existing callers/fixtures building a BudgetSnapshot
+    # without it (e.g. test_summary_generator_next_month_low's
+    # _blank_snapshot) keep working unchanged.
+    safety_margin_today: Decimal = Decimal("0")
     days_remaining_in_month: int
     # The quarter's projected low point and the day it lands. Already computed
     # for safety_margin; surfaced because it is what the user checks before

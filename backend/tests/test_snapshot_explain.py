@@ -10,6 +10,7 @@ FIELD = {
     "spendable_today": "spendable_today",
     "safety_margin": "safety_margin",
     "safety_margin_week": "safety_margin_weekly",
+    "safety_margin_today": "safety_margin_today",
     "lookahead_minimum": "lookahead_minimum",
 }
 

@@ -43,6 +43,7 @@ def _blank_snapshot(**overrides) -> BudgetSnapshot:
         on_pace=True,
         safety_margin=Decimal("0"),
         safety_margin_weekly=Decimal("0"),
+        safety_margin_today=Decimal("0"),
         days_remaining_in_month=30,
         lookahead_minimum=Decimal("0"),
         lookahead_minimum_date=None,
@@ -197,6 +198,33 @@ def test_move_line_absent_when_next_month_low_is_non_negative(db_session):
     html, text = _render(db_session, snap, "nomoveline")
     assert "Move $" not in html
     assert "Move $" not in text
+
+
+# ── 5. Safety Margin per-day line ───────────────────────────────────────────
+
+def test_email_shows_the_safety_margin_per_day_line(db_session):
+    """Safety Margin gets its own "$Y/day" line, same style as Spendable's
+    per-day line, in both the HTML and text bodies. Negative values use the
+    email's real-minus-sign "-$" formatter."""
+    snap = _blank_snapshot(
+        safety_margin_weekly=Decimal("-55.00"),
+        safety_margin_today=Decimal("-7.86"),
+    )
+    html, text = _render(db_session, snap, "margintoday")
+    assert "−$7.86/day" in html
+    assert "−$7.86/day" in text
+    assert "$-7.86" not in html and "$-7.86" not in text
+
+
+def test_email_safety_margin_per_day_line_positive_has_no_sign(db_session):
+    snap = _blank_snapshot(
+        safety_margin_weekly=Decimal("210.00"),
+        safety_margin_today=Decimal("30.00"),
+    )
+    html, text = _render(db_session, snap, "marginpositive")
+    assert "$30.00/day" in html
+    assert "$30.00/day" in text
+    assert "−$30.00/day" not in html and "−$30.00/day" not in text
 
 
 # ── 4. Layout: two-cell table row with percentage widths ───────────────────

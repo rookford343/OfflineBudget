@@ -8,6 +8,11 @@ export interface ExplainChild { label: string; amount: string; note?: string | n
 export interface ExplainRow {
   op: "start" | "add" | "subtract" | "divide" | "result";
   label: string; amount: string; note?: string | null; children?: ExplainChild[];
+  // Extra child rows that are a receipt for the number (e.g. the card
+  // payments behind a lowest-point figure), not an arithmetic breakdown of
+  // it -- their amounts are NOT expected to sum to the row's own amount,
+  // unlike `children`. Rendered in the same expandable list.
+  informational_children?: ExplainChild[];
 }
 export interface Explanation { title: string; result: string; rows: ExplainRow[] }
 
@@ -49,6 +54,13 @@ export default function HowCalculated(
     return r.op === "result" || r.op === "start" ? signed(r.amount) : money(r.amount);
   };
   const toggle = (k: string) => setExpanded(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  // Unlike a child's `amount` (masked via money()/signed() above), a
+  // `note` is free text -- some notes (the card-payment basis behind a
+  // lowest-point figure) now embed real dollar figures on purpose, so
+  // hide-balances has to mask those substrings directly rather than
+  // relying on a field that was never wrapped. Matches the email/app's own
+  // "$1,234.56" / "−$1,234.56" money shapes.
+  const maskNote = (note: string) => hidden ? note.replace(/[−-]?\$[\d,]+(?:\.\d{1,2})?/g, "••••") : note;
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>
@@ -76,6 +88,7 @@ export default function HowCalculated(
                 {ex.rows.map((r, ri) => {
                   const key = `${ei}-${ri}`;
                   const hasKids = (r.children?.length ?? 0) > 0;
+                  const infoKids = r.informational_children ?? [];
                   const isResult = r.op === "result";
                   return (
                     <div key={key} className={`py-1 ${isResult ? "border-t border-gray-200 dark:border-gray-600 mt-1 pt-2" : ""}`}>
@@ -91,13 +104,41 @@ export default function HowCalculated(
                           {rowAmount(r)}
                         </span>
                       </button>
-                      {r.note && <p className="ml-6 text-xs text-gray-400">{r.note}</p>}
+                      {r.note && <p className="ml-6 text-xs text-gray-400">{maskNote(r.note)}</p>}
+                      {/* Informational children are a receipt, not a collapsible
+                          breakdown -- they show unconditionally under the row,
+                          never gated behind the chevron/expand toggle `children`
+                          uses below. A zero-amount entry (e.g. a statement-just-
+                          closed heads-up) has nothing to show in the amount
+                          column, so it renders as a plain note line instead. */}
+                      {infoKids.length > 0 && (
+                        <div className="ml-6 mt-1 space-y-1">
+                          {infoKids.map((c, ci) => (
+                            parseFloat(c.amount) === 0 ? (
+                              // No amount column here, so the label itself is
+                              // where a dollar figure would leak (e.g. "...its
+                              // $X balance is now..." on the
+                              // statement-just-closed line) -- maskNote has to
+                              // run on `label`, not just `note`.
+                              <p key={ci} className="text-xs text-gray-400">{maskNote(c.label)}{c.note ? ` ${maskNote(c.note)}` : ""}</p>
+                            ) : (
+                              <div key={ci} className="text-xs text-gray-500">
+                                <div className="flex justify-between gap-2">
+                                  <span>{maskNote(c.label)}</span>
+                                  <span className="tabular-nums whitespace-nowrap">{signed(c.amount)}</span>
+                                </div>
+                                {c.note && <p className="text-gray-400">{maskNote(c.note)}</p>}
+                              </div>
+                            )
+                          ))}
+                        </div>
+                      )}
                       {hasKids && expanded.has(key) && (
                         <div className="ml-6 mt-1 space-y-0.5">
                           {r.children!.map((c, ci) => (
-                            <div key={ci} className="flex justify-between text-xs text-gray-500">
-                              <span>{c.label}{c.note ? <span className="text-gray-400"> · {c.note}</span> : null}</span>
-                              <span className="tabular-nums">{signed(c.amount)}</span>
+                            <div key={ci} className="flex justify-between gap-2 text-xs text-gray-500">
+                              <span>{c.label}{c.note ? <span className="text-gray-400"> · {maskNote(c.note)}</span> : null}</span>
+                              <span className="tabular-nums whitespace-nowrap">{signed(c.amount)}</span>
                             </div>
                           ))}
                         </div>
