@@ -32,6 +32,14 @@ def _seed_spreadsheet_scenario(db):
     )
     db.add_all([checking, card])
     db.flush()
+    # One synced row from last month makes the card "transaction-fed", so
+    # Left to Spend uses its calendar-month sum (no August rows -> 0) rather
+    # than the balance-only fallback (test_budget_snapshot_calendar_month.py).
+    db.add(models.CreditCardTransaction(
+        card_id=card.id, user_id=user.id, date=date(2026, 7, 20),
+        amount=Decimal("12.00"), merchant="SOME STORE",
+        source=models.CardTransactionSource.bank_sync,
+    ))
 
     income_cat = models.Category(user_id=user.id, name="Income", type=models.CategoryType.income)
     savings_cat = models.Category(user_id=user.id, name="Savings", type=models.CategoryType.savings)
@@ -230,6 +238,7 @@ def test_left_to_spend_ignores_already_statemented_balance(db_session):
         db_session.add(models.CreditCardTransaction(
             card_id=card.id, user_id=user.id, date=date(2026, 8, 3),
             amount=Decimal("500.00"), merchant="SOME STORE",
+            source=models.CardTransactionSource.bank_sync,
         ))
         db_session.commit()
         return user, checking

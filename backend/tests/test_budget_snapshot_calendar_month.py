@@ -17,6 +17,7 @@ from unittest.mock import patch
 from backend import models
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.explain import children_consistent, replay
+from backend.services.spending_helpers import is_card_payment
 from backend.tests.test_budget_snapshot import _fake_quarter_min
 
 
@@ -39,10 +40,10 @@ def _seed(db, username="calmonth", *, current_balance="0.00", balance_due="0.00"
     return user, checking, card
 
 
-def _txn(db, card, d, amount, merchant="SOME STORE"):
+def _txn(db, card, d, amount, merchant="SOME STORE", source=models.CardTransactionSource.bank_sync):
     db.add(models.CreditCardTransaction(
         card_id=card.id, user_id=card.user_id, date=d,
-        amount=Decimal(amount), merchant=merchant,
+        amount=Decimal(amount), merchant=merchant, source=source,
     ))
 
 
@@ -179,3 +180,79 @@ def test_explain_rows_sum_to_left_to_spend(db_session):
     assert ex.result == snap.left_to_spend == snap.leftover - Decimal("113.00")
     assert replay(ex) == snap.left_to_spend
     assert children_consistent(ex)
+
+
+# ── balance-only cards fall back to the statement-based figure ───────────────
+# A card whose feed sends balances but no transactions (the user's Apple Card
+# via SimpleFIN) would otherwise vanish from Spendable while charged_so_far
+# still added back its recurring bills. Such a card keeps the old per-card
+# figure, current_balance - balance_due + pending_charges.
+
+def _balance_only_card(db, user, name="Balance Card", *, current="250.00", due="100.00", pending="20.00"):
+    card = models.CreditCard(
+        user_id=user.id, name=name, credit_limit=Decimal("5000.00"),
+        statement_day=31, due_day=28,
+        current_balance=Decimal(current), balance_due=Decimal(due),
+        pending_charges=Decimal(pending),
+    )
+    db.add(card)
+    db.flush()
+    return card
+
+
+def test_a_balance_only_card_uses_the_statement_fallback_with_its_pending_once(db_session):
+    user, checking, _card = _seed(db_session)          # transaction-fed card with no rows this month
+    _txn(db_session, _card, date(2026, 9, 20), "5.00")  # fed within 60 days, nothing this month
+    _balance_only_card(db_session, user)
+
+    snap = _snap(db_session, user, checking, date(2026, 10, 10))
+
+    # 250 - 100 + 20 = 170, pending included once, never added again.
+    assert snap.left_to_spend == snap.leftover - Decimal("170.00")
+
+
+def test_manual_rows_or_stale_imports_do_not_make_a_card_transaction_fed(db_session):
+    user, checking, _card = _seed(db_session)
+    _txn(db_session, _card, date(2026, 10, 2), "5.00")
+    manual = _balance_only_card(db_session, user, "Manual Card")
+    _txn(db_session, manual, date(2026, 10, 3), "40.00", source=models.CardTransactionSource.manual)
+    stale = _balance_only_card(db_session, user, "Stale Card")
+    _txn(db_session, stale, date(2026, 8, 1), "40.00")   # more than 60 days before as_of
+
+    snap = _snap(db_session, user, checking, date(2026, 10, 10))
+
+    assert snap.left_to_spend == snap.leftover - Decimal("5.00") - Decimal("170.00") * 2
+
+
+def test_a_transaction_fed_card_does_not_use_the_fallback(db_session):
+    # Large balance gap, but posted rows rule: only this month's 60 counts.
+    user, checking, card = _seed(db_session, current_balance="900.00", balance_due="100.00", pending="10.00")
+    _txn(db_session, card, date(2026, 10, 4), "60.00", source=models.CardTransactionSource.csv_import)
+
+    snap = _snap(db_session, user, checking, date(2026, 10, 10))
+
+    assert snap.left_to_spend == snap.leftover - Decimal("60.00") - Decimal("10.00")
+
+
+def test_mixed_cards_sum_and_explain_correctly(db_session):
+    user, checking, card = _seed(db_session, pending="10.00")
+    _txn(db_session, card, date(2026, 10, 4), "60.00")
+    _balance_only_card(db_session, user, "Balance Card")
+
+    snap = _snap(db_session, user, checking, date(2026, 10, 10))
+    ex = snap.explain["left_to_spend"]
+
+    assert snap.left_to_spend == snap.leftover - Decimal("60.00") - Decimal("10.00") - Decimal("170.00")
+    spending = next(r for r in ex.rows if r.label == "Card spending this month")
+    assert {c.label: c.amount for c in spending.children} == {
+        "Test Visa: purchases since Oct 1": Decimal("60.00"),
+        "Balance Card: balance since its last statement (this card's feed sends no transactions)": Decimal("170.00"),
+    }
+    pending = next(r for r in ex.rows if r.label == "Pending charges")
+    assert {c.label: c.amount for c in pending.children} == {"Test Visa": Decimal("10.00")}
+    assert replay(ex) == ex.result == snap.left_to_spend
+    assert children_consistent(ex)
+
+
+def test_mindbody_payments_is_a_gym_not_a_card_payment():
+    assert not is_card_payment("MINDBODY PAYMENTS")
