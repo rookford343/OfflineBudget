@@ -11,7 +11,7 @@ export interface ExplainRow {
   // Extra child rows that are a receipt for the number (e.g. the card
   // payments behind a lowest-point figure), not an arithmetic breakdown of
   // it -- their amounts are NOT expected to sum to the row's own amount,
-  // unlike `children`. Rendered in the same expandable list.
+  // unlike `children`. Collapsed behind the same chevron as `children`.
   informational_children?: ExplainChild[];
 }
 export interface Explanation { title: string; result: string; rows: ExplainRow[] }
@@ -87,8 +87,11 @@ export default function HowCalculated(
                 {list.length > 1 && <p className="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">{ex.title}</p>}
                 {ex.rows.map((r, ri) => {
                   const key = `${ei}-${ri}`;
-                  const hasKids = (r.children?.length ?? 0) > 0;
                   const infoKids = r.informational_children ?? [];
+                  // One chevron reveals both the arithmetic breakdown and the
+                  // informational receipt lines.
+                  const hasKids = (r.children?.length ?? 0) > 0 || infoKids.length > 0;
+                  const isOpen = hasKids && expanded.has(key);
                   const isResult = r.op === "result";
                   return (
                     <div key={key} className={`py-1 ${isResult ? "border-t border-gray-200 dark:border-gray-600 mt-1 pt-2" : ""}`}>
@@ -105,13 +108,12 @@ export default function HowCalculated(
                         </span>
                       </button>
                       {r.note && <p className="ml-6 text-xs text-gray-400">{maskNote(r.note)}</p>}
-                      {/* Informational children are a receipt, not a collapsible
-                          breakdown -- they show unconditionally under the row,
-                          never gated behind the chevron/expand toggle `children`
-                          uses below. A zero-amount entry (e.g. a statement-just-
+                      {/* Informational children are a receipt, not an arithmetic
+                          breakdown, but they collapse behind the same chevron as
+                          `children` so the panel stays short. A zero-amount entry (e.g. a statement-just-
                           closed heads-up) has nothing to show in the amount
                           column, so it renders as a plain note line instead. */}
-                      {infoKids.length > 0 && (
+                      {isOpen && infoKids.length > 0 && (
                         <div className="ml-6 mt-1 space-y-1">
                           {infoKids.map((c, ci) => (
                             parseFloat(c.amount) === 0 ? (
@@ -133,7 +135,7 @@ export default function HowCalculated(
                           ))}
                         </div>
                       )}
-                      {hasKids && expanded.has(key) && (
+                      {isOpen && (r.children?.length ?? 0) > 0 && (
                         <div className="ml-6 mt-1 space-y-0.5">
                           {r.children!.map((c, ci) => (
                             <div key={ci} className="flex justify-between gap-2 text-xs text-gray-500">
