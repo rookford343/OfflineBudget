@@ -107,14 +107,13 @@ def test_left_to_spend_and_safety_margin_match_spreadsheet_exactly(db_session):
     with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
-    # Golden value. The fixture's amounts were anonymized on 2026-10-08 and
-    # this value re-derived by hand from the original spreadsheet-verified
-    # one: each bill change moves it one-for-one, except Peloton (billed on
-    # the 2nd, already inside pending_charges by the 7th), and the
-    # balance_due change moves it the other way through new_spending_total.
-    # Our Decimal(14,2) columns round each input to cents up front, which is
-    # why it can sit a cent off a spreadsheet that rounds only for display.
-    assert snapshot.left_to_spend == Decimal("966.01")
+    # Golden value. Was 966.01 under the spreadsheet's "new spending since
+    # the last statement" card term (current_balance - balance_due +
+    # pending = 2783.93 here). Since 2026-10-30 the card term is the
+    # calendar month's posted card purchases (none seeded in this fixture)
+    # plus pending (540.18): 966.01 + 2783.93 - 540.18 = 3209.76. Safety
+    # Margin below is untouched by that change.
+    assert snapshot.left_to_spend == Decimal("3209.76")
     # left_to_spend_weekly is no longer derived from left_to_spend -- it's
     # the transaction-driven weekly pacer now (see test_spendable_pacer.py).
     # Not asserted here; this test only covers the spreadsheet-verified
@@ -153,8 +152,8 @@ def test_no_active_cards_gives_zero_card_balance(db_session):
 
 def test_pending_charges_move_left_to_spend_only(db_session):
     """A pending charge is money already spent, so it must reduce Left to
-    Spend by exactly its amount -- that formula's new_spending_total term
-    (current_balance - balance_due + pending_charges) sees it directly.
+    Spend by exactly its amount -- Left to Spend subtracts pending_charges
+    directly, alongside the calendar month's posted card spending.
 
     Not Saving must NOT move: it stopped using new_spending_total entirely
     on 2026-08-13 (see compute_budget_snapshot's safety_margin comment), so a
@@ -163,14 +162,9 @@ def test_pending_charges_move_left_to_spend_only(db_session):
     original name and assertion (both moving together) -- that was itself
     the era of the safety_margin double-count the user later caught.
 
-    Left to Spend's reactivity was corrected 2026-08-12 against "2026
-    Overview"!B17, whose card term is B12 = -balance_due + current_balance +
-    pending_charges.
-
-    current_balance is seeded equal to balance_due so the baseline delta is
-    zero and the pending charge is the only thing moving -- an earlier
-    version left current_balance at its 0 default while balance_due was
-    1000, a state a real card cannot be in."""
+    current_balance is seeded equal to balance_due -- an earlier version
+    left current_balance at its 0 default while balance_due was 1000, a
+    state a real card cannot be in."""
     user = models.User(username="pendtest", hashed_password="x", display_name="PendTest")
     db_session.add(user)
     db_session.flush()
@@ -214,8 +208,9 @@ def test_left_to_spend_ignores_already_statemented_balance(db_session):
     room charges the user for it twice. Live symptom: the app and Budget.xlsx
     disagreed by almost exactly the combined balance_due.
 
-    Two cards with identical NEW spending but wildly different statemented
-    balances must therefore produce the same Left to Spend."""
+    Two cards with identical spending this month but wildly different
+    statemented balances must therefore produce the same Left to Spend.
+    (Since 2026-10-30 that spending is the month's posted card purchases.)"""
     def _seed(username: str, balance_due: str, current_balance: str):
         user = models.User(username=username, hashed_password="x", display_name=username)
         db_session.add(user)
@@ -231,10 +226,15 @@ def test_left_to_spend_ignores_already_statemented_balance(db_session):
             next_payment_date=date(2026, 8, 25),
         )
         db_session.add_all([checking, card])
+        db_session.flush()
+        db_session.add(models.CreditCardTransaction(
+            card_id=card.id, user_id=user.id, date=date(2026, 8, 3),
+            amount=Decimal("500.00"), merchant="SOME STORE",
+        ))
         db_session.commit()
         return user, checking
 
-    # Both carry exactly $500 of new, un-statemented spending.
+    # Both carry exactly $500 of purchases posted this month.
     fresh_user, fresh_checking = _seed("freshstmt", "0.00", "500.00")
     heavy_user, heavy_checking = _seed("heavystmt", "7342.90", "7842.90")
 
@@ -248,7 +248,7 @@ def test_left_to_spend_ignores_already_statemented_balance(db_session):
     )
     assert heavy.left_to_spend == Decimal("-500.00"), (
         "with no income or bills seeded, leftover is 0, so Left to Spend is "
-        "just -new_spending_total"
+        "just minus this month's card spending"
     )
 
 
@@ -340,7 +340,7 @@ def test_over_budget_names_the_savings_transfer_to_skip(db_session):
     """
     user, checking, card = _seed_spreadsheet_scenario(db_session)
     # Force the over-budget branch regardless of the fixture's own figures.
-    card.current_balance = Decimal("40000.00")
+    card.pending_charges = Decimal("40000.00")
 
     with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
@@ -412,7 +412,7 @@ def test_reserve_sizes_the_savings_needed_to_cover_the_shortfall(db_session):
     """the user funds the year's gap from a bonus rather than saving monthly, so
     the useful figure is how much must sit in savings until the next one."""
     user, checking, card = _seed_spreadsheet_scenario(db_session)
-    card.current_balance = Decimal("40000.00")  # force a shortfall
+    card.pending_charges = Decimal("40000.00")  # force a shortfall
 
     with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
@@ -464,7 +464,7 @@ def test_default_strategy_is_save_monthly(db_session):
 def test_left_to_spend_card_notes_never_leak_a_balance(db_session):
     """The frontend renders ExplainChild notes unmasked -- maskIfHidden is
     only ever applied to `amount` -- so a per-card note built from the
-    card's own numbers (current/balance_due/pending) would leak a hidden
+    card's own numbers (spending/pending) would leak a hidden
     balance straight through the dialog. The Left to Spend card children
     must therefore describe the formula shape only, never the figures.
 
@@ -474,9 +474,11 @@ def test_left_to_spend_card_notes_never_leak_a_balance(db_session):
     across every explanation would be wrong.
     """
     snap = _snapshot_for_notes_test(db_session)
-    card_row = next(r for r in snap.explain["left_to_spend"].rows if r.label == "New card spending")
-    assert len(card_row.children) >= 1
-    for child in card_row.children:
+    rows = [r for r in snap.explain["left_to_spend"].rows if r.label in ("Card spending this month", "Pending charges")]
+    assert len(rows) == 2
+    children = [c for r in rows for c in r.children]
+    assert len(children) >= 2
+    for child in children:
         assert child.note, f"{child.label} must carry a note"
         assert not re.search(r"\d", child.note), (
             f"{child.label}'s note leaks a figure: {child.note!r}"

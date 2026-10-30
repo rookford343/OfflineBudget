@@ -481,7 +481,10 @@ The daily report arrives at 7:15am by default, right after the morning bank sync
 reports fresh numbers:
 
 - **Household Snapshot**: Spendable this week, Safety Margin, and the lowest
-  projected balance in the next three months.
+  projected balance in the next three months. Spendable counts card
+  purchases by calendar month (since the 1st, returns subtracted, card
+  payments left out) plus pending card charges, so a statement closing
+  mid-month doesn't change it.
 - **Checking Accounts**: each balance and when its last transaction posted.
 - **Upcoming (next 7 days)**: bills and income due this week, using a real
   bill amount when you've entered one.

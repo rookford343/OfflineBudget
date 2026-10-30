@@ -35,10 +35,13 @@ def test_every_explanation_replays_to_its_displayed_value(db_session):
 def test_left_to_spend_steps(db_session):
     snap = _snapshot(db_session, date(2026, 8, 7))
     ex = snap.explain["left_to_spend"]
-    assert [r.op for r in ex.rows] == ["start", "subtract", "add", "result"]
+    assert [r.op for r in ex.rows] == ["start", "subtract", "subtract", "add", "result"]
     assert ex.rows[0].amount == snap.leftover
     assert len(ex.rows[0].children) == 4          # income, bills, savings, groceries
+    assert ex.rows[1].label == "Card spending this month"
     assert len(ex.rows[1].children) >= 1          # one per active card
+    assert ex.rows[2].label == "Pending charges"
+    assert len(ex.rows[2].children) >= 1          # one per active card
 
 
 def test_last_week_of_month_is_a_single_step(db_session):

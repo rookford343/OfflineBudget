@@ -1013,7 +1013,7 @@ def build_forecast(
             # spreadsheet forecast pays off only the last-statement total on
             # the due date ("2026 Forecast" row 24: "=L23-5000.00-100.00",
             # no pending-charges term), and separately counts pending_charges
-            # exactly once via budget_snapshot.py's new_spending_total.
+            # exactly once via budget_snapshot.py's Left to Spend.
             # Adding it here too double-counted it: once in this payoff
             # projection, once again downstream. Confirmed live 2026-08-09.
             #

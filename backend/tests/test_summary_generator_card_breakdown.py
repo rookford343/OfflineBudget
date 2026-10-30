@@ -46,8 +46,8 @@ def test_card_row_breaks_out_balance_upcoming_payoff_and_cycle_spend(db_session)
 
 def test_cycle_spend_includes_pending_charges(db_session):
     """pending_charges is spend that has happened but not posted -- it belongs
-    in "spent this cycle", and budget_snapshot's new_spending_total already
-    counts it that way. The email must not disagree with Left to Spend."""
+    in "spent this cycle", and budget_snapshot's Left to Spend subtracts it
+    too."""
     user, account = _user_with_checking(db_session)
     db_session.add(models.CreditCard(
         user_id=user.id, name="Visa", credit_limit=Decimal("10000.00"),

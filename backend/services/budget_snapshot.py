@@ -19,7 +19,7 @@ from backend.services.forecast_engine import (
 )
 from backend.services.card_matching import card_matches_description
 from backend.services.spendable_pacer import compute_weekly_spendable
-from backend.services.spending_helpers import category_totals_for_range, merchant_totals
+from backend.services.spending_helpers import category_totals_for_range, is_card_payment, merchant_totals
 from backend.services.statement_reconcile import statement_stale_reason
 
 
@@ -174,6 +174,34 @@ def _card_linked_recurring_items(
     # with forecast_engine, whose Safety Margin floor walk leaves exactly
     # these (the ones not charged yet) out of the carried card payoff.
     return [item for item in items if is_card_bill_in_month(item, as_of)]
+
+
+def _card_spending_this_month(
+    db: Session, user_id: int, active_cards: list, as_of: date,
+) -> dict[int, Decimal]:
+    """Per active card: posted card transactions dated from the 1st of
+    `as_of`'s month through `as_of`. Charges add, returns subtract (the
+    card convention, positive = charge), and card payments are skipped via
+    the shared is_card_payment classifier. Pending rows live in their own
+    table and are counted separately through pending_charges."""
+    totals = {c.id: Decimal("0.00") for c in active_cards}
+    if not totals:
+        return totals
+    rows = db.query(
+        models.CreditCardTransaction.card_id,
+        models.CreditCardTransaction.merchant,
+        models.CreditCardTransaction.amount,
+    ).filter(
+        models.CreditCardTransaction.user_id == user_id,
+        models.CreditCardTransaction.card_id.in_(list(totals)),
+        models.CreditCardTransaction.date >= as_of.replace(day=1),
+        models.CreditCardTransaction.date <= as_of,
+    ).all()
+    for card_id, merchant, amount in rows:
+        if is_card_payment(merchant):
+            continue
+        totals[card_id] += amount
+    return totals
 
 
 def _cc_budget_total(db: Session, user_id: int, as_of: date) -> Decimal:
@@ -606,49 +634,37 @@ def compute_budget_snapshot(
         models.CreditCard.user_id == user.id,
         models.CreditCard.is_active == True,
     ).all()
-    # NEW spending accumulated since each card's last statement closed --
-    # NOT the full running balance, and NOT just balance_due. quarter_min
-    # (below) already reflects paying off each card's last-statement total
-    # (balance_due) via the forecast's own payoff projection, so subtracting
-    # the full current_balance again here would double-count that same
-    # statement amount; subtracting only balance_due would miss the new,
-    # not-yet-statemented spending entirely. current_balance - balance_due
-    # + pending_charges is exactly that gap. Read directly from the user's real
-    # spreadsheet 2026-08-09 ("2026 Overview"!B12: "=-5000.00+8500.00+500.00"
-    # -- literally -balance_due + current_balance + pending_charges for
-    # Chase Sapphire). Before bank sync this was usually ~0 (current_balance
-    # tracked balance_due closely by hand); live sync now keeps
-    # current_balance accurate to the minute, so the gap is real and
-    # material -- confirmed live: Chase Sapphire alone carried a $1,500.00
-    # gap on 2026-08-09.
+    # Card spending counts by CALENDAR MONTH: posted card purchases dated
+    # from the 1st through as_of (returns subtract, card payments excluded),
+    # plus each card's pending_charges (current, not yet posted).
+    # charged_so_far adds back the recurring card bills already charged this
+    # month, because leftover already holds them as bills -- so a posted
+    # subscription nets out once, as its bill.
     #
-    # Left to Spend used to subtract the full sum of current_balance instead,
-    # which double-counted every card's already-statemented balance_due: that
-    # amount is a payment the user has already budgeted for (it sits in Checking
-    # Bills and lands in the forecast on the due date), not money eroding this
-    # month's spending room. Confirmed live 2026-08-12: the app showed Left to
-    # Spend -$6,500.00 against the spreadsheet's +$750.00, a $8,420 gap almost
-    # exactly equal to the $7,500.00 of balance_due across both cards. The old
-    # test fixture hid this by pre-computing the delta into current_balance
-    # and leaving balance_due at 0.
-    # Computed once per card so this and `card_children` below can never
-    # drift apart -- `new_spending_total` is just their sum, not the same
-    # formula written a second time.
-    card_new_spending = [
-        (c, c.current_balance - c.balance_due + c.pending_charges) for c in active_cards
-    ]
-    new_spending_total = sum((amount for _c, amount in card_new_spending), Decimal("0"))
+    # History: from 2026-08-09 this term was "new spending since each card's
+    # last statement" (current_balance - balance_due + pending_charges, the
+    # user's spreadsheet cell), which replaced subtracting the full
+    # current_balance (that double-counted balance_due). Changed to calendar
+    # month on 2026-10-30 at the user's request: when a statement closed late
+    # in the month (Chase closes on the 28th), that month's purchases moved
+    # into balance_due and stopped counting, so Spendable jumped up before
+    # the month was over. Accepted trade-offs: this no longer matches the
+    # spreadsheet formula, and transactions count on their posted date, so a
+    # late-month charge that posts on the 1st lands in the next month.
+    month_start = as_of.replace(day=1)
+    card_month_spending = _card_spending_this_month(db, user.id, active_cards, as_of)
+    card_spending_this_month = sum(card_month_spending.values(), Decimal("0"))
+    pending_charges_total = sum((c.pending_charges for c in active_cards), Decimal("0"))
     # Computed once per card, with real wall-clock "today" (not `as_of`,
     # which can be a past date a scenario or the weekly email is replaying)
-    # -- matches CreditCardOut.statement_stale_reason exactly, and feeds
-    # both the CardSnapshot list and the Left to Spend note below so they
-    # can never disagree about which cards look stale.
+    # -- matches CreditCardOut.statement_stale_reason exactly for the
+    # CardSnapshot list below.
     stale_today = date.today()
     card_stale_reasons = {c.id: statement_stale_reason(c, stale_today) for c in active_cards}
     charged_so_far = _charged_so_far(db, user.id, as_of)
     cc_budget_total = _cc_budget_total(db, user.id, as_of)
 
-    left_to_spend = leftover - new_spending_total + charged_so_far
+    left_to_spend = leftover - card_spending_this_month - pending_charges_total + charged_so_far
     lookahead_window = _lookahead_window(
         db, user.id, account_id, as_of, proposal=proposal, overrides=overrides,
     )
@@ -656,7 +672,7 @@ def compute_budget_snapshot(
     next_month_min, next_month_min_date, _next_month_start, next_month_label = _next_month_minimum(
         lookahead_window, as_of,
     )
-    # Safety Margin does NOT subtract new_spending_total -- unlike Left to
+    # Safety Margin does NOT subtract card spending -- unlike Left to
     # Spend, quarter_min here is a CHECKING-account balance that the new
     # spending has already flowed through (a card swipe debits checking the
     # moment the statement's payoff hits the forecast's due-date injection;
@@ -669,7 +685,7 @@ def compute_budget_snapshot(
     # spreadsheet 2026-08-13 and rewrote '2026 Overview'!B18 to
     # "=B25-(Budget!F2-SUMIF(Budget!C22:C40,'<='&DAY(B11),Budget!B22:B40))" --
     # quarter minimum minus only the recurring card bills not yet charged
-    # this month, nothing else. Do not re-add the new_spending_total term to
+    # this month, nothing else. Do not re-add a card-spending term to
     # make this look symmetric with Left to Spend -- they aren't, by design.
     #
     # This formula is right -- resolved 2026-08-13 after two rounds against
@@ -794,22 +810,21 @@ def compute_budget_snapshot(
             )
         return builder.build(weekly_amount)
 
-    # Static text, no amounts: the frontend renders ExplainChild.note
-    # unmasked (maskIfHidden only ever wraps `amount`), so a note built from
-    # the card's own numbers would leak a hidden balance straight through
-    # the dialog. A stale card (see card_stale_reasons above) swaps in the
-    # warning note instead -- still digit-free.
+    # Notes are static text with no figures: the frontend renders
+    # ExplainChild.note unmasked (maskIfHidden only ever wraps `amount`).
+    # The date in the label is not a balance.
+    since = f"{month_start:%b %-d}"
     card_children = [
         ExplainChild(
-            label=c.name,
-            amount=amount,
-            note=(
-                "statement looks stale, update it on Credit Cards"
-                if card_stale_reasons[c.id]
-                else "current balance − last statement + pending charges"
-            ),
+            label=f"{c.name}: purchases since {since}",
+            amount=card_month_spending[c.id],
+            note="returns subtract, card payments excluded",
         )
-        for c, amount in card_new_spending
+        for c in active_cards
+    ]
+    pending_children = [
+        ExplainChild(label=c.name, amount=c.pending_charges, note="charged but not posted yet")
+        for c in active_cards
     ]
     low_note = (
         "Lowest projected checking balance in the next 3 months"
@@ -829,8 +844,11 @@ def compute_budget_snapshot(
         "left_to_spend": ExplainBuilder("Left to Spend")
             .start("Leftover", leftover, note="Income after bills, savings and groceries",
                    children=leftover_children(parts))
-            .subtract("New card spending", new_spending_total,
-                      note="Spent on cards since each card's last statement", children=card_children)
+            .subtract("Card spending this month", card_spending_this_month,
+                      note=f"Posted card purchases since {since}, returns subtracted, card payments excluded",
+                      children=card_children)
+            .subtract("Pending charges", pending_charges_total,
+                      note="Card charges not posted yet", children=pending_children)
             .add("Card bills already charged", charged_so_far,
                  note="Recurring card subscriptions already posted this month (already inside card spending)")
             .build(left_to_spend),

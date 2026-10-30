@@ -37,7 +37,7 @@ export default function HowCalculated(
   const money = (v: string) => maskIfHidden(hidden, fmt(Math.abs(parseFloat(v))));
   const signed = (v: string) => `${parseFloat(v) < 0 ? "−" : ""}${money(v)}`;
   // An add/subtract row's amount can itself be negative (e.g.
-  // new_spending_total < 0 after a payoff syncs before a stale statement).
+  // a month's card spending < 0 when returns outweigh purchases).
   // SYMBOL[op] is a fixed +/−, so left alone a negative amount reads
   // backwards -- a "subtract" of −300 must show as "+ $300", not "− $300".
   // Flip the symbol and let money() show the absolute value. Children and

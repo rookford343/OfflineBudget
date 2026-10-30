@@ -20,7 +20,7 @@ def test_cc_payment_injection_excludes_pending_charges(db_session):
     closed statement), matching "2026 Forecast" row 24
     ("=L23-7342.90-143.00" -- no pending-charges term). pending_charges is
     counted exactly once, downstream, via
-    budget_snapshot.py's new_spending_total. Including it here too used to
+    budget_snapshot.py's Left to Spend (its pending term). Including it here too used to
     double-count it.
 
     Dates relative to date.today() rather than hardcoded 2026-08 values --

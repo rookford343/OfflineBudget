@@ -278,9 +278,9 @@ def generate_daily_summary(
         A card's current_balance blends two things that call for different
         reactions: balance_due is already-statemented debt that leaves on the
         due date no matter what the user does now, while the remainder is new spend
-        he can still steer. Same arithmetic budget_snapshot uses for
-        new_spending_total, so the email and Left to Spend can never disagree
-        about what counts as new spend.
+        he can still steer. This is the statement cycle, not Left to Spend's
+        figure: since 2026-10-30 Left to Spend counts card purchases by
+        calendar month instead.
 
         balance_due is manual-entry only (bank sync never writes it), so it
         goes stale after a payment and can exceed current_balance -- which

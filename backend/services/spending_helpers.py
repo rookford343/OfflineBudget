@@ -26,7 +26,10 @@ NOT_SAVINGS = or_(
 # "MINDBODY PAYMENTS" (a real gym charge) is not caught.
 _CARD_PAYMENT_PATTERNS = re.compile(
     r"(^|\b)(automatic\s+payment|autopay|online\s+payment|payment\s*-\s*thank"
-    r"|payment\s+thank\s+you|mobile\s+payment|electronic\s+payment)(\b|$)",
+    r"|payment\s+thank\s+you|mobile\s+payment|electronic\s+payment"
+    # Apple Card's payment credit: "ACH DEPOSIT INTERNET TRANSFER FROM
+    # ACCOUNT ENDING IN ...".
+    r"|internet\s+transfer\s+from\s+account)(\b|$)",
     re.IGNORECASE,
 )
 

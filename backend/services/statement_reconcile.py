@@ -7,8 +7,9 @@ bank_sync_service.py's card sync branch). Once the user pays a statement,
 current_balance drops to the real new-cycle balance but balance_due keeps
 carrying the old statement total forever:
   - budget_snapshot.py's per-card "new card spending"
-    (current_balance - balance_due + pending_charges) goes negative and
-    inflates Left to Spend.
+    (current_balance - balance_due + pending_charges) went negative and
+    inflated Left to Spend (until 2026-10-30, when Left to Spend switched to
+    calendar-month card purchases and stopped reading balance_due).
   - forecast_engine.py's payment_is_stale rolls a past next_payment_date
     forward and plans the same payment again.
 

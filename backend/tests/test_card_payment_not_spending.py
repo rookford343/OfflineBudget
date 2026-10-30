@@ -27,6 +27,9 @@ from backend.services.spendable_pacer import discretionary_spend_card
     "ONLINE PAYMENT FROM CHK 1234",
     "MOBILE PAYMENT - THANK YOU",
     "ELECTRONIC PAYMENT RECEIVED",
+    "Payment Thank You",
+    # Apple Card's wording for a payment credit.
+    "ACH DEPOSIT INTERNET TRANSFER FROM ACCOUNT ENDING IN 0000",
 ])
 def test_recognises_payment_merchants(merchant):
     assert is_card_payment(merchant)
@@ -37,6 +40,7 @@ def test_recognises_payment_merchants(merchant):
     "PAYPAL *BLISS DIAMO",
     "PAYMENTS PLUS SALON",
     "TARGET T-1063",
+    "WIRE TRANSFER SERVICES",
     None,
     "",
 ])

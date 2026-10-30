@@ -268,10 +268,12 @@ def test_stale_reason(db_session, next_payment, balance_due, current, as_of, exp
 
 # ── budget_snapshot's Left to Spend note ──────────────────────────────────────
 
-def test_left_to_spend_note_flags_a_stale_card_with_no_digits(db_session):
-    """When a card is stale, its Left to Spend card child swaps the usual
-    formula-shape note for the stale-statement warning -- still digit-free,
-    since ExplainChild.note renders unmasked on the frontend."""
+def test_stale_card_still_flagged_but_left_to_spend_note_no_longer_warns(db_session):
+    """Since 2026-10-30 Left to Spend counts the calendar month's posted card
+    purchases, which never read balance_due, so a stale statement can't skew
+    it and its card child no longer carries the stale warning. Staleness is
+    still reported on the card itself (Credit Cards page). The note stays
+    digit-free, since ExplainChild.note renders unmasked on the frontend."""
     user, card = _make_card(
         db_session, statement_day=28, due_day=25,
         next_payment_date=date(2026, 9, 25), balance_due=Decimal("6324.50"),
@@ -290,9 +292,10 @@ def test_left_to_spend_note_flags_a_stale_card_with_no_digits(db_session):
     ):
         snap = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 9, 20))
 
-    card_row = next(r for r in snap.explain["left_to_spend"].rows if r.label == "New card spending")
-    child = next(c for c in card_row.children if c.label == card.name)
-    assert child.note == "statement looks stale, update it on Credit Cards"
+    assert next(c for c in snap.cards if c.id == card.id).statement_stale_reason == "balance_below_statement"
+    card_row = next(r for r in snap.explain["left_to_spend"].rows if r.label == "Card spending this month")
+    child = next(c for c in card_row.children if c.label.startswith(card.name))
+    assert "stale" not in child.note
     assert not any(ch.isdigit() for ch in child.note)
 
 

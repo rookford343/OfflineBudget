@@ -550,7 +550,7 @@ def available_to_spend(
     # bank sync (and CSV import) only produce itemized rows once a charge
     # actually posts, which can lag the real purchase by days. Every OTHER
     # place in this app that answers "how much has really been spent"
-    # (budget_snapshot.py's new_spending_total, forecast_engine.py's carried
+    # (budget_snapshot.py's Left to Spend, forecast_engine.py's carried
     # balance) already folds this in; this endpoint didn't, so a real,
     # already-confirmed charge the user knows about (2026-09-02: $500.00 on
     # Chase, current_balance already reflects it) stayed invisible here,

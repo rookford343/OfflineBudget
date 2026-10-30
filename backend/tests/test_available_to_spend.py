@@ -100,7 +100,7 @@ def test_fresh_pending_charges_count_toward_spent_this_month(db_session):
     the user confirmed $470.90 of real new spend, because that spend hadn't
     itemized into credit_card_transactions yet -- every other place in the
     app answering "how much has really been spent" (budget_snapshot.py's
-    new_spending_total, forecast_engine.py's carried balance) already reads
+    Left to Spend, forecast_engine.py's carried balance) already reads
     pending_charges; this endpoint didn't."""
     from datetime import datetime
     user, acct, card = _seed(db_session)
