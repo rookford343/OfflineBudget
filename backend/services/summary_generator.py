@@ -1,11 +1,12 @@
 import calendar
-from datetime import date, datetime, timedelta
+import html as html_lib
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, ROUND_CEILING
 from collections import defaultdict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
-from backend.schemas import MonthlySummary, WeeklyDigest, ForecastRisk
+from backend.schemas import BankConnectionStatusOut, MonthlySummary, WeeklyDigest, ForecastRisk
 from backend.services.forecast_engine import build_forecast, find_balance_risk, _next_occurrence_on_or_after
 from backend.services.budget_snapshot import compute_budget_snapshot, spending_breakdown
 from backend.services.upcoming_bills import upcoming_bills
@@ -120,6 +121,67 @@ def _stale_bank_connections(db: Session, user_id: int, now: datetime | None = No
     ]
 
 
+def _utc_to_local(d: datetime) -> datetime:
+    """A stored UTC-naive timestamp as naive local time. The email is built
+    on the household's own machine, so its local zone is the user's."""
+    return d.replace(tzinfo=timezone.utc).astimezone().replace(tzinfo=None)
+
+
+def _friendly_time(local: datetime, now_local: datetime) -> str:
+    """"today 7:00 AM", "yesterday 3:00 PM", otherwise "Oct 27 7:00 AM"."""
+    days = (now_local.date() - local.date()).days
+    day = "today" if days == 0 else "yesterday" if days == 1 else local.strftime("%b %-d")
+    return f"{day} {local.strftime('%-I:%M %p')}"
+
+
+def _last_pull_line(
+    db: Session, user_id: int, *, now_local: datetime | None = None, to_local=_utc_to_local,
+) -> str | None:
+    """Plain-text "Bank data updated <time> · <names> (<provider>) ✓ · ..."
+    line, the same meaning as the Dashboard's: the time is
+    BankConnectionStatusOut.last_success_at (newest active-link stamp, which
+    only a committed import writes), never last_synced_at, which a failed
+    run also stamps. A failing connection reads "⚠ last good: <time>". None
+    when no connection has an active link."""
+    now_local = now_local or datetime.now()
+    connections = db.query(models.BankConnection).filter(
+        models.BankConnection.user_id == user_id,
+        models.BankConnection.status != models.BankConnectionStatus.disconnected,
+    ).order_by(models.BankConnection.id).all()
+    parts: list[str] = []
+    successes: list[datetime] = []
+    for c in connections:
+        active = [link for link in c.links if link.is_active]
+        if not active:
+            continue
+        names: list[str] = []
+        for link in active:
+            name = (
+                (link.local_account.name if link.local_account else None)
+                or (link.local_credit_card.name if link.local_credit_card else None)
+                or link.simplefin_account_name
+            )
+            if name and name not in names:
+                names.append(name)
+        provider = {"plaid": "Plaid", "simplefin": "SimpleFIN"}.get(c.provider, c.provider)
+        label = f"{', '.join(names)} ({provider})"
+        last_success = BankConnectionStatusOut.model_validate(c).last_success_at
+        if last_success:
+            successes.append(last_success)
+        if c.last_error or c.status == models.BankConnectionStatus.error:
+            when = f"last good: {_friendly_time(to_local(last_success), now_local)}" if last_success else "sync failing"
+            parts.append(f"{label} ⚠ {when}")
+        else:
+            parts.append(f"{label} ✓")
+    if not parts:
+        return None
+    head = (
+        f"Bank data updated {_friendly_time(to_local(max(successes)), now_local)}"
+        if successes else "Bank data not pulled yet"
+    )
+    return " · ".join([head, *parts])
+
+
 def _next_fire_date(item: models.RecurringItem, today: date, days_ahead: int = 7) -> date | None:
     """The next date within [today, today+days_ahead] this item fires, or
     None. The single source of truth _fires_soon delegates to (bool) and the
@@ -207,6 +269,14 @@ def generate_daily_summary(
     ).all()
 
     stale_connections = _stale_bank_connections(db, user.id)
+    last_pull = _last_pull_line(db, user.id)
+    # Small and muted under the date; word-break so long names wrap inside
+    # a 340px viewport instead of widening it, and a no-break space keeps
+    # each ✓/⚠ on the same line as the connection it marks.
+    last_pull_html = (
+        f"<p style='color:#9ca3af;margin:-14px 0 20px;font-size:11px;line-height:1.4;"
+        f"word-break:break-word;overflow-wrap:break-word'>{html_lib.escape(last_pull).replace(' ✓', '&nbsp;✓').replace(' ⚠', '&nbsp;⚠')}</p>"
+    ) if last_pull else ""
 
     fmt = _fmt
 
@@ -470,6 +540,7 @@ def generate_daily_summary(
 <div style='max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;padding:24px;color:#1f2937'>
 <h2 style='color:#4f46e5;margin:0 0 4px;font-size:19px'>OfflineBudget Daily Summary</h2>
 <p style='color:#6b7280;margin:0 0 20px;font-size:13px'>{today.strftime("%A, %B %-d, %Y")}</p>
+{last_pull_html}
 
 {stale_html}
 {household_html}
@@ -536,8 +607,9 @@ def generate_daily_summary(
         + "\n".join(f"  {_connection_label(c)}: {_stale_reason(c)}" for c in stale_connections) + "\n"
     ) if stale_connections else ""
 
+    last_pull_text = f"{last_pull}\n" if last_pull else ""
     text = f"""OfflineBudget Daily Summary — {today.strftime("%B %-d, %Y")}
-{stale_text}
+{last_pull_text}{stale_text}
 {household_text}
 CHECKING ACCOUNTS
 {acct_text}
