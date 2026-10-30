@@ -18,6 +18,7 @@ import BillsToConfirm from "../components/BillsToConfirm";
 import AmountDrift from "../components/AmountDrift";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
 import RecentTransactions from "../components/RecentTransactions";
+import BankSyncStatusLine from "../components/BankSyncStatusLine";
 
 /** The next date on/after `today` whose day-of-month is `dueDay` (clamped to
  *  the month's last day), plus the day-count to reach it -- both derived
@@ -222,6 +223,7 @@ export default function Dashboard() {
       <div>
         <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Dashboard <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
         <p className="text-sm text-gray-500">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
+        <BankSyncStatusLine accounts={accounts} cards={cards} />
       </div>
 
       {/* Anything asking for an action goes first. These were sitting below

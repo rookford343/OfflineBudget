@@ -1261,6 +1261,17 @@ class BankConnectionStatusOut(BaseModel):
         (always False for SimpleFIN, which has no cursor)."""
         return self.sync_cursor is not None
 
+    @computed_field
+    @property
+    def last_success_at(self) -> Optional[datetime]:
+        """When this connection last pulled data successfully: the newest
+        last_synced_at among its active links. Both providers stamp a link
+        only after that link's import commits, unlike the connection's own
+        last_synced_at, which a failed SimpleFIN run also stamps. None when
+        no active link has ever synced."""
+        stamps = [link.last_synced_at for link in self.links if link.is_active and link.last_synced_at]
+        return max(stamps) if stamps else None
+
 
 class BankSyncNowResponse(BaseModel):
     synced_connections: int

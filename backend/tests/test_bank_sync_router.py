@@ -911,3 +911,35 @@ def test_disconnecting_plaid_drops_its_checking_pending_snapshot(client, db_sess
         resp = test_client.delete(f"/bank-sync/{plaid.id}")
     assert resp.status_code == 204
     assert db_session.query(models.AccountPendingTransaction).count() == 0
+
+
+def test_status_last_success_at_is_newest_active_link_sync_not_failed_run_stamp(client, db_session):
+    """A failed SimpleFIN run stamps the connection's last_synced_at, so the
+    dashboard's "last pulled" time comes from the links, which are stamped
+    only after a successful import. Inactive links don't count."""
+    from datetime import datetime
+    test_client, user = client
+    failed_run = datetime(2026, 1, 10, 12, 0)
+    good = datetime(2026, 1, 8, 12, 0)
+    older = datetime(2026, 1, 5, 12, 0)
+    inactive_newer = datetime(2026, 1, 9, 12, 0)
+    connection = models.BankConnection(
+        user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url"),
+        status=models.BankConnectionStatus.error, last_error="boom", last_synced_at=failed_run,
+    )
+    never = models.BankConnection(user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url"))
+    db_session.add_all([connection, never])
+    db_session.commit()
+    db_session.add_all([
+        models.BankConnectionAccountLink(connection_id=connection.id, simplefin_account_id="a", simplefin_account_name="A", last_synced_at=good),
+        models.BankConnectionAccountLink(connection_id=connection.id, simplefin_account_id="b", simplefin_account_name="B", last_synced_at=older),
+        models.BankConnectionAccountLink(connection_id=connection.id, simplefin_account_id="c", simplefin_account_name="C", last_synced_at=inactive_newer, is_active=False),
+        models.BankConnectionAccountLink(connection_id=never.id, simplefin_account_id="d", simplefin_account_name="D"),
+    ])
+    db_session.commit()
+
+    by_id = {c["id"]: c for c in test_client.get("/bank-sync/status").json()}
+
+    assert by_id[connection.id]["last_success_at"] == good.isoformat()
+    assert by_id[connection.id]["last_synced_at"] == failed_run.isoformat()
+    assert by_id[never.id]["last_success_at"] is None
