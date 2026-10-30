@@ -19,6 +19,7 @@ import AmountDrift from "../components/AmountDrift";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
 import RecentTransactions from "../components/RecentTransactions";
 import BankSyncStatusLine from "../components/BankSyncStatusLine";
+import CheckingBalancesCard from "../components/CheckingBalancesCard";
 
 /** The next date on/after `today` whose day-of-month is `dueDay` (clamped to
  *  the month's last day), plus the day-count to reach it -- both derived
@@ -91,6 +92,11 @@ export default function Dashboard() {
   const { data: accounts = [] } = useQuery<any[]>({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const checkingAccounts = accounts.filter((a) => a.type === "checking");
   const { data: cards = [] } = useQuery<any[]>({ queryKey: ["credit-cards"], queryFn: cardsApi.list });
+  // The issuers' pending rows, only counted here ("N pending"); the amount
+  // shown on top of a card's posted balance is its pending_charges total.
+  const { data: cardPending = [] } = useQuery<any[]>({ queryKey: ["card-pending-transactions"], queryFn: cardsApi.pendingTransactions });
+  const cardPendingCount = new Map<number, number>();
+  for (const p of cardPending) cardPendingCount.set(p.card_id, (cardPendingCount.get(p.card_id) ?? 0) + 1);
   const { data: recurring = [] } = useQuery<any[]>({ queryKey: ["recurring"], queryFn: () => recurringApi.list(true) });
   // Real next-fire date (frequency/start/end/month_of_year aware) and any
   // confirmed BillAmountOverride actual for that date -- replaces building
@@ -593,6 +599,10 @@ export default function Dashboard() {
       {/* Same idea: a third column rather than two stretched ones, so
           All Accounts rises out of the tail of the page. */}
       <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6">
+        {/* Checking stacks above Credit cards in one column, so the grid
+            keeps its three slots. */}
+        <div className="space-y-6">
+        <CheckingBalancesCard accounts={accounts} hidden={balancesHidden} />
         {/* Credit cards */}
         <div className="card">
           <div className="flex items-center justify-between mb-4">
@@ -611,6 +621,9 @@ export default function Dashboard() {
                 const balanceDue = parseFloat(String(c.balance_due));
                 const pendingCharges = parseFloat(String(c.pending_charges ?? 0)) || 0;
                 const cycleSpend = Math.max(0, currentBalance - balanceDue + pendingCharges);
+                // Display-only: the balance as if pending charges go through.
+                const afterPending = currentBalance + pendingCharges;
+                const pendingCount = cardPendingCount.get(c.id) ?? 0;
                 return (
                   <div key={c.id} className="flex items-center justify-between">
                     <div className="min-w-0">
@@ -658,7 +671,13 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div className="text-right shrink-0 ml-4">
-                      <p className={`text-sm font-bold tabular-nums ${utilColor(c.utilization_pct)}`}>{maskIfHidden(balancesHidden, fmt(c.current_balance))}</p>
+                      <p className={`text-sm font-bold tabular-nums ${utilColor(c.utilization_pct)}`}>{maskIfHidden(balancesHidden, fmt(afterPending))}</p>
+                      {pendingCharges !== 0 && (
+                        <p className="text-xs text-gray-400">
+                          Posted {maskIfHidden(balancesHidden, fmt(currentBalance))}
+                          {" · "}{pendingCount > 0 ? `${pendingCount} pending` : "incl. pending"}
+                        </p>
+                      )}
                       <p className="text-xs text-gray-500">{c.utilization_pct}% of {maskIfHidden(balancesHidden, fmt(c.credit_limit))}</p>
                     </div>
                   </div>
@@ -666,6 +685,7 @@ export default function Dashboard() {
               })}
             </div>
           )}
+        </div>
         </div>
 
         {/* Upcoming bills */}

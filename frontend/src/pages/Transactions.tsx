@@ -10,6 +10,8 @@ import { CategoryOptions, AccountOptions } from "../lib/selectOptions";
 import { VerificationFlagButton } from "../components/VerificationFlagButton";
 import { sortCategoryList, byName } from "../lib/selectOptions";
 import { primaryChecking } from "../lib/accounts";
+import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
+import { PendingBadge } from "../components/CheckingBalancesCard";
 
 // A single row shape both checking transactions and card charges normalize
 // into for the "All" tab -- lets one table render a chronological, source-
@@ -347,6 +349,41 @@ export default function Transactions() {
     }),
   ].sort((a, b) => a.date.localeCompare(b.date));
 
+  // Checking list's Balance column (primary checking only). Posted rows walk
+  // backwards from the account's current_balance through every posted row
+  // from `start` to today -- its own unfiltered query, so the search/amount
+  // filters and an `end` before today can't break the walk. The bank's
+  // pending rows sit on top, applied as if they had gone through; forecast
+  // projections aren't bank-pending, so they get no balance. A pending item
+  // that posts leaves the snapshot on the same sync that imports it, so it
+  // is never counted twice.
+  const balancesHidden = useBalancesHidden();
+  const balanceAccount = primaryChecking(accounts as any[]);
+  const { data: balanceWalkTxns = [] } = useQuery<any[]>({
+    queryKey: ["transactions-balance-walk", balanceAccount?.id, start, today()],
+    queryFn: () => transactionsApi.list({ start, end: today(), account_id: balanceAccount!.id }),
+    enabled: txnTab === "checking" && !!balanceAccount,
+  });
+  const postedBalanceAfter = new Map<number, number>();
+  const pendingBalanceAfter = new Map<PendingRow, number>();
+  if (balanceAccount) {
+    let run = parseFloat(balanceAccount.current_balance);
+    for (const p of pendingRows.filter(p => p.source === "bank_pending")) { // oldest first
+      run += p.amount;
+      pendingBalanceAfter.set(p, run);
+    }
+    run = parseFloat(balanceAccount.current_balance);
+    for (const t of [...balanceWalkTxns].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)) {
+      postedBalanceAfter.set(t.id, run);
+      run -= parseFloat(t.amount);
+    }
+  }
+  const balanceCell = (v: number | undefined) => (
+    <td className="px-4 py-3 text-right tabular-nums text-gray-500 hidden sm:table-cell whitespace-nowrap">
+      {v === undefined ? "—" : maskIfHidden(balancesHidden, fmt(v))}
+    </td>
+  );
+
   const unifiedRows: UnifiedRow[] = txnTab === "all" ? [
     ...txns.map((t: any) => ({
       id: t.id, kind: "checking" as const, date: t.date, description: t.description,
@@ -396,7 +433,8 @@ export default function Transactions() {
       if (filterAmountMax && amt > parseFloat(filterAmountMax)) return false;
       return true;
     })
-    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id) : [];
+    // Pending rows first (not yet posted), then posted rows, each newest first.
+    .sort((a, b) => Number(a.isActual) - Number(b.isActual) || b.date.localeCompare(a.date) || b.id - a.id) : [];
 
   const activeReconcileAccountId = reconcileAccountId ?? (primaryChecking(accounts as any[])?.id ?? null);
   const { data: reconcileData, isLoading: reconcileLoading } = useQuery({
@@ -651,11 +689,7 @@ export default function Transactions() {
                         <div className="truncate flex items-center gap-1.5">
                           <SourceBadge source={r.source} />
                           {r.description}
-                          {!r.isActual && (
-                            <span className="shrink-0 text-[10px] uppercase tracking-wide px-1 rounded bg-gray-100 dark:bg-gray-800 text-gray-500">
-                              pending
-                            </span>
-                          )}
+                          {!r.isActual && <PendingBadge />}
                         </div>
                         {/* Everything that doesn't earn a column of its own but
                             changes what the row means. */}
@@ -718,19 +752,23 @@ export default function Transactions() {
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Category</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Account</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase hidden sm:table-cell">Balance</th>
                     <th className="px-4 py-3 w-16"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                  {/* Pending items merged in and sorted alongside the real
-                      rows, newest first -- same convention as the All tab.
-                      Read-only: no notes/category-edit/delete, since there's
+                  {/* Pending items on top, then posted rows, each newest first
+                      -- same convention as the All tab. Pending rows are
+                      read-only: no notes/category-edit/delete, since there's
                       no database row behind them. */}
                   {[
-                    ...txns.map((t: any) => ({ kind: "actual" as const, date: t.date, t })),
-                    ...pendingRows.map((p, i) => ({ kind: "pending" as const, date: p.date, p, key: `pending-${i}` })),
+                    ...pendingRows.map((p, i) => ({ kind: "pending" as const, date: p.date, id: 0, p, key: `pending-${i}` }))
+                      // reverse() first: within one date, the row applied last
+                      // in the Balance walk is listed on top.
+                      .reverse().sort((a, b) => b.date.localeCompare(a.date)),
+                    ...txns.map((t: any) => ({ kind: "actual" as const, date: t.date, id: t.id as number, t }))
+                      .sort((a: any, b: any) => b.date.localeCompare(a.date) || b.id - a.id),
                   ]
-                    .sort((a, b) => b.date.localeCompare(a.date))
                     .map(row => row.kind === "actual" ? (
                     <tr key={row.t.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30">
                       <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
@@ -764,6 +802,7 @@ export default function Transactions() {
                       <td className={`px-4 py-3 text-right font-semibold tabular-nums ${parseFloat(row.t.amount) >= 0 ? "text-green-600" : "text-red-600"}`}>
                         {parseFloat(row.t.amount) >= 0 ? "+" : ""}{fmt(row.t.amount)}
                       </td>
+                      {balanceCell(postedBalanceAfter.get(row.t.id))}
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           <VerificationFlagButton
@@ -785,7 +824,7 @@ export default function Transactions() {
                       <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
                         <div className="truncate flex items-center gap-1.5">
                           {row.p.name}
-                          <span className="shrink-0 text-[10px] uppercase tracking-wide px-1 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">pending</span>
+                          <PendingBadge />
                         </div>
                       </td>
                       <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">{row.p.categoryName ?? (row.p.isCcPayment ? "Credit Card Payment" : "—")}</td>
@@ -793,6 +832,7 @@ export default function Transactions() {
                       <td className={`px-4 py-3 text-right font-semibold tabular-nums ${row.p.amount >= 0 ? "text-green-600" : "text-red-600"}`}>
                         {row.p.amount >= 0 ? "+" : ""}{fmt(row.p.amount)}
                       </td>
+                      {balanceCell(pendingBalanceAfter.get(row.p))}
                       <td className="px-4 py-3"></td>
                     </tr>
                   ))}
@@ -837,7 +877,7 @@ export default function Transactions() {
                       <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
                         <div className="truncate flex items-center gap-1.5">
                           {p.name}
-                          <span className="shrink-0 text-[10px] uppercase tracking-wide px-1 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">pending</span>
+                          <PendingBadge />
                         </div>
                       </td>
                       <td className="px-4 py-3 text-gray-500 hidden sm:table-cell">Credit Card Payment</td>
@@ -853,7 +893,7 @@ export default function Transactions() {
                       <td className="px-4 py-3 text-gray-900 dark:text-gray-100 max-w-xs">
                         <div className="truncate flex items-center gap-1.5">
                           {p.merchant}
-                          <span className="shrink-0 text-[10px] uppercase tracking-wide px-1 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">pending</span>
+                          <PendingBadge />
                         </div>
                       </td>
                       <td className="px-4 py-3 text-gray-400 hidden sm:table-cell">—</td>
