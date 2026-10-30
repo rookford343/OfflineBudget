@@ -581,15 +581,21 @@ def test_the_cycle_after_a_locked_payoff_uses_the_carried_balance(db_session):
     )
 
 
-def test_safety_floor_leaves_unbilled_card_bills_out_of_the_carried_cycle(db_session):
+def test_safety_floor_leaves_unbilled_card_bills_out_of_the_carried_cycle(db_session, monkeypatch):
     """Safety Margin subtracts this month's card bills itself (the user's sheet,
     '2026 Overview'!B18), so the floor's walk must not ALSO fold them into the
     carried cycle's payoff -- that charged them twice (found live
     2026-10-01). Same scenario as above: the carried cycle is $1,000, not
-    $1,100, when the caller opts out. Later cycles are untouched."""
+    $1,100, when the caller opts out. Later cycles are untouched.
+
+    Today is pinned early in a month so the subscription six days out lands
+    in THIS month: only this month's remaining bills are Safety Margin's to
+    subtract. One landing next month stays in the walk (see the test
+    below)."""
     from backend.services import budget_snapshot
 
-    today = date.today()
+    today = date(2026, 3, 10)
+    _freeze_today(monkeypatch, today)
     close_date = today + timedelta(days=14)
     sub_date = today + timedelta(days=6)
     due_day = (close_date + timedelta(days=3)).day
@@ -632,6 +638,88 @@ def test_safety_floor_leaves_unbilled_card_bills_out_of_the_carried_cycle(db_ses
     finally:
         budget_snapshot.build_forecast = real
     assert seen.get("include_unbilled_card_bills") is False
+
+
+def _floor_cycle_scenario(db, monkeypatch):
+    """Pinned to 3/20: a statement (balance_due) is due 4/3, the card closes
+    the 10th and is due the 3rd, so the carried cycle closes 4/10 and is paid
+    5/3. Subscriptions charged before that close: "Late" on 3/25 (this month,
+    not charged yet), "Early" on 4/5 (its March charge on 3/5 already
+    happened), and a yearly "Annual" on 4/8. A paycheck on the 15th ends the
+    locked-payoff dip so the 5/3 cycle can be the floor."""
+    today = date(2026, 3, 20)
+    _freeze_today(monkeypatch, today)
+    user = _user(db, username="floorcycle")
+    account = _checking(db, user, balance="20000.00")
+    card = _card(db, user, name="Chase", statement_day=10, due_day=3,
+                 current_balance=Decimal("2000.00"), balance_due=Decimal("1500.00"),
+                 pending_charges=Decimal("0"), next_payment_date=date(2026, 4, 3),
+                 monthly_spend_estimate=Decimal("1.00"))
+    for name, amount, freq, day, moy in [
+        ("Late", "40.00", models.RecurringFrequency.monthly, 25, None),
+        ("Early", "60.00", models.RecurringFrequency.monthly, 5, None),
+        ("Annual", "30.00", models.RecurringFrequency.yearly, 8, 4),
+    ]:
+        db.add(models.RecurringItem(
+            user_id=user.id, account_id=account.id, card_id=card.id, name=name,
+            amount=Decimal(amount), type=models.RecurringType.expense, frequency=freq,
+            day_of_month=day, month_of_year=moy, start_date=date(2026, 1, 1),
+        ))
+    db.add(models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Paycheck",
+        amount=Decimal("100.00"), type=models.RecurringType.income,
+        frequency=models.RecurringFrequency.monthly, day_of_month=15,
+        start_date=date(2026, 1, 1),
+    ))
+    db.commit()
+    return user, account, today
+
+
+def _cycle_line(entries, due):
+    return [
+        t for e in entries if e.date == due for t in e.transactions
+        if t.name == "CC Estimate: Chase" and not t.is_actual
+    ]
+
+
+def test_safety_floor_keeps_next_months_subscriptions_in_the_carried_cycle(db_session, monkeypatch):
+    """The floor walk drops only THIS month's remaining card bills (Safety
+    Margin subtracts those itself). Bills charged next month, before the
+    cycle closes, are nobody else's to count: dropping them made the floor
+    optimistic by that month's subscriptions (found live 2026-10-30)."""
+    user, account, today = _floor_cycle_scenario(db_session, monkeypatch)
+
+    floor = build_forecast(db_session, user.id, account.id, today, date(2026, 6, 30),
+                           include_unbilled_card_bills=False)
+    full = build_forecast(db_session, user.id, account.id, today, date(2026, 6, 30))
+
+    # carried 500 + Early 60 + Annual 30; "Late" (3/25) is this month's.
+    [floor_line] = _cycle_line(floor, date(2026, 5, 3))
+    assert floor_line.amount == Decimal("-590.00")
+    assert floor_line.basis["subscriptions_before_close"] == Decimal("90.00")
+    [full_line] = _cycle_line(full, date(2026, 5, 3))
+    assert full_line.amount == Decimal("-630.00")
+    assert full_line.basis["subscriptions_before_close"] == Decimal("130.00")
+
+
+def test_safety_margin_counts_this_months_remaining_card_bills_exactly_once(db_session, monkeypatch):
+    """Safety Margin = the floor walk's low minus this month's card bills not
+    yet charged. That must equal the low of the walk that keeps every
+    subscription in the payoff: "Late" counted once (by the subtraction),
+    not twice, not zero times, and next month's bills counted too."""
+    from backend.services import budget_snapshot
+
+    user, account, today = _floor_cycle_scenario(db_session, monkeypatch)
+    snap = budget_snapshot.compute_budget_snapshot(db_session, user, account.id, as_of=today)
+
+    full = build_forecast(db_session, user.id, account.id, today - timedelta(days=45),
+                          budget_snapshot._months_ahead_end(today, 3))
+    mask = budget_snapshot.floor_mask(full, [c for c in db_session.query(models.CreditCard).all()])
+    full_low, full_low_date = budget_snapshot._floor_minimum(full, mask, today)
+
+    assert full_low_date == date(2026, 5, 3), "the carried cycle must be the floor here"
+    assert snap.lookahead_minimum_date == full_low_date
+    assert snap.safety_margin == full_low
 
 
 # --- 4. A statement close that already passed but hasn't billed yet -------

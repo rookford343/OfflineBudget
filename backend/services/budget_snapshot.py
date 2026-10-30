@@ -14,7 +14,7 @@ from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
 from backend.services.explain import ExplainBuilder
 from backend.services.forecast_engine import (
-    build_forecast, ScenarioProposal,
+    build_forecast, ScenarioProposal, is_card_bill_in_month,
     _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
 )
 from backend.services.card_matching import card_matches_description
@@ -168,24 +168,12 @@ def _card_linked_recurring_items(
         models.RecurringItem.is_active == True,
         models.RecurringItem.card_id.isnot(None),
     ).all()
-    return [
-        item for item in items
-        if item.frequency == models.RecurringFrequency.monthly
-        or (
-            item.frequency == models.RecurringFrequency.yearly
-            and item.month_of_year == as_of.month
-        )
-        or (
-            # Quarterly card charges land whole in their own month, unlike the
-            # accrual treatment in _monthly_expenses: both callers here ask
-            # "what hits the card this month", which is the full bill or
-            # nothing. the user has no quarterly card items today; this keeps the
-            # filter honest if he adds one.
-            item.frequency == models.RecurringFrequency.quarterly
-            and item.month_of_year is not None
-            and (as_of.month - item.month_of_year) % 3 == 0
-        )
-    ]
+    # Quarterly card charges land whole in their own month, unlike the
+    # accrual treatment in _monthly_expenses: both callers here ask "what
+    # hits the card this month", which is the full bill or nothing. Shared
+    # with forecast_engine, whose Safety Margin floor walk leaves exactly
+    # these (the ones not charged yet) out of the carried card payoff.
+    return [item for item in items if is_card_bill_in_month(item, as_of)]
 
 
 def _cc_budget_total(db: Session, user_id: int, as_of: date) -> Decimal:

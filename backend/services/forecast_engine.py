@@ -328,6 +328,20 @@ def _fires_on(item: models.RecurringItem, d: date) -> bool:
     return d.day == target
 
 
+def is_card_bill_in_month(item: models.RecurringItem, month: date) -> bool:
+    """Is this card-linked item on `month`'s 'Credit Card Bills' list -- the
+    set behind budget_snapshot's _cc_budget_total? Monthly items always,
+    yearly items in their own month, quarterly items every third month from
+    month_of_year. Weekly and biweekly items are not on that list."""
+    if item.frequency == models.RecurringFrequency.monthly:
+        return True
+    if item.frequency == models.RecurringFrequency.yearly:
+        return item.month_of_year == month.month
+    if item.frequency == models.RecurringFrequency.quarterly:
+        return item.month_of_year is not None and (month.month - item.month_of_year) % 3 == 0
+    return False
+
+
 def pending_snapshot_is_live(db: Session, account: models.Account) -> bool:
     """True when this account's AccountPendingTransaction snapshot is kept
     fresh: a checking account with an ACTIVE Plaid link. Nothing else
@@ -824,18 +838,30 @@ def build_forecast(
             else:
                 next_close = _next_occurrence_on_or_after(card.statement_day, anchor)
             derived_due = _next_occurrence_on_or_after(card.due_day, next_close + timedelta(days=1))
-            upcoming = Decimal("0")
+            # The Safety Margin floor opts out of part of this sum: it
+            # subtracts this month's card bills not yet charged on its own (the
+            # user's sheet, '2026 Overview'!B18), and counting them here as well
+            # charged them twice (found live 2026-10-01). Only those, though:
+            # the cursor starts after today, so a bill in today's month is one
+            # _charged_so_far has not counted yet. A bill charged in a LATER
+            # month before this close is nobody else's to subtract, and
+            # dropping it too left the floor optimistic by a whole month of
+            # subscriptions (found live 2026-10-30). The Forecast page keeps
+            # every bill in the payoff.
+            subscriptions_before_close = Decimal("0")
             cursor = max(today, start_date) + timedelta(days=1)
             while cursor <= next_close:
                 for item in card_items_by_card.get(card.id, []):
-                    if _fires_on(item, cursor):
-                        upcoming += item.amount
+                    if not _fires_on(item, cursor):
+                        continue
+                    if (
+                        not include_unbilled_card_bills
+                        and (cursor.year, cursor.month) == (today.year, today.month)
+                        and is_card_bill_in_month(item, cursor)
+                    ):
+                        continue
+                    subscriptions_before_close += item.amount
                 cursor += timedelta(days=1)
-            # The Safety Margin floor opts out of `upcoming`: it subtracts this
-            # month's card bills on its own (the user's sheet, '2026 Overview'!B18),
-            # and counting them here as well charged them twice (found live
-            # 2026-10-01). The Forecast page keeps them in the payoff.
-            subscriptions_before_close = upcoming if include_unbilled_card_bills else Decimal("0")
             derived_amount = carried + subscriptions_before_close
             derived_amount = max(derived_amount - excess_paid, Decimal("0"))
             # The breakdown behind `derived_amount`, for the explain panel.
