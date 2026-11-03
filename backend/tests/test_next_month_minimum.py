@@ -15,6 +15,18 @@ from backend.services.budget_snapshot import (
 )
 
 
+def _freeze_today(monkeypatch, fixed: date) -> None:
+    """Pin the real "today" the snapshot and forecast read (card staleness,
+    no card estimates before today) to a test's fixed as_of, so a fixed-date
+    scenario does not change meaning as the calendar moves past it."""
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return fixed
+    monkeypatch.setattr("backend.services.forecast_engine.date", _FixedDate)
+    monkeypatch.setattr("backend.services.budget_snapshot.date", _FixedDate)
+
+
 def _user(db, **kw):
     user = models.User(username=kw.pop("username", "nextmonth"), hashed_password="x", display_name="D", **kw)
     db.add(user)
@@ -93,13 +105,18 @@ def test_next_month_minimum_crosses_december_into_january(db_session):
     assert snap.next_month_label == "January"
 
 
-def test_next_month_minimum_excludes_the_locked_card_payoff_dip(db_session):
+def test_next_month_minimum_excludes_the_locked_card_payoff_dip(db_session, monkeypatch):
     """Same floor_mask locked-payoff exclusion the 3-month figure already
     gets must also apply to next month's figure: a statemented payoff dip
     inside next month is real money leaving (it still shows in the balance
     walk) but must not set the REPORTED next-month low -- the recovery
     balance after the following paycheck does, exactly like
-    test_the_payoff_trough_is_not_the_safety_floor for the 3-month figure."""
+    test_the_payoff_trough_is_not_the_safety_floor for the 3-month figure.
+
+    Today is pinned to as_of: once the real date passes the 11/5 due date
+    the statement reads as overdue/stale and the payoff stops being a
+    locked dip inside next month at all."""
+    _freeze_today(monkeypatch, date(2026, 10, 29))
     user = _user(db_session, username="nmlocked")
     account = _checking(db_session, user, balance="10000.00")
     db_session.add(models.CreditCard(

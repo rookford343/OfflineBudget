@@ -50,6 +50,16 @@ def _propose_trade_in(db, scenario, account, card):
     db.commit()
 
 
+def _freeze_today(monkeypatch, fixed: date) -> None:
+    """Pin the forecast's today: a card estimate is never placed before
+    today, so the fixed 10/1-11/30 window must not slide into the past."""
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return fixed
+    monkeypatch.setattr("backend.services.forecast_engine.date", _FixedDate)
+
+
 def _txn_names(entries, d: date) -> list[str]:
     return [t.name for e in entries if e.date == d for t in e.transactions]
 
@@ -72,8 +82,10 @@ def test_a_card_routed_proposal_never_appears_in_the_checking_walk(db_session):
     assert "iPhone Trade-In" not in [t.name for e in entries for t in e.transactions]
 
 
-def test_it_reaches_checking_on_the_cards_payoff_date(db_session):
-    """Charged 10/23 -> statement closes 10/28 -> due 11/25."""
+def test_it_reaches_checking_on_the_cards_payoff_date(db_session, monkeypatch):
+    """Charged 10/23 -> statement closes 10/28 -> due 11/25. Today is pinned
+    to the window's start so the 11/25 estimate is still in the future."""
+    _freeze_today(monkeypatch, date(2026, 10, 1))
     user, account, card, scenario = _seed(db_session)
     _propose_trade_in(db_session, scenario, account, card)
 

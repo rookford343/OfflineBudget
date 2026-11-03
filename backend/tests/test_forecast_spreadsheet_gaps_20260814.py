@@ -570,11 +570,13 @@ def test_the_cycle_after_a_locked_payoff_uses_the_carried_balance(db_session):
     entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=120))
     estimates = dict(_named(entries, "CC Estimate: Chase"))
 
-    next_cycle = [amt for d, amt in estimates.items() if close_date <= d < close_date + timedelta(days=32)]
+    # This cycle is due close+3; the next due date can be as soon as close+31
+    # when February follows, so a 32-day window caught it too (2027-01-15).
+    next_cycle = [amt for d, amt in estimates.items() if close_date <= d < close_date + timedelta(days=28)]
     assert next_cycle == [Decimal("-1100.00")], (
         f"the cycle after the locked payoff must be carried + upcoming subs, got {next_cycle}"
     )
-    later = [amt for d, amt in estimates.items() if d >= close_date + timedelta(days=32)]
+    later = [amt for d, amt in estimates.items() if d >= close_date + timedelta(days=28)]
     assert later, "later cycles must still be projected"
     assert all(a == Decimal("-15000.00") for a in later), (
         f"cycles beyond the next one keep the flat estimate, got {later}"
@@ -1036,7 +1038,7 @@ def test_the_cycle_after_the_carried_cycle_uses_fresh_pending_charges(db_session
     )
 
 
-def test_second_hop_leaves_a_subscription_driven_cards_projection_alone(db_session):
+def test_second_hop_leaves_a_subscription_driven_cards_projection_alone(db_session, monkeypatch):
     """Restricted to monthly_spend_estimate cards only (controller ruling,
     final whole-branch review, 2026-08-28): a subscription-driven card (no
     monthly_spend_estimate -- the user's Apple Card is exactly this shape) must
@@ -1046,15 +1048,23 @@ def test_second_hop_leaves_a_subscription_driven_cards_projection_alone(db_sessi
     second hop's suppression logic (_covered_by_real_payment, shared with
     the subscription-fallback branch below in this same function) would
     have deleted that month's subscription-based projection and replaced it
-    with the raw pending_charges figure instead of leaving it alone."""
+    with the raw pending_charges figure instead of leaving it alone.
+
+    Today is pinned to the window's start. With the real today the locked
+    payoff (due tomorrow) and the derived cycle claim the window's last two
+    months, and every earlier subscription payoff is in the past, so no
+    standalone subscription projection is left to check (failed 2026-11-02
+    with the engine behaving as intended)."""
+    today = date(2026, 8, 14)
+    _freeze_today(monkeypatch, today)
     user = _user(db_session, username="secondhopsubscription")
     account = _checking(db_session, user, balance="60000.00")
     card = _card(
         db_session, user, name="Apple Card", statement_day=28, due_day=25,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
         pending_charges=Decimal("2000.00"),
-        pending_charges_updated_at=datetime.utcnow(),
-        next_payment_date=date.today() + timedelta(days=1),
+        pending_charges_updated_at=datetime(2026, 8, 14, 12, 0),
+        next_payment_date=today + timedelta(days=1),
         monthly_spend_estimate=None,
     )
     db_session.add(models.RecurringItem(

@@ -263,9 +263,15 @@ def test_the_strip_and_the_comparison_chart_agree_about_a_tweak(tweak_only):
     )
 
     assert strip_monthly_delta == OVERRIDE_DELTA
-    # Twelve occurrences in the year: the tweaked bill falls on the 1st and
-    # starts on January 1, so it fires in every month of the walk.
-    assert chart_year_end_delta == strip_monthly_delta * 12
+    # One D per occurrence in the year's walk. Usually twelve, but a 1st that
+    # falls on a weekend moves to the business day before it, so a year can
+    # hold thirteen (2027 picks up 2028-01-01, a Saturday) or eleven.
+    occurrences = sum(
+        1 for q in scenario_chart for day in q.days for t in day.transactions
+        if t.name == "Housing" and not t.is_actual
+    )
+    assert 11 <= occurrences <= 13
+    assert chart_year_end_delta == strip_monthly_delta * occurrences
 
 
 def test_a_tweak_changes_the_snapshots_lookahead_floor(tweak_only):

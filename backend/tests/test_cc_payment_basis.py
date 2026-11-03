@@ -55,9 +55,11 @@ def test_carried_cycle_estimate_basis_sums_to_its_amount(db_session):
     db_session.commit()
 
     entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=120))
+    # Due close+3; the next due date can be as soon as close+31 when February
+    # follows, so the window stops short of that at 28 days.
     next_cycle = [
         (d, t) for d, t in _tx_named(entries, "CC Estimate: Chase")
-        if close_date <= d < close_date + timedelta(days=32)
+        if close_date <= d < close_date + timedelta(days=28)
     ]
     assert len(next_cycle) == 1, next_cycle
     _d, tx = next_cycle[0]
