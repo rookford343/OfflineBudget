@@ -56,6 +56,13 @@ A read-only map of the codebase (same date) found:
 - **"Available to Spend" is rebuilt, not retired.** Where possible, streamline where numbers are calculated.
 - **History is recorded at each bank sync and each email.** The "why" view is available everywhere in the app; the dashboard is the primary place.
 - **Architecture documentation** for new people and AI is required.
+- **Available to Spend (rebuilt) is figured "before budgets":** this month's income − bills − one-offs − real spending so far, without the groceries/savings budgets, for the whole calendar month. Its ⓘ walks from it to Left to Spend (subtract budgets, then card/pending adjustments).
+- **Real-spending verdicts, applied to every total:**
+  - Refunds net against spending.
+  - Transfers to savings, or between your own accounts, are not spending.
+  - A debit filed under an income category reduces income (e.g. a paycheck reversal).
+- **One cushion everywhere.** The risk banner, the 3-month low and the Wish List all use the single cushion (default $1,000): amber below it, red below $0. The per-account `low_balance_threshold` and the Wish List cushion are retired; any existing non-default value migrates into the single setting.
+- **Workflow:** build in the live working tree as today, with no separate copy. Take a `backup_database()` copy before schema changes, and run a before/after on a database copy for any step that moves a visible number.
 
 ## The shared calculation layer
 
@@ -125,7 +132,7 @@ Rebuild the card entirely from the primitives above. Today it uses:
 - monthly/yearly bills only, with no overrides;
 - dropped refunds.
 
-After the rebuild, it must reconcile visibly with the Household Snapshot. Its ⓘ shows how it relates to Leftover / Left to Spend. If, once rebuilt, it duplicates Left to Spend exactly, the builder proposes merging the two and asks before removing either.
+After the rebuild it follows the "before budgets" definition above and must reconcile visibly with the Household Snapshot: its ⓘ walks from it to Left to Spend.
 
 ## Change history ("why did this change")
 
@@ -147,7 +154,11 @@ The headline metrics are:
 
 > "Safety Margin −$400.00 since 7:00 AM: new pending Visa charges: Example Insurance Co. $250.00, Grocery Store $100.00, Online Shop $50.00"
 
-When code changes the math (not data), record the app version with each snapshot. The "why" can then say "calculation changed in version X" instead of inventing a data cause.
+When code changes the math (not data), each snapshot records a `CALC_VERSION` constant. The "why" can then say "calculation changed (v7: …)" instead of inventing a data cause.
+
+- **What it is (my call):** a single hand-bumped integer in the shared layer, bumped only when a calculation's meaning changes, with a one-line changelog entry in `docs/architecture.md`.
+- **Why not the git hash:** a hash changes on every commit, so CSS-only commits would show up as calculation changes.
+- **Live-tree commits:** behavior-changing commits made in the live tree will show up in real history, labeled as calculation changes.
 
 **Surfaces.**
 - **Email:** one "since last email" line under each headline number. Show it only when the change is non-zero; keep it short for a phone screen.
@@ -203,6 +214,6 @@ Add a short pointer in the project `CLAUDE.md` so AI sessions read `docs/archite
 ## My calls (not yet confirmed by the principal)
 
 - Thirteen months of snapshot retention.
-- Refunds are netted against spending everywhere, because that reflects true spending.
-- Overrides keyed by natural due date.
-- Snapshots also taken on demand and on code-version change.
+- Overrides and statement amounts keyed by the item's natural due date; the weekend shift moves only the posting day. If this is overturned, only the weekend-rule step changes, so sequence it after the real-spending step.
+- Snapshots also taken on demand and whenever `CALC_VERSION` changes.
+- `CALC_VERSION` as a hand-bumped integer, not the git hash.
