@@ -11,6 +11,7 @@ from backend.services.forecast_engine import build_forecast, find_balance_risk, 
 from backend.services.budget_snapshot import compute_budget_snapshot, spending_breakdown
 from backend.services.upcoming_bills import upcoming_bills
 from backend.services.primary_account import primary_checking
+from backend.services.spending_helpers import filter_real_spend, is_card_payment
 
 _STALE_SYNC_HOURS = 24
 
@@ -733,6 +734,13 @@ def _month_spending_by_category(
 
     Includes both checking transactions and credit card charges so totals
     match the budget overview rather than being understated.
+
+    Same filters as the Sankey endpoint (routers/spending.spending_sankey):
+    a checking card payoff settles charges already counted on the card side,
+    and a move between the user's own accounts is neither spending (out) nor
+    income (in), so filter_real_spend drops both before anything is summed.
+    A card-side payment row and a checking debit tagged with an income
+    category are not spending either.
     """
     start = date(year, month, 1)
     end = date(year, month, calendar.monthrange(year, month)[1])
@@ -762,8 +770,17 @@ def _month_spending_by_category(
     total_debits = Decimal("0")
     total_credits = Decimal("0")
 
-    for t in checking_txns:
+    income_cat_ids = {
+        c.id for c in db.query(models.Category.id).filter(
+            models.Category.user_id == user_id,
+            models.Category.type == models.CategoryType.income,
+        )
+    }
+
+    for t in filter_real_spend(db, user_id, checking_txns):
         if t.amount < 0:
+            if t.category_id in income_cat_ids:
+                continue
             total_debits += abs(t.amount)
             if t.category_id:
                 by_cat[t.category_id] += abs(t.amount)
@@ -771,7 +788,7 @@ def _month_spending_by_category(
             total_credits += t.amount
 
     for t in card_txns:
-        if t.amount > 0:
+        if t.amount > 0 and not is_card_payment(t.merchant):
             total_debits += t.amount
             if t.category_id:
                 by_cat[t.category_id] += t.amount

@@ -85,9 +85,11 @@ export default function Dashboard() {
     },
   });
   const now = new Date();
-  // Show previous month's summary once we're past the 3rd of the current month; otherwise current month
-  const summaryMonth = now.getDate() > 3 ? now.getMonth() + 1 : (now.getMonth() === 0 ? 12 : now.getMonth());
-  const summaryYear = now.getDate() > 3 ? now.getFullYear() : (now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear());
+  // Month in Review always covers the last completed month: a partial current
+  // month compared against a full prior one reads as a huge drop. January
+  // reviews December of the prior year.
+  const summaryMonth = now.getMonth() === 0 ? 12 : now.getMonth();
+  const summaryYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
 
   const { data: accounts = [] } = useQuery<any[]>({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const checkingAccounts = accounts.filter((a) => a.type === "checking");
