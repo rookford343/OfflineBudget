@@ -657,3 +657,74 @@ def test_week_never_exceeds_the_month_it_belongs_to(db_session):
             f"{as_of}: week {result.spendable_this_week} > month {result.remaining_this_month}"
         )
         assert result.remaining_this_month <= leftover
+
+
+# Card bills come off the pacer's card spend from the same list Leftover
+# subtracts -- the month base's card-linked occurrences at their month-base
+# amounts. The old day-of-month walk only knew monthly/yearly bills at the
+# item's base amount, so a weekly or quarterly card bill counted as
+# discretionary spend on top of Leftover already subtracting it.
+
+def _card_and_bill(db, user, checking, amount, **kw):
+    card = models.CreditCard(
+        user_id=user.id, name="Visa", credit_limit=Decimal("5000.00"),
+        statement_day=28, due_day=15,
+    )
+    db.add(card)
+    db.flush()
+    item = models.RecurringItem(
+        user_id=user.id, account_id=checking.id, name="Bill", amount=Decimal(amount),
+        type=models.RecurringType.expense, card_id=card.id, **kw,
+    )
+    db.add(item)
+    db.flush()
+    return card, item
+
+
+def _charge(db, user, card, day, amount, merchant):
+    db.add(models.CreditCardTransaction(
+        card_id=card.id, user_id=user.id, date=date(2026, 8, day),
+        amount=Decimal(amount), merchant=merchant,
+    ))
+
+
+def test_a_weekly_card_bill_posted_three_times_is_not_discretionary(db_session):
+    user, checking = _make_user_and_checking(db_session)
+    # Mondays Aug 3, 10, 17 2026.
+    card, _ = _card_and_bill(db_session, user, checking, "12.00",
+                             frequency=models.RecurringFrequency.weekly, day_of_month=1,
+                             start_date=date(2026, 8, 3))
+    for day in (3, 10, 17):
+        _charge(db_session, user, card, day, "12.00", "Meal Kit")
+    _charge(db_session, user, card, 5, "60.00", "Hardware Store")
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 20)) == Decimal("60.00")
+
+
+def test_a_quarterly_card_bill_is_not_discretionary(db_session):
+    user, checking = _make_user_and_checking(db_session)
+    card, _ = _card_and_bill(db_session, user, checking, "45.00",
+                             frequency=models.RecurringFrequency.quarterly, month_of_year=2,
+                             day_of_month=6, start_date=date(2026, 2, 6))
+    _charge(db_session, user, card, 6, "45.00", "Software Plan")
+    _charge(db_session, user, card, 6, "30.00", "Bookstore")
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("30.00")
+
+
+def test_an_overridden_card_bill_nets_at_its_entered_amount(db_session):
+    user, checking = _make_user_and_checking(db_session)
+    card, item = _card_and_bill(db_session, user, checking, "20.00",
+                                frequency=models.RecurringFrequency.monthly, day_of_month=4,
+                                start_date=date(2026, 1, 4))
+    db_session.add(models.BillAmountOverride(
+        user_id=user.id, recurring_item_id=item.id, due_date=date(2026, 8, 4),
+        actual_amount=Decimal("23.50"),
+    ))
+    _charge(db_session, user, card, 4, "23.50", "Streaming")
+    _charge(db_session, user, card, 4, "40.00", "Pharmacy")
+    db_session.commit()
+
+    assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("40.00")

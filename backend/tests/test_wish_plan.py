@@ -344,3 +344,42 @@ def test_full_card_option_on_a_since_closed_card_shows_as_an_error(db_session):
     assert opt_out["safe_date"] is None
     assert opt_out["total_cost"] is None
     assert item_out["fits"] is False
+
+
+def test_this_months_remaining_card_bills_lower_the_wish_low(db_session, monkeypatch):
+    """The Wish List walks the Forecast tab's series: a card bill still to
+    come this month rides the next card payoff, so it lowers the projected
+    low by its amount. Walking Safety Margin's series left it out (Safety
+    Margin subtracts those bills itself; the Wish List never did), so its
+    lows and safe dates were optimistic by this month's remaining card
+    bills."""
+    from backend.services.wish_plan import _series
+    today = date(2026, 11, 6)
+
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return today
+    monkeypatch.setattr("backend.services.forecast_engine.date", _FixedDate)
+
+    end = date(2026, 12, 31)
+    lows = {}
+    for name, with_bill in (("nobill", False), ("withbill", True)):
+        u, acct = _seed(db_session, name)
+        card = models.CreditCard(user_id=u.id, name="Visa", credit_limit=Decimal("5000.00"),
+                                 statement_day=28, due_day=25, current_balance=Decimal("300.00"),
+                                 balance_due=Decimal("100.00"), pending_charges=Decimal("0"),
+                                 next_payment_date=date(2026, 11, 25),
+                                 monthly_spend_estimate=Decimal("1.00"))
+        db_session.add(card); db_session.flush()
+        if with_bill:
+            db_session.add(models.RecurringItem(
+                user_id=u.id, account_id=acct.id, name="Streaming", amount=Decimal("40.00"),
+                type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
+                day_of_month=20, start_date=date(2026, 1, 20), end_date=date(2026, 11, 30),
+                card_id=card.id,
+            ))
+        db_session.commit()
+        lows[name] = min(Decimal(d.projected_balance) for d in _series(db_session, u.id, acct.id, today, end))
+
+    assert lows["withbill"] == lows["nobill"] - Decimal("40.00")

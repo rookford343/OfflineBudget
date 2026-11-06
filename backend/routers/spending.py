@@ -1,5 +1,5 @@
 import calendar
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -470,6 +470,44 @@ def spending_by_card(
     return result
 
 
+def _committed_card_bills_fired(db: Session, user_id: int, start: date, end: date) -> Decimal:
+    """Card-linked bills in committed_expenses below (monthly items, and
+    yearly items in their month, at item.amount) whose due day falls in
+    [start, end]. Kept to this endpoint's own committed recipe so the
+    add-back removes exactly what it subtracted: the weekly pacer moved to
+    the month base's card-bill list (2026-11), which also holds weekly,
+    biweekly and quarterly bills and entered statement amounts that this
+    card's committed figure doesn't, so sharing it here would drop those
+    bills from both sides. Goes away when Available to Spend is rebuilt on
+    the month base (docs/superpowers/specs/2026-11-06-calculation-consistency-design.md)."""
+    items = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user_id,
+        models.RecurringItem.type == models.RecurringType.expense,
+        models.RecurringItem.is_active == True,
+        models.RecurringItem.card_id.isnot(None),
+    ).all()
+    total = Decimal("0")
+    day = start
+    while day <= end:
+        last_day_of_month = calendar.monthrange(day.year, day.month)[1]
+        for item in items:
+            if item.start_date > day or (item.end_date and item.end_date < day):
+                continue
+            if item.frequency == models.RecurringFrequency.monthly:
+                fires = True
+            elif item.frequency == models.RecurringFrequency.yearly:
+                fires = item.month_of_year == day.month
+            else:
+                fires = False
+            if not fires:
+                continue
+            due_day = item.day_of_month if item.day_of_month > 0 else last_day_of_month
+            if min(due_day, last_day_of_month) == day.day:
+                total += item.amount
+        day += timedelta(days=1)
+    return total
+
+
 @router.get("/available-to-spend", response_model=schemas.AvailableToSpend)
 def available_to_spend(
     db: Session = Depends(get_db),
@@ -541,8 +579,7 @@ def available_to_spend(
     # the ones that have actually fired so far this month -- not the whole
     # month's worth, or an early-month view would over-credit charges that
     # haven't happened yet.
-    from backend.services.spendable_pacer import _recurring_card_charges_in_range
-    card_committed_so_far = _recurring_card_charges_in_range(db, user.id, first, today)
+    card_committed_so_far = _committed_card_bills_fired(db, user.id, first, today)
     spent_this_month += max(card_spend - card_committed_so_far, Decimal("0"))
 
     # pending_charges is the user's own hand-tracked read of real, already-made

@@ -241,3 +241,49 @@ def test_a_month_before_the_stub_gets_no_boost(db_session, monkeypatch):
     dec = ss_paycheck_boosts(db_session, user, items, 2026, 12, today=today)
     mid_month = next(i for i in items if i.day_of_month == 15)
     assert dec[(mid_month.id, date(2026, 12, 15))] == partial
+
+
+# A stub only says where the base stood on its own date. Moving the walk
+# start past it is right only while the stub shows the base NOT yet met, and
+# only for its own year (found re-reviewing c16b15d, 2026-11).
+
+def test_a_stub_above_the_base_keeps_the_months_earlier_boosts(db_session, monkeypatch):
+    """Stub dated Nov 20 shows the base already passed: the Nov 13 check
+    (paid for the 15th) really was boosted, so it keeps its boost alongside
+    Nov 30, and October keeps both of its boosts too."""
+    today = _freeze_today(monkeypatch, AS_OF)
+    user, checking = _seed(db_session, "stubover", remaining=D("0"))
+    _stub(db_session, user, date(2026, 11, 20), D("-500.00"))
+    items = _items(db_session, user)
+    mid, last = (next(i for i in items if i.day_of_month == d) for d in (15, 0))
+
+    nov = ss_paycheck_boosts(db_session, user, items, 2026, 11, today=today)
+    octo = ss_paycheck_boosts(db_session, user, items, 2026, 10, today=today)
+    forecast = _forecast_paychecks(db_session, user, checking, today, date(2026, 11, 30))
+
+    assert nov == {(mid.id, date(2026, 11, 15)): BOOST, (last.id, date(2026, 11, 30)): BOOST}
+    assert octo == {(mid.id, date(2026, 10, 15)): BOOST, (last.id, date(2026, 10, 31)): BOOST}
+    assert forecast == [(date(2026, 11, 30), NET + BOOST)]
+
+
+def test_a_next_year_stub_leaves_december_boosts_intact(db_session, monkeypatch):
+    """A January 2027 stub says nothing about 2026: December still counts
+    the year's received paychecks against the 2026 base, as it did before
+    the stub was entered. January itself still reads the stub."""
+    today = _freeze_today(monkeypatch, date(2027, 1, 20))
+    user, checking = _seed(db_session, "stubnext", remaining=D("0"))
+    items = _items(db_session, user)
+    mid, last = (next(i for i in items if i.day_of_month == d) for d in (15, 0))
+    # Two paychecks received in 2026 already used up the (small) test base.
+    for day, item in ((15, mid), (30, last)):
+        db_session.add(models.Transaction(
+            user_id=user.id, account_id=checking.id, date=date(2026, 10, day), amount=NET,
+            description="Paycheck", is_actual=True, recurring_item_id=item.id,
+        ))
+    _stub(db_session, user, date(2027, 1, 15), D("10000.00"))
+
+    dec = ss_paycheck_boosts(db_session, user, items, 2026, 12, today=today)
+    jan = ss_paycheck_boosts(db_session, user, items, 2027, 1, today=today)
+
+    assert dec == {(mid.id, date(2026, 12, 15)): BOOST, (last.id, date(2026, 12, 31)): BOOST}
+    assert jan == {}

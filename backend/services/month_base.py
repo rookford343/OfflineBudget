@@ -139,6 +139,31 @@ def _funding_inflow(pe: models.PlannedExpense, year: int, month: int) -> schemas
     )
 
 
+def card_bill_occurrences(base: MonthBase) -> list:
+    """Card-linked bill occurrences in the month base -- every weekly,
+    biweekly, monthly, quarterly and yearly charge to a card landing this
+    month, at this month's amount (an entered statement amount wins). The
+    'Credit Card Bills' list behind budget_snapshot's cc_budget_total and
+    charged_so_far, and the card bills the weekly pacer takes out of card
+    spend.
+
+    Read off build_month_base so an add-back matches what Leftover
+    subtracted occurrence for occurrence. Until 2026-11 this was a separate
+    query that skipped weekly/biweekly bills and used each item's base
+    amount, so a weekly card bill came off Left to Spend twice (as a bill
+    and as posted card spending) and an entered statement amount left the
+    difference behind. Before that, yearly items counted in all twelve
+    months ($500.00/yr of annual card subscriptions treated as monthly).
+
+    A scenario's proposed items (negative ids) are left out: they are not
+    charged to the card, so nothing in card spending needs adding back.
+    """
+    return [
+        o for o in (*base.monthly_bills, *base.periodic_due)
+        if o.card_id is not None and (o.recurring_item_id or 0) > 0
+    ]
+
+
 def build_month_base(
     db: Session, user: models.User, year: int, month: int,
     extra_items: list[models.RecurringItem] | None = None,

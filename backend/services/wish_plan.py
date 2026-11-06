@@ -93,8 +93,13 @@ def effective_cushion(db, user, account_id) -> Decimal:
 
 
 def _series(db, user_id, account_id, today, end, proposal=None, overrides=None):
+    # The Forecast tab's walk (and the Snapshot's displayed lows): this
+    # month's card bills still to come ride the next card payment. Safety
+    # Margin's walk (False) leaves them out because Safety Margin subtracts
+    # them itself; the Wish List never did, so walking that series made its
+    # safe dates and lows optimistic by this month's remaining card bills.
     days = build_forecast(db, user_id, account_id, today - timedelta(days=45), end,
-                          overrides=overrides, proposal=proposal, include_unbilled_card_bills=False)
+                          overrides=overrides, proposal=proposal, include_unbilled_card_bills=True)
     return [d for d in days if d.date >= today]
 
 

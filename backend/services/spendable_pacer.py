@@ -18,6 +18,7 @@ from decimal import Decimal
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from backend import models
+from backend.services.month_base import build_month_base, card_bill_occurrences
 from backend.services.spending_helpers import NOT_SAVINGS, is_card_payment
 
 
@@ -63,41 +64,38 @@ def weeks_remaining_in_month(as_of: date) -> Decimal:
 
 
 def _recurring_card_charges_in_range(db: Session, user_id: int, start: date, end: date) -> Decimal:
-    """Sum of card-linked recurring items (RecurringItem.card_id set --
-    subscriptions billed to a card, already counted in the monthly leftover
-    pool via budget_snapshot.py's cc_budget_total) that fire on any day in
-    [start, end]. Mirrors charged_so_far's firing logic but
-    over an arbitrary range instead of "month start through as_of", so it
-    still works when a calendar week straddles a month boundary. Like
-    charged_so_far, this fires on the calendar day regardless of whether a
-    matching real CreditCardTransaction has posted yet -- same accepted
-    tradeoff already established there, not a new gap.
+    """Card bills (card-linked recurring expenses) landing in [start, end],
+    taken from the same list Leftover subtracts: build_month_base's
+    card-linked occurrences (month_base.card_bill_occurrences) at their
+    month-base amounts -- weekly and biweekly bills each time they fire,
+    quarterly and yearly bills in the month they're due, an entered statement
+    amount in place of the item's base amount. The same source as Left to
+    Spend's card add-back (budget_snapshot's card_bills_charged), so a card
+    bill Leftover already subtracted never also counts as discretionary card
+    spend.
+
+    Walks every month the range touches, so it still works when a calendar
+    week straddles a month boundary. Like card_bills_charged, a bill counts
+    on its due day whether or not the real CreditCardTransaction has posted
+    yet -- the same accepted tradeoff.
+
+    Until 2026-11 this ran its own day-of-month walk that knew only monthly
+    and yearly bills at item.amount: a weekly, biweekly or quarterly card
+    bill counted as discretionary spend on top of Leftover subtracting it,
+    and an entered statement amount left the difference behind.
     """
-    items = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == user_id,
-        models.RecurringItem.type == models.RecurringType.expense,
-        models.RecurringItem.is_active == True,
-        models.RecurringItem.card_id.isnot(None),
-    ).all()
+    user = db.get(models.User, user_id)
+    if user is None:
+        return Decimal("0")
     total = Decimal("0")
-    day = start
-    while day <= end:
-        last_day_of_month = calendar.monthrange(day.year, day.month)[1]
-        for item in items:
-            if item.start_date > day or (item.end_date and item.end_date < day):
-                continue
-            if item.frequency == models.RecurringFrequency.monthly:
-                fires = True
-            elif item.frequency == models.RecurringFrequency.yearly:
-                fires = item.month_of_year == day.month
-            else:
-                fires = False
-            if not fires:
-                continue
-            due_day = item.day_of_month if item.day_of_month > 0 else last_day_of_month
-            if min(due_day, last_day_of_month) == day.day:
-                total += item.amount
-        day += timedelta(days=1)
+    year, month = start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        base = build_month_base(db, user, year, month)
+        total += sum(
+            (o.amount for o in card_bill_occurrences(base) if start <= o.date <= end),
+            Decimal("0"),
+        )
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
     return total
 
 

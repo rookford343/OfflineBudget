@@ -18,7 +18,7 @@ from backend.services.forecast_engine import (
     _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
 )
 from backend.services.card_matching import card_matches_description
-from backend.services.month_base import build_month_base
+from backend.services.month_base import build_month_base, card_bill_occurrences
 from backend.services.spendable_pacer import compute_weekly_spendable
 from backend.services.spending_helpers import category_totals_for_range, is_card_payment, merchant_totals
 from backend.services.statement_reconcile import statement_stale_reason
@@ -67,7 +67,7 @@ def leftover_parts(
          and o.direction == models.PlannedDirection.outflow),
         Decimal("0"),
     )
-    card_bills = _card_bill_occurrences(base)
+    card_bills = card_bill_occurrences(base)
     return LeftoverParts(
         card_bills_total=sum((o.amount for o in card_bills), Decimal("0")),
         card_bills_charged=sum((o.amount for o in card_bills if o.date <= as_of), Decimal("0")),
@@ -107,29 +107,6 @@ def leftover_children(parts: LeftoverParts) -> list[ExplainChild]:
         ExplainChild(label="Groceries budget", amount=-parts.groceries_budget),
     ]
     return children
-
-
-def _card_bill_occurrences(base) -> list:
-    """Card-linked bill occurrences in the month base -- every weekly,
-    biweekly, monthly, quarterly and yearly charge to a card landing this
-    month, at this month's amount (an entered statement amount wins). The
-    'Credit Card Bills' list behind cc_budget_total and charged_so_far.
-
-    Read off build_month_base so the add-back matches what Leftover
-    subtracted occurrence for occurrence. Until 2026-11 this was a separate
-    query that skipped weekly/biweekly bills and used each item's base
-    amount, so a weekly card bill came off Left to Spend twice (as a bill
-    and as posted card spending) and an entered statement amount left the
-    difference behind. Before that, yearly items counted in all twelve
-    months ($500.00/yr of annual card subscriptions treated as monthly).
-
-    A scenario's proposed items (negative ids) are left out: they are not
-    charged to the card, so nothing in card spending needs adding back.
-    """
-    return [
-        o for o in (*base.monthly_bills, *base.periodic_due)
-        if o.card_id is not None and (o.recurring_item_id or 0) > 0
-    ]
 
 
 def _card_spending_this_month(

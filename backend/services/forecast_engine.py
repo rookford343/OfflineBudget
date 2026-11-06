@@ -518,12 +518,15 @@ class SSWageBaseTracker:
     year's base. The crossing paycheck gets only the part above the base.
     """
 
-    def __init__(self, user: models.User, recurring_items, bonus_item_ids: set[int], walk_start: date):
+    def __init__(
+        self, user: models.User, recurring_items, bonus_item_ids: set[int], walk_start: date,
+        *, use_checkpoint: bool = True,
+    ):
         self.user = user
         self.gross: Decimal = user.ss_gross_per_paycheck
         self.checkpoint_date: date | None = None
         self.limit_reached = False
-        if user.ss_withheld_ytd is not None and user.ss_withheld_ytd_as_of is not None:
+        if use_checkpoint and user.ss_withheld_ytd is not None and user.ss_withheld_ytd_as_of is not None:
             # Preferred: a direct checkpoint off a real pay stub's YTD SS
             # withholding line, rather than reconstructing YTD gross wages by
             # counting actual paychecks against a flat per-paycheck figure.
@@ -565,15 +568,21 @@ class SSWageBaseTracker:
         self.year = self.checkpoint_date.year if self.checkpoint_date is not None else walk_start.year
 
     @classmethod
-    def for_user(cls, user, recurring_items, bonus_item_ids: set[int], walk_start: date) -> "SSWageBaseTracker | None":
-        """None when the user hasn't set a gross per paycheck and a wage base."""
+    def for_user(
+        cls, user, recurring_items, bonus_item_ids: set[int], walk_start: date,
+        *, use_checkpoint: bool = True,
+    ) -> "SSWageBaseTracker | None":
+        """None when the user hasn't set a gross per paycheck and a wage base.
+        `use_checkpoint=False` ignores the pay stub and counts the walk's year
+        from January 1 (received paychecks plus ss_bonus_ytd) -- for a year
+        the stub doesn't describe."""
         if not (
             user
             and user.ss_gross_per_paycheck and user.ss_gross_per_paycheck > 0
             and user.ss_wage_base and user.ss_wage_base > 0
         ):
             return None
-        return cls(user, recurring_items, bonus_item_ids, walk_start)
+        return cls(user, recurring_items, bonus_item_ids, walk_start, use_checkpoint=use_checkpoint)
 
     def catch_up(self, db: Session, user_id: int, bonus_plans: dict, before: date) -> None:
         """Draw the base down for wages already RECEIVED before `before`.
@@ -729,18 +738,37 @@ def ss_paycheck_boosts(
     month_end = date(year, month, monthrange(year, month)[1])
     cutoff = min(today, _adjust_for_weekend(month_start))
     bonus_plans = effective_bonus_plans(db, user.id, user)
-    ss = SSWageBaseTracker.for_user(user, income_items, set(bonus_plans), cutoff)
+    # A pay stub describes its own calendar year only. For a month in an
+    # earlier year (December viewed after a January stub) it says nothing,
+    # and walking from it rolled the year over to a fresh base with none of
+    # that year's paychecks counted, wiping December's boosts. Such a month
+    # is counted from January 1 of its own year instead.
+    stub = user.ss_withheld_ytd_as_of if user.ss_withheld_ytd is not None else None
+    ss = SSWageBaseTracker.for_user(
+        user, income_items, set(bonus_plans), cutoff,
+        use_checkpoint=not (stub is not None and stub.year > year),
+    )
     if ss is None or not ss.paycheck_ids:
         return {}
-    # A pay stub dated on/after the cutoff already holds every paycheck up to
-    # and including its own date in `remaining`, so the walk starts the day
-    # after it: those earlier occurrences get no boost (the stub's YTD says
-    # the base wasn't met by then -- or, at most, their boost is already in
-    # what landed). Walking from the 1st instead drew the base down a second
-    # time for each of them, crossing it a paycheck or more early; and a
-    # month wholly before the stub (browsing Recurring backwards) walked the
-    # stub's remaining base through checks the stub had already counted.
-    if ss.checkpoint_date is not None and ss.checkpoint_date >= cutoff:
+    # A same-year pay stub dated on/after the cutoff that shows the base NOT
+    # yet met already holds every paycheck up to and including its own date
+    # in `remaining`, so the walk starts the day after it: those earlier
+    # occurrences got no boost (the stub's YTD says the base wasn't met by
+    # then -- or, at most, their boost is already in what landed). Walking
+    # from the 1st instead drew the base down a second time for each of
+    # them, crossing it a paycheck or more early; and a month wholly before
+    # the stub (browsing Recurring backwards) walked the stub's remaining
+    # base through checks the stub had already counted.
+    #
+    # A stub showing the base already MET keeps the old cutoff: the checks
+    # before it really were boosted, and with `remaining` at or below zero
+    # the walk gives each of them the full boost.
+    if (
+        ss.checkpoint_date is not None
+        and ss.checkpoint_date >= cutoff
+        and ss.checkpoint_date.year == year
+        and ss.remaining > 0
+    ):
         cutoff = ss.checkpoint_date + timedelta(days=1)
     ss.catch_up(db, user.id, bonus_plans, before=cutoff)
 
