@@ -917,15 +917,64 @@ def tax_estimate(
     )
     total_deductible = deductible_amount + itemized_total
 
+    from backend.services.bonus_plans import (
+        bonus_gross, is_bonus_shaped, payout_date, plans_by_item, salary_for_year,
+    )
+    from backend.services.forecast_engine import paycheck_dates, paycheck_item_ids
+
+    # Raise-aware salary for the year, falling back to the flat figure.
+    salary = salary_for_year(user, year) or Decimal(str(user.annual_salary))
+
+    # The year's bonuses (pay date, gross); unknown amounts are skipped.
+    plans = {
+        item_id: plan for item_id, plan in plans_by_item(db, user.id).items()
+        if is_bonus_shaped(plan.recurring_item) and plan.recurring_item.is_active
+    }
+    bonuses = []
+    for plan in plans.values():
+        gross = bonus_gross(plan, user, year)
+        if gross is not None:
+            bonuses.append((payout_date(plan.recurring_item, year), gross))
+
+    # Paychecks in the year, and left after the pay stub's date, from the
+    # same paycheck items and schedule the forecast uses.
+    as_of = user.tax_withholding_as_of
+    income_items = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user.id,
+        models.RecurringItem.type == models.RecurringType.income,
+        models.RecurringItem.is_active == True,
+    ).all()
+    pay_ids = paycheck_item_ids(income_items, user.ss_gross_per_paycheck, set(plans))
+    paychecks_in_year = paychecks_remaining = None
+    if pay_ids:
+        pay_items = [i for i in income_items if i.id in pay_ids]
+        dates = paycheck_dates(pay_items, _date(year, 1, 1), _date(year, 12, 31))
+        paychecks_in_year = len(dates)
+        if as_of is None or as_of.year < year:
+            paychecks_remaining = paychecks_in_year
+        else:
+            paychecks_remaining = sum(1 for d in dates if d > as_of)
+    # When no paycheck item matches, estimate_taxes assumes 26 a year.
+
+    def _dec(v):
+        return Decimal(str(v)) if v is not None else None
+
     result = estimate_taxes(
         filing_status=user.tax_filing_status or "single",
         state=user.tax_state or "TX",
-        gross_income=Decimal(str(user.annual_salary)),
+        gross_income=salary,
         other_income=Decimal(str(user.other_income or 0)),
         deductible_expenses=total_deductible,
         federal_withheld=Decimal(str(user.federal_withholding_ytd or 0)),
         state_withheld=Decimal(str(user.state_withholding_ytd or 0)),
         year=year,
+        bonuses=bonuses,
+        pretax_per_paycheck=_dec(user.pretax_per_paycheck),
+        federal_per_paycheck=_dec(user.federal_withheld_per_paycheck),
+        state_per_paycheck=_dec(user.state_withheld_per_paycheck),
+        withholding_as_of=as_of,
+        paychecks_in_year=paychecks_in_year,
+        paychecks_remaining=paychecks_remaining,
     )
     result["year"] = year
     # result["bracket_year"] is the table year actually used (the nearest

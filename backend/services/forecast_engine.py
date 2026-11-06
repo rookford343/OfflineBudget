@@ -329,6 +329,40 @@ def _fires_on(item: models.RecurringItem, d: date) -> bool:
     return d.day == target
 
 
+def paycheck_item_ids(
+    recurring_items, gross_per_paycheck: Decimal | None, bonus_item_ids: set[int],
+) -> set[int]:
+    """Ids of the recurring income items that are paychecks: net amount
+    between 0.5x and 1.1x of the gross per paycheck (a recurring item holds
+    the NET that lands in checking; see build_forecast's SS boost setup for
+    why the band is shaped this way). Bonus-plan items are never paychecks.
+    Empty when gross_per_paycheck is unset."""
+    if not gross_per_paycheck or gross_per_paycheck <= 0:
+        return set()
+    ids: set[int] = set()
+    for item in recurring_items:
+        if item.id in bonus_item_ids:
+            continue  # a bonus is never a paycheck, whatever its net/gross ratio
+        if item.type == models.RecurringType.income and item.amount > 0:
+            ratio = item.amount / gross_per_paycheck
+            if Decimal("0.5") <= ratio <= Decimal("1.1"):
+                ids.add(item.id)
+    return ids
+
+
+def paycheck_dates(items, start: date, end: date) -> list[date]:
+    """Sorted distinct dates in [start, end] on which any of `items` fires
+    (per _fires_on). Distinct, so a paycheck split across two deposit items
+    counts once per pay date."""
+    dates: list[date] = []
+    d = start
+    while d <= end:
+        if any(_fires_on(item, d) for item in items):
+            dates.append(d)
+        d += timedelta(days=1)
+    return dates
+
+
 def is_card_bill_in_month(item: models.RecurringItem, month: date) -> bool:
     """Is this card-linked item on `month`'s 'Credit Card Bills' list -- the
     set behind budget_snapshot's _cc_budget_total? Monthly items always,
@@ -525,13 +559,7 @@ def build_forecast(
         # smoothed bonus twelfth, a rental payment) without needing to know the
         # exact withholding rate; the upper bound keeps net from exceeding gross
         # by more than rounding.
-        for item in recurring_items:
-            if item.id in bonus_plans:
-                continue  # a bonus is never a paycheck, whatever its net/gross ratio
-            if item.type == models.RecurringType.income and item.amount > 0:
-                ratio = item.amount / ss_gross
-                if Decimal("0.5") <= ratio <= Decimal("1.1"):
-                    ss_paycheck_item_ids.add(item.id)
+        ss_paycheck_item_ids = paycheck_item_ids(recurring_items, ss_gross, set(bonus_plans))
 
     # Known statement amounts for specific upcoming occurrences, keyed by
     # (recurring_item_id, due_date) so a lookup during the day walk is exact.

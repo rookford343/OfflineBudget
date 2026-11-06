@@ -12,7 +12,17 @@ and the Social Security wage base from the SSA's announcement. If Indiana's
 flat rate changes, add the year to _STATE_RATE_OVERRIDES too.
 """
 from __future__ import annotations
-from decimal import Decimal
+from collections.abc import Sequence
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
+
+CENT = Decimal("0.01")
+
+# IRS flat rate for withholding on supplemental wages (bonuses) up to $1M.
+SUPPLEMENTAL_FEDERAL_RATE = Decimal("0.22")
+
+# Paychecks per year assumed when no paycheck item can be identified.
+ASSUMED_PAYCHECKS_PER_YEAR = 26
 
 
 def _ladder(*floors: str) -> list[tuple[Decimal, Decimal]]:
@@ -162,6 +172,48 @@ def _apply_brackets(
     return tax, breakdown
 
 
+def assumed_biweekly_counts(year: int, as_of: date | None) -> tuple[int, int]:
+    """(paychecks in `year`, paychecks left after `as_of`) assuming 26 a year
+    when no paycheck schedule is known: prorated by days left in the year
+    when `as_of` falls in it, all of them when it's earlier or unset, none
+    when it's later."""
+    n = ASSUMED_PAYCHECKS_PER_YEAR
+    if as_of is None or as_of.year < year:
+        return n, n
+    if as_of.year > year:
+        return n, 0
+    year_days = (date(year, 12, 31) - date(year, 1, 1)).days + 1
+    left = (date(year, 12, 31) - as_of).days
+    return n, int((Decimal(n * left) / year_days).quantize(Decimal(1), ROUND_HALF_UP))
+
+
+def _withholding(
+    *, year: int | None, as_of: date | None, ytd: Decimal, per_paycheck: Decimal | None,
+    projecting: bool, past_year: bool, paychecks_remaining: int,
+    bonuses: Sequence[tuple[date, Decimal]], bonus_rate: Decimal,
+) -> dict:
+    """One tax's (federal or state) projected withholding breakdown."""
+    zero = Decimal("0")
+    if past_year:
+        return {"ytd": zero, "per_paycheck": per_paycheck or zero,
+                "remaining_paychecks": zero, "bonus": zero, "total": zero}
+    if not projecting:
+        return {"ytd": ytd, "per_paycheck": zero,
+                "remaining_paychecks": zero, "bonus": zero, "total": ytd}
+    in_year = as_of is not None and as_of.year == year
+    base = ytd if in_year else zero
+    pp = per_paycheck or zero
+    remaining = (pp * paychecks_remaining).quantize(CENT)
+    # A bonus paid on or before the stub date is already inside its YTD.
+    bonus = sum(
+        ((gross * bonus_rate).quantize(CENT) for d, gross in bonuses
+         if not in_year or d > as_of),
+        zero,
+    )
+    return {"ytd": base, "per_paycheck": pp, "remaining_paychecks": remaining,
+            "bonus": bonus, "total": base + remaining + bonus}
+
+
 def estimate_taxes(
     filing_status: str,
     state: str,
@@ -171,40 +223,114 @@ def estimate_taxes(
     federal_withheld: Decimal,
     state_withheld: Decimal,
     year: int | None = None,
+    *,
+    bonuses: Sequence[tuple[date, Decimal]] = (),
+    pretax_per_paycheck: Decimal | None = None,
+    federal_per_paycheck: Decimal | None = None,
+    state_per_paycheck: Decimal | None = None,
+    withholding_as_of: date | None = None,
+    paychecks_in_year: int | None = None,
+    paychecks_remaining: int | None = None,
+    paycheck_basis: str = "schedule",
 ) -> dict:
+    """Full-year tax estimate. Pure: the caller gathers every input.
+
+    gross_income is the year's salary; `bonuses` are (pay date, gross) for
+    the year's bonuses, which count as wages for every tax. federal_withheld
+    / state_withheld are the pay stub's YTD figures as of withholding_as_of.
+    pretax_per_paycheck x paychecks_in_year comes off federal and state
+    taxable wages, not Social Security/Medicare wages (conservative: a 401k
+    deferral is still FICA wages; only some premiums/HSA aren't).
+
+    withholding_basis says how the withholding compared against the tax was
+    found:
+      projected           -- stub in `year`: YTD + per-paycheck x paychecks
+                             left after it + bonus withholding after it
+      projected_full_year -- stub earlier or unset: per-paycheck x all of
+                             the year's paychecks + all bonus withholding
+      past_year           -- stub from a later year: no withholding known
+                             for `year`; refund/owed are None (see the W-2)
+      ytd_only            -- no per-paycheck amounts: YTD compared as-is
+    """
     filing_status = filing_status or "single"
-    total_income = gross_income + other_income
+    zero = Decimal("0")
+    bonus_gross = sum((g for _, g in bonuses), zero)
+    wages = gross_income + bonus_gross
+    total_income = wages + other_income
     table_year = _table_year(year)
     table = _TABLES[table_year]
+
+    if paychecks_in_year is None or paychecks_remaining is None:
+        est_year = year if year is not None else (withholding_as_of or date(table_year, 1, 1)).year
+        paychecks_in_year, paychecks_remaining = assumed_biweekly_counts(est_year, withholding_as_of)
+        paycheck_basis = "assumed_biweekly"
+    pretax = ((pretax_per_paycheck or zero) * paychecks_in_year).quantize(CENT)
+    income_tax_income = max(zero, total_income - pretax)
 
     std_ded = table["standard_deduction"].get(filing_status, table["standard_deduction"]["single"])
     itemized = deductible_expenses
     deduction = max(std_ded, itemized)
-    taxable_income = max(Decimal("0"), total_income - deduction)
+    taxable_income = max(zero, income_tax_income - deduction)
 
     federal_tax, brackets = _apply_brackets(taxable_income, filing_status, table_year)
 
     # State tax (simple flat-rate approximation)
     state_rate = Decimal(str(_state_rate(state.upper(), year)))
-    state_taxable = max(Decimal("0"), total_income - std_ded)
+    state_taxable = max(zero, income_tax_income - std_ded)
     state_tax = state_taxable * state_rate
 
-    # FICA
-    ss_taxable = min(gross_income, table["ss_wage_base"])
+    # FICA (bonus included; pre-tax deductions deliberately not subtracted)
+    ss_taxable = min(wages, table["ss_wage_base"])
     fica_ss = ss_taxable * SS_RATE
-    fica_medicare = gross_income * MEDICARE_RATE
+    fica_medicare = wages * MEDICARE_RATE
     add_medicare_threshold = ADDITIONAL_MEDICARE_THRESHOLD.get(filing_status, Decimal("200000"))
     if total_income > add_medicare_threshold:
         fica_medicare += (total_income - add_medicare_threshold) * Decimal("0.009")
 
     total_tax = federal_tax + state_tax + fica_ss + fica_medicare
-    effective_rate = total_tax / total_income if total_income > 0 else Decimal("0")
+    effective_rate = total_tax / total_income if total_income > 0 else zero
 
-    federal_refund = federal_withheld - federal_tax
-    state_refund = state_withheld - state_tax
-    total_refund = federal_refund + state_refund
+    # Withholding
+    projecting = federal_per_paycheck is not None or state_per_paycheck is not None
+    basis_year = year if year is not None else (withholding_as_of.year if withholding_as_of else None)
+    past_year = (
+        withholding_as_of is not None and basis_year is not None
+        and withholding_as_of.year > basis_year
+    )
+    if past_year:
+        withholding_basis = "past_year"
+    elif not projecting:
+        withholding_basis = "ytd_only"
+    elif withholding_as_of is not None and withholding_as_of.year == basis_year:
+        withholding_basis = "projected"
+    else:
+        withholding_basis = "projected_full_year"
+    common = dict(year=basis_year, as_of=withholding_as_of, projecting=projecting,
+                  past_year=past_year, paychecks_remaining=paychecks_remaining, bonuses=bonuses)
+    fed_w = _withholding(ytd=federal_withheld, per_paycheck=federal_per_paycheck,
+                         bonus_rate=SUPPLEMENTAL_FEDERAL_RATE, **common)
+    state_w = _withholding(ytd=state_withheld, per_paycheck=state_per_paycheck,
+                           bonus_rate=state_rate, **common)
+    federal_withheld = fed_w["total"]
+    state_withheld = state_w["total"]
+
+    if past_year:
+        federal_refund = state_refund = total_refund = None
+    else:
+        federal_refund = federal_withheld - federal_tax
+        state_refund = state_withheld - state_tax
+        total_refund = federal_refund + state_refund
 
     return {
+        "salary": gross_income,
+        "bonus_gross": bonus_gross,
+        "pretax_deductions": pretax,
+        "paychecks_in_year": paychecks_in_year,
+        "paychecks_remaining": paychecks_remaining,
+        "paycheck_basis": paycheck_basis,
+        "withholding_basis": withholding_basis,
+        "withholding_as_of": withholding_as_of,
+        "withholding": {"federal": fed_w, "state": state_w},
         "federal_tax": federal_tax,
         "state_tax": state_tax,
         "fica_ss": fica_ss,

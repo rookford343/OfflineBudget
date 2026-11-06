@@ -66,6 +66,10 @@ class UserOut(BaseModel):
     other_income: Optional[Decimal] = None
     federal_withholding_ytd: Optional[Decimal] = None
     state_withholding_ytd: Optional[Decimal] = None
+    federal_withheld_per_paycheck: Optional[Decimal] = None
+    state_withheld_per_paycheck: Optional[Decimal] = None
+    pretax_per_paycheck: Optional[Decimal] = None
+    tax_withholding_as_of: Optional[date] = None
     itemized_mortgage_interest: Optional[Decimal] = None
     itemized_donations: Optional[Decimal] = None
     itemized_salt: Optional[Decimal] = None
@@ -94,6 +98,10 @@ class UserUpdate(BaseModel):
     other_income: Optional[Decimal] = None
     federal_withholding_ytd: Optional[Decimal] = None
     state_withholding_ytd: Optional[Decimal] = None
+    federal_withheld_per_paycheck: Optional[Decimal] = None
+    state_withheld_per_paycheck: Optional[Decimal] = None
+    pretax_per_paycheck: Optional[Decimal] = None
+    tax_withholding_as_of: Optional[date] = None
     itemized_mortgage_interest: Optional[Decimal] = None
     itemized_donations: Optional[Decimal] = None
     itemized_salt: Optional[Decimal] = None

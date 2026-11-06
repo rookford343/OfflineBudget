@@ -319,6 +319,11 @@ def upgrade_schema():
         "ALTER TABLE credit_cards ADD COLUMN minimum_payment_amount NUMERIC(14,2)",
         "ALTER TABLE transactions ADD COLUMN alt_external_id VARCHAR(128)",
         "ALTER TABLE credit_card_transactions ADD COLUMN alt_external_id VARCHAR(128)",
+        # Tax-page pay-stub inputs -- see services/tax_service.py estimate_taxes.
+        "ALTER TABLE users ADD COLUMN federal_withheld_per_paycheck NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN state_withheld_per_paycheck NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN pretax_per_paycheck NUMERIC(14,2)",
+        "ALTER TABLE users ADD COLUMN tax_withholding_as_of DATE",
     ]
     with engine.connect() as conn:
         for s in stmts:

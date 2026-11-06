@@ -167,6 +167,14 @@ class User(Base):
     other_income: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     federal_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     state_withholding_ytd: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # From the latest pay stub (Tax page): this period's federal/state
+    # withholding, pre-tax payroll deductions (401k, HSA, premiums), and the
+    # stub's pay date, which the *_withholding_ytd figures above are as of.
+    # The tax estimate projects full-year withholding from these.
+    federal_withheld_per_paycheck: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    state_withheld_per_paycheck: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    pretax_per_paycheck: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    tax_withholding_as_of: Mapped[date | None] = mapped_column(Date)
     # Itemized deductions (manually entered from tax documents)
     itemized_mortgage_interest: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     itemized_donations: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
