@@ -192,13 +192,14 @@ def _withholding(
     projecting: bool, past_year: bool, paychecks_remaining: int,
     bonuses: Sequence[tuple[date, Decimal]], bonus_rate: Decimal,
 ) -> dict:
-    """One tax's (federal or state) projected withholding breakdown."""
+    """One tax's (federal or state) projected withholding breakdown, with the
+    basis (see estimate_taxes) it was found on."""
     zero = Decimal("0")
     if past_year:
-        return {"ytd": zero, "per_paycheck": per_paycheck or zero,
+        return {"basis": "past_year", "ytd": zero, "per_paycheck": per_paycheck or zero,
                 "remaining_paychecks": zero, "bonus": zero, "total": zero}
     if not projecting:
-        return {"ytd": ytd, "per_paycheck": zero,
+        return {"basis": "ytd_only", "ytd": ytd, "per_paycheck": zero,
                 "remaining_paychecks": zero, "bonus": zero, "total": ytd}
     in_year = as_of is not None and as_of.year == year
     base = ytd if in_year else zero
@@ -210,7 +211,8 @@ def _withholding(
          if not in_year or d > as_of),
         zero,
     )
-    return {"ytd": base, "per_paycheck": pp, "remaining_paychecks": remaining,
+    return {"basis": "projected" if in_year else "projected_full_year",
+            "ytd": base, "per_paycheck": pp, "remaining_paychecks": remaining,
             "bonus": bonus, "total": base + remaining + bonus}
 
 
@@ -242,15 +244,20 @@ def estimate_taxes(
     taxable wages, not Social Security/Medicare wages (conservative: a 401k
     deferral is still FICA wages; only some premiums/HSA aren't).
 
-    withholding_basis says how the withholding compared against the tax was
-    found:
+    withholding.federal.basis / withholding.state.basis say how each tax's
+    withholding compared against the tax was found:
       projected           -- stub in `year`: YTD + per-paycheck x paychecks
                              left after it + bonus withholding after it
       projected_full_year -- stub earlier or unset: per-paycheck x all of
                              the year's paychecks + all bonus withholding
       past_year           -- stub from a later year: no withholding known
                              for `year`; refund/owed are None (see the W-2)
-      ytd_only            -- no per-paycheck amounts: YTD compared as-is
+      ytd_only            -- that tax's per-paycheck amount is blank: its
+                             YTD compared as-is (a blank is never $0)
+    Each tax projects only from its own per-paycheck amount. A no-income-tax
+    state follows the federal basis (its blank isn't worth a warning).
+    Top-level withholding_basis is the shared basis when both agree, else
+    "mixed" (one tax projected, the other still YTD-only).
     """
     filing_status = filing_status or "single"
     zero = Decimal("0")
@@ -291,26 +298,23 @@ def estimate_taxes(
     effective_rate = total_tax / total_income if total_income > 0 else zero
 
     # Withholding
-    projecting = federal_per_paycheck is not None or state_per_paycheck is not None
+    fed_projecting = federal_per_paycheck is not None
+    state_projecting = (
+        fed_projecting if state_rate == 0 and state_per_paycheck is None
+        else state_per_paycheck is not None
+    )
     basis_year = year if year is not None else (withholding_as_of.year if withholding_as_of else None)
     past_year = (
         withholding_as_of is not None and basis_year is not None
         and withholding_as_of.year > basis_year
     )
-    if past_year:
-        withholding_basis = "past_year"
-    elif not projecting:
-        withholding_basis = "ytd_only"
-    elif withholding_as_of is not None and withholding_as_of.year == basis_year:
-        withholding_basis = "projected"
-    else:
-        withholding_basis = "projected_full_year"
-    common = dict(year=basis_year, as_of=withholding_as_of, projecting=projecting,
-                  past_year=past_year, paychecks_remaining=paychecks_remaining, bonuses=bonuses)
+    common = dict(year=basis_year, as_of=withholding_as_of, past_year=past_year,
+                  paychecks_remaining=paychecks_remaining, bonuses=bonuses)
     fed_w = _withholding(ytd=federal_withheld, per_paycheck=federal_per_paycheck,
-                         bonus_rate=SUPPLEMENTAL_FEDERAL_RATE, **common)
+                         projecting=fed_projecting, bonus_rate=SUPPLEMENTAL_FEDERAL_RATE, **common)
     state_w = _withholding(ytd=state_withheld, per_paycheck=state_per_paycheck,
-                           bonus_rate=state_rate, **common)
+                           projecting=state_projecting, bonus_rate=state_rate, **common)
+    withholding_basis = fed_w["basis"] if fed_w["basis"] == state_w["basis"] else "mixed"
     federal_withheld = fed_w["total"]
     state_withheld = state_w["total"]
 

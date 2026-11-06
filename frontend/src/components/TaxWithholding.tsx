@@ -3,10 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { authApi } from "../api";
 import { fmt, fmtDate } from "../lib/utils";
 
-type Breakdown = { ytd: number; per_paycheck: number; remaining_paychecks: number; bonus: number; total: number };
+type Basis = "projected" | "projected_full_year" | "past_year" | "ytd_only";
+type Breakdown = { basis: Basis; ytd: number; per_paycheck: number; remaining_paychecks: number; bonus: number; total: number };
 
 function WithholdingRows({ label, w, te }: { label: string; w: Breakdown; te: any }) {
-  const basis = te.withholding_basis;
+  // Each tax has its own basis: one can project while the other, with a
+  // blank this-period amount, stays on its YTD figure.
+  const basis = w.basis ?? te.withholding_basis;
   const asOf = te.withholding_as_of;
   return (
     <div className="space-y-1">
@@ -44,6 +47,12 @@ function WithholdingRows({ label, w, te }: { label: string; w: Breakdown; te: an
 /** How the withholding compared against the estimated tax was found. */
 export function WithholdingCard({ te, taxYear }: { te: any; taxYear: number }) {
   const basis = te.withholding_basis;
+  // The taxes shown, with their own bases (top-level basis is "mixed" when they differ).
+  const shown: { label: string; w: Breakdown }[] = [{ label: "Federal", w: te.withholding.federal }];
+  if (!te.state_no_income_tax) shown.push({ label: "State", w: te.withholding.state });
+  const basisOf = (w: Breakdown) => w.basis ?? basis;
+  const ytdOnly = shown.filter(t => basisOf(t.w) === "ytd_only").map(t => t.label);
+  const anyBasis = (b: Basis) => shown.some(t => basisOf(t.w) === b);
   return (
     <div className="card space-y-3">
       <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Withholding</h4>
@@ -53,22 +62,24 @@ export function WithholdingCard({ te, taxYear }: { te: any; taxYear: number }) {
         </p>
       ) : (
         <>
-          <WithholdingRows label="Federal" w={te.withholding.federal} te={te} />
-          {!te.state_no_income_tax && <WithholdingRows label="State" w={te.withholding.state} te={te} />}
+          {shown.map(t => <WithholdingRows key={t.label} label={t.label} w={t.w} te={te} />)}
         </>
       )}
-      {basis === "ytd_only" && (
+      {basis !== "past_year" && ytdOnly.length > 0 && (
         <p className="text-xs text-amber-700 dark:text-amber-300">
-          Only year-to-date withholding is counted, so the result leans toward owing. Fill in
-          "From your latest pay stub" to project the rest of the year.
+          {ytdOnly.length === shown.length
+            ? <>Only year-to-date withholding is counted, so the result leans toward owing. Fill in
+              "From your latest pay stub" to project the rest of the year.</>
+            : <>{ytdOnly.join(" and ")} counts only year-to-date withholding, so the result leans toward
+              owing. Fill in "{ytdOnly.join(" and ")} withheld this period" to project the rest of the year.</>}
         </p>
       )}
-      {basis === "projected_full_year" && (
+      {anyBasis("projected_full_year") && (
         <p className="text-xs text-gray-400">
           No {taxYear} pay stub yet, so a full year of paychecks at your latest per-paycheck withholding is assumed.
         </p>
       )}
-      {Number(te.bonus_gross) > 0 && basis !== "past_year" && basis !== "ytd_only" && (
+      {Number(te.bonus_gross) > 0 && (anyBasis("projected") || anyBasis("projected_full_year")) && (
         <p className="text-xs text-gray-400">Bonuses not yet paid are withheld at 22% federal plus your state rate.</p>
       )}
       {te.paycheck_basis === "assumed_biweekly" && basis !== "past_year" && (

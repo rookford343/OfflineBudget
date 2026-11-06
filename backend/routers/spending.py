@@ -920,7 +920,7 @@ def tax_estimate(
     from backend.services.bonus_plans import (
         bonus_gross, is_bonus_shaped, payout_date, plans_by_item, salary_for_year,
     )
-    from backend.services.forecast_engine import paycheck_dates, paycheck_item_ids
+    from backend.services.forecast_engine import pay_year_dates, paycheck_item_ids
 
     # Raise-aware salary for the year, falling back to the flat figure.
     salary = salary_for_year(user, year) or Decimal(str(user.annual_salary))
@@ -937,7 +937,9 @@ def tax_estimate(
             bonuses.append((payout_date(plan.recurring_item, year), gross))
 
     # Paychecks in the year, and left after the pay stub's date, from the
-    # same paycheck items and schedule the forecast uses.
+    # same paycheck items the forecast uses, counted across the whole year
+    # from each item's schedule pattern (pay_year_dates ignores start_date,
+    # which is only when the item was entered).
     as_of = user.tax_withholding_as_of
     income_items = db.query(models.RecurringItem).filter(
         models.RecurringItem.user_id == user.id,
@@ -948,7 +950,7 @@ def tax_estimate(
     paychecks_in_year = paychecks_remaining = None
     if pay_ids:
         pay_items = [i for i in income_items if i.id in pay_ids]
-        dates = paycheck_dates(pay_items, _date(year, 1, 1), _date(year, 12, 31))
+        dates = pay_year_dates(pay_items, year)
         paychecks_in_year = len(dates)
         if as_of is None or as_of.year < year:
             paychecks_remaining = paychecks_in_year

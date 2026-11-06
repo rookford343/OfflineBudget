@@ -7,7 +7,7 @@ import { fmt } from "../lib/utils";
 import { AlertTriangle } from "lucide-react";
 
 export default function TaxExport() {
-  const [taxYear, setTaxYear] = useState(new Date().getFullYear() - 1);
+  const [taxYear, setTaxYear] = useState(new Date().getFullYear());
 
   const { data: taxEstimate, isLoading: taxEstimateLoading } = useQuery({
     queryKey: ["tax-estimate", taxYear],

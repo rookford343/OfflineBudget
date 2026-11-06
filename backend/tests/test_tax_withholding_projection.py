@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from backend import models
 from backend.dependencies import get_current_user
 from backend.routers import spending as spending_router
-from backend.services.forecast_engine import paycheck_dates, paycheck_item_ids
+from backend.services.forecast_engine import pay_year_dates, paycheck_dates, paycheck_item_ids
 from backend.services.tax_service import (
     SUPPLEMENTAL_FEDERAL_RATE,
     assumed_biweekly_counts,
@@ -259,3 +259,118 @@ def test_endpoint_falls_back_to_assumed_biweekly_without_a_paycheck_match(db_ses
     body = _client(db_session, user).get(f"{_prefix()}/tax-estimate", params={"year": 2026}).json()
     assert body["paycheck_basis"] == "assumed_biweekly"
     assert body["paychecks_in_year"] == 26 and body["paychecks_remaining"] == 13
+
+
+# --- Review fixes: pay-year counting, per-tax basis ----------------------------
+#
+# 1. A paycheck item's start_date is just when it was entered (the Recurring
+#    form defaults it to today), so the tax year's paydays come from the
+#    item's schedule pattern across the whole year, not from start_date on.
+# 2. Federal and state each project only when their own this-period amount is
+#    set; a blank one stays on its YTD figure instead of counting as $0.
+
+def _pay_item(db, user, acct, *, name, amount, frequency, day, start):
+    item = models.RecurringItem(
+        user_id=user.id, account_id=acct.id, name=name, amount=amount,
+        type=models.RecurringType.income, frequency=frequency,
+        day_of_month=day, start_date=start,
+    )
+    db.add(item)
+    db.flush()
+    return item
+
+
+def test_pay_year_ignores_a_mid_year_start_date_for_semi_monthly_items(db_session):
+    user, pay = _seed(db_session)
+    acct = db_session.query(models.Account).first()
+    mid = _pay_item(db_session, user, acct, name="Pay 15th", amount=D("1400"),
+                    frequency=models.RecurringFrequency.monthly, day=15, start=date(2026, 4, 15))
+    end = _pay_item(db_session, user, acct, name="Pay EOM", amount=D("1400"),
+                    frequency=models.RecurringFrequency.monthly, day=0, start=date(2026, 5, 31))
+    dates = pay_year_dates([mid, end], 2026)
+    assert len(dates) == 24
+    assert dates[0] == date(2026, 1, 15) and dates[1] == date(2026, 1, 31)
+    assert date(2026, 2, 28) in dates and dates[-1] == date(2026, 12, 31)
+    # A year before the items existed still has a full pay year.
+    assert len(pay_year_dates([mid, end], 2025)) == 24
+
+
+def test_pay_year_steps_a_biweekly_schedule_back_before_its_start_date(db_session):
+    user, pay = _seed(db_session)
+    pay.start_date = date(2026, 7, 3)  # same Friday cadence, entered mid-year
+    db_session.flush()
+    dates = pay_year_dates([pay], 2026)
+    assert len(dates) == 26 and dates[0] == FIRST_PAYDAY and dates[-1] == date(2026, 12, 18)
+    weekly = _pay_item(db_session, user, db_session.query(models.Account).first(),
+                       name="Weekly", amount=D("1400"), frequency=models.RecurringFrequency.weekly,
+                       day=1, start=date(2026, 10, 2))
+    assert len(pay_year_dates([weekly], 2026)) == 52
+    assert len(pay_year_dates([pay], 2025)) == 26
+
+
+def test_pay_year_ignores_end_date_and_dedupes_split_deposits(db_session):
+    user, pay = _seed(db_session)
+    split = _pay_item(db_session, user, db_session.query(models.Account).first(),
+                      name="Paycheck savings split", amount=D("500"),
+                      frequency=models.RecurringFrequency.biweekly, day=2, start=date(2026, 3, 13))
+    split.end_date = date(2026, 6, 1)
+    db_session.flush()
+    assert len(pay_year_dates([pay, split], 2026)) == 26
+
+
+def test_endpoint_counts_a_full_pay_year_for_items_created_mid_year(db_session):
+    user, pay = _seed(db_session)
+    pay.start_date = date(2026, 9, 11)  # same cadence, entered in September
+    user.tax_withholding_as_of = None
+    db_session.commit()
+    client = _client(db_session, user)
+    body = client.get(f"{_prefix()}/tax-estimate", params={"year": 2026}).json()
+    assert body["paycheck_basis"] == "schedule"
+    assert body["paychecks_in_year"] == 26 and body["paychecks_remaining"] == 26
+    assert body["withholding"]["federal"]["total"] == 26 * 200
+    # A year before the item existed is a full year too, not $0 withheld.
+    before = client.get(f"{_prefix()}/tax-estimate", params={"year": 2025}).json()
+    assert before["paychecks_in_year"] == 26
+    assert before["withholding"]["federal"]["total"] == 26 * 200
+
+
+def test_endpoint_remaining_paychecks_ignore_start_date(db_session):
+    user, pay = _seed(db_session)
+    pay.start_date = date(2026, 9, 11)
+    db_session.commit()
+    body = _client(db_session, user).get(f"{_prefix()}/tax-estimate", params={"year": 2026}).json()
+    assert body["paychecks_in_year"] == 26 and body["paychecks_remaining"] == 12
+
+
+def test_blank_state_per_paycheck_keeps_state_on_ytd():
+    r = _estimate(state_pp=None)
+    fed, st = r["withholding"]["federal"], r["withholding"]["state"]
+    assert fed["basis"] == "projected" and fed["total"] == D("5000") + 12 * D("200")
+    assert st["basis"] == "ytd_only" and st["total"] == D("1500")
+    assert r["state_withheld"] == D("1500")
+    assert r["withholding_basis"] == "mixed"
+
+
+def test_blank_federal_per_paycheck_keeps_federal_on_ytd_even_without_a_stub_date():
+    r = _estimate(fed_pp=None, as_of=None, remaining=26)
+    fed, st = r["withholding"]["federal"], r["withholding"]["state"]
+    assert fed["basis"] == "ytd_only" and fed["total"] == D("5000")
+    assert st["basis"] == "projected_full_year" and st["total"] == 26 * D("50")
+    assert r["withholding_basis"] == "mixed"
+
+
+def test_matching_bases_report_that_basis_at_the_top_level():
+    r = _estimate()
+    assert r["withholding"]["federal"]["basis"] == r["withholding"]["state"]["basis"] == "projected"
+    assert r["withholding_basis"] == "projected"
+    past = _estimate(year=2025, remaining=0, state_pp=None)
+    assert past["withholding_basis"] == "past_year"
+    assert past["withholding"]["state"]["basis"] == "past_year"
+
+
+def test_no_income_tax_state_follows_federal_without_a_mixed_basis():
+    r = _estimate(state="TX", state_pp=None, state_ytd=D("0"))
+    assert r["state_no_income_tax"] is True
+    assert r["withholding"]["state"]["basis"] == "projected"
+    assert r["withholding"]["state"]["total"] == D("0")
+    assert r["withholding_basis"] == "projected"

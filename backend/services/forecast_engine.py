@@ -302,6 +302,13 @@ def _fires_on(item: models.RecurringItem, d: date) -> bool:
         return False
     if not item.is_active:
         return False
+    return _matches_schedule(item, d)
+
+
+def _matches_schedule(item: models.RecurringItem, d: date) -> bool:
+    """Does d fall on this item's schedule pattern? Ignores start_date/end_date
+    as bounds (weekly/biweekly still use start_date as the cadence anchor,
+    stepping backward as well as forward) and is_active; _fires_on adds those."""
     frequency = getattr(item, "frequency", None)
     if frequency == models.RecurringFrequency.weekly:
         return (d - item.start_date).days % 7 == 0
@@ -358,6 +365,24 @@ def paycheck_dates(items, start: date, end: date) -> list[date]:
     d = start
     while d <= end:
         if any(_fires_on(item, d) for item in items):
+            dates.append(d)
+        d += timedelta(days=1)
+    return dates
+
+
+def pay_year_dates(items, year: int) -> list[date]:
+    """Sorted distinct paydays in `year` from the items' schedule patterns,
+    ignoring start_date and end_date as bounds. For tax counting only: a
+    paycheck item describes the current pay schedule, and its start_date is
+    just when it was entered (the Recurring form defaults it to today), so
+    bounding by it under-counts a year the item was created in and zeroes
+    out a year before it. Weekly/biweekly cadences are stepped from
+    start_date in both directions; day-of-month items fire every month.
+    Distinct, so a paycheck split across deposit items counts once."""
+    dates: list[date] = []
+    d, end = date(year, 1, 1), date(year, 12, 31)
+    while d <= end:
+        if any(_matches_schedule(item, d) for item in items):
             dates.append(d)
         d += timedelta(days=1)
     return dates
