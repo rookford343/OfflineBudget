@@ -291,8 +291,8 @@ def test_pay_year_ignores_a_mid_year_start_date_for_semi_monthly_items(db_sessio
     assert len(dates) == 24
     assert dates[0] == date(2026, 1, 15) and dates[1] == date(2026, 1, 31)
     assert date(2026, 2, 28) in dates and dates[-1] == date(2026, 12, 31)
-    # A year before the items existed still has a full pay year.
-    assert len(pay_year_dates([mid, end], 2025)) == 24
+    # A year before the items start is a future schedule for that year: none.
+    assert pay_year_dates([mid, end], 2025) == []
 
 
 def test_pay_year_steps_a_biweekly_schedule_back_before_its_start_date(db_session):
@@ -305,17 +305,53 @@ def test_pay_year_steps_a_biweekly_schedule_back_before_its_start_date(db_sessio
                        name="Weekly", amount=D("1400"), frequency=models.RecurringFrequency.weekly,
                        day=1, start=date(2026, 10, 2))
     assert len(pay_year_dates([weekly], 2026)) == 52
-    assert len(pay_year_dates([pay], 2025)) == 26
+    assert len(pay_year_dates([pay], 2027)) == 27  # 1/1 through 12/31 on this cadence
+    assert pay_year_dates([pay], 2025) == []  # starts after 2025
 
 
-def test_pay_year_ignores_end_date_and_dedupes_split_deposits(db_session):
+def test_pay_year_clips_at_end_date_and_dedupes_split_deposits(db_session):
     user, pay = _seed(db_session)
     split = _pay_item(db_session, user, db_session.query(models.Account).first(),
                       name="Paycheck savings split", amount=D("500"),
                       frequency=models.RecurringFrequency.biweekly, day=2, start=date(2026, 3, 13))
     split.end_date = date(2026, 6, 1)
     db_session.flush()
+    # The split lands on the same paydays as the main deposit: counted once.
     assert len(pay_year_dates([pay, split], 2026)) == 26
+    # On its own it stops at its end_date (start_date still ignored: no other
+    # item ended before it started), and a year after it ended has none.
+    alone = pay_year_dates([split], 2026)
+    assert alone[0] == FIRST_PAYDAY and alone[-1] == date(2026, 5, 22) and len(alone) == 11
+    assert pay_year_dates([split], 2027) == []
+
+
+def test_pay_year_counts_a_replacement_schedule_only_from_its_start_date(db_session):
+    # Biweekly pay ends 6/30; semi-monthly (15th + last day) replaces it 7/1.
+    user, pay = _seed(db_session)
+    pay.end_date = date(2026, 6, 30)
+    acct = db_session.query(models.Account).first()
+    mid = _pay_item(db_session, user, acct, name="Pay 15th", amount=D("1400"),
+                    frequency=models.RecurringFrequency.monthly, day=15, start=date(2026, 7, 1))
+    eom = _pay_item(db_session, user, acct, name="Pay EOM", amount=D("1400"),
+                    frequency=models.RecurringFrequency.monthly, day=0, start=date(2026, 7, 1))
+    db_session.flush()
+    dates = pay_year_dates([pay, mid, eom], 2026)
+    assert len(dates) == 13 + 12
+    assert dates[0] == FIRST_PAYDAY and date(2026, 6, 19) in dates
+    assert not any(date(2026, 6, 19) < d < date(2026, 7, 15) for d in dates)
+    assert dates[-1] == date(2026, 12, 31)
+    # The next year is all semi-monthly.
+    assert len(pay_year_dates([pay, mid, eom], 2027)) == 24
+
+
+def test_pay_year_skips_an_item_that_starts_after_the_year(db_session):
+    user, pay = _seed(db_session)
+    future = _pay_item(db_session, user, db_session.query(models.Account).first(),
+                       name="Next job", amount=D("1400"),
+                       frequency=models.RecurringFrequency.monthly, day=15, start=date(2027, 1, 15))
+    assert pay_year_dates([future], 2026) == []
+    assert len(pay_year_dates([pay, future], 2026)) == 26
+    assert len(pay_year_dates([future], 2027)) == 12
 
 
 def test_endpoint_counts_a_full_pay_year_for_items_created_mid_year(db_session):
@@ -328,10 +364,9 @@ def test_endpoint_counts_a_full_pay_year_for_items_created_mid_year(db_session):
     assert body["paycheck_basis"] == "schedule"
     assert body["paychecks_in_year"] == 26 and body["paychecks_remaining"] == 26
     assert body["withholding"]["federal"]["total"] == 26 * 200
-    # A year before the item existed is a full year too, not $0 withheld.
+    # A year before the item starts has no paydays from it (a future schedule).
     before = client.get(f"{_prefix()}/tax-estimate", params={"year": 2025}).json()
-    assert before["paychecks_in_year"] == 26
-    assert before["withholding"]["federal"]["total"] == 26 * 200
+    assert before["paychecks_in_year"] == 0 and before["paychecks_remaining"] == 0
 
 
 def test_endpoint_remaining_paychecks_ignore_start_date(db_session):

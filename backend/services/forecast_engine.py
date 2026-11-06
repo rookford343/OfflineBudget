@@ -371,18 +371,35 @@ def paycheck_dates(items, start: date, end: date) -> list[date]:
 
 
 def pay_year_dates(items, year: int) -> list[date]:
-    """Sorted distinct paydays in `year` from the items' schedule patterns,
-    ignoring start_date and end_date as bounds. For tax counting only: a
-    paycheck item describes the current pay schedule, and its start_date is
-    just when it was entered (the Recurring form defaults it to today), so
-    bounding by it under-counts a year the item was created in and zeroes
-    out a year before it. Weekly/biweekly cadences are stepped from
-    start_date in both directions; day-of-month items fire every month.
-    Distinct, so a paycheck split across deposit items counts once."""
+    """Sorted distinct paydays in `year` from the items' schedule patterns.
+    For tax counting only. Bounds:
+    - end_date is honored: an item that ended before the year is skipped,
+      and each item stops at its end_date.
+    - An item starting after the year (a future schedule) is skipped.
+    - start_date is otherwise NOT a lower bound: it is usually just when the
+      item was entered (the Recurring form defaults it to today), so bounding
+      by it under-counts the year it was created in. The exception is a
+      replacement schedule: when another item ended this year before this
+      one's start_date, that start_date is the real switchover and is honored.
+    Weekly/biweekly cadences are stepped from start_date in both directions;
+    day-of-month items fire every month. Distinct, so a paycheck split across
+    deposit items counts once."""
+    jan1, dec31 = date(year, 1, 1), date(year, 12, 31)
+    live = [i for i in items
+            if i.start_date <= dec31 and not (i.end_date and i.end_date < jan1)]
+    windows = []
+    for item in live:
+        replaces_ended = any(
+            other is not item and other.end_date and other.end_date < item.start_date
+            for other in live  # live end_dates are all on/after jan1
+        )
+        lo = item.start_date if replaces_ended and item.start_date > jan1 else jan1
+        hi = min(item.end_date, dec31) if item.end_date else dec31
+        windows.append((item, lo, hi))
     dates: list[date] = []
-    d, end = date(year, 1, 1), date(year, 12, 31)
-    while d <= end:
-        if any(_matches_schedule(item, d) for item in items):
+    d = jan1
+    while d <= dec31:
+        if any(lo <= d <= hi and _matches_schedule(item, d) for item, lo, hi in windows):
             dates.append(d)
         d += timedelta(days=1)
     return dates
