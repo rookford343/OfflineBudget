@@ -14,7 +14,7 @@ from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
 from backend.services.explain import ExplainBuilder
 from backend.services.forecast_engine import (
-    build_forecast, ScenarioProposal, is_card_bill_in_month,
+    build_forecast, ScenarioProposal,
     _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
 )
 from backend.services.card_matching import card_matches_description
@@ -37,6 +37,11 @@ class LeftoverParts(NamedTuple):
     # Outflow one-offs charged to a card and already settled on/before as_of:
     # card spending this month already holds them (see compute_budget_snapshot).
     one_offs_on_card: Decimal = Decimal("0")
+    # This month's card-linked bill occurrences (the 'Credit Card Bills'
+    # list), read off the same month base at the same amounts Leftover
+    # subtracted: all of them, and those dated on/before as_of.
+    card_bills_total: Decimal = Decimal("0")
+    card_bills_charged: Decimal = Decimal("0")
 
 
 def leftover_parts(
@@ -62,7 +67,10 @@ def leftover_parts(
          and o.direction == models.PlannedDirection.outflow),
         Decimal("0"),
     )
+    card_bills = _card_bill_occurrences(base)
     return LeftoverParts(
+        card_bills_total=sum((o.amount for o in card_bills), Decimal("0")),
+        card_bills_charged=sum((o.amount for o in card_bills if o.date <= as_of), Decimal("0")),
         income=base.income_total, expenses=base.expense_total,
         savings_budget=base.savings_budget, committed_savings=base.committed_savings,
         groceries_budget=base.groceries_budget, leftover=base.left_over,
@@ -101,30 +109,27 @@ def leftover_children(parts: LeftoverParts) -> list[ExplainChild]:
     return children
 
 
-def _card_linked_recurring_items(
-    db: Session, user_id: int, as_of: date,
-) -> list[models.RecurringItem]:
-    """Card-linked expense items that charge in the month containing `as_of`.
+def _card_bill_occurrences(base) -> list:
+    """Card-linked bill occurrences in the month base -- every weekly,
+    biweekly, monthly, quarterly and yearly charge to a card landing this
+    month, at this month's amount (an entered statement amount wins). The
+    'Credit Card Bills' list behind cc_budget_total and charged_so_far.
 
-    Frequency matters: both callers below treat this list as a set of charges
-    landing THIS month, so a yearly item must only appear in its own month.
-    Without that filter the annual card subscriptions (Fitbod, Runna,
-    Bitdefender, Apple TV+, Rivian Connect+, Natural Cycles -- $500.00/yr)
-    counted as if each were billed monthly, overstating the credit-card bill
-    total by that amount in all twelve months.
+    Read off build_month_base so the add-back matches what Leftover
+    subtracted occurrence for occurrence. Until 2026-11 this was a separate
+    query that skipped weekly/biweekly bills and used each item's base
+    amount, so a weekly card bill came off Left to Spend twice (as a bill
+    and as posted card spending) and an entered statement amount left the
+    difference behind. Before that, yearly items counted in all twelve
+    months ($500.00/yr of annual card subscriptions treated as monthly).
+
+    A scenario's proposed items (negative ids) are left out: they are not
+    charged to the card, so nothing in card spending needs adding back.
     """
-    items = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == user_id,
-        models.RecurringItem.type == models.RecurringType.expense,
-        models.RecurringItem.is_active == True,
-        models.RecurringItem.card_id.isnot(None),
-    ).all()
-    # Quarterly card charges land whole in their own month (as in
-    # leftover_parts): both callers here ask "what hits the card this
-    # month", which is the full bill or nothing. Shared
-    # with forecast_engine, whose Safety Margin floor walk leaves exactly
-    # these (the ones not charged yet) out of the carried card payoff.
-    return [item for item in items if is_card_bill_in_month(item, as_of)]
+    return [
+        o for o in (*base.monthly_bills, *base.periodic_due)
+        if o.card_id is not None and (o.recurring_item_id or 0) > 0
+    ]
 
 
 def _card_spending_this_month(
@@ -180,27 +185,6 @@ def _transaction_fed_card_ids(
         models.CreditCardTransaction.date <= as_of,
     ).distinct().all()
     return {card_id for (card_id,) in rows}
-
-
-def _cc_budget_total(db: Session, user_id: int, as_of: date) -> Decimal:
-    """Full monthly total of the user's 'Credit Card Bills' list (recurring
-    subscriptions charged to a card) -- Budget.xlsx's F2."""
-    items = _card_linked_recurring_items(db, user_id, as_of)
-    return sum((item.amount for item in items), Decimal("0"))
-
-
-def _charged_so_far(db: Session, user_id: int, as_of: date) -> Decimal:
-    """Sum of recurring card-linked charges whose day_of_month has already
-    passed this month -- the user's 'Credit Card Bills' list, filtered to what's
-    already posted, matching Budget.xlsx's SUMIF(...'<=' & DAY(...))."""
-    items = _card_linked_recurring_items(db, user_id, as_of)
-    total = Decimal("0")
-    for item in items:
-        last_day = calendar.monthrange(as_of.year, as_of.month)[1]
-        due_day = item.day_of_month if item.day_of_month > 0 else last_day
-        if min(due_day, last_day) <= as_of.day:
-            total += item.amount
-    return total
 
 
 def floor_mask(days, active_cards) -> list[bool]:
@@ -674,8 +658,11 @@ def compute_budget_snapshot(
     # CardSnapshot list below.
     stale_today = date.today()
     card_stale_reasons = {c.id: statement_stale_reason(c, stale_today) for c in active_cards}
-    charged_so_far = _charged_so_far(db, user.id, as_of)
-    cc_budget_total = _cc_budget_total(db, user.id, as_of)
+    # The 'Credit Card Bills' list: this month's card-linked bill
+    # occurrences (cc_budget_total) and those already charged by as_of
+    # (charged_so_far, matching Budget.xlsx's SUMIF(...'<=' & DAY(...))).
+    charged_so_far = parts.card_bills_charged
+    cc_budget_total = parts.card_bills_total
 
     # Leftover subtracts this month's planned one-offs (as the Recurring page
     # does). One charged to a card and already settled is inside card

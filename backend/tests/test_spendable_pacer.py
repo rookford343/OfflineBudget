@@ -341,9 +341,9 @@ def test_counts_a_plain_card_charge(db_session):
 
 def test_excludes_a_card_linked_recurring_subscription_from_card_spend(db_session):
     """A subscription billed to a card (RecurringItem.card_id set) is
-    already counted in `leftover` via _cc_budget_total -- deduct it from
+    already counted in `leftover` via cc_budget_total -- deduct it from
     the card total for the range it fires in, the same day-of-month
-    'firing' logic budget_snapshot.py's _charged_so_far already uses
+    'firing' logic budget_snapshot.py's charged_so_far already uses
     (not per-transaction fuzzy matching)."""
     user, checking = _make_user_and_checking(db_session)
     card = models.CreditCard(

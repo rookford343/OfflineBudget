@@ -65,11 +65,11 @@ def weeks_remaining_in_month(as_of: date) -> Decimal:
 def _recurring_card_charges_in_range(db: Session, user_id: int, start: date, end: date) -> Decimal:
     """Sum of card-linked recurring items (RecurringItem.card_id set --
     subscriptions billed to a card, already counted in the monthly leftover
-    pool via budget_snapshot.py's _cc_budget_total) that fire on any day in
-    [start, end]. Mirrors _charged_so_far's day-of-month firing logic but
+    pool via budget_snapshot.py's cc_budget_total) that fire on any day in
+    [start, end]. Mirrors charged_so_far's firing logic but
     over an arbitrary range instead of "month start through as_of", so it
     still works when a calendar week straddles a month boundary. Like
-    _charged_so_far, this fires on the calendar day regardless of whether a
+    charged_so_far, this fires on the calendar day regardless of whether a
     matching real CreditCardTransaction has posted yet -- same accepted
     tradeoff already established there, not a new gap.
     """

@@ -18,19 +18,23 @@ function, so they agree to the cent:
   whole in the month they're due (no /3 spreading), matching the cash
   forecast and the Budget page's Committed list.
 * Planned one-offs landing this month (settled ones at their real amount
-  and date): outflows subtract, inflows add.
+  and date): outflows subtract, inflows add. A purchase funded from savings
+  also adds its funding transfer, in the month the forecast books it
+  (expected_date - funding_lead_days), so checking nets to zero as it does
+  on the Forecast tab and only an uncovered remainder moves Leftover.
 * Then the month's Groceries budget and the Savings set aside (zero under
   the "pull_from_savings" strategy, where the year is funded by a bonus).
 
 Items with include_in_forecast=False (income that is real but already spoken
 for, e.g. a bonus modelled as 1/12th a month) count in neither: this is the
-month's real cash. credit_card_payment items never count -- they pay off card
+month's real cash. (Confirmed by the user, 2026-11: such income stays out of
+Leftover.) credit_card_payment items never count -- they pay off card
 charges already counted elsewhere.
 """
 from __future__ import annotations
 from calendar import monthrange
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from backend import models, schemas
@@ -102,6 +106,36 @@ def _counts(item) -> bool:
     return (
         item.type != models.RecurringType.credit_card_payment
         and getattr(item, "include_in_forecast", True) is not False
+    )
+
+
+def _funding_inflow(pe: models.PlannedExpense, year: int, month: int) -> schemas.OneOffOccurrence | None:
+    """The savings transfer that funds an outflow one-off, as an inflow row,
+    when it lands in this month. Same amount and date the forecast uses
+    (forecast_engine.build_forecast's funding_by_date): funding_amount, else
+    the purchase amount, on expected_date minus funding_lead_days. So a fully
+    funded purchase nets to zero here as it does in checking, and a partly
+    funded one moves Leftover by the uncovered remainder only. card_id stays
+    None: the transfer reaches checking, not the card, so Left to Spend's
+    card add-back (one_offs_on_card) never sees it.
+
+    Counted for settled purchases too: their real transfer posted like the
+    purchase did, and dropping it would put the whole purchase back on the
+    month. A one-off funded from its own account moves nothing."""
+    if (
+        pe.funding_account_id is None
+        or pe.direction != models.PlannedDirection.outflow
+        or pe.funding_account_id == pe.account_id
+    ):
+        return None
+    fund_date = pe.expected_date - timedelta(days=pe.funding_lead_days or 0)
+    if (fund_date.year, fund_date.month) != (year, month):
+        return None
+    move = pe.funding_amount if pe.funding_amount is not None else pe.amount
+    return schemas.OneOffOccurrence(
+        planned_expense_id=pe.id, name=f"{pe.name} (funded from savings)", date=fund_date,
+        amount=abs(move), direction=models.PlannedDirection.inflow,
+        settled=pe.settled_on is not None, card_id=None,
     )
 
 
@@ -179,7 +213,8 @@ def build_month_base(
 
     # Not scoped by expected_date up front because the effective date can be
     # settled_on, which may differ from expected_date -- filtered below.
-    for pe in db.query(models.PlannedExpense).filter(models.PlannedExpense.user_id == user.id).all():
+    planned = db.query(models.PlannedExpense).filter(models.PlannedExpense.user_id == user.id).all()
+    for pe in planned:
         settled = pe.settled_on is not None
         if settled:
             eff_date = pe.settled_on
@@ -194,6 +229,10 @@ def build_month_base(
             amount=abs(eff_amount), direction=pe.direction, settled=settled,
             card_id=pe.card_id,
         ))
+    for pe in planned:
+        funding = _funding_inflow(pe, year, month)
+        if funding is not None:
+            base.one_offs.append(funding)
     base.one_offs.sort(key=lambda o: o.date)
     base.one_off_out_total = sum(
         (o.amount for o in base.one_offs if o.direction == models.PlannedDirection.outflow), ZERO,

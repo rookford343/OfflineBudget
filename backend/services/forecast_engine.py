@@ -418,10 +418,16 @@ def pay_year_dates(items, year: int, *, today: date | None = None) -> list[date]
 
 def is_card_bill_in_month(item: models.RecurringItem, month: date) -> bool:
     """Is this card-linked item on `month`'s 'Credit Card Bills' list -- the
-    set behind budget_snapshot's _cc_budget_total? Monthly items always,
-    yearly items in their own month, quarterly items every third month from
-    month_of_year. Weekly and biweekly items are not on that list."""
-    if item.frequency == models.RecurringFrequency.monthly:
+    set behind budget_snapshot's cc_budget_total? Monthly, weekly and
+    biweekly items always (budget_snapshot counts each weekly/biweekly
+    occurrence since 2026-11, so the Safety Margin walk must leave those out
+    of the payoff too), yearly items in their own month, quarterly items
+    every third month from month_of_year."""
+    if item.frequency in (
+        models.RecurringFrequency.monthly,
+        models.RecurringFrequency.weekly,
+        models.RecurringFrequency.biweekly,
+    ):
         return True
     if item.frequency == models.RecurringFrequency.yearly:
         return item.month_of_year == month.month
@@ -726,6 +732,16 @@ def ss_paycheck_boosts(
     ss = SSWageBaseTracker.for_user(user, income_items, set(bonus_plans), cutoff)
     if ss is None or not ss.paycheck_ids:
         return {}
+    # A pay stub dated on/after the cutoff already holds every paycheck up to
+    # and including its own date in `remaining`, so the walk starts the day
+    # after it: those earlier occurrences get no boost (the stub's YTD says
+    # the base wasn't met by then -- or, at most, their boost is already in
+    # what landed). Walking from the 1st instead drew the base down a second
+    # time for each of them, crossing it a paycheck or more early; and a
+    # month wholly before the stub (browsing Recurring backwards) walked the
+    # stub's remaining base through checks the stub had already counted.
+    if ss.checkpoint_date is not None and ss.checkpoint_date >= cutoff:
+        cutoff = ss.checkpoint_date + timedelta(days=1)
     ss.catch_up(db, user.id, bonus_plans, before=cutoff)
 
     from backend.services.bonus_plans import bonus_gross
@@ -1145,7 +1161,7 @@ def build_forecast(
             # user's sheet, '2026 Overview'!B18), and counting them here as well
             # charged them twice (found live 2026-10-01). Only those, though:
             # the cursor starts after today, so a bill in today's month is one
-            # _charged_so_far has not counted yet. A bill charged in a LATER
+            # charged_so_far has not counted yet. A bill charged in a LATER
             # month before this close is nobody else's to subtract, and
             # dropping it too left the floor optimistic by a whole month of
             # subscriptions (found live 2026-10-30). The Forecast page keeps
