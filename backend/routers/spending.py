@@ -940,7 +940,8 @@ def tax_estimate(
     # same paycheck items the forecast uses, counted across the whole year
     # from each item's schedule pattern (pay_year_dates honors end_date but
     # ignores start_date, which is usually only when the item was entered,
-    # unless the item replaces one that ended earlier in the year).
+    # unless the item replaces one that ended earlier in the year; a year no
+    # item applies to is counted in full on today's schedule).
     as_of = user.tax_withholding_as_of
     income_items = db.query(models.RecurringItem).filter(
         models.RecurringItem.user_id == user.id,

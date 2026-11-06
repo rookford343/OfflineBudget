@@ -33,6 +33,8 @@ SALARY = D("100000")
 FIRST_PAYDAY = date(2026, 1, 2)
 AS_OF = date(2026, 7, 3)
 IN_2026 = 0.0295
+# Pinned "today" for pay_year_dates' no-item-applies fallback.
+TODAY = date(2026, 11, 6)
 
 
 def _estimate(year=2026, *, salary=SALARY, bonuses=(), pretax=None, fed_pp=D("200"),
@@ -291,8 +293,9 @@ def test_pay_year_ignores_a_mid_year_start_date_for_semi_monthly_items(db_sessio
     assert len(dates) == 24
     assert dates[0] == date(2026, 1, 15) and dates[1] == date(2026, 1, 31)
     assert date(2026, 2, 28) in dates and dates[-1] == date(2026, 12, 31)
-    # A year before the items start is a future schedule for that year: none.
-    assert pay_year_dates([mid, end], 2025) == []
+    # A year before every paycheck item existed falls back to a full year on
+    # today's schedule, not zero paychecks.
+    assert len(pay_year_dates([mid, end], 2025, today=TODAY)) == 24
 
 
 def test_pay_year_steps_a_biweekly_schedule_back_before_its_start_date(db_session):
@@ -306,7 +309,8 @@ def test_pay_year_steps_a_biweekly_schedule_back_before_its_start_date(db_sessio
                        day=1, start=date(2026, 10, 2))
     assert len(pay_year_dates([weekly], 2026)) == 52
     assert len(pay_year_dates([pay], 2027)) == 27  # 1/1 through 12/31 on this cadence
-    assert pay_year_dates([pay], 2025) == []  # starts after 2025
+    # Before the item existed: full year on today's schedule (fallback).
+    assert len(pay_year_dates([pay], 2025, today=TODAY)) == 26
 
 
 def test_pay_year_clips_at_end_date_and_dedupes_split_deposits(db_session):
@@ -349,7 +353,8 @@ def test_pay_year_skips_an_item_that_starts_after_the_year(db_session):
     future = _pay_item(db_session, user, db_session.query(models.Account).first(),
                        name="Next job", amount=D("1400"),
                        frequency=models.RecurringFrequency.monthly, day=15, start=date(2027, 1, 15))
-    assert pay_year_dates([future], 2026) == []
+    # Not in effect yet as of today, so no full-year fallback for 2026.
+    assert pay_year_dates([future], 2026, today=TODAY) == []
     assert len(pay_year_dates([pay, future], 2026)) == 26
     assert len(pay_year_dates([future], 2027)) == 12
 
@@ -364,9 +369,10 @@ def test_endpoint_counts_a_full_pay_year_for_items_created_mid_year(db_session):
     assert body["paycheck_basis"] == "schedule"
     assert body["paychecks_in_year"] == 26 and body["paychecks_remaining"] == 26
     assert body["withholding"]["federal"]["total"] == 26 * 200
-    # A year before the item starts has no paydays from it (a future schedule).
+    # A year before the item existed is a full year too, not $0 withheld.
     before = client.get(f"{_prefix()}/tax-estimate", params={"year": 2025}).json()
-    assert before["paychecks_in_year"] == 0 and before["paychecks_remaining"] == 0
+    assert before["paychecks_in_year"] == 26
+    assert before["withholding"]["federal"]["total"] == 26 * 200
 
 
 def test_endpoint_remaining_paychecks_ignore_start_date(db_session):

@@ -370,7 +370,7 @@ def paycheck_dates(items, start: date, end: date) -> list[date]:
     return dates
 
 
-def pay_year_dates(items, year: int) -> list[date]:
+def pay_year_dates(items, year: int, *, today: date | None = None) -> list[date]:
     """Sorted distinct paydays in `year` from the items' schedule patterns.
     For tax counting only. Bounds:
     - end_date is honored: an item that ended before the year is skipped,
@@ -381,9 +381,16 @@ def pay_year_dates(items, year: int) -> list[date]:
       by it under-counts the year it was created in. The exception is a
       replacement schedule: when another item ended this year before this
       one's start_date, that start_date is the real switchover and is honored.
+    - Fallback: when NO item applies to the year (e.g. a year before every
+      paycheck item was entered), the year is counted in full on today's
+      schedule -- the items in effect `today` (started, not ended), with no
+      start/end bound -- so pre-tax deductions and withholding don't vanish
+      for a past year. All in-effect items are used, not just the newest:
+      a split deposit or a semi-monthly pair can have different start_dates.
+      Nothing in effect today (only future or ended items) gives [].
     Weekly/biweekly cadences are stepped from start_date in both directions;
     day-of-month items fire every month. Distinct, so a paycheck split across
-    deposit items counts once."""
+    deposit items counts once. `today` defaults to date.today()."""
     jan1, dec31 = date(year, 1, 1), date(year, 12, 31)
     live = [i for i in items
             if i.start_date <= dec31 and not (i.end_date and i.end_date < jan1)]
@@ -396,6 +403,10 @@ def pay_year_dates(items, year: int) -> list[date]:
         lo = item.start_date if replaces_ended and item.start_date > jan1 else jan1
         hi = min(item.end_date, dec31) if item.end_date else dec31
         windows.append((item, lo, hi))
+    if not live:
+        today = today or date.today()
+        windows = [(i, jan1, dec31) for i in items
+                   if i.start_date <= today and not (i.end_date and i.end_date < today)]
     dates: list[date] = []
     d = jan1
     while d <= dec31:
