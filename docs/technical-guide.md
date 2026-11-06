@@ -99,8 +99,12 @@ The `User` model carries the full tax profile directly to avoid a separate table
 | `tax_state` | VARCHAR(2) | 2-letter state code |
 | `annual_salary` | NUMERIC(14,2) | Gross W-2 salary |
 | `other_income` | NUMERIC(14,2) | 1099 / dividends / other |
-| `federal_withholding_ytd` | NUMERIC(14,2) | YTD federal tax withheld |
-| `state_withholding_ytd` | NUMERIC(14,2) | YTD state tax withheld |
+| `federal_withholding_ytd` | NUMERIC(14,2) | YTD federal tax withheld, as of `tax_withholding_as_of` |
+| `state_withholding_ytd` | NUMERIC(14,2) | YTD state tax withheld, as of `tax_withholding_as_of` |
+| `federal_withheld_per_paycheck` | NUMERIC(14,2) | This-period federal withholding from the latest pay stub |
+| `state_withheld_per_paycheck` | NUMERIC(14,2) | This-period state withholding from the latest pay stub |
+| `pretax_per_paycheck` | NUMERIC(14,2) | Pre-tax payroll deductions per paycheck (401k, HSA, premiums) |
+| `tax_withholding_as_of` | DATE | Pay date of that stub |
 | `itemized_mortgage_interest` | NUMERIC(14,2) | Form 1098 interest |
 | `itemized_donations` | NUMERIC(14,2) | Charitable donations |
 | `itemized_salt` | NUMERIC(14,2) | State & local taxes paid |
@@ -194,20 +198,37 @@ apply_rules(description: str, rules: list[TransactionRule]) -> RuleMatch | None
 estimate_taxes(
     filing_status, state, gross_income, other_income,
     deductible_expenses, federal_withheld, state_withheld,
-    year=None,
+    year=None, *,
+    bonuses=(), pretax_per_paycheck=None,
+    federal_per_paycheck=None, state_per_paycheck=None,
+    withholding_as_of=None, paychecks_in_year=None,
+    paychecks_remaining=None, paycheck_basis="schedule",
 ) -> dict
 ```
+
+It's a pure function. `GET /spending/tax-estimate?year=Y` gathers the inputs: salary is `bonus_plans.salary_for_year(user, Y)` (raise-aware), falling back to `annual_salary`. `bonuses` is `(payout_date, bonus_gross)` for each active bonus-shaped plan paying in Y, skipping unknown amounts. Paychecks are the items `forecast_engine.paycheck_item_ids()` tags (the same 0.5-1.1 net/gross band the SS boost uses), with dates from `paycheck_dates()` (distinct `_fires_on` dates). When no item matches (for example `ss_gross_per_paycheck` is unset), counts come from `assumed_biweekly_counts()`: 26 a year, prorated by days left after the stub date. The result's `paycheck_basis` is then `"assumed_biweekly"` instead of `"schedule"`.
+
+Withholding (`withholding_basis`, with per-tax `withholding.federal/state` = `ytd`, `per_paycheck`, `remaining_paychecks`, `bonus`, `total`):
+
+| Basis | When | Withholding used |
+|-------|------|------------------|
+| `projected` | stub in Y, per-paycheck set | YTD + per-paycheck × paychecks after the stub + bonus withholding for bonuses after the stub |
+| `projected_full_year` | stub before Y or unset, per-paycheck set | per-paycheck × all of Y's paychecks + all of Y's bonus withholding (YTD ignored) |
+| `past_year` | stub after Y | 0; refund/owed keys are `null` (compare with the W-2) |
+| `ytd_only` | no per-paycheck amounts | YTD as-is (legacy) |
+
+Bonus withholding is 22% federal (`SUPPLEMENTAL_FEDERAL_RATE`) plus the state rate for Y.
 
 Federal tables (brackets, standard deduction, SS wage base) are keyed by tax year in `_TABLES` (2025, 2026, 2027 bundled). An unbundled year uses the nearest bundled table (latest for future years, earliest for older ones), and the result's `bracket_year` says which table was used so the UI can warn on a mismatch. `ss_wage_base_for(year)` returns the published wage base (or `None`); the forecast uses it when the SS wage base rolls over on January 1.
 
 The function:
-1. Sums `gross_income + other_income`
+1. Sums wages (`gross_income` + bonus gross) and `other_income`, and subtracts pre-tax deductions (`pretax_per_paycheck × paychecks_in_year`) for income-tax purposes
 2. Computes itemized total from `deductible_expenses` (already summed by the endpoint: user profile fields + tagged transactions)
 3. Picks `max(standard_deduction, itemized)` and sets `used_itemized` flag
-4. Applies that year's federal brackets to `total_income - deduction`
-5. Applies approximate flat state rate to `total_income - standard_deduction` (Indiana uses its exact per-year flat rate)
-6. Computes FICA: SS on `min(gross_income, wage_base)` + Medicare with additional threshold
-7. Returns bracket ladder, refund/owed per federal/state, effective rate
+4. Applies that year's federal brackets to `total_income - pretax - deduction`
+5. Applies approximate flat state rate to `total_income - pretax - standard_deduction` (Indiana uses its exact per-year flat rate)
+6. Computes FICA on wages before pre-tax deductions: SS on `min(wages, wage_base)` + Medicare with additional threshold
+7. Projects withholding (table above) and returns bracket ladder, refund/owed per federal/state, effective rate, plus `salary`, `bonus_gross`, `other_income`, `pretax_deductions`, `paychecks_in_year`, `paychecks_remaining`, `withholding_as_of`
 
 State rates are approximate effective rates for middle-income earners (not marginal). They are sufficient for planning but not for filing.
 

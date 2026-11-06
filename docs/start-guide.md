@@ -209,11 +209,21 @@ Configure your tax information under **Settings → Profile → Tax Profile**:
 1. **Filing Status** — Single, Married Filing Jointly, Married Separately, or Head of Household
 2. **State** — 2-letter code (e.g., TX, CA)
 3. **Annual Gross Salary** — your W-2 gross wages
-4. **Federal/State Withholding YTD** — from your pay stubs
-5. **Itemized Deductions** — enter mortgage interest (Form 1098), charitable donations, SALT, property taxes, and other deductions
-6. **Social Security Tracker** — enter your gross per paycheck and YTD bonus to track when you'll hit the wage base
+4. **Itemized Deductions** — enter mortgage interest (Form 1098), charitable donations, SALT, property taxes, and other deductions
+5. **Social Security Tracker** — enter your gross per paycheck and YTD bonus to track when you'll hit the wage base. The gross per paycheck is also how the Tax page finds your paychecks on the Recurring schedule.
 
-After saving, go to **Tax** (Money → Tax in the sidebar) to see your full estimated tax liability for any year.
+After saving, go to **Tax** (Money → Tax in the sidebar) to see your full estimated tax liability for any year. The estimate includes your raise-adjusted salary for that year and any bonus plans that pay in it.
+
+**From your latest pay stub** (on the Tax page): enter the pay date, the year-to-date federal and state tax withheld, this period's federal and state tax withheld, and your pre-tax deductions per paycheck (401k, HSA, medical/dental premiums). The page projects the full year's withholding:
+
+- **Year to date** + **this period × the paychecks left this year** + **withholding on bonuses not yet paid** (22% federal, the IRS flat rate for bonuses, plus your state rate). A bonus paid on or before the stub's date is already in the year-to-date figures.
+- For a **future year**, a full year of paychecks at this period's withholding is used.
+- For a **past year**, there's nothing to project. The page shows the estimated tax; compare it with your W-2.
+- Without this period's withholding, only the year-to-date figures are compared, so the result leans toward owing.
+
+Pre-tax deductions lower federal and state taxable wages. Social Security and Medicare are still figured on full pay. That's conservative, because a 401k deferral is still subject to them.
+
+If no paycheck can be found on your Recurring schedule, 26 paychecks a year are assumed, and the page says so.
 
 ---
 

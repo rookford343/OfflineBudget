@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { spendingApi } from "../api";
+import PayStubCard, { WithholdingCard } from "../components/TaxWithholding";
 import { api } from "../api/client";
 import { fmt } from "../lib/utils";
 import { AlertTriangle } from "lucide-react";
@@ -53,12 +54,22 @@ export default function TaxExport() {
 
         {taxEstimate && !taxEstimate.error && (() => {
           const te = taxEstimate as any;
+          const pastYear = te.withholding_basis === "past_year";
           const refund = Number(te.total_refund_or_owed);
           const fedRefund = Number(te.federal_refund_or_owed);
           const stateRefund = Number(te.state_refund_or_owed);
           return (
             <div className="space-y-4">
-              {/* Summary banner */}
+              {/* Summary banner -- a past year has no pay stub to project
+                  from, so show the tax itself and point at the W-2. */}
+              {pastYear ? (
+                <div className="card border-2 border-gray-200 dark:border-gray-700">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Estimated Total Tax</p>
+                  <p className="text-3xl font-bold text-gray-900 dark:text-[#c4ccd8]">{fmt(te.total_tax)}</p>
+                  <p className="text-xs text-gray-500 mt-1">Compare with the withholding on your {taxYear} W-2 to see your refund or amount owed.</p>
+                  <p className="text-xs text-gray-500 mt-1">Effective rate: {(Number(te.effective_rate) * 100).toFixed(1)}% · Filing: {te.filing_status.replace("_", " ")} · {te.state}</p>
+                </div>
+              ) : (
               <div className={`card border-2 ${refund >= 0 ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20" : "border-red-300 dark:border-red-700 bg-red-50 dark:bg-red-900/20"}`}>
                 <div className="flex items-center justify-between flex-wrap gap-4">
                   <div>
@@ -82,13 +93,17 @@ export default function TaxExport() {
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Breakdown */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="card space-y-2">
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Income</h4>
                   <dl className="space-y-1 text-sm">
-                    <div className="flex justify-between"><dt className="text-gray-500">Gross salary</dt><dd className="tabular-nums">{fmt(Number(te.taxable_income) + Number(te.deduction_used))}</dd></div>
+                    <div className="flex justify-between"><dt className="text-gray-500">Salary</dt><dd className="tabular-nums">{fmt(te.salary)}</dd></div>
+                    {Number(te.bonus_gross) > 0 && <div className="flex justify-between"><dt className="text-gray-500">Bonus</dt><dd className="tabular-nums">{fmt(te.bonus_gross)}</dd></div>}
+                    {Number(te.other_income) > 0 && <div className="flex justify-between"><dt className="text-gray-500">Other income</dt><dd className="tabular-nums">{fmt(te.other_income)}</dd></div>}
+                    {Number(te.pretax_deductions) > 0 && <div className="flex justify-between"><dt className="text-gray-500">Pre-tax deductions</dt><dd className="tabular-nums text-green-600">−{fmt(te.pretax_deductions)}</dd></div>}
                     <div className="flex justify-between"><dt className="text-gray-500">Deduction ({te.used_itemized ? "itemized" : "standard"})</dt><dd className="tabular-nums text-green-600">−{fmt(te.deduction_used)}</dd></div>
                     <div className="flex justify-between border-t border-gray-100 dark:border-gray-700 pt-1 font-medium"><dt>Taxable income</dt><dd className="tabular-nums">{fmt(te.taxable_income)}</dd></div>
                     {te.used_itemized && te.itemized_breakdown && (() => {
@@ -118,6 +133,12 @@ export default function TaxExport() {
                     <div className="flex justify-between border-t border-gray-100 dark:border-gray-700 pt-1 font-medium"><dt>Total taxes</dt><dd className="tabular-nums text-red-600">{fmt(te.total_tax)}</dd></div>
                   </dl>
                 </div>
+              </div>
+
+              {/* Withholding projection, and the pay-stub inputs it's built from */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <WithholdingCard te={te} taxYear={taxYear} />
+                <PayStubCard />
               </div>
 
               {/* Federal bracket ladder */}

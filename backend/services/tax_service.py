@@ -324,6 +324,7 @@ def estimate_taxes(
     return {
         "salary": gross_income,
         "bonus_gross": bonus_gross,
+        "other_income": other_income,
         "pretax_deductions": pretax,
         "paychecks_in_year": paychecks_in_year,
         "paychecks_remaining": paychecks_remaining,

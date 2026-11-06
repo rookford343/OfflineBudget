@@ -11,8 +11,6 @@ export default function TaxTab() {
   const [taxState, setTaxState] = useState("");
   const [taxSalary, setTaxSalary] = useState("");
   const [taxOtherIncome, setTaxOtherIncome] = useState("");
-  const [taxFedWithheld, setTaxFedWithheld] = useState("");
-  const [taxStateWithheld, setTaxStateWithheld] = useState("");
   const [taxMortgageInterest, setTaxMortgageInterest] = useState("");
   const [taxDonations, setTaxDonations] = useState("");
   const [taxSalt, setTaxSalt] = useState("");
@@ -39,6 +37,7 @@ export default function TaxTab() {
       qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
       qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
       qc.invalidateQueries({ queryKey: ["forecast-risk"] });
+      qc.invalidateQueries({ queryKey: ["tax-estimate"] });
       setTaxSaved(true);
       setTimeout(() => setTaxSaved(false), 2000);
     },
@@ -55,8 +54,6 @@ export default function TaxTab() {
       setTaxState(me.tax_state ?? "");
       setTaxSalary(me.annual_salary ?? "");
       setTaxOtherIncome(me.other_income ?? "");
-      setTaxFedWithheld(me.federal_withholding_ytd ?? "");
-      setTaxStateWithheld(me.state_withholding_ytd ?? "");
       setTaxMortgageInterest(me.itemized_mortgage_interest ?? "");
       setTaxDonations(me.itemized_donations ?? "");
       setTaxSalt(me.itemized_salt ?? "");
@@ -92,15 +89,8 @@ export default function TaxTab() {
             <label className="label">Other Income (1099, dividends, etc.)</label>
             <input type="number" step="1" className="input" placeholder="e.g. 5000" value={taxOtherIncome} onChange={e => setTaxOtherIncome(e.target.value)} />
           </div>
-          <div>
-            <label className="label">Federal Tax Withheld YTD</label>
-            <input type="number" step="1" className="input" placeholder="From your pay stubs" value={taxFedWithheld} onChange={e => setTaxFedWithheld(e.target.value)} />
-          </div>
-          <div>
-            <label className="label">State Tax Withheld YTD</label>
-            <input type="number" step="1" className="input" placeholder="From your pay stubs" value={taxStateWithheld} onChange={e => setTaxStateWithheld(e.target.value)} />
-          </div>
         </div>
+        <p className="text-xs text-gray-500 dark:text-gray-400">Tax withheld is entered from your latest pay stub on the <a href="/tax" className="underline">Tax page</a>.</p>
         <div className="border-t border-gray-100 dark:border-gray-700 pt-3">
           <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Itemized Deductions (from tax documents)</p>
           <p className="text-xs text-gray-400 dark:text-gray-400 mb-3">These are added to any transactions marked tax-deductible. If the total exceeds the standard deduction, itemized will be used automatically.</p>
@@ -189,8 +179,6 @@ export default function TaxTab() {
               tax_state: taxState || null,
               annual_salary: taxSalary ? parseFloat(taxSalary) : null,
               other_income: taxOtherIncome ? parseFloat(taxOtherIncome) : null,
-              federal_withholding_ytd: taxFedWithheld ? parseFloat(taxFedWithheld) : null,
-              state_withholding_ytd: taxStateWithheld ? parseFloat(taxStateWithheld) : null,
               itemized_mortgage_interest: taxMortgageInterest ? parseFloat(taxMortgageInterest) : null,
               itemized_donations: taxDonations ? parseFloat(taxDonations) : null,
               itemized_salt: taxSalt ? parseFloat(taxSalt) : null,
