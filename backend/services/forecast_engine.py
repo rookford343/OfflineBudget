@@ -1740,8 +1740,9 @@ def build_forecast(
             # date), a one-off planned purchase has no reliable way to match
             # itself to one specific imported transaction among many on the
             # same statement, so it would risk suppressing on an unrelated
-            # charge. Mark the plan resolved by deleting it once the real
-            # purchase posts.
+            # charge here. Instead bank sync settles the plan against its
+            # real charge (services/planned_auto_settle.py), which drops it
+            # from the query above.
             is_inflow = pe.direction == models.PlannedDirection.inflow
             signed = abs(pe.amount) if is_inflow else -abs(pe.amount)
             balance += signed

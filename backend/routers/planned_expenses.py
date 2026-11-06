@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
+from backend.services.planned_auto_settle import apply_settlement
 
 router = APIRouter(prefix="/planned-expenses", tags=["planned-expenses"])
 
@@ -121,8 +122,7 @@ def settle_planned_expense(
     if not expense:
         raise HTTPException(status_code=404, detail="Planned expense not found")
 
-    expense.settled_on = payload.settled_on or date.today()
-    expense.actual_amount = payload.actual_amount
+    apply_settlement(expense, payload.settled_on or date.today(), payload.actual_amount)
     db.commit()
     db.refresh(expense)
     return expense

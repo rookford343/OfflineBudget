@@ -943,3 +943,22 @@ def test_status_last_success_at_is_newest_active_link_sync_not_failed_run_stamp(
     assert by_id[connection.id]["last_success_at"] == good.isoformat()
     assert by_id[connection.id]["last_synced_at"] == failed_run.isoformat()
     assert by_id[never.id]["last_success_at"] is None
+
+
+def test_sync_now_auto_settles_planned_expenses_after_every_connection(client, db_session):
+    """Sync Now runs planned-expense auto-settle once, for the caller, after
+    all of the caller's connections have synced."""
+    test_client, user = client
+    db_session.add_all([
+        models.BankConnection(user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url")),
+        models.BankConnection(user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url")),
+    ])
+    db_session.commit()
+    calls = []
+    with patch("backend.routers.bank_sync.sync_connection", side_effect=lambda db, conn: calls.append("sync") or (0, 0)), \
+         patch("backend.routers.bank_sync.settle_after_sync",
+               side_effect=lambda db, user_ids: calls.append(("settle", list(user_ids)))):
+        resp = test_client.post("/bank-sync/sync-now")
+
+    assert resp.status_code == 200
+    assert calls == ["sync", "sync", ("settle", [user.id])]

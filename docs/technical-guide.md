@@ -387,6 +387,32 @@ ignored outright; rows after it rely on `external_id` dedup only. See
 `docs/superpowers/specs/2026-10-25-plaid-sync-design.md` for the full
 cutover design.
 
+**Planned one-offs settle themselves.** A `PlannedExpense` used to leave
+the forecast only when settled by hand, so its real charge was counted
+twice in the meantime: a card-routed plan's "(via card)" line on the payoff
+date plus the same charge inside the card's own estimate (pending) or
+balance (posted), and a checking-routed plan's line plus the real
+transaction that had already moved the balance. `planned_auto_settle.py`
+now runs once per user after all providers finish -- at the end of
+`sync_all()`, Sync Now, and a Plaid first import. An unsettled plan
+routed to a card (`card_id`) or account (`account_id`) settles against a
+real row on that same card or account, in the same direction, within $1.00
+of its amount, dated `expected_date` - 7 to + 14 days. Pending and posted
+rows both count; card payments (`is_card_payment`, or a checking debit
+`match_payment_card` ties to a card) and own-account transfers never do.
+Pairs are taken best-first (closest amount, then closest date) and each
+real row settles one plan at most; already-settled plans claim their row
+first (against `actual_amount`), so a pending charge that settled plan A
+can't settle plan B once it posts as a new row. A match writes
+`settled_on` = the row's date and `actual_amount` = its amount through
+`apply_settlement()`, the same helper the manual settle endpoint uses.
+Savings-funded plans (`funding_account_id`) are never auto-settled, since
+settling also drops the projected funding transfer and nothing records
+whether it happened; plans with neither card nor account are left alone,
+and nothing is ever un-settled. There is no forecast-side guard: the
+matched data only changes when a sync runs, and a forecast that hid a plan
+the Planned list still shows open would disagree with itself.
+
 ## Shared Helpers (one place to fix)
 
 | Helper | Use it for |

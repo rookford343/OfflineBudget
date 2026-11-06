@@ -603,6 +603,17 @@ new posted activity syncs.
 > SimpleFIN can lag your card app by a few hours to a day, so the pending total
 > in OfflineBudget may trail what your issuer's app shows.
 
+### Planned one-offs settle themselves
+
+After each bank sync, a planned one-off that's set to a card or an account
+is marked settled once its real charge or deposit shows up there: same card
+or account, within $1.00 of the planned amount, dated from a week before to
+two weeks after the planned date. A pending charge counts. The one-off then
+drops off the forecast, so the money isn't subtracted twice, and its actual
+amount is recorded beside your estimate. One real charge settles one one-off
+at most. One-offs funded from savings are left for you to settle by hand.
+Nothing is ever un-settled automatically.
+
 > The SMTP password is encrypted before storage and is never sent back to the
 > browser. That requires `APP_ENCRYPTION_KEY` in your `.env` — generate one
 > with:
