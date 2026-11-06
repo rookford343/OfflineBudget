@@ -11,4 +11,4 @@ omit =
 [report]
 show_missing = False
 # Measured 84% on 2026-10-25 (80% on 2026-10-10). Raise it as coverage grows; never lower it.
-fail_under = 83
+fail_under = 85
