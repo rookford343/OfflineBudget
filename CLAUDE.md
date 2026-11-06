@@ -30,3 +30,7 @@ The global "Security gates for AI coding" rules apply here. Project specifics:
   Transitive-dependency fixes go through `package.json` `overrides`. Pre-push runs
   `bun install --frozen-lockfile`, `bun audit --audit-level=high`, and `bunx vite build` for
   `frontend/` (not `tsc -b` -- 35 pre-existing TypeScript errors are tracked debt).
+
+## Money calculations
+
+Before touching any money calculation, read docs/architecture.md.

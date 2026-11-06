@@ -121,6 +121,7 @@ Open **http://localhost:5173** → Create an account → Run through the Quick S
 |-------|-------------|
 | [Getting Started](docs/start-guide.md) | First-time setup, LAN access, initial budget configuration |
 | [Technical Guide](docs/technical-guide.md) | Architecture, data model, forecast engine, adding new features |
+| [Number Architecture](docs/architecture.md) | Where every figure is calculated, how to trace a mismatch, contributor rules |
 | [Privacy](docs/PRIVACY.md) | What's stored, what leaves your machine, how to delete it |
 | [Security](SECURITY.md) | Threat model, password storage, JWT, HTTPS, backup strategy |
 

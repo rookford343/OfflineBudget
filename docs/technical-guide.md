@@ -1,5 +1,7 @@
 # Technical Guide
 
+Where each money figure comes from: see [architecture.md](architecture.md).
+
 ## Architecture Overview
 
 ```
