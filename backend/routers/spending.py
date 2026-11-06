@@ -925,12 +925,12 @@ def tax_estimate(
         deductible_expenses=total_deductible,
         federal_withheld=Decimal(str(user.federal_withholding_ytd or 0)),
         state_withheld=Decimal(str(user.state_withholding_ytd or 0)),
+        year=year,
     )
     result["year"] = year
-    # Surface the year the bracket tables actually encode so the UI can warn
-    # on a mismatch rather than silently applying the wrong year's brackets.
-    from backend.services.tax_service import BRACKET_YEAR
-    result["bracket_year"] = BRACKET_YEAR
+    # result["bracket_year"] is the table year actually used (the nearest
+    # bundled one when `year` isn't bundled), so the UI can warn on a mismatch
+    # rather than silently applying another year's brackets.
     result["itemized_breakdown"] = {
         "mortgage_interest": float(user.itemized_mortgage_interest or 0),
         "donations": float(user.itemized_donations or 0),

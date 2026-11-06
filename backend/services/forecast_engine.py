@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from backend import models
 from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
+from backend.services.tax_service import ss_wage_base_for
 from backend.services.card_matching import card_matches_description, match_payment_card
 
 # How many days before "today" a scheduled recurring item can still be
@@ -1421,7 +1422,9 @@ def build_forecast(
     # of the checkpoint (or of start_date without one); every later January 1
     # starts over at the full base, so withholding resumes until the new
     # year's base is met. Without this, a boost reached in one year carried
-    # into every later year's paychecks.
+    # into every later year's paychecks. The checkpoint year uses the user's
+    # own setting; a later year uses the published base when tax_service
+    # bundles it (the base rises each year), else the user's setting again.
     ss_year = ss_checkpoint_date.year if ss_checkpoint_date is not None else start_date.year
 
     entries: list[ForecastEntry] = []
@@ -1430,7 +1433,7 @@ def build_forecast(
     while current <= end_date:
         if ss_remaining_gross is not None and current.year != ss_year:
             ss_year = current.year
-            ss_remaining_gross = user.ss_wage_base
+            ss_remaining_gross = ss_wage_base_for(current.year) or user.ss_wage_base
             ss_limit_reached = False
         day_transactions: list[ForecastTransaction] = []
         actuals_today = actuals_by_date.get(current, [])

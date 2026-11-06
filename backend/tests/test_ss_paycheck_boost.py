@@ -207,10 +207,15 @@ def test_incidental_recurring_income_is_not_treated_as_a_paycheck(db_session):
     assert all(b == Decimal("1391.31") for b in bonuses), "incidental income must never be boosted"
 
 
-def test_boost_stops_at_year_end_and_the_wage_base_resets(db_session):
+def test_boost_stops_at_year_end_and_the_wage_base_resets(db_session, monkeypatch):
     """The wage base is per calendar year: once the 2026 base is met every
     later 2026 paycheck is boosted, but SS withholding resumes on January 1.
-    It used to stay boosted forever, overstating every later year's income."""
+    It used to stay boosted forever, overstating every later year's income.
+
+    2027's base is now published (see test_tax_service_years for that path);
+    here it is treated as unpublished so the new year resets to the user's
+    own small setting and the re-crossing stays inside the window."""
+    monkeypatch.setattr("backend.services.forecast_engine.ss_wage_base_for", lambda year: None)
     user, account = _seed(db_session, wage_base="13864.28", paychecks_received=10)
     entries = build_forecast(db_session, user.id, account.id, date(2026, 11, 1), date(2027, 3, 31))
     by_month = {(d.year, d.month): amt for d, amt in _paychecks(entries)}
