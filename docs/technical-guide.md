@@ -36,6 +36,7 @@ OfflineBudget/
 │       ├── email_service.py       SMTP send (one config: Settings page over .env)
 │       ├── summary_generator.py   Daily email (Spending this month, weekly digest)
 │       ├── budget_snapshot.py     Household Snapshot; spending_breakdown(start, end)
+│       ├── month_base.py          One month's income/bills/one-offs/budgets: Recurring Left over = Snapshot Leftover
 │       ├── bank_sync_service.py   SimpleFIN sync, card pending snapshot
 │       ├── simplefin_client.py    SimpleFIN protocol client (pending=1 for cards)
 │       ├── plaid_client.py        Thin httpx client for Plaid's API (no SDK)

@@ -18,136 +18,87 @@ from backend.services.forecast_engine import (
     _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
 )
 from backend.services.card_matching import card_matches_description
+from backend.services.month_base import build_month_base
 from backend.services.spendable_pacer import compute_weekly_spendable
 from backend.services.spending_helpers import category_totals_for_range, is_card_payment, merchant_totals
 from backend.services.statement_reconcile import statement_stale_reason
 
 
-def _monthly_income(
-    db: Session, user_id: int,
-    extra_items: list[models.RecurringItem] | None = None,
-) -> Decimal:
-    items = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == user_id,
-        models.RecurringItem.type == models.RecurringType.income,
-        models.RecurringItem.is_active == True,
-        models.RecurringItem.frequency == models.RecurringFrequency.monthly,
-    ).all()
-    # A scenario's proposed items are RecurringItem-shaped and never persisted,
-    # so the same filter is applied in Python instead of SQL.
-    items = items + [
-        i for i in (extra_items or [])
-        if i.type == models.RecurringType.income
-        and i.frequency == models.RecurringFrequency.monthly
-    ]
-    return sum((item.amount for item in items), Decimal("0"))
-
-
-def leftover_share(item, as_of: date) -> Decimal:
-    """What one expense recurring item contributes to `_monthly_expenses` for
-    as_of's month. Shared with the Budget page's committed list so committed
-    + leftover reconcile to income to the cent.
-
-    Weekly/biweekly items contribute nothing here, matching the long-standing
-    behavior of `_monthly_expenses`.
-    """
-    if item.frequency == models.RecurringFrequency.monthly:
-        return item.amount
-    if item.frequency == models.RecurringFrequency.quarterly:
-        # Accrued, not charged: a quarterly bill spreads across the three
-        # months it covers, exactly as the sheet does -- Budget!B15 carries
-        # Stormwater at $5.00/mo while the forecast charges the full $15.00
-        # once a quarter. Counting the whole bill in its own month would
-        # make Leftover lurch every third month.
-        return (item.amount / 3).quantize(Decimal("0.01"))
-    if item.frequency == models.RecurringFrequency.yearly and item.month_of_year == as_of.month:
-        return item.amount
-    return Decimal("0")
-
-
-def _monthly_expenses(
-    db: Session, user_id: int, as_of: date,
-    extra_items: list[models.RecurringItem] | None = None,
-) -> Decimal:
-    """All active expense recurring items, monthly + any yearly item due
-    this month -- covers Checking Bills, Credit Card Bills, and Tithing
-    combined, matching how Budget.xlsx's Leftover formula treats them."""
-    items = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == user_id,
-        models.RecurringItem.type == models.RecurringType.expense,
-        models.RecurringItem.is_active == True,
-    ).all()
-    items = items + [
-        i for i in (extra_items or [])
-        if i.type == models.RecurringType.expense
-    ]
-    return sum((leftover_share(item, as_of) for item in items), Decimal("0"))
-
-
-def _budget_allocation_total(
-    db: Session, user_id: int, category_name: str, year: int, month: int,
-) -> Decimal:
-    """The budgeted amount for a category, honouring a month-specific override.
-
-    month == 0 is the "all months" default and 1-12 overrides it. Sorting
-    ascending and taking the last row means a month-specific figure wins --
-    the same resolution budget_calculator.compute_overview uses (see its
-    month.in_([0, month]) query). This used to filter month == 0 only, so
-    setting, say, a higher December savings target left the snapshot still
-    quoting the annual default.
-    """
-    rows = (
-        db.query(models.BudgetAllocation)
-        .join(models.Category, models.Category.id == models.BudgetAllocation.category_id)
-        .filter(
-            models.BudgetAllocation.user_id == user_id,
-            models.Category.name == category_name,
-            models.BudgetAllocation.year == year,
-            models.BudgetAllocation.month.in_([0, month]),
-        )
-        .order_by(models.BudgetAllocation.month)
-        .all()
-    )
-    return rows[-1].budgeted_amount if rows else Decimal("0")
-
-
 class LeftoverParts(NamedTuple):
-    income: Decimal
+    income: Decimal           # includes ss_boost
     expenses: Decimal
     savings_budget: Decimal
     committed_savings: Decimal
     groceries_budget: Decimal
     leftover: Decimal
+    ss_boost: Decimal = Decimal("0")
+    one_off_out: Decimal = Decimal("0")
+    one_off_in: Decimal = Decimal("0")
+    # Outflow one-offs charged to a card and already settled on/before as_of:
+    # card spending this month already holds them (see compute_budget_snapshot).
+    one_offs_on_card: Decimal = Decimal("0")
 
 
 def leftover_parts(
     db: Session, user: models.User, as_of: date,
     extra_items: list[models.RecurringItem] | None = None,
 ) -> LeftoverParts:
-    """The pieces of `leftover`, computed once so the snapshot and the
-    Budget page's Left to budget read the same number by construction."""
-    income = _monthly_income(db, user.id, extra_items)
-    expenses = _monthly_expenses(db, user.id, as_of, extra_items)
-    savings_budget = _budget_allocation_total(db, user.id, "Savings", as_of.year, as_of.month)
-    groceries_budget = _budget_allocation_total(db, user.id, "Groceries", as_of.year, as_of.month)
-    committed_savings = (
-        Decimal("0.00") if user.savings_strategy == "pull_from_savings" else savings_budget
+    """The pieces of `leftover` for as_of's month, from the same
+    build_month_base the Recurring page's month summary reads -- so the
+    Dashboard's Leftover equals the Recurring strip's Left over to the cent
+    (the user's decision, 2026-11: same income, same bill amounts, Groceries
+    and Savings shown on both). See month_base for the counting rules.
+
+    History: until 2026-11 this counted monthly-frequency income only, each
+    bill at its base item.amount (ignoring a real statement amount entered
+    for this month), quarterly bills spread as 1/3 a month (Budget!B15's
+    Stormwater accrual), weekly/biweekly bills not at all, no planned
+    one-offs, and no Social Security boost -- so it never matched the
+    Recurring page's Left over."""
+    base = build_month_base(db, user, as_of.year, as_of.month, extra_items)
+    on_card = sum(
+        (o.amount for o in base.one_offs
+         if o.card_id is not None and o.settled and o.date <= as_of
+         and o.direction == models.PlannedDirection.outflow),
+        Decimal("0"),
     )
-    leftover = income - expenses - committed_savings - groceries_budget
-    return LeftoverParts(income, expenses, savings_budget, committed_savings, groceries_budget, leftover)
+    return LeftoverParts(
+        income=base.income_total, expenses=base.expense_total,
+        savings_budget=base.savings_budget, committed_savings=base.committed_savings,
+        groceries_budget=base.groceries_budget, leftover=base.left_over,
+        ss_boost=base.ss_boost_total,
+        one_off_out=base.one_off_out_total, one_off_in=base.one_off_in_total,
+        one_offs_on_card=on_card,
+    )
 
 
 def leftover_children(parts: LeftoverParts) -> list[ExplainChild]:
-    """The four pieces of `leftover`, signed so they sum to it exactly."""
-    return [
-        ExplainChild(label="Income this month", amount=parts.income,
-                     note="Monthly income items only"),
-        ExplainChild(label="Recurring bills this month", amount=-parts.expenses,
-                     note="Monthly bills, quarterly bills spread over 3 months, yearly bills in "
-                          "their month; weekly and biweekly bills aren't included here"),
+    """The pieces of `leftover`, signed so they sum to it exactly. Notes
+    carry no figures: the frontend renders notes unmasked."""
+    children = [
+        ExplainChild(label="Income this month", amount=parts.income - parts.ss_boost,
+                     note="Every paycheck and other income landing this month"),
+    ]
+    if parts.ss_boost:
+        children.append(ExplainChild(
+            label="Social Security max", amount=parts.ss_boost,
+            note="Wage base met, so paychecks no longer have Social Security withheld",
+        ))
+    children.append(ExplainChild(
+        label="Recurring bills this month", amount=-parts.expenses,
+        note="Every bill charged this month at this month's amount (a real statement amount "
+             "when you've entered one); quarterly and yearly bills in the month they're due",
+    ))
+    if parts.one_off_out or parts.one_off_in:
+        children.append(ExplainChild(
+            label="Planned one-offs this month", amount=parts.one_off_in - parts.one_off_out,
+            note="One-off purchases and inflows landing this month, as on the Recurring page",
+        ))
+    children += [
         ExplainChild(label="Savings set aside", amount=-parts.committed_savings),
         ExplainChild(label="Groceries budget", amount=-parts.groceries_budget),
     ]
+    return children
 
 
 def _card_linked_recurring_items(
@@ -160,7 +111,7 @@ def _card_linked_recurring_items(
     Without that filter the annual card subscriptions (Fitbod, Runna,
     Bitdefender, Apple TV+, Rivian Connect+, Natural Cycles -- $500.00/yr)
     counted as if each were billed monthly, overstating the credit-card bill
-    total by that amount in all twelve months. Mirrors _monthly_expenses.
+    total by that amount in all twelve months.
     """
     items = db.query(models.RecurringItem).filter(
         models.RecurringItem.user_id == user_id,
@@ -168,9 +119,9 @@ def _card_linked_recurring_items(
         models.RecurringItem.is_active == True,
         models.RecurringItem.card_id.isnot(None),
     ).all()
-    # Quarterly card charges land whole in their own month, unlike the
-    # accrual treatment in _monthly_expenses: both callers here ask "what
-    # hits the card this month", which is the full bill or nothing. Shared
+    # Quarterly card charges land whole in their own month (as in
+    # leftover_parts): both callers here ask "what hits the card this
+    # month", which is the full bill or nothing. Shared
     # with forecast_engine, whose Safety Margin floor walk leaves exactly
     # these (the ones not charged yet) out of the carried card payoff.
     return [item for item in items if is_card_bill_in_month(item, as_of)]
@@ -655,7 +606,7 @@ def compute_budget_snapshot(
     reaches the day-by-day walk only -- `_lookahead_minimum`, and therefore
     `lookahead_minimum`, `lookahead_minimum_date`, `safety_margin` and
     `safety_margin_weekly`. It deliberately does NOT reach the flat monthly
-    aggregates (`_monthly_income`/`_monthly_expenses`, hence `leftover` and
+    aggregates (`leftover_parts`, hence `leftover` and
     `left_to_spend`); those are not figures the scenario impact strip shows,
     and widening the blast radius would change what the Dashboard means.
 
@@ -726,7 +677,14 @@ def compute_budget_snapshot(
     charged_so_far = _charged_so_far(db, user.id, as_of)
     cc_budget_total = _cc_budget_total(db, user.id, as_of)
 
-    left_to_spend = leftover - card_spending_this_month - pending_charges_total + charged_so_far
+    # Leftover subtracts this month's planned one-offs (as the Recurring page
+    # does). One charged to a card and already settled is inside card
+    # spending too, so it is added back once -- the same netting
+    # charged_so_far does for card subscriptions.
+    one_offs_on_card = parts.one_offs_on_card
+    left_to_spend = (
+        leftover - card_spending_this_month - pending_charges_total + charged_so_far + one_offs_on_card
+    )
     # Two walks, same window/start/floor_mask rules (approved 2026-11-06).
     # `lookahead_window` leaves this month's not-yet-charged card bills out
     # of the next card payment; Safety Margin reads it and subtracts those
@@ -949,9 +907,9 @@ def compute_budget_snapshot(
         _cc_line_children(display_window.days, as_of, display_min_date)
         + _recent_close_children(active_cards, as_of)
     )
-    explain = {
-        "left_to_spend": ExplainBuilder("Left to Spend")
-            .start("Leftover", leftover, note="Income after bills, savings and groceries",
+    left_to_spend_builder = (
+        ExplainBuilder("Left to Spend")
+            .start("Leftover", leftover, note="Income after bills, one-offs, savings and groceries",
                    children=leftover_children(parts))
             .subtract("Card spending this month", card_spending_this_month,
                       note=f"Posted card purchases since {since}, returns subtracted, card payments excluded",
@@ -960,7 +918,14 @@ def compute_budget_snapshot(
                       note="Card charges not posted yet", children=pending_children)
             .add("Card bills already charged", charged_so_far,
                  note="Recurring card subscriptions already posted this month (already inside card spending)")
-            .build(left_to_spend),
+    )
+    if one_offs_on_card:
+        left_to_spend_builder.add(
+            "Card one-offs already charged", one_offs_on_card,
+            note="Planned one-offs settled on a card this month (already inside card spending)",
+        )
+    explain = {
+        "left_to_spend": left_to_spend_builder.build(left_to_spend),
         "spendable_week": weekly_explanation(
             "Spendable this week", "Left to Spend", left_to_spend, left_to_spend_weekly),
         "spendable_today": ExplainBuilder("Spendable today")

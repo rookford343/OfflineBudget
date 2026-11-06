@@ -114,8 +114,8 @@ def test_income_minus_committed_is_the_recurring_tabs_left_over(db_session):
     user, _, _ = _seed(db_session)
     out = compute_budget_plan(db_session, user, 2026, 10)
     summary = build_month_summary(db_session, user.id, 2026, 10)
-    assert out.recurring_left_over == summary.left_over
-    assert out.income_total - out.committed_total == summary.left_over
+    assert out.recurring_left_over == summary.left_over_before_budgets
+    assert out.income_total - out.committed_total == summary.left_over_before_budgets
 
 
 def test_committed_per_category_is_the_months_recurring_amounts(db_session):

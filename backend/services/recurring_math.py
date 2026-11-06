@@ -1,8 +1,8 @@
 """What one occurrence of each recurring frequency costs per month on average.
 
-Deliberately NOT the same treatment as budget_snapshot._monthly_expenses,
-which charges a yearly bill in full in the month it lands to reconcile with
-the spreadsheet's Leftover row. This is the "what does my life cost per
+Deliberately NOT the same treatment as services/month_base (the Recurring
+summary and the Dashboard's Leftover), which charges a yearly bill in full in
+the month it lands. This is the "what does my life cost per
 month" figure, so a yearly bill is a twelfth of itself.
 
 Lives here rather than in routers/recurring.py so both the /recurring/breakdown

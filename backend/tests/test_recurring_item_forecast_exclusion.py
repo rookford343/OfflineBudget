@@ -2,7 +2,7 @@ from datetime import date
 from decimal import Decimal
 from backend import models
 from backend.services.forecast_engine import build_forecast
-from backend.services.budget_snapshot import _monthly_income
+from backend.services.budget_snapshot import leftover_parts
 
 
 def test_include_in_forecast_false_excludes_item_from_cash_forecast(db_session):
@@ -33,8 +33,10 @@ def test_include_in_forecast_false_excludes_item_from_cash_forecast(db_session):
     db_session.add(bonus)
     db_session.commit()
 
-    # Still counts toward monthly budget income -- unaffected by the flag.
-    assert _monthly_income(db_session, user.id) == Decimal("1391.31")
+    # Since 2026-11 the Dashboard's Leftover counts the month's real cash,
+    # the same as the Recurring page (services/month_base), so an item kept
+    # out of the cash forecast stays out of Leftover's income too.
+    assert leftover_parts(db_session, user, date(2026, 1, 31)).income == Decimal("0")
 
     # Never appears as projected cash in the forecast walk.
     entries = build_forecast(db_session, user.id, checking.id, date(2026, 1, 1), date(2026, 1, 31))

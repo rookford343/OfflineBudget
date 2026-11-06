@@ -11,7 +11,9 @@ The rules here:
 * Committed comes from `build_month_summary`, the exact source of the
   Recurring tab's Income / Expenses / Left over strip, grouped by category.
   Planned one-offs count too, because that strip counts them. So
-  income_total - committed_total == the Recurring tab's left_over, always.
+  income_total - committed_total == the Recurring tab's
+  left_over_before_budgets, always (its Left over then also takes off the
+  Groceries budget and Savings set aside, which are Flexible lines here).
 * Flexible is the stored BudgetAllocation for the month, resolved the way
   compute_overview resolves it (month row beats the every-month row, and an
   assignable bucket's every-month row is ignored while carry-forward is off).
@@ -265,7 +267,7 @@ def compute_budget_plan(db: Session, user: models.User, year: int, month: int) -
         flexible_total=flexible_total,
         budget_total=committed_total + flexible_total,
         left_to_assign=left_to_assign,
-        recurring_left_over=summary.left_over,
+        recurring_left_over=summary.left_over_before_budgets,
         category_budget_total=category_budget_total,
         unclassified_count=unclassified_count,
         carry_forward=bool(user.budget_carry_forward),

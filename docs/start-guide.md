@@ -152,6 +152,25 @@ Add each bill with its day-of-month. Examples:
 | HOA Fees | $125 | 1 |
 | Car Payment | $501 | 17 |
 
+### Reading the Recurring summary
+The strip at the top of the Recurring page totals one calendar month
+(use the arrows to switch months):
+
+- **Income**: every paycheck and other income that lands that month. Once
+  your pay passes the Social Security wage base (set up in the Social
+  Security Tracker), Social Security stops being withheld until January 1,
+  so each paycheck shows "incl. +$X Social Security max". The paycheck that
+  crosses the base gets only the part above it. These are the same paycheck
+  amounts the Forecast draws.
+- **Expenses**: every bill charged that month at that month's amount (a real
+  statement amount when you've entered one), weekly bills each week, and
+  quarterly and yearly bills in the month they're due.
+- **Left over**: income minus expenses, minus planned one-offs that month
+  (plus planned inflows), minus your **Groceries budget** and **Savings set
+  aside** (nothing set aside when your savings strategy is "pull from
+  savings"). For the current month this is exactly the Dashboard's
+  **Leftover**, the starting point of Spendable.
+
 ### Step 5 — Add Credit Cards (Credit Cards page)
 - Enter the current balance, statement day and due day for each card
 - **Statement balance (balance due)**: the last statement's total, which the
@@ -491,7 +510,9 @@ The daily report arrives at 7:15am by default, right after the morning bank sync
 reports fresh numbers:
 
 - **Household Snapshot**: Spendable this week, Safety Margin, and the lowest
-  projected balance next month and in the next three months. Spendable counts card
+  projected balance next month and in the next three months. Spendable starts
+  from Leftover, the same figure as the Recurring page's Left over for this
+  month (see "Reading the Recurring summary"), and counts card
   purchases by calendar month (since the 1st, returns subtracted, card
   payments left out) plus pending card charges, so a statement closing
   mid-month doesn't change it. **Safety Margin** starts from next month's

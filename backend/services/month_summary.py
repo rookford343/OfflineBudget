@@ -8,141 +8,52 @@ itself uses, so this can never disagree with the day-by-day cash forecast on
 start/end dates, quarterly/yearly firing months, or last-day (day_of_month=0)
 handling.
 
+The numbers come from services/month_base.build_month_base, which the
+Dashboard's Household Snapshot Leftover reads too -- so this strip's Left
+over (after the Groceries budget and Savings set aside) IS that Leftover for
+the same month. See month_base's docstring for the counting rules.
+
 Scoped to the user, not an account -- like /recurring/breakdown, this covers
 every active recurring item the user owns regardless of which account it's
 on, since the Recurring page has no per-account context to filter by.
 """
 from __future__ import annotations
-from calendar import monthrange
-from datetime import date
-from decimal import Decimal
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.schemas import ExplainChild
 from backend.services.explain import ExplainBuilder
-from backend.services.forecast_engine import _fires_on
+from backend.services.month_base import build_month_base
 
 
 def build_month_summary(db: Session, user_id: int, year: int, month: int) -> schemas.MonthSummaryOut:
-    last_day = monthrange(year, month)[1]
-    days = [date(year, month, d) for d in range(1, last_day + 1)]
-    month_start, month_end = days[0], days[-1]
-
-    items = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == user_id,
-        models.RecurringItem.is_active == True,
-        models.RecurringItem.type != models.RecurringType.credit_card_payment,
-        # Real but not cash landing this month -- e.g. an annual bonus
-        # modelled as 1/12th per month for budget planning (models.py's own
-        # comment on this column). build_forecast excludes these from the
-        # day-by-day forecast the same way (forecast_engine.py ~line 329 and
-        # ~488); this summary has to agree with it or "real cash this month"
-        # stops being true.
-        models.RecurringItem.include_in_forecast == True,
-    ).all()
-
-    # Keyed by (recurring_item_id, due_date) so a lookup during the day walk
-    # is exact -- mirrors build_forecast's own bill_actuals map (~line 407).
-    overrides: dict[tuple[int, date], Decimal] = {
-        (o.recurring_item_id, o.due_date): o.actual_amount
-        for o in db.query(models.BillAmountOverride).filter(
-            models.BillAmountOverride.user_id == user_id,
-            models.BillAmountOverride.due_date >= month_start,
-            models.BillAmountOverride.due_date <= month_end,
-        ).all()
-    }
-
-    income_items: list[schemas.MonthIncomeOccurrence] = []
-    monthly_bills: list[schemas.MonthlyBillOccurrence] = []
-    periodic_due: list[schemas.PeriodicDueOccurrence] = []
-
-    monthly_like = {
-        models.RecurringFrequency.monthly,
-        models.RecurringFrequency.weekly,
-        models.RecurringFrequency.biweekly,
-    }
-
-    for item in items:
-        for d in days:
-            if not _fires_on(item, d):
-                continue
-
-            override = overrides.get((item.id, d))
-            amount = override if override is not None else item.amount
-            overridden = override is not None
-
-            if item.type == models.RecurringType.income:
-                income_items.append(schemas.MonthIncomeOccurrence(
-                    recurring_item_id=item.id, name=item.name, date=d, amount=amount,
-                ))
-            elif item.frequency in monthly_like:
-                monthly_bills.append(schemas.MonthlyBillOccurrence(
-                    recurring_item_id=item.id, name=item.name, date=d, amount=amount,
-                    overridden=overridden, card_id=item.card_id,
-                ))
-            else:  # quarterly / yearly
-                periodic_due.append(schemas.PeriodicDueOccurrence(
-                    recurring_item_id=item.id, name=item.name, frequency=item.frequency,
-                    date=d, amount=amount, overridden=overridden, card_id=item.card_id,
-                ))
-
-    income_items.sort(key=lambda o: o.date)
-    monthly_bills.sort(key=lambda o: o.date)
-    periodic_due.sort(key=lambda o: o.date)
-
-    income_total = sum((o.amount for o in income_items), Decimal("0"))
-    monthly_bills_total = sum((o.amount for o in monthly_bills), Decimal("0"))
-    periodic_total = sum((o.amount for o in periodic_due), Decimal("0"))
-    expense_total = monthly_bills_total + periodic_total
-
-    # Not scoped by due_date/expected_date up front (unlike the override
-    # query) because the effective date can be settled_on, which may differ
-    # from expected_date -- filtered below, after computing which date to use.
-    planned = db.query(models.PlannedExpense).filter(
-        models.PlannedExpense.user_id == user_id,
-    ).all()
-
-    one_offs: list[schemas.OneOffOccurrence] = []
-    for pe in planned:
-        settled = pe.settled_on is not None
-        if settled:
-            eff_date = pe.settled_on
-            eff_amount = pe.actual_amount if pe.actual_amount is not None else pe.amount
-        else:
-            eff_date = pe.expected_date
-            eff_amount = pe.amount
-        if eff_date.year != year or eff_date.month != month:
-            continue
-        one_offs.append(schemas.OneOffOccurrence(
-            planned_expense_id=pe.id, name=pe.name, date=eff_date,
-            amount=abs(eff_amount), direction=pe.direction, settled=settled,
-        ))
-
-    one_offs.sort(key=lambda o: o.date)
-    one_off_out_total = sum(
-        (o.amount for o in one_offs if o.direction == models.PlannedDirection.outflow), Decimal("0"),
-    )
-    one_off_in_total = sum(
-        (o.amount for o in one_offs if o.direction == models.PlannedDirection.inflow), Decimal("0"),
-    )
-
-    left_over = income_total - expense_total - one_off_out_total + one_off_in_total
+    user = db.query(models.User).filter(models.User.id == user_id).one()
+    base = build_month_base(db, user, year, month)
 
     expense_builder = ExplainBuilder("Expenses this month").start(
-        "Monthly bills", monthly_bills_total,
+        "Monthly bills", base.monthly_bills_total,
         note="Every weekly, biweekly and monthly bill charged this month",
         children=[ExplainChild(label=f"{b.name} ({b.date:%b %-d})", amount=b.amount,
                                note="actual statement amount" if b.overridden else None)
-                  for b in monthly_bills],
+                  for b in base.monthly_bills],
     )
-    for p in periodic_due:
+    for p in base.periodic_due:
         expense_builder.add(f"{p.name} ({p.date:%b %-d})", p.amount,
                             note=f"{p.frequency.value if hasattr(p.frequency, 'value') else p.frequency} bill due this month")
+
+    # Each paycheck's Social Security boost is its own child row, so the
+    # figure sits in an amount (masked with balances hidden), never a note.
+    income_children: list[ExplainChild] = []
+    for i in base.income_items:
+        income_children.append(ExplainChild(label=f"{i.name} ({i.date:%b %-d})", amount=i.amount - i.ss_boost))
+        if i.ss_boost:
+            income_children.append(ExplainChild(
+                label=f"Social Security max ({i.date:%b %-d})", amount=i.ss_boost,
+                note="Wage base met, so Social Security is no longer withheld",
+            ))
     left_builder = ExplainBuilder("Left over").start(
-        "Income", income_total,
-        children=[ExplainChild(label=f"{i.name} ({i.date:%b %-d})", amount=i.amount) for i in income_items],
-    ).subtract("Expenses this month", expense_total)
-    for o in one_offs:
+        "Income", base.income_total, children=income_children,
+    ).subtract("Expenses this month", base.expense_total)
+    for o in base.one_offs:
         direction = o.direction.value if hasattr(o.direction, "value") else str(o.direction)
         label = f"{o.name} ({o.date:%b %-d})"
         note = "one-off, settled" if o.settled else "planned one-off"
@@ -150,18 +61,28 @@ def build_month_summary(db: Session, user_id: int, year: int, month: int) -> sch
             left_builder.add(label, o.amount, note=note)
         else:
             left_builder.subtract(label, o.amount, note=note)
+    left_builder.subtract(
+        "Savings set aside", base.committed_savings,
+        note=("None: your savings strategy pulls from savings instead"
+              if user.savings_strategy == "pull_from_savings" else "This month's Savings budget"),
+    ).subtract("Groceries budget", base.groceries_budget, note="This month's Groceries budget")
     explain = {
-        "expense_total": expense_builder.build(expense_total),
-        "left_over": left_builder.build(left_over),
+        "expense_total": expense_builder.build(base.expense_total),
+        "left_over": left_builder.build(base.left_over),
     }
 
     return schemas.MonthSummaryOut(
         year=year, month=month,
-        income_items=income_items, income_total=income_total,
-        monthly_bills=monthly_bills, monthly_bills_total=monthly_bills_total,
-        periodic_due=periodic_due, periodic_total=periodic_total,
-        expense_total=expense_total,
-        one_offs=one_offs, one_off_out_total=one_off_out_total, one_off_in_total=one_off_in_total,
-        left_over=left_over,
+        income_items=base.income_items, income_total=base.income_total,
+        ss_boost_total=base.ss_boost_total,
+        monthly_bills=base.monthly_bills, monthly_bills_total=base.monthly_bills_total,
+        periodic_due=base.periodic_due, periodic_total=base.periodic_total,
+        expense_total=base.expense_total,
+        one_offs=base.one_offs, one_off_out_total=base.one_off_out_total,
+        one_off_in_total=base.one_off_in_total,
+        left_over_before_budgets=base.left_over_before_budgets,
+        savings_budget=base.savings_budget, committed_savings=base.committed_savings,
+        groceries_budget=base.groceries_budget,
+        left_over=base.left_over,
         explain=explain,
     )

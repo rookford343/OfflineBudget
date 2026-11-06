@@ -398,8 +398,8 @@ class RecurringBreakdownItem(BaseModel):
     type: RecurringType
     frequency: RecurringFrequency
     # amount restated as a monthly rate: a yearly bill is a twelfth of itself
-    # here, unlike budget_snapshot._monthly_expenses, which charges a yearly
-    # bill in full in its own month to match the spreadsheet's Leftover row.
+    # here, unlike services/month_base (Recurring summary, Dashboard
+    # Leftover), which charges a yearly bill in full in its own month.
     # Different questions: "what does this cost me per month, on average" vs.
     # "what hits this particular month".
     monthly_equivalent: Decimal
@@ -474,7 +474,10 @@ class MonthIncomeOccurrence(BaseModel):
     recurring_item_id: int
     name: str
     date: date
-    amount: Decimal
+    amount: Decimal          # includes ss_boost
+    # Social Security no longer withheld once the wage base is met: the
+    # crossing paycheck gets part of it, every later one this year all of it.
+    ss_boost: Decimal = Decimal("0")
 
 
 class MonthlyBillOccurrence(BaseModel):
@@ -505,13 +508,15 @@ class OneOffOccurrence(BaseModel):
     amount: Decimal
     direction: PlannedDirection
     settled: bool
+    card_id: Optional[int] = None
 
 
 class MonthSummaryOut(BaseModel):
     year: int
     month: int
     income_items: list[MonthIncomeOccurrence]
-    income_total: Decimal
+    income_total: Decimal                # includes ss_boost_total
+    ss_boost_total: Decimal = Decimal("0")
     monthly_bills: list[MonthlyBillOccurrence]
     monthly_bills_total: Decimal
     periodic_due: list[PeriodicDueOccurrence]
@@ -522,7 +527,16 @@ class MonthSummaryOut(BaseModel):
     one_offs: list[OneOffOccurrence]
     one_off_out_total: Decimal
     one_off_in_total: Decimal
-    # income_total - expense_total - one_off_out_total + one_off_in_total
+    # income_total - expense_total - one_off_out_total + one_off_in_total:
+    # what the Budget page's Committed list reconciles to.
+    left_over_before_budgets: Decimal = Decimal("0")
+    savings_budget: Decimal = Decimal("0")
+    # savings_budget, or 0 under the "pull_from_savings" strategy.
+    committed_savings: Decimal = Decimal("0")
+    groceries_budget: Decimal = Decimal("0")
+    # left_over_before_budgets - committed_savings - groceries_budget -- the
+    # Dashboard's Household Snapshot Leftover for the same month, to the cent
+    # (both come from services/month_base.build_month_base).
     left_over: Decimal
     # Receipts for the headline numbers, keyed "expense_total" and "left_over".
     explain: dict[str, Explanation] = {}
@@ -2103,7 +2117,7 @@ class BudgetPlanOut(BaseModel):
     flexible_total: Decimal
     budget_total: Decimal              # committed_total + flexible_total
     left_to_assign: Decimal            # income - committed - flexible
-    recurring_left_over: Decimal       # /recurring/month-summary left_over; = income - committed
+    recurring_left_over: Decimal       # /recurring/month-summary left_over_before_budgets; = income - committed
     category_budget_total: Decimal     # what Track Budgets measures (excludes "Not in a category")
     unclassified_count: int            # recurring items with no usable category
     carry_forward: bool
