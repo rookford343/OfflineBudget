@@ -4,11 +4,12 @@ from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
-from backend.services.spending_helpers import filter_real_spend, is_card_payment, looks_like_internal_transfer, NOT_SAVINGS, merchant_totals
+from backend.services.spending_helpers import filter_real_spend, is_card_payment, NOT_SAVINGS, merchant_totals
+from backend.services.real_spend import ClassifiedRow, classified_rows
 from backend.services.summary_generator import generate_weekly_digest
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.recent_activity import get_recent_activity
@@ -22,6 +23,13 @@ _OTHER_CATEGORY_ID = -1
 router = APIRouter(prefix="/spending", tags=["spending"])
 
 
+def _spend_rows(db: Session, user_id: int, start: date, end: date, **filters) -> list[ClassifiedRow]:
+    """Rows the real-spending rule (services/real_spend.py) calls spend, with
+    their signed amounts (refunds negative). Every Spending page chart reads
+    through this, so a bar, its drill-down and the category view agree."""
+    return [r for r in classified_rows(db, user_id, start, end, **filters) if r.verdict.kind == "spend"]
+
+
 @router.get("/monthly", response_model=list[schemas.MonthlySpendingEntry])
 def spending_monthly(
     start: date = Query(...),
@@ -32,44 +40,10 @@ def spending_monthly(
     user: models.User = Depends(get_current_user),
 ):
     results: dict[str, dict] = {}
-
-    # Checking transactions (expenses only = negative amounts, exclude savings categories)
-    checking_q = (
-        db.query(models.Transaction)
-        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
-        .filter(
-            models.Transaction.user_id == user.id,
-            models.Transaction.is_actual == True,
-            models.Transaction.date >= start,
-            models.Transaction.date <= end,
-            models.Transaction.amount < 0,
-            NOT_SAVINGS,
-        )
-    )
-    if account_id:
-        checking_q = checking_q.filter(models.Transaction.account_id == account_id)
-    for t in filter_real_spend(db, user.id, checking_q.all()):
-        month = t.date.strftime("%Y-%m")
-        if month not in results:
-            results[month] = {"checking": Decimal("0"), "cards": Decimal("0")}
-        results[month]["checking"] += abs(t.amount)
-
-    # Card transactions (charges only = positive amounts)
-    card_q = db.query(models.CreditCardTransaction).filter(
-        models.CreditCardTransaction.user_id == user.id,
-        models.CreditCardTransaction.date >= start,
-        models.CreditCardTransaction.date <= end,
-        models.CreditCardTransaction.amount > 0,
-    )
-    if card_id:
-        card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
-    for t in card_q.all():
-        if is_card_payment(t.merchant):
-            continue
-        month = t.date.strftime("%Y-%m")
-        if month not in results:
-            results[month] = {"checking": Decimal("0"), "cards": Decimal("0")}
-        results[month]["cards"] += t.amount
+    for r in _spend_rows(db, user.id, start, end, account_id=account_id, card_id=card_id):
+        month = r.row.date.strftime("%Y-%m")
+        bucket = results.setdefault(month, {"checking": Decimal("0"), "cards": Decimal("0")})
+        bucket["checking" if r.source == "checking" else "cards"] += r.verdict.amount
 
     return [
         schemas.MonthlySpendingEntry(
@@ -102,41 +76,14 @@ def spending_line_items(
     not two similar ones.
     """
     items: list[schemas.SpendingLineItem] = []
-
-    checking_q = (
-        db.query(models.Transaction)
-        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
-        .filter(
-            models.Transaction.user_id == user.id,
-            models.Transaction.is_actual == True,
-            models.Transaction.date >= start,
-            models.Transaction.date <= end,
-            models.Transaction.amount < 0,
-            NOT_SAVINGS,
-        )
-    )
-    if account_id:
-        checking_q = checking_q.filter(models.Transaction.account_id == account_id)
-    for t in filter_real_spend(db, user.id, checking_q.all()):
+    for r in _spend_rows(db, user.id, start, end, account_id=account_id, card_id=card_id):
+        if r.source == "checking":
+            description = r.row.description or "(no description)"
+        else:
+            description = r.row.merchant or "(no merchant)"
         items.append(schemas.SpendingLineItem(
-            date=t.date, description=t.description or "(no description)",
-            amount=abs(t.amount), source="checking",
-        ))
-
-    card_q = db.query(models.CreditCardTransaction).filter(
-        models.CreditCardTransaction.user_id == user.id,
-        models.CreditCardTransaction.date >= start,
-        models.CreditCardTransaction.date <= end,
-        models.CreditCardTransaction.amount > 0,
-    )
-    if card_id:
-        card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
-    for t in card_q.all():
-        if is_card_payment(t.merchant):
-            continue
-        items.append(schemas.SpendingLineItem(
-            date=t.date, description=t.merchant or "(no merchant)",
-            amount=t.amount, source="card",
+            date=r.row.date, description=description,
+            amount=r.verdict.amount, source=r.source,
         ))
 
     items.sort(key=lambda i: i.amount, reverse=True)
@@ -177,48 +124,15 @@ def spending_monthly_by_category(
         return None if c is None else c.id
 
     results: dict[str, dict[int, Decimal]] = {}
-
-    checking_q = (
-        db.query(models.Transaction)
-        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
-        .filter(
-            models.Transaction.user_id == user.id,
-            models.Transaction.is_actual == True,
-            models.Transaction.date >= start,
-            models.Transaction.date <= end,
-            models.Transaction.amount < 0,
-            NOT_SAVINGS,
-        )
-    )
-    if account_id:
-        checking_q = checking_q.filter(models.Transaction.account_id == account_id)
-    for t in filter_real_spend(db, user.id, checking_q.all()):
-        if not t.category_id:
+    for r in _spend_rows(db, user.id, start, end, account_id=account_id, card_id=card_id):
+        if not r.category_id:
             continue
-        tc = group_id(t.category_id)
+        tc = group_id(r.category_id)
         if tc is None:
             continue
-        month = t.date.strftime("%Y-%m")
+        month = r.row.date.strftime("%Y-%m")
         results.setdefault(month, {})
-        results[month][tc] = results[month].get(tc, Decimal("0")) + abs(t.amount)
-
-    card_q = db.query(models.CreditCardTransaction).filter(
-        models.CreditCardTransaction.user_id == user.id,
-        models.CreditCardTransaction.date >= start,
-        models.CreditCardTransaction.date <= end,
-        models.CreditCardTransaction.amount > 0,
-    )
-    if card_id:
-        card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
-    for t in card_q.all():
-        if not t.category_id or is_card_payment(t.merchant):
-            continue
-        tc = group_id(t.category_id)
-        if tc is None:
-            continue
-        month = t.date.strftime("%Y-%m")
-        results.setdefault(month, {})
-        results[month][tc] = results[month].get(tc, Decimal("0")) + t.amount
+        results[month][tc] = results[month].get(tc, Decimal("0")) + r.verdict.amount
 
     # Leaf categories are numerous enough that stacking every one of them
     # produces an unreadable chart, so only the biggest get their own band
@@ -279,51 +193,16 @@ def spending_by_category(
     ).all()
     card_map = {c.id: c.name for c in cards}
 
-    # Checking actuals (expenses only, exclude savings categories)
-    checking_q = (
-        db.query(models.Transaction)
-        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
-        .filter(
-            models.Transaction.user_id == user.id,
-            models.Transaction.is_actual == True,
-            models.Transaction.date >= start,
-            models.Transaction.date <= end,
-            NOT_SAVINGS,
-        )
-    )
-    if account_id:
-        checking_q = checking_q.filter(models.Transaction.account_id == account_id)
-    checking_txns = checking_q.all()
-
-    # Card charges
-    card_q = db.query(models.CreditCardTransaction).filter(
-        models.CreditCardTransaction.user_id == user.id,
-        models.CreditCardTransaction.date >= start,
-        models.CreditCardTransaction.date <= end,
-    )
-    if card_id:
-        card_q = card_q.filter(models.CreditCardTransaction.card_id == card_id)
-    card_txns = card_q.all()
-
-    # Build sub-category → {source_label: amount}
+    # Build sub-category -> {source_label: amount} from the real-spending
+    # rule: refunds net, so a line (and its breakdown) can go negative.
     sub_breakdown: dict[int, dict[str, Decimal]] = {}
-
-    for t in checking_txns:
-        if t.amount >= 0 or not t.category_id:
+    for r in _spend_rows(db, user.id, start, end, account_id=account_id, card_id=card_id):
+        if not r.category_id:
             continue
-        sub_breakdown.setdefault(t.category_id, {})
-        label = "Checking"
-        sub_breakdown[t.category_id][label] = (
-            sub_breakdown[t.category_id].get(label, Decimal("0")) + abs(t.amount)
-        )
-
-    for t in card_txns:
-        if t.amount <= 0 or not t.category_id or is_card_payment(t.merchant):
-            continue
-        sub_breakdown.setdefault(t.category_id, {})
-        label = card_map.get(t.card_id, "Credit Card")
-        sub_breakdown[t.category_id][label] = (
-            sub_breakdown[t.category_id].get(label, Decimal("0")) + t.amount
+        label = "Checking" if r.source == "checking" else card_map.get(r.row.card_id, "Credit Card")
+        sub_breakdown.setdefault(r.category_id, {})
+        sub_breakdown[r.category_id][label] = (
+            sub_breakdown[r.category_id].get(label, Decimal("0")) + r.verdict.amount
         )
 
     # Budgets come from the Set Budgets plan (Committed from Recurring +
@@ -426,20 +305,10 @@ def spending_by_card(
         models.Category.user_id == user.id,
     ).all()
 
-    txns = db.query(models.CreditCardTransaction).filter(
-        models.CreditCardTransaction.card_id == card_id,
-        models.CreditCardTransaction.user_id == user.id,
-        models.CreditCardTransaction.date >= start,
-        models.CreditCardTransaction.date <= end,
-        models.CreditCardTransaction.amount > 0,
-    ).all()
-
     sub_totals: dict[int, Decimal] = {}
-    for t in txns:
-        if is_card_payment(t.merchant):
-            continue
-        if t.category_id:
-            sub_totals[t.category_id] = sub_totals.get(t.category_id, Decimal("0")) + t.amount
+    for r in _spend_rows(db, user.id, start, end, card_id=card_id, include_checking=False):
+        if r.category_id:
+            sub_totals[r.category_id] = sub_totals.get(r.category_id, Decimal("0")) + r.verdict.amount
     top_categories = [c for c in categories if c.parent_id is None and c.type == "expense"]
     result: list[schemas.SpendingTopLevel] = []
 
@@ -637,34 +506,8 @@ def spending_yearly_trends(
     result = []
     for year in range(current_year - years + 1, current_year + 1):
         months_data: dict[str, Decimal] = {str(m): Decimal("0") for m in range(1, 13)}
-        txns = (
-            db.query(models.Transaction)
-            .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
-            .filter(
-                models.Transaction.user_id == user.id,
-                models.Transaction.is_actual == True,
-                models.Transaction.date >= date(year, 1, 1),
-                models.Transaction.date <= date(year, 12, 31),
-                models.Transaction.amount < 0,
-                NOT_SAVINGS,
-            )
-        ).all()
-        txns = filter_real_spend(db, user.id, txns)
-        for t in txns:
-            months_data[str(t.date.month)] += abs(t.amount)
-        card_txns = db.query(models.CreditCardTransaction).filter(
-            models.CreditCardTransaction.user_id == user.id,
-            models.CreditCardTransaction.date >= date(year, 1, 1),
-            models.CreditCardTransaction.date <= date(year, 12, 31),
-            models.CreditCardTransaction.amount > 0,
-        ).all()
-        for t in card_txns:
-            # "AUTOMATIC PAYMENT - THANK" etc. reach the card table with a
-            # positive (charge-side) amount, so they inflate spend instead of
-            # netting out -- the card-side twin of the checking payoff.
-            if is_card_payment(t.merchant):
-                continue
-            months_data[str(t.date.month)] += t.amount
+        for r in _spend_rows(db, user.id, date(year, 1, 1), date(year, 12, 31)):
+            months_data[str(r.row.date.month)] += r.verdict.amount
         result.append(schemas.YearlyTrendEntry(year=year, months=months_data))
     return result
 
@@ -685,35 +528,10 @@ def spending_rolling_monthly(
     start = date(start_year, start_month, 1)
 
     results: dict[str, dict[str, Decimal]] = {}
-    txns = (
-        db.query(models.Transaction)
-        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
-        .filter(
-            models.Transaction.user_id == user.id,
-            models.Transaction.is_actual == True,
-            models.Transaction.date >= start,
-            models.Transaction.date <= today,
-            models.Transaction.amount < 0,
-            NOT_SAVINGS,
-        )
-    ).all()
-    txns = filter_real_spend(db, user.id, txns)
-    for t in txns:
-        key = t.date.strftime("%Y-%m")
-        results.setdefault(key, {"checking": Decimal("0"), "cards": Decimal("0")})
-        results[key]["checking"] += abs(t.amount)
-    card_txns = db.query(models.CreditCardTransaction).filter(
-        models.CreditCardTransaction.user_id == user.id,
-        models.CreditCardTransaction.date >= start,
-        models.CreditCardTransaction.date <= today,
-        models.CreditCardTransaction.amount > 0,
-    ).all()
-    for t in card_txns:
-        if is_card_payment(t.merchant):
-            continue
-        key = t.date.strftime("%Y-%m")
-        results.setdefault(key, {"checking": Decimal("0"), "cards": Decimal("0")})
-        results[key]["cards"] += t.amount
+    for r in _spend_rows(db, user.id, start, today):
+        key = r.row.date.strftime("%Y-%m")
+        bucket = results.setdefault(key, {"checking": Decimal("0"), "cards": Decimal("0")})
+        bucket["checking" if r.source == "checking" else "cards"] += r.verdict.amount
 
     return [
         schemas.RollingMonthEntry(
@@ -747,46 +565,24 @@ def spending_sankey(
     first_day = date(year, month, 1)
     last_day = date(year, month, calendar.monthrange(year, month)[1])
 
-    txns = db.query(models.Transaction).options(
-        joinedload(models.Transaction.category)
-    ).filter(
-        models.Transaction.user_id == user.id,
-        models.Transaction.is_actual == True,
-        models.Transaction.date >= first_day,
-        models.Transaction.date <= last_day,
-    ).all()
-
-    # Also include credit card transactions
-    card_txns = db.query(models.CreditCardTransaction).options(
-        joinedload(models.CreditCardTransaction.category)
-    ).filter(
-        models.CreditCardTransaction.user_id == user.id,
-        models.CreditCardTransaction.date >= first_day,
-        models.CreditCardTransaction.date <= last_day,
-    ).all()
-
     income_totals: dict[str, Decimal] = {}
     expense_totals: dict[str, Decimal] = {}
 
-    # A transfer in from savings is not household income, and a transfer out
-    # or card payoff is not spending -- both would make the flow diagram claim
-    # money entered or left the household when it only moved between accounts.
-    txns = [x for x in txns if not looks_like_internal_transfer(x.description)]
-    txns = filter_real_spend(db, user.id, txns)
-    for t in txns:
-        cat_name = t.category.name if t.category else "Uncategorized"
-        cat_type = t.category.type if t.category else None
-        if t.amount > 0:
-            income_totals[cat_name] = income_totals.get(cat_name, Decimal("0")) + t.amount
-        elif t.amount < 0 and cat_type != models.CategoryType.income:
-            expense_totals[cat_name] = expense_totals.get(cat_name, Decimal("0")) + abs(t.amount)
+    # The real-spending rule decides every flow: transfers and card payoffs
+    # are neither income nor spending, refunds net against their category,
+    # and an income-category debit (a paycheck reversal) reduces income.
+    for r in classified_rows(db, user.id, first_day, last_day):
+        cat_name = r.row.category.name if r.row.category else "Uncategorized"
+        if r.verdict.kind == "income":
+            income_totals[cat_name] = income_totals.get(cat_name, Decimal("0")) + r.verdict.amount
+        elif r.verdict.kind == "spend":
+            expense_totals[cat_name] = expense_totals.get(cat_name, Decimal("0")) + r.verdict.amount
 
-    for t in card_txns:
-        if is_card_payment(t.merchant):
-            continue
-        cat_name = t.category.name if t.category else "Uncategorized"
-        if t.amount > 0:
-            expense_totals[cat_name] = expense_totals.get(cat_name, Decimal("0")) + t.amount
+    # A flow diagram can't draw a zero or negative flow, so a category whose
+    # refunds met or exceeded its charges (or a fully reversed income line)
+    # is left off the diagram; the Spending page totals still carry it.
+    income_totals = {k: v for k, v in income_totals.items() if v > 0}
+    expense_totals = {k: v for k, v in expense_totals.items() if v > 0}
 
     # More than _MAX_STACK_CATEGORIES distinct expense categories makes the
     # diagram unreadable -- collapse the tail into "Other", same pattern the

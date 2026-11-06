@@ -2,7 +2,7 @@ from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 from sqlalchemy.orm import Session
-from backend.services.spending_helpers import filter_real_spend, is_card_payment
+from backend.services.real_spend import classified_rows
 from backend.services.budget_buckets import assignable_category_ids, drop_uncarried_defaults
 from backend import models
 from backend.schemas import BudgetOverviewRow
@@ -35,35 +35,16 @@ def compute_overview(
     for a in sorted(allocations, key=lambda x: x.month):  # month=0 first, overridden by specific
         budget_by_cat[a.category_id] = a.budgeted_amount
 
-    # Actual checking account spending
-    checking_txns = db.query(models.Transaction).filter(
-        models.Transaction.user_id == user_id,
-        models.Transaction.is_actual == True,
-        models.Transaction.date >= start,
-        models.Transaction.date <= end,
-        models.Transaction.category_id != None,
-    ).all()
-    # Same predicates the Spending page uses. Without them a categorized
-    # internal transfer counts as spending here but not there, so the two
-    # pages disagree on the same month -- Aug 2026 showed $1,000.00 of
-    # "Income" spend on this page from a savings transfer alone.
+    # Actuals per category from the one real-spending rule, split by
+    # source. Refunds net (a line can go negative); transfers, card payoffs,
+    # savings-category rows and income-category debits are not spending.
     checking_by_cat: dict[int, Decimal] = {}
-    for t in filter_real_spend(db, user_id, [x for x in checking_txns if x.amount < 0]):
-        checking_by_cat[t.category_id] = checking_by_cat.get(t.category_id, Decimal("0")) + abs(t.amount)
-
-    # Credit card spending
-    card_txns = db.query(models.CreditCardTransaction).filter(
-        models.CreditCardTransaction.user_id == user_id,
-        models.CreditCardTransaction.date >= start,
-        models.CreditCardTransaction.date <= end,
-        models.CreditCardTransaction.category_id != None,
-    ).all()
     cards_by_cat: dict[int, Decimal] = {}
-    for t in card_txns:
-        # A card payoff settles charges already counted individually, so
-        # counting it too double-counts the whole statement.
-        if t.amount > 0 and not is_card_payment(t.merchant):
-            cards_by_cat[t.category_id] = cards_by_cat.get(t.category_id, Decimal("0")) + t.amount
+    for r in classified_rows(db, user_id, start, end):
+        if r.verdict.kind != "spend" or r.category_id is None:
+            continue
+        bucket = checking_by_cat if r.source == "checking" else cards_by_cat
+        bucket[r.category_id] = bucket.get(r.category_id, Decimal("0")) + r.verdict.amount
 
     rows: list[BudgetOverviewRow] = []
     for cat in sorted(categories, key=lambda c: (c.sort_order, c.name)):

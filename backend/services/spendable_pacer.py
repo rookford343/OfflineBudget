@@ -15,11 +15,9 @@ from __future__ import annotations
 import calendar
 from datetime import date, timedelta
 from decimal import Decimal
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from backend import models
 from backend.services.month_base import build_month_base, card_bill_occurrences
-from backend.services.spending_helpers import NOT_SAVINGS, is_card_payment
 
 
 # Categories whose BUDGETED amount budget_snapshot.py already removes from the
@@ -27,7 +25,7 @@ from backend.services.spending_helpers import NOT_SAVINGS, is_card_payment
 # Subtracting their ACTUAL spend here too would deduct the same money twice --
 # once as a budget line, again as a transaction. Matched by exact, case-sensitive
 # name because that is precisely what budget_snapshot.py hardcodes. The
-# CategoryType.savings check in NOT_SAVINGS does NOT cover these: real users
+# savings-category transfer verdict (services/real_spend.py) does NOT cover these: real users
 # routinely type their "Savings"/"Groceries" categories as `expense`.
 # Groceries is back on this list: budget_snapshot removes the Groceries
 # BUDGET from the pool up front, so counting the actual spend here too would
@@ -38,7 +36,7 @@ _EXCLUDED_CATEGORY_NAMES = ("Groceries", "Savings")
 # tests that import it. Holding the only copy in this module is why the
 # Spending page and the weekly email -- which read through spending_helpers --
 # never got this exclusion and counted card payoffs and transfers as spend.
-from backend.services.spending_helpers import (  # noqa: E402
+from backend.services.spending_helpers import (  # noqa: E402, F401 -- re-export for tests that import it from here
     is_real_checking_spend,
 )
 
@@ -99,7 +97,19 @@ def _recurring_card_charges_in_range(db: Session, user_id: int, start: date, end
     return total
 
 
+def _is_pacer_excluded(row) -> bool:
+    """Spend the pacer leaves out because Leftover already holds it: rows in
+    the Groceries/Savings budget lines (see _EXCLUDED_CATEGORY_NAMES)."""
+    return row.category is not None and row.category.name in _EXCLUDED_CATEGORY_NAMES
+
+
 def discretionary_spend_checking(db: Session, user_id: int, start: date, end: date) -> Decimal:
+    """Checking real spending (services/real_spend.py: refunds net, card
+    payoffs, transfers, savings and income categories excluded) minus what
+    Leftover already counts: posted recurring bills, Groceries/Savings budget
+    lines, and the debit that verified a planned transfer."""
+    from backend.services.real_spend import classified_rows
+
     verified_txn_ids = {
         row[0] for row in db.query(models.PlannedTransfer.verified_transaction_id)
         .filter(
@@ -107,106 +117,32 @@ def discretionary_spend_checking(db: Session, user_id: int, start: date, end: da
             models.PlannedTransfer.verified_transaction_id.isnot(None),
         ).all()
     }
-    rows = (
-        db.query(models.Transaction)
-        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
-        .filter(
-            models.Transaction.user_id == user_id,
-            models.Transaction.is_actual == True,
-            models.Transaction.date >= start,
-            models.Transaction.date <= end,
-            models.Transaction.amount < 0,
-            models.Transaction.recurring_item_id.is_(None),
-            NOT_SAVINGS,
-            or_(
-                models.Transaction.category_id.is_(None),
-                models.Category.name.notin_(_EXCLUDED_CATEGORY_NAMES),
-            ),
-        )
-        .all()
-    )
-
-    # The remaining two exclusions can't be expressed as SQL predicates -- both
-    # need the description matched against Python-side data (the user's card
-    # list / a marker tuple), so filter the fetched rows instead.
-    #
-    # Credit-card autopay debits ("CHASE CREDIT CRD AUTOPAY") and internal
-    # transfers ("Online Transfer to CHK ...XXXX") land in checking as plain
-    # uncategorized negatives with no recurring_item_id, so neither existing
-    # exclusion catches them -- yet neither is discretionary spend. A card
-    # payment is settling charges this pacer ALREADY counted on the card side
-    # (discretionary_spend_card), so counting the payment too double-counts the
-    # same dollars; a transfer never leaves the household at all.
-    active_cards = db.query(models.CreditCard).filter(
-        models.CreditCard.user_id == user_id,
-        models.CreditCard.is_active == True,
-    ).all()
-
-    def is_spend(t: models.Transaction) -> bool:
-        if t.id in verified_txn_ids:
-            return False
-        return is_real_checking_spend(t.description, active_cards)
-
-    debit_rows = [t for t in rows if is_spend(t)]
-    total = sum((abs(t.amount) for t in debit_rows), Decimal("0"))
-
-    # A refund nets against the charge it reverses rather than being dropped.
-    # Only a positive-amount row whose description matches an already-counted
-    # debit qualifies -- an unrelated deposit (paycheck, Zelle, a transfer in)
-    # has its own description and never accidentally nets against spend it
-    # has nothing to do with. Same rule spending_helpers.py's merchant/category
-    # totals use, for the same reason.
-    debit_descriptions = {t.description for t in debit_rows if t.description}
-    if debit_descriptions:
-        refund_rows = (
-            db.query(models.Transaction)
-            .filter(
-                models.Transaction.user_id == user_id,
-                models.Transaction.is_actual == True,
-                models.Transaction.date >= start,
-                models.Transaction.date <= end,
-                models.Transaction.amount > 0,
-                models.Transaction.description.in_(debit_descriptions),
-            )
-            .all()
-        )
-        total -= sum((t.amount for t in refund_rows), Decimal("0"))
-
+    total = Decimal("0")
+    for r in classified_rows(db, user_id, start, end, include_cards=False):
+        t = r.row
+        if r.verdict.kind != "spend" or t.recurring_item_id is not None:
+            continue
+        if t.id in verified_txn_ids or _is_pacer_excluded(t):
+            continue
+        total += r.verdict.amount
     return total
 
 
 def discretionary_spend_card(db: Session, user_id: int, start: date, end: date) -> Decimal:
-    """Card charges minus refunds/credits, minus card-linked recurring
-    subscriptions already counted in `leftover`.
+    """Card real spending (charges minus refunds, payments excluded, per
+    services/real_spend.classify_card) outside the Groceries/Savings budget
+    lines, minus card-linked recurring subscriptions already counted in
+    `leftover`."""
+    from backend.services.real_spend import classified_rows
 
-    Refunds net unconditionally here (no `amount > 0` filter) -- unlike the
-    checking side, CreditCardTransaction holds charges and their refunds, so a
-    negative amount is a credit against that same card's discretionary spend.
-
-    The one thing in this table that is neither is a payment settling the card,
-    which arrives charge-side and so inflates spend instead of netting out; it
-    is filtered by spending_helpers.is_card_payment. The mirror-image checking
-    debit is already excluded via card_matching.card_matches_description.
-    """
-    rows = (
-        db.query(models.CreditCardTransaction)
-        .outerjoin(models.Category, models.CreditCardTransaction.category_id == models.Category.id)
-        .filter(
-            models.CreditCardTransaction.user_id == user_id,
-            models.CreditCardTransaction.date >= start,
-            models.CreditCardTransaction.date <= end,
-            or_(
-                models.CreditCardTransaction.category_id.is_(None),
-                models.Category.type != models.CategoryType.savings,
-            ),
-            or_(
-                models.CreditCardTransaction.category_id.is_(None),
-                models.Category.name.notin_(_EXCLUDED_CATEGORY_NAMES),
-            ),
-        )
-        .all()
+    total = sum(
+        (
+            r.verdict.amount
+            for r in classified_rows(db, user_id, start, end, include_checking=False)
+            if r.verdict.kind == "spend" and not _is_pacer_excluded(r.row)
+        ),
+        Decimal("0"),
     )
-    total = sum((t.amount for t in rows if not is_card_payment(t.merchant)), Decimal("0"))
     if total < 0:
         # Already a net refund period -- a subscription's assumed firing
         # (which may not have even posted as a real row yet, see

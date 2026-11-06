@@ -57,15 +57,15 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Weekend shift | Posting day moves off a weekend; override keyed by natural due date | `_adjust_for_weekend`, `_matches_schedule` (services/forecast_engine.py); month model and upcoming bills have their own date handling -> Task 4 | Forecast, Recurring, Upcoming bills |
 | Card bill in month | Whether a card-paid recurring bill belongs to a month (quarterly lands whole in its due month) | `is_card_bill_in_month` (services/forecast_engine.py) | Month model, forecast |
 | Upcoming bills | Next occurrence per bill with override amounts | `upcoming_bills` (services/upcoming_bills.py), `_next_fire_date` (services/summary_generator.py) | Dashboard card, daily email |
-| Real spending (rule) | Which transactions count as spending: card payments, own-account transfers, income-category debits, refunds, savings categories | `is_card_payment`, `looks_like_internal_transfer`, `is_real_checking_spend`, `filter_real_spend` (services/spending_helpers.py) -> Task 2 (real_spend) | everything below |
-| Category / merchant totals | Spending per category or merchant over a range | `category_totals_for_range`, `merchant_totals` (services/spending_helpers.py); `spending_breakdown` (services/budget_snapshot.py) -> Task 2 | Weekly digest, Budget overview, snapshot explain |
-| Spending page charts | Monthly, line items, by category, by card, yearly, rolling, Sankey, merchants | `spending_monthly`, `spending_line_items`, `spending_monthly_by_category`, `spending_by_category`, `spending_by_card`, `spending_yearly_trends`, `spending_rolling_monthly`, `spending_sankey`, `spending_by_merchant` (routers/spending.py), each with its own loop over `filter_real_spend` -> Task 2 | Spending page |
-| Budget actuals | Actual spend per budget line | `budget_calculator.py` (services/budget_calculator.py), `merchant_totals` use in routers/budget.py -> Task 2 | Budget page |
-| Monthly summary / Month in Review | Category totals, debits, credits, month-over-month change, net cashflow | `_month_spending_by_category`, `generate_summary` (services/summary_generator.py) -> Task 2 | Monthly email, Month in Review, `/spending/monthly-summary` |
+| Real spending (rule) | Whether a row is spend, income, a transfer or a card payment, and its signed amount: card payments and own-account transfers are neither, savings-category rows are transfers, refunds net as negative spend, an income-category debit reduces income | `classify_checking`, `classify_card`, `classified_rows`, `spend_totals` (services/real_spend.py); description checks `is_card_payment`, `looks_like_internal_transfer` (services/spending_helpers.py), `card_matches_description`, `looks_like_card_autopay` (services/card_matching.py) | everything below |
+| Category / merchant totals | Real spending per category or merchant over a range | `category_totals_for_range` (= `spend_totals().by_category`), `merchant_totals` (services/spending_helpers.py, both over services/real_spend.py); `spending_breakdown` (services/budget_snapshot.py) | Weekly digest, Budget overview, snapshot explain |
+| Spending page charts | Monthly, line items, by category, by card, yearly, rolling, Sankey, merchants | `spending_monthly`, `spending_line_items`, `spending_monthly_by_category`, `spending_by_category`, `spending_by_card`, `spending_yearly_trends`, `spending_rolling_monthly`, `spending_sankey`, `spending_by_merchant` (routers/spending.py), all reading `_spend_rows` / `classified_rows` (services/real_spend.py) | Spending page |
+| Budget actuals | Real spend per budget line, split checking / cards | `compute_overview` (services/budget_calculator.py) over `classified_rows`; `merchant_totals` use in routers/budget.py | Budget page |
+| Monthly summary / Month in Review | Category totals, debits, credits, month-over-month change, net cashflow | `_month_spending_by_category` (= `spend_totals`), `generate_summary` (services/summary_generator.py) | Monthly email, Month in Review, `/spending/monthly-summary` |
 | Weekly digest | Trailing 7 days of spending plus forward balance risk | `generate_weekly_digest` (services/summary_generator.py) | Weekly email, `/spending/weekly-digest` |
 | Daily email | Headline figures, cards, upcoming, stale-connection notes | `generate_daily_summary` (services/summary_generator.py) | Daily email |
 | Available to Spend | Monthly-frequency income minus bills for the calendar month (no boost, no overrides, refunds dropped) -> Task 7 rebuild | `available_to_spend`, `_committed_card_bills_fired` (routers/spending.py) | Dashboard card |
-| Pacer add-backs / discretionary spend | Real spending in a range for the weekly pacer, with recurring card charges added back | `discretionary_spend_checking`, `discretionary_spend_card`, `discretionary_spend_in_range`, `compute_weekly_spendable` (services/spendable_pacer.py) -> Task 2 | Dashboard weekly allowance |
+| Pacer add-backs / discretionary spend | Real spending in a range for the weekly pacer, with recurring card charges added back | `discretionary_spend_checking`, `discretionary_spend_card` (spend verdicts from `classified_rows`, minus recurring bills, Groceries/Savings lines and verified planned transfers), `discretionary_spend_in_range`, `compute_weekly_spendable` (services/spendable_pacer.py) | Dashboard weekly allowance |
 | Wish List plan | Earliest safe date to afford a wish, using forecast plus cushion | `build_plan`, `earliest_safe_date`, `effective_cushion` (services/wish_plan.py); `wish_math.py` | Wish List page |
 | Planned expense settlement | A planned one-off settles when a matching real charge appears | `auto_settle_planned_expenses`, `settle_after_sync` (services/planned_auto_settle.py) | Month model, forecast, Recurring |
 | Tax estimate | Federal, state and FICA estimate from the tax profile | `estimate_taxes` (services/tax_service.py), `tax_estimate`, `tax_summary` (routers/spending.py) | Tax export page |
@@ -86,7 +86,43 @@ weekends, quarterly bills, Social Security boost, funded one-offs.
 Not yet extracted from `build_forecast` (Task 5).
 
 ### 3. Real-spending rule
-Not yet unified; six totals recipes exist today (Task 2).
+`backend/services/real_spend.py`. One verdict per row; every spending and income total
+reads it (Spending page charts, Sankey, Budget overview, weekly digest, monthly email,
+Month in Review, Left to Spend's card spending, pacer).
+
+Verdicts, checked in this order:
+
+- **Checking rows** (only `is_actual` ones; `classify_checking` raises on a planned row):
+  1. `card_payment` when the description matches an active card (`card_matches_description`)
+     or reads like a card payoff (`looks_like_card_autopay`, which also catches a card no
+     longer active).
+  2. `transfer` when the description is an own-account transfer
+     (`looks_like_internal_transfer`) or the row is under a savings-type category. Both
+     directions: a transfer back from savings is not income either.
+  3. `income` under an income-type category, signed: a debit there (a paycheck reversal)
+     is negative income.
+  4. `spend` for any other debit. A "Zelle payment to <person>" stays spend; only
+     own-account wording is a transfer.
+  5. A credit whose description matches a spend debit in the same window is a refund:
+     negative `spend`. Any other credit is `income`.
+- **Card rows** (`classify_card`): `card_payment` for payment wording (`is_card_payment`),
+  `transfer` under a savings-type category, otherwise `spend` with the row's sign, so a
+  refund is negative spend. Card rows are never income.
+
+Amounts: spend and income are signed (refunds negative); transfers and card payments carry
+their magnitude. Totals are never clamped: refunds larger than charges make a category
+negative. The Sankey diagram alone omits non-positive flows, because it can't draw them.
+
+Entry points: `classify_checking` / `classify_card` for one row; `classified_rows` for a
+window, with the Spending page's `account_id` (checking side) and `card_id` (card side)
+filters; `spend_totals` for `by_category`, `spend` and `income`. A balance-only card (no
+transaction feed) has no rows and contributes nothing. Callers layer their own exclusions on
+spend verdicts, never a second rule: the pacer drops recurring bills, the Groceries/Savings
+lines and verified planned transfers. `filter_real_spend` (spending_helpers) keeps spend and
+income rows for list views; `/spending/available-to-spend` keeps its own recipe until its
+rebuild (Task 7).
+
+Parity: `backend/tests/test_real_spend.py::test_all_spend_surfaces_agree`.
 
 ### 4. Pending and thresholds
 Pending freshness lives in the forecast engine only; one cushion not yet adopted (Tasks 3 and 6).
@@ -143,3 +179,4 @@ When two places show different numbers for the same concept:
 Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 
 - v1: baseline after 2026-11-06 fixes.
+- v2: one real-spending rule; refunds net everywhere

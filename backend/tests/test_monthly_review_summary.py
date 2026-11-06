@@ -109,4 +109,5 @@ def test_income_category_debit_is_not_spending(db_session):
     s = generate_summary(db_session, user.id, 2026, 10)
 
     assert s.top_category == "Utilities"
-    assert s.net_cashflow == Decimal("2850.00")
+    # The reversal reduces income (3000 - 50) rather than vanishing.
+    assert s.net_cashflow == Decimal("2800.00")

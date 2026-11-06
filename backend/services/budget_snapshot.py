@@ -20,7 +20,7 @@ from backend.services.forecast_engine import (
 from backend.services.card_matching import card_matches_description
 from backend.services.month_base import build_month_base, card_bill_occurrences
 from backend.services.spendable_pacer import compute_weekly_spendable
-from backend.services.spending_helpers import category_totals_for_range, is_card_payment, merchant_totals
+from backend.services.spending_helpers import category_totals_for_range, merchant_totals
 from backend.services.statement_reconcile import statement_stale_reason
 
 
@@ -114,26 +114,23 @@ def _card_spending_this_month(
 ) -> dict[int, Decimal]:
     """Per active card: posted card transactions dated from the 1st of
     `as_of`'s month through `as_of`. Charges add, returns subtract (the
-    card convention, positive = charge), and card payments are skipped via
-    the shared is_card_payment classifier. Pending rows live in their own
+    card convention, positive = charge), and card payments are skipped, per
+    the real-spending rule (services/real_spend.classify_card). Pending rows live in their own
     table and are counted separately through pending_charges."""
     totals = {c.id: Decimal("0.00") for c in active_cards}
     if not totals:
         return totals
-    rows = db.query(
-        models.CreditCardTransaction.card_id,
-        models.CreditCardTransaction.merchant,
-        models.CreditCardTransaction.amount,
-    ).filter(
+    from backend.services.real_spend import classify_card
+    rows = db.query(models.CreditCardTransaction).filter(
         models.CreditCardTransaction.user_id == user_id,
         models.CreditCardTransaction.card_id.in_(list(totals)),
         models.CreditCardTransaction.date >= as_of.replace(day=1),
         models.CreditCardTransaction.date <= as_of,
     ).all()
-    for card_id, merchant, amount in rows:
-        if is_card_payment(merchant):
-            continue
-        totals[card_id] += amount
+    for t in rows:
+        verdict = classify_card(t)
+        if verdict.kind == "spend":
+            totals[t.card_id] += verdict.amount
     return totals
 
 
