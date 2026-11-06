@@ -624,7 +624,7 @@ def test_new_statement_due(db_session, pending, expected):
         db_session, statement_day=28, due_day=25,
         next_payment_date=date(2026, 10, 25), balance_due=Decimal("0"),
         balance_due_updated_at=datetime(2026, 9, 26, 9, 0),
-        current_balance=Decimal("0"), pending_charges=Decimal(pending),
+        current_balance=Decimal("0"), pending_charges=Decimal(pending), pending_charges_updated_at=datetime.utcnow(),
     )
     assert statement_stale_reason(card, date(2026, 9, 30)) == expected
 

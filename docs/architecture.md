@@ -52,7 +52,7 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Forecast balances | Day-by-day projected checking balance | `build_forecast` (services/forecast_engine.py) | Forecast tab, lows, risk banner, Wish List, upcoming bills, baselines |
 | Forecast walk start/flags | Callers choose their own start date and `include_unbilled_card_bills`; bridge walks inside `build_forecast` drop the flag -> Task 4 (standard walk) | `build_forecast` call sites: routers/forecast.py, services/budget_snapshot.py, services/summary_generator.py, services/upcoming_bills.py, services/wish_plan.py, services/forecast_baseline.py, services/forecast_engine.py (bridges, quarters) | Forecast tab, lows, digest, Wish List, baselines |
 | Card payment amount (payoff) | Locked statement payoff, cycle estimate (pending + spent since statement + subscriptions before close + one-offs), second-hop rule, flat estimate, subscription fallback; basis kept on `ForecastTransaction.basis` | inline in `build_forecast`, helpers `_card_payoff_date_for_charge`, `_card_subscription_charges`, `_cc_actual_nearby` (services/forecast_engine.py) -> Task 5 (card payment model) | Forecast tab, Safety Margin, explain notes (`_cc_basis_note`) |
-| Pending charges (fresh) | Hand-typed or synced pending total, ignored when older than 7 days | `_fresh_pending_charges` (services/forecast_engine.py). Raw `card.pending_charges` is also read directly in services/budget_snapshot.py, services/summary_generator.py and the frontend -> Task 3 (one accessor) | Forecast, Left to Spend, Credit Cards page, email |
+| Pending charges (fresh) | Hand-typed or synced pending total, ignored when older than 7 days | `card_pending` (services/pending.py), read by the forecast, Left to Spend, available-to-spend, the email and statement checks. The frontend still reads the raw field -> Plan 2 | Forecast, Left to Spend, Credit Cards page, email |
 | Social Security boost | Extra take-home per paycheck once the wage base is met | `ss_paycheck_boosts`, `SSWageBaseTracker`, `pay_year_dates` (services/forecast_engine.py); month model calls them | Forecast, Recurring, Leftover |
 | Weekend shift | Posting day moves off a weekend; override keyed by natural due date | `_adjust_for_weekend`, `_matches_schedule` (services/forecast_engine.py); month model and upcoming bills have their own date handling -> Task 4 | Forecast, Recurring, Upcoming bills |
 | Card bill in month | Whether a card-paid recurring bill belongs to a month (quarterly lands whole in its due month) | `is_card_bill_in_month` (services/forecast_engine.py) | Month model, forecast |
@@ -131,7 +131,21 @@ figure and `apply_rollover` see it; every spending total still excludes it.
 Parity: `backend/tests/test_real_spend.py::test_all_spend_surfaces_agree`.
 
 ### 4. Pending and thresholds
-Pending freshness lives in the forecast engine only; one cushion not yet adopted (Tasks 3 and 6).
+Pending charges: `card_pending(card, today)` in `services/pending.py` is the only reader of
+`CreditCard.pending_charges`. It returns the sum of the card's `CardPendingTransaction` rows
+(floored at 0) when the card has any; otherwise the hand-typed field, only if
+`pending_charges_updated_at` is within `PENDING_FRESH_DAYS` (7) of `today`; otherwise 0. A stale or
+unstamped figure is never carried forward. A synced card whose pending list just went empty has
+the field set to 0 by sync, so it reads 0. Writers (`bank_sync_service`, the credit-cards router)
+touch the field; nobody else reads it.
+
+Checking pending: `checking_pending_debits(db, account, today, card_payments_only=...)` returns the
+Plaid `AccountPendingTransaction` debits, only while an active Plaid link keeps the snapshot live
+(`pending_snapshot_is_live`). `card_payments_only=True` keeps the debits `match_payment_card` pins
+to one active card (the forecast's rule). `checking_balance_with_pending` is posted balance minus
+all pending debits; the sidebar adopts it in Plan 2.
+
+One cushion is not yet adopted (Task 6).
 
 ### Forecast walk policy
 No standard walk function yet (Task 4).
@@ -186,3 +200,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 
 - v1: baseline after 2026-11-06 fixes.
 - v2: one real-spending rule; refunds net everywhere
+- v3: one pending freshness rule

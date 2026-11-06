@@ -4,7 +4,7 @@ from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.routers._shared import owned_or_404
-from backend.services.forecast_engine import pending_snapshot_is_live
+from backend.services.pending import pending_snapshot_is_live
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 

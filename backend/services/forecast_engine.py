@@ -18,6 +18,7 @@ from backend import models
 from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
 from backend.services.tax_service import ss_wage_base_for
 from backend.services.card_matching import card_matches_description, match_payment_card
+from backend.services.pending import card_pending, checking_pending_debits
 
 # How many days before "today" a scheduled recurring item can still be
 # missing its actual and get folded into today's opening balance anyway,
@@ -92,20 +93,6 @@ def _card_payoff_date_for_charge(card: "models.CreditCard", charge_date: date) -
     common case) would otherwise match an already-passed same-month date."""
     close_date = _next_occurrence_on_or_after(card.statement_day, charge_date)
     return _next_occurrence_on_or_after(card.due_day, close_date + timedelta(days=1))
-
-
-def _fresh_pending_charges(card: "models.CreditCard", today: date) -> Decimal:
-    """pending_charges is a hand-typed, point-in-time figure -- trustworthy
-    right after the user enters it, increasingly not as days pass without a real
-    sync confirming it. A stale or absent timestamp is treated the same as
-    nothing pending at all, never silently carried forward."""
-    if not card.pending_charges or card.pending_charges <= 0:
-        return Decimal("0")
-    if card.pending_charges_updated_at is None:
-        return Decimal("0")
-    if (today - card.pending_charges_updated_at.date()).days > 7:
-        return Decimal("0")
-    return Decimal(str(card.pending_charges))
 
 
 def _card_subscription_charges(
@@ -434,20 +421,6 @@ def is_card_bill_in_month(item: models.RecurringItem, month: date) -> bool:
     if item.frequency == models.RecurringFrequency.quarterly:
         return item.month_of_year is not None and (month.month - item.month_of_year) % 3 == 0
     return False
-
-
-def pending_snapshot_is_live(db: Session, account: models.Account) -> bool:
-    """True when this account's AccountPendingTransaction snapshot is kept
-    fresh: a checking account with an ACTIVE Plaid link. Nothing else
-    refreshes the snapshot, so rows on any other account are stale and must
-    be neither subtracted by the forecast nor shown as pending."""
-    return account.type == models.AccountType.checking and db.query(
-        models.BankConnectionAccountLink.id,
-    ).join(models.BankConnection).filter(
-        models.BankConnectionAccountLink.local_account_id == account.id,
-        models.BankConnectionAccountLink.is_active == True,
-        models.BankConnection.provider == "plaid",
-    ).first() is not None
 
 
 def has_unsettled_projection(db: Session, user_id: int, account_id: int, target: date) -> bool:
@@ -904,15 +877,10 @@ def build_forecast(
     # Only while an ACTIVE Plaid link feeds this account: nothing else
     # refreshes the snapshot, and stale rows would be subtracted forever.
     pending_card_debits: dict[int, list[models.AccountPendingTransaction]] = {}
-    if pending_snapshot_is_live(db, account):
-        for row in db.query(models.AccountPendingTransaction).filter(
-            models.AccountPendingTransaction.user_id == user_id,
-            models.AccountPendingTransaction.account_id == account_id,
-            models.AccountPendingTransaction.amount < 0,
-        ).order_by(models.AccountPendingTransaction.date, models.AccountPendingTransaction.id).all():
-            paid = match_payment_card(all_active_cards, row.description)
-            if paid is not None:
-                pending_card_debits.setdefault(paid.id, []).append(row)
+    for row in checking_pending_debits(db, account, date.today(), card_payments_only=True):
+        paid = match_payment_card(all_active_cards, row.description)
+        if paid is not None:
+            pending_card_debits.setdefault(paid.id, []).append(row)
 
     planned = db.query(models.PlannedExpense).options(
         joinedload(models.PlannedExpense.category)
@@ -1138,7 +1106,7 @@ def build_forecast(
         ):
             carried = (
                 Decimal(str(card.current_balance))
-                + Decimal(str(card.pending_charges or 0))
+                + card_pending(card, today)
                 - Decimal(str(card.balance_due))
             )
             carried = max(carried, Decimal("0"))
@@ -1222,7 +1190,7 @@ def build_forecast(
             # pending than the carried total actually contains (the carried
             # clamp to >= 0 above can shrink the total below the card's own
             # pending_charges figure, e.g. a recent overpayment).
-            pending_live = min(Decimal(str(card.pending_charges or 0)), carried)
+            pending_live = min(card_pending(card, today), carried)
             spent_since_statement = carried - pending_live
             last_close = _most_recent_occurrence_on_or_before(card.statement_day, anchor)
             # Mirrors the math above exactly, including the excess_paid
@@ -1289,7 +1257,7 @@ def build_forecast(
             second_due = _next_occurrence_on_or_after(card.due_day, second_close + timedelta(days=1))
             second_amount = (
                 Decimal("0") if card.id in bank_feed_pending_card_ids
-                else _fresh_pending_charges(card, today)
+                else card_pending(card, today)
             )
         # No carried balance and no subscriptions-before-close signal exists
         # for this hop yet (see comment above) -- the whole amount, when

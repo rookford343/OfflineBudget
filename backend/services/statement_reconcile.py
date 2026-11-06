@@ -27,6 +27,7 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
+from backend.services.pending import card_pending
 from backend.services.forecast_engine import (
     _most_recent_occurrence_on_or_before,
     _next_occurrence_on_or_after,
@@ -148,7 +149,7 @@ def statement_stale_reason(card: models.CreditCard, today: date) -> str | None:
     payment the way reconcile_statement_payment requires."""
     balance_due = Decimal(str(card.balance_due or 0))
     current_balance = Decimal(str(card.current_balance or 0))
-    pending_charges = Decimal(str(card.pending_charges or 0))
+    pending_charges = card_pending(card, today)
 
     if balance_due <= 0:
         # Nothing billed on record, but the card carries debt and a

@@ -10,7 +10,7 @@ each card's last statement" (current_balance - balance_due + pending), which
 jumped up the moment a statement closed late in the month. All figures here
 are invented.
 """
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -33,7 +33,7 @@ def _seed(db, username="calmonth", *, current_balance="0.00", balance_due="0.00"
         user_id=user.id, name="Test Visa", credit_limit=Decimal("10000.00"),
         statement_day=28, due_day=25,
         current_balance=Decimal(current_balance), balance_due=Decimal(balance_due),
-        pending_charges=Decimal(pending), next_payment_date=date(2026, 11, 25),
+        pending_charges=Decimal(pending), pending_charges_updated_at=datetime.utcnow(), next_payment_date=date(2026, 11, 25),
     )
     db.add_all([checking, card])
     db.flush()
@@ -138,7 +138,7 @@ def test_inactive_cards_are_ignored(db_session):
     old = models.CreditCard(
         user_id=user.id, name="Closed Card", credit_limit=Decimal("1000.00"),
         statement_day=10, due_day=5, is_active=False,
-        current_balance=Decimal("500.00"), pending_charges=Decimal("40.00"),
+        current_balance=Decimal("500.00"), pending_charges=Decimal("40.00"), pending_charges_updated_at=datetime.utcnow(),
     )
     db_session.add(old)
     db_session.flush()
@@ -153,7 +153,7 @@ def test_explain_rows_sum_to_left_to_spend(db_session):
     user, checking, card = _seed(db_session, pending="12.00")
     second = models.CreditCard(
         user_id=user.id, name="Other Card", credit_limit=Decimal("5000.00"),
-        statement_day=1, due_day=20, pending_charges=Decimal("8.00"),
+        statement_day=1, due_day=20, pending_charges=Decimal("8.00"), pending_charges_updated_at=datetime.utcnow(),
     )
     db_session.add(second)
     db_session.flush()
@@ -193,7 +193,7 @@ def _balance_only_card(db, user, name="Balance Card", *, current="250.00", due="
         user_id=user.id, name=name, credit_limit=Decimal("5000.00"),
         statement_day=31, due_day=28,
         current_balance=Decimal(current), balance_due=Decimal(due),
-        pending_charges=Decimal(pending),
+        pending_charges=Decimal(pending), pending_charges_updated_at=datetime.utcnow(),
     )
     db.add(card)
     db.flush()

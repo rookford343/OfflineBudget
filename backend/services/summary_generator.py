@@ -8,6 +8,7 @@ from backend import models
 from backend.schemas import BankConnectionStatusOut, MonthlySummary, WeeklyDigest, ForecastRisk
 from backend.services.forecast_engine import build_forecast, find_balance_risk, _next_occurrence_on_or_after
 from backend.services.budget_snapshot import compute_budget_snapshot, spending_breakdown
+from backend.services.pending import card_pending
 from backend.services.upcoming_bills import upcoming_bills
 from backend.services.primary_account import primary_checking
 from backend.services.real_spend import spend_totals
@@ -377,7 +378,7 @@ def generate_daily_summary(
         """
         sc = snap_cards_by_id.get(c.id)
         balance_due = sc.balance_due if sc else c.balance_due
-        pending = sc.pending_charges if sc else c.pending_charges
+        pending = sc.pending_charges if sc else card_pending(c, today)
         cycle_spend = c.current_balance - balance_due + pending
         if cycle_spend < 0:
             return balance_due, Decimal("0"), True

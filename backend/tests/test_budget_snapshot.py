@@ -1,5 +1,5 @@
 import re
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import patch
 from backend import models
@@ -28,7 +28,7 @@ def _seed_spreadsheet_scenario(db):
         user_id=user.id, name="Chase Sapphire", credit_limit=Decimal("27500.00"),
         statement_day=28, due_day=25,
         current_balance=Decimal("9586.65"), balance_due=Decimal("7342.90"),
-        pending_charges=Decimal("540.18"), next_payment_date=date(2026, 8, 25),
+        pending_charges=Decimal("540.18"), pending_charges_updated_at=datetime.utcnow(), next_payment_date=date(2026, 8, 25),
     )
     db.add_all([checking, card])
     db.flush()
@@ -198,6 +198,7 @@ def test_pending_charges_move_left_to_spend_only(db_session):
     baseline = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     card.pending_charges = Decimal("500.00")
+    card.pending_charges_updated_at = datetime.utcnow()
     db_session.commit()
 
     with_pending = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
@@ -350,6 +351,7 @@ def test_over_budget_names_the_savings_transfer_to_skip(db_session):
     user, checking, card = _seed_spreadsheet_scenario(db_session)
     # Force the over-budget branch regardless of the fixture's own figures.
     card.pending_charges = Decimal("40000.00")
+    card.pending_charges_updated_at = datetime.utcnow()
 
     with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
@@ -422,6 +424,7 @@ def test_reserve_sizes_the_savings_needed_to_cover_the_shortfall(db_session):
     the useful figure is how much must sit in savings until the next one."""
     user, checking, card = _seed_spreadsheet_scenario(db_session)
     card.pending_charges = Decimal("40000.00")  # force a shortfall
+    card.pending_charges_updated_at = datetime.utcnow()
 
     with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))

@@ -7,7 +7,7 @@ flat-fallback estimate, and a locked statement payoff.
 
 Invented figures throughout, never the user's real account data.
 """
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from decimal import Decimal
 from backend import models
 from backend.services.budget_snapshot import _cc_basis_note
@@ -42,7 +42,7 @@ def test_carried_cycle_estimate_basis_sums_to_its_amount(db_session):
     card = _card(
         db_session, user, name="Chase", statement_day=close_date.day, due_day=due_day,
         current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
-        pending_charges=Decimal("200.00"),
+        pending_charges=Decimal("200.00"), pending_charges_updated_at=datetime.utcnow(),
         next_payment_date=today + timedelta(days=200),  # comfortably non-stale
         monthly_spend_estimate=Decimal("15000.00"),
     )

@@ -18,6 +18,7 @@ from backend.services.forecast_engine import (
     _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
 )
 from backend.services.card_matching import card_matches_description
+from backend.services.pending import card_pending
 from backend.services.month_base import build_month_base, card_bill_occurrences
 from backend.services.spendable_pacer import compute_weekly_spendable
 from backend.services.spending_helpers import category_totals_for_range, merchant_totals
@@ -622,12 +623,13 @@ def compute_budget_snapshot(
     month_start = as_of.replace(day=1)
     fed_ids = _transaction_fed_card_ids(db, user.id, active_cards, as_of)
     card_month_spending = _card_spending_this_month(db, user.id, active_cards, as_of)
+    pending_by_card = {c.id: card_pending(c, as_of) for c in active_cards}
     for c in active_cards:
         if c.id not in fed_ids:
-            card_month_spending[c.id] = c.current_balance - c.balance_due + c.pending_charges
+            card_month_spending[c.id] = c.current_balance - c.balance_due + pending_by_card[c.id]
     fed_cards = [c for c in active_cards if c.id in fed_ids]
     card_spending_this_month = sum(card_month_spending.values(), Decimal("0"))
-    pending_charges_total = sum((c.pending_charges for c in fed_cards), Decimal("0"))
+    pending_charges_total = sum((pending_by_card[c.id] for c in fed_cards), Decimal("0"))
     # Computed once per card, with real wall-clock "today" (not `as_of`,
     # which can be a past date a scenario or the weekly email is replaying)
     # -- matches CreditCardOut.statement_stale_reason exactly for the
@@ -800,7 +802,7 @@ def compute_budget_snapshot(
         CardSnapshot(
             id=c.id, name=c.name, current_balance=c.current_balance,
             balance_due=c.balance_due,
-            pending_charges=c.pending_charges, credit_limit=c.credit_limit,
+            pending_charges=pending_by_card[c.id], credit_limit=c.credit_limit,
             utilization_pct=round(float(c.current_balance) / float(c.credit_limit) * 100, 1) if c.credit_limit else 0.0,
             due_day=c.due_day,
             statement_stale_reason=card_stale_reasons[c.id],
@@ -840,7 +842,7 @@ def compute_budget_snapshot(
         for c in active_cards
     ]
     pending_children = [
-        ExplainChild(label=c.name, amount=c.pending_charges, note="charged but not posted yet")
+        ExplainChild(label=c.name, amount=pending_by_card[c.id], note="charged but not posted yet")
         for c in fed_cards
     ]
     def _low_note(low_date: date | None) -> str:

@@ -1,5 +1,5 @@
 import pytest
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from backend import models
 import backend.services.summary_generator as summary_generator_module
@@ -53,7 +53,7 @@ def test_cycle_spend_includes_pending_charges(db_session):
         user_id=user.id, name="Visa", credit_limit=Decimal("10000.00"),
         statement_day=28, due_day=25,
         current_balance=Decimal("1000.00"), balance_due=Decimal("400.00"),
-        pending_charges=Decimal("50.00"),
+        pending_charges=Decimal("50.00"), pending_charges_updated_at=datetime.utcnow(),
     ))
     db_session.commit()
 
