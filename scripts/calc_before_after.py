@@ -28,13 +28,14 @@ ROOT = Path(__file__).resolve().parent.parent
 LIVE_DB = (ROOT / "data" / "budget.db").resolve()
 
 # Runs inside each tree (python -I, tree root inserted on sys.path). Prints one
-# JSON object of metric -> string. Every metric is best-effort so an older ref
-# that lacks a function reports "n/a" instead of aborting the comparison.
+# JSON object of metric -> string. In strict mode (the current tree) any error
+# propagates; otherwise (the old ref) a missing function reports "n/a".
 SNIPPET = r"""
 import json, sys, calendar
 from datetime import date, timedelta
 sys.path.insert(0, sys.argv[1])
 user_id = int(sys.argv[2])
+strict = sys.argv[3] == 'strict'
 out = {}
 
 from backend.database import SessionLocal
@@ -57,6 +58,8 @@ try:
                   "next_month_minimum", "lookahead_minimum"):
             out[f] = str(getattr(snap, f))
     except Exception as exc:
+        if strict:
+            raise
         for f in ("leftover", "left_to_spend", "safety_margin",
                   "next_month_minimum", "lookahead_minimum"):
             out[f] = "n/a (%s)" % type(exc).__name__
@@ -77,6 +80,8 @@ try:
             hit = next((v for k, v in seen.items() if c.name in k), None)
             out["next payment: " + c.name] = str(abs(hit[1])) if hit else "none"
     except Exception as exc:
+        if strict:
+            raise
         out["next payment"] = "n/a (%s)" % type(exc).__name__
 
     try:
@@ -86,6 +91,8 @@ try:
         _, debits, _ = sg._month_spending_by_category(db, user_id, last_prev.year, last_prev.month)
         out["last full month spend"] = str(debits)
     except Exception as exc:
+        if strict:
+            raise
         out["last full month spend"] = "n/a (%s)" % type(exc).__name__
 finally:
     db.close()
@@ -93,7 +100,7 @@ print("@@METRICS@@" + json.dumps(out))
 """
 
 
-def _run_tree(tree: Path, db_copy: Path, user_id: int) -> dict[str, str]:
+def _run_tree(tree: Path, db_copy: Path, user_id: int, *, strict: bool) -> dict[str, str]:
     env = {
         **os.environ,
         "DATABASE_URL": f"sqlite:///{db_copy}",
@@ -101,7 +108,7 @@ def _run_tree(tree: Path, db_copy: Path, user_id: int) -> dict[str, str]:
     }
     # --project keeps one locked environment for both trees; code comes from `tree`.
     cmd = ["uv", "run", "--locked", "--project", str(ROOT), "python", "-I", "-c", SNIPPET,
-           str(tree), str(user_id)]
+           str(tree), str(user_id), "strict" if strict else "lenient"]
     proc = subprocess.run(cmd, cwd=tree, env=env, capture_output=True, text=True, check=False)  # noqa: S603
     for line in proc.stdout.splitlines():
         if line.startswith("@@METRICS@@"):
@@ -109,7 +116,14 @@ def _run_tree(tree: Path, db_copy: Path, user_id: int) -> dict[str, str]:
     raise SystemExit(f"metrics run failed in {tree}:\n{proc.stderr[-2000:]}")
 
 
+def is_na(value: str) -> bool:
+    return value.startswith("n/a")
+
+
 def _delta(new: str, old: str) -> str:
+    # A figure that could not be computed on either side is never "no change".
+    if is_na(new) or is_na(old):
+        return "n/a"
     try:
         return f"{Decimal(new) - Decimal(old):.2f}"
     except (InvalidOperation, ValueError):
@@ -120,12 +134,12 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout  # noqa: S603,S607
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", required=True, help="path to a COPY of the database")
     ap.add_argument("--user", required=True, type=int, help="user id")
     ap.add_argument("--ref", required=True, help="git ref for the 'before' tree")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     db_path = Path(args.db).resolve()
     if db_path == LIVE_DB or (LIVE_DB.exists() and db_path.exists() and db_path.samefile(LIVE_DB)):
@@ -146,8 +160,8 @@ def main() -> int:
         shutil.copyfile(db_path, new_db)
         shutil.copyfile(db_path, old_db)
 
-        new = _run_tree(ROOT, new_db, args.user)
-        old = _run_tree(wt, old_db, args.user)
+        new = _run_tree(ROOT, new_db, args.user, strict=True)
+        old = _run_tree(wt, old_db, args.user, strict=False)
     finally:
         if added:
             subprocess.run(["git", "worktree", "remove", "--force", str(wt)], cwd=ROOT, check=False)  # noqa: S603,S607
@@ -157,13 +171,20 @@ def main() -> int:
     width = max(len(k) for k in keys)
     print(f"{'metric'.ljust(width)}  {'current':>14}  {args.ref[:14]:>14}  {'delta':>10}")
     changed = 0
+    uncomputed: list[str] = []
     for k in keys:
         n, o = new.get(k, "n/a"), old.get(k, "n/a")
         d = _delta(n, o)
-        if d not in ("0.00",):
+        if d != "0.00":
             changed += 1
+        for side, val in (("current tree", n), (args.ref, o)):
+            if is_na(val):
+                uncomputed.append(f"could not compute '{k}' on {side}: {val}")
         print(f"{k.ljust(width)}  {n:>14}  {o:>14}  {d:>10}")
     print(f"\n{changed} row(s) differ.")
+    if uncomputed:
+        print("\n".join(uncomputed), file=sys.stderr)
+        return 1
     return 0
 
 
