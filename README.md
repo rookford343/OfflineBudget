@@ -77,7 +77,7 @@ Income and bills that repeat, with monthly/quarterly/yearly frequencies.
 | Wish List | Ranked purchases with pay-in-full, card and financing options; finds the earliest safe date to buy |
 | Adventures | Trips priced in cash and points, a points wallet with transfer partners, committed to the forecast |
 | [Spending Analysis](#spending-analysis) | Monthly trends, ranged spending chart, merchant ranking, income flow diagram |
-| [Tax Estimator](#tax-estimator) | Full 2025 federal + state estimate; itemized vs. standard deduction; bracket ladder |
+| [Tax Estimator](#tax-estimator) | Federal (2025-2027 tables) + state estimate; itemized vs. standard deduction; bracket ladder |
 | [Transaction Import](#transaction-import) | CSV and OFX/QFX upload; auto-categorization; custom rules engine; optional automated bank sync via Plaid or SimpleFIN |
 | [Credit Cards](#credit-cards) | Balance tracking, due-date reminders, payment recording, per-card spending, pending charges from your bank |
 | [Budget Tracking](#budget-tracking) | Monthly category budgets with rollover; actual vs. budgeted variance |
@@ -145,7 +145,7 @@ OfflineBudget/
 │   │   ├── rules_engine.py        User-defined transaction rules
 │   │   ├── csv_parser.py          CSV format detection and parsing
 │   │   ├── ofx_parser.py          OFX/QFX bank file parsing
-│   │   ├── tax_service.py         2025 federal + state tax estimation
+│   │   ├── tax_service.py         Year-keyed (2025-2027) federal + state tax estimation
 │   │   ├── budget_calculator.py   Budget vs. actual aggregation
 │   │   ├── recurring_detector.py  Auto-detect recurring patterns
 │   │   ├── email_service.py       SMTP send helper
@@ -230,9 +230,9 @@ Quick-filter buttons (**This Month / 3 Months / YTD / Last Year**) appear above 
 
 Configure your tax profile under **Settings → Profile → Tax Profile**. The estimator calculates:
 
-- **2025 federal income tax** using official brackets for all four filing statuses
+- **Federal income tax** using the official 2025, 2026 and 2027 brackets and standard deductions for all four filing statuses (the nearest bundled year is used, with a warning, for any other year)
 - **State income tax** using approximate effective rates for all 50 states + DC
-- **FICA** — Social Security (6.2% up to the $176,100 wage base) + Medicare (1.45% + 0.9% additional above threshold)
+- **FICA** — Social Security (6.2% up to that year's wage base: $176,100 / $184,500 / $192,300) + Medicare (1.45% + 0.9% additional above threshold)
 - **Itemized vs. standard deduction** — whichever is higher is used automatically
 
 Enter your known itemized deductions directly in the Tax Profile:

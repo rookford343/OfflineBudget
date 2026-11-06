@@ -131,7 +131,7 @@ export default function TaxTab() {
           <div className="flex items-center gap-2 mb-1">
             <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Social Security Tracker</p>
           </div>
-          <p className="text-xs text-gray-400 dark:text-gray-400 mb-3">Track when you hit the SS wage base to plan for your resulting paycheck increase (~6.2% of gross). The 2026 wage base is $184,500.</p>
+          <p className="text-xs text-gray-400 dark:text-gray-400 mb-3">Track when you hit the SS wage base to plan for your resulting paycheck increase (~6.2% of gross). Wage base 2026: $184,500 · 2027: $192,300. The forecast switches to the new base on Jan 1; update this field at your first 2027 pay-stub checkpoint.</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-xl">
             <div>
               <label className="label">Gross Per Paycheck ($)</label>

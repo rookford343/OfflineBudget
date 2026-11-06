@@ -30,7 +30,7 @@ OfflineBudget/
 │       ├── rules_engine.py        User-defined transaction rules
 │       ├── csv_parser.py          CSV format detection and parsing
 │       ├── ofx_parser.py          OFX/QFX bank file parsing
-│       ├── tax_service.py         2025 federal + state tax estimation
+│       ├── tax_service.py         Year-keyed (2025-2027) federal + state tax estimation
 │       ├── budget_calculator.py   Budget vs. actual aggregation
 │       ├── recurring_detector.py  Auto-detect recurring transaction patterns
 │       ├── email_service.py       SMTP send (one config: Settings page over .env)
@@ -107,7 +107,7 @@ The `User` model carries the full tax profile directly to avoid a separate table
 | `itemized_property_tax` | NUMERIC(14,2) | Property taxes |
 | `itemized_other` | NUMERIC(14,2) | Other deductible expenses |
 | `ss_gross_per_paycheck` | NUMERIC(14,2) | Gross wages per pay period |
-| `ss_wage_base` | NUMERIC(14,2) | SS wage base (default $176,100) |
+| `ss_wage_base` | NUMERIC(14,2) | SS wage base for the checkpoint year (Settings pre-fills $184,500; later years use the published base when bundled) |
 | `ss_bonus_ytd` | NUMERIC(14,2) | YTD bonus subject to SS tax |
 
 ### Key Design Decisions
@@ -193,16 +193,19 @@ apply_rules(description: str, rules: list[TransactionRule]) -> RuleMatch | None
 ```python
 estimate_taxes(
     filing_status, state, gross_income, other_income,
-    deductible_expenses, federal_withheld, state_withheld
+    deductible_expenses, federal_withheld, state_withheld,
+    year=None,
 ) -> dict
 ```
+
+Federal tables (brackets, standard deduction, SS wage base) are keyed by tax year in `_TABLES` (2025, 2026, 2027 bundled). An unbundled year uses the nearest bundled table (latest for future years, earliest for older ones), and the result's `bracket_year` says which table was used so the UI can warn on a mismatch. `ss_wage_base_for(year)` returns the published wage base (or `None`); the forecast uses it when the SS wage base rolls over on January 1.
 
 The function:
 1. Sums `gross_income + other_income`
 2. Computes itemized total from `deductible_expenses` (already summed by the endpoint: user profile fields + tagged transactions)
 3. Picks `max(standard_deduction, itemized)` and sets `used_itemized` flag
-4. Applies 2025 federal brackets to `total_income - deduction`
-5. Applies approximate flat state rate to `total_income - standard_deduction`
+4. Applies that year's federal brackets to `total_income - deduction`
+5. Applies approximate flat state rate to `total_income - standard_deduction` (Indiana uses its exact per-year flat rate)
 6. Computes FICA: SS on `min(gross_income, wage_base)` + Medicare with additional threshold
 7. Returns bracket ladder, refund/owed per federal/state, effective rate
 

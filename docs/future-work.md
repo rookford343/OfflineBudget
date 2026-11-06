@@ -26,7 +26,7 @@
 - ✅ Quick date filters (This Month / 3 Months / YTD / Last Year)
 
 ### Tax
-- ✅ Full 2025 federal tax estimate with bracket ladder
+- ✅ Full federal tax estimate (2025-2027 tables) with bracket ladder
 - ✅ State income tax (approximate effective rates, all 50 states + DC)
 - ✅ FICA — Social Security + Medicare with additional Medicare threshold
 - ✅ Itemized deductions (mortgage interest, donations, SALT, property tax, other)

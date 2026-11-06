@@ -25,7 +25,7 @@ export default function TaxExport() {
         <div className="flex items-center gap-3">
           <label className="label mb-0">Tax Year</label>
           <select className="input w-auto" value={taxYear} onChange={e => setTaxYear(parseInt(e.target.value))}>
-            {[-2, -1, 0].map(d => { const y = new Date().getFullYear() + d; return <option key={y} value={y}>{y}</option>; })}
+            {[-2, -1, 0, 1].map(d => { const y = new Date().getFullYear() + d; return <option key={y} value={y}>{y}</option>; })}
           </select>
           <button
             className="btn-secondary text-sm ml-auto"
@@ -149,7 +149,7 @@ export default function TaxExport() {
                     <p className="text-xs text-amber-800 dark:text-amber-200">
                       You're estimating <b>{taxYear}</b>, but the bundled bracket tables are{" "}
                       <b>{(taxEstimate as any).bracket_year}</b>. Rates, bracket floors and the standard
-                      deduction all shift year to year, so treat this as a rough figure until the {taxYear} tables ship.
+                      deduction all shift year to year, so treat this as a rough figure until the {taxYear} tables are added.
                     </p>
                   </div>
                 )}
