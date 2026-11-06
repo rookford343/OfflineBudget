@@ -478,6 +478,286 @@ def has_unsettled_projection(db: Session, user_id: int, account_id: int, target:
     return any(not t.is_actual for t in entries[0].transactions)
 
 
+SS_EMPLOYEE_RATE = Decimal("0.062")
+
+
+def effective_bonus_plans(db: Session, user_id: int, user: models.User | None) -> dict:
+    """{recurring_item_id: BonusPlan} for plans whose item is still
+    bonus-shaped. A BonusPlan can only be attached to a yearly income item at
+    creation time (routers/bonus_plans.py's _own_item), but nothing stops the
+    user from editing that same item into a different type or frequency
+    afterward on the Recurring page. Filtered once, via the same
+    is_bonus_shaped() guard refresh_item_amounts uses, so every use of the
+    plans -- the day-walk's own amount lookup, the paycheck-tag skip, and the
+    checkpoint-mode SS bonus reconciliation -- agrees with what the item
+    actually is right now, instead of applying the plan's net to an item that
+    no longer qualifies (e.g. firing it every month instead of once a year)."""
+    from backend.services.bonus_plans import is_bonus_shaped, plans_by_item
+    return {
+        item_id: plan
+        for item_id, plan in (plans_by_item(db, user_id) if user else {}).items()
+        if is_bonus_shaped(plan.recurring_item)
+    }
+
+
+class SSWageBaseTracker:
+    """Social Security wage-base state for one walk through paychecks: how
+    much gross is left under the base, whether it has been met, and the boost
+    each paycheck gets once it has. build_forecast and ss_paycheck_boosts
+    (the Recurring summary and the Household Snapshot's income) both drive
+    this one object, so the boost can't disagree between them.
+
+    Once cumulative gross wages pass the base, the 6.2% withholding stops and
+    every later paycheck deposits more, until January 1 starts the next
+    year's base. The crossing paycheck gets only the part above the base.
+    """
+
+    def __init__(self, user: models.User, recurring_items, bonus_item_ids: set[int], walk_start: date):
+        self.user = user
+        self.gross: Decimal = user.ss_gross_per_paycheck
+        self.checkpoint_date: date | None = None
+        self.limit_reached = False
+        if user.ss_withheld_ytd is not None and user.ss_withheld_ytd_as_of is not None:
+            # Preferred: a direct checkpoint off a real pay stub's YTD SS
+            # withholding line, rather than reconstructing YTD gross wages by
+            # counting actual paychecks against a flat per-paycheck figure.
+            # ss_withheld_ytd / 0.062 recovers gross wages actually subject to
+            # SS as of that stub -- correct through every raise in the year
+            # with no reconstruction, unlike ss_bonus_ytd below. the user's April
+            # raise alone misdated the 2026 crossing by a full paycheck under
+            # the old method (found 2026-08-14, YTD withheld $8,500.00 as of
+            # the 8/14 check implies gross $138,000.00, still $1,000.00 under
+            # the $184,500 base -- crossing is 8/31, not 8/14).
+            gross_ytd_at_checkpoint = (user.ss_withheld_ytd / SS_EMPLOYEE_RATE).quantize(Decimal("0.01"))
+            self.remaining: Decimal = user.ss_wage_base - gross_ytd_at_checkpoint
+            self.checkpoint_date = user.ss_withheld_ytd_as_of
+        else:
+            self.remaining = user.ss_wage_base - (user.ss_bonus_ytd or Decimal("0"))
+        # Quantized like the monthly interest credit -- it is a dollar amount
+        # landing in an account, and unrounded it produced paychecks of
+        # $5,000.00112.
+        self.boost_per_check = (self.gross * SS_EMPLOYEE_RATE).quantize(Decimal("0.01"))
+        # Which recurring income items are paychecks (and so stop having Social
+        # Security withheld once the wage base is hit)? Compared against
+        # ss_gross_per_paycheck, but note the units differ: a recurring income
+        # item holds the NET amount that lands in checking, while
+        # ss_gross_per_paycheck is gross. Net runs roughly 55-85% of gross after
+        # tax, retirement, and benefits, so the old two-sided 0.9..1.1 band
+        # could never match a real paycheck -- the user's is 5000.00/7000.00 = 0.714,
+        # which meant the boost silently never fired for anyone and left Q4 2026
+        # about $2,460 (6 paychecks x $410) low against his spreadsheet.
+        # Confirmed live 2026-08-12.
+        #
+        # The lower bound stays well above incidental recurring income (a
+        # smoothed bonus twelfth, a rental payment) without needing to know the
+        # exact withholding rate; the upper bound keeps net from exceeding gross
+        # by more than rounding.
+        self.paycheck_ids: set[int] = paycheck_item_ids(recurring_items, self.gross, bonus_item_ids)
+        # The wage base is per calendar year. The figures above describe the
+        # year of the checkpoint (or of the walk's start without one); every
+        # later January 1 starts over -- see roll_year.
+        self.year = self.checkpoint_date.year if self.checkpoint_date is not None else walk_start.year
+
+    @classmethod
+    def for_user(cls, user, recurring_items, bonus_item_ids: set[int], walk_start: date) -> "SSWageBaseTracker | None":
+        """None when the user hasn't set a gross per paycheck and a wage base."""
+        if not (
+            user
+            and user.ss_gross_per_paycheck and user.ss_gross_per_paycheck > 0
+            and user.ss_wage_base and user.ss_wage_base > 0
+        ):
+            return None
+        return cls(user, recurring_items, bonus_item_ids, walk_start)
+
+    def catch_up(self, db: Session, user_id: int, bonus_plans: dict, before: date) -> None:
+        """Draw the base down for wages already RECEIVED before `before`.
+
+        Past days are served from actuals, which skip the projection branch
+        where the drawdown lives, so without this the base only ever saw
+        future paychecks and the boost landed far too late -- or never.
+
+        Counted from January 1 of the walk's year rather than from its start,
+        because the wage base is a calendar-year quantity. Scoping it to the
+        window instead made the answer depend on the window: /forecast/risk
+        asks for today..+90 and would see zero prior paychecks, so it never
+        applied the boost and ran ~$410 short per paycheck against the
+        Jan-anchored /forecast/quarters the chart draws. That put a false
+        at-risk alert (-$200.00 on 2026-08-25) under a chart whose trough was
+        +$1,000.00 on the very same day. Found live 2026-08-12.
+
+        Counted, not summed: SS is withheld on gross, while the stored actual
+        is the net deposit.
+
+        With a checkpoint, this only needs to bridge the gap between the pay
+        stub's date and `before` -- `remaining` already reflects everything
+        through the checkpoint itself, so counting from Jan 1 would
+        double-count every paycheck already folded into ss_withheld_ytd.
+        """
+        if self.paycheck_ids:
+            catchup_filter = (
+                models.Transaction.date > self.checkpoint_date
+                if self.checkpoint_date is not None
+                # No checkpoint: legacy behaviour, unchanged -- counts from Jan 1
+                # inclusive, matching how ss_bonus_ytd has always been reconciled.
+                else models.Transaction.date >= date(self.year, 1, 1)
+            )
+            received = (
+                db.query(models.Transaction)
+                .filter(
+                    models.Transaction.user_id == user_id,
+                    models.Transaction.is_actual == True,
+                    models.Transaction.recurring_item_id.in_(self.paycheck_ids),
+                    catchup_filter,
+                    models.Transaction.date < before,
+                )
+                .count()
+            )
+            if received:
+                self.remaining -= self.gross * received
+                if self.remaining <= 0:
+                    self.limit_reached = True
+
+        # Bonuses received after the pay-stub checkpoint also used up wage base.
+        # Only in checkpoint mode: the legacy ss_bonus_ytd figure already holds
+        # the user's bonus, so counting deposits there would double it.
+        if self.checkpoint_date is not None and bonus_plans:
+            from backend.services.bonus_plans import bonus_gross
+            for t in db.query(models.Transaction).filter(
+                models.Transaction.user_id == user_id,
+                models.Transaction.is_actual == True,
+                models.Transaction.recurring_item_id.in_(list(bonus_plans)),
+                models.Transaction.date > self.checkpoint_date,
+                models.Transaction.date < before,
+            ):
+                gross = bonus_gross(bonus_plans[t.recurring_item_id], self.user, t.date.year)
+                if gross is not None and t.date.year == self.checkpoint_date.year:
+                    self.remaining -= gross
+            if self.remaining <= 0:
+                self.limit_reached = True
+
+    def roll_year(self, current: date) -> None:
+        """Every January 1 starts over at the full base, so withholding resumes
+        until the new year's base is met. Without this, a boost reached in one
+        year carried into every later year's paychecks. The checkpoint year
+        uses the user's own setting; a later year uses the published base when
+        tax_service bundles it (the base rises each year), else the user's
+        setting again."""
+        if current.year != self.year:
+            self.year = current.year
+            self.remaining = ss_wage_base_for(current.year) or self.user.ss_wage_base
+            self.limit_reached = False
+
+    def paycheck_boost(self, current: date) -> Decimal:
+        """The boost for one paycheck landing on `current`, drawing the base
+        down by its gross."""
+        # The checkpoint date's own paycheck is already fully accounted for
+        # inside `remaining` (the checkpoint is "as of and including" that
+        # date) -- decrementing for it again here would subtract it twice.
+        if current == self.checkpoint_date:
+            return Decimal("0")
+        if self.limit_reached:
+            return self.boost_per_check
+        # Draw down by GROSS, not item.amount -- the wage base is a
+        # gross-wages figure, while item.amount is the net deposit.
+        # Decrementing by net stretched the run-up ~40% too far
+        # (the user: 118,260 remaining / 5,000.00 net = 19.5 paychecks,
+        # landing in late Oct 2027 instead of autumn 2026), so the
+        # boost never arrived inside the forecast window at all.
+        self.remaining -= self.gross
+        if self.remaining <= 0:
+            self.limit_reached = True
+            # The CROSSING paycheck only gets a partial boost: SS is still
+            # withheld on the wages up to the base, and only the remainder
+            # above it comes back. Granting the full $500.00 here overstated
+            # that one check and, worse, pulled the whole step-up a paycheck
+            # early -- caught 2026-08-14 reconciling to Budget.xlsx, where the
+            # app boosted the 8/14 check while the sheet held flat until 9/15.
+            # After the subtraction above, -remaining IS the gross above the
+            # base, so it needs no separate bookkeeping. Every check after
+            # this one gets the full boost via the limit_reached branch.
+            excess = min(-self.remaining, self.gross)
+            return (excess * SS_EMPLOYEE_RATE).quantize(Decimal("0.01"))
+        return Decimal("0")
+
+    def bonus_boost(self, current: date, bonus_gross_amt: Decimal) -> Decimal:
+        """A bonus is wages too: its gross draws the base down, and SS
+        withheld on whatever lies above the base comes back."""
+        if current == self.checkpoint_date:
+            return Decimal("0")
+        if self.limit_reached:
+            return (bonus_gross_amt * SS_EMPLOYEE_RATE).quantize(Decimal("0.01"))
+        self.remaining -= bonus_gross_amt
+        if self.remaining <= 0:
+            self.limit_reached = True
+            excess = min(-self.remaining, bonus_gross_amt)
+            return (excess * SS_EMPLOYEE_RATE).quantize(Decimal("0.01"))
+        return Decimal("0")
+
+
+def ss_paycheck_boosts(
+    db: Session, user: models.User, income_items, year: int, month: int,
+    *, today: date | None = None,
+) -> dict[tuple[int, date], Decimal]:
+    """{(recurring_item_id, natural fire date): boost} for every paycheck
+    occurrence in the month whose Social Security boost is above zero.
+
+    Drives the same SSWageBaseTracker build_forecast does, the same way:
+    wages already received (actuals) before a cutoff are caught up, then
+    every paycheck and bonus occurrence from the cutoff on draws the base
+    down in the forecast's order -- on its weekend-adjusted date (a Saturday
+    paycheck counts on the Friday before, exactly as the forecast books it),
+    rolling the base over on January 1. The cutoff is today, or the start of
+    the month when the month is already under way, so the month's own
+    earlier paychecks get their boost too (the forecast only books those as
+    actuals). A future month's paychecks get exactly the forecast's
+    paycheck-line boost.
+
+    `income_items` is the caller's set of income items -- every account, not
+    one checking account like build_forecast -- since the Recurring page and
+    the Household Snapshot both total the user's whole month.
+    """
+    if user is None:
+        return {}
+    today = today or date.today()
+    month_start = date(year, month, 1)
+    month_end = date(year, month, monthrange(year, month)[1])
+    cutoff = min(today, _adjust_for_weekend(month_start))
+    bonus_plans = effective_bonus_plans(db, user.id, user)
+    ss = SSWageBaseTracker.for_user(user, income_items, set(bonus_plans), cutoff)
+    if ss is None or not ss.paycheck_ids:
+        return {}
+    ss.catch_up(db, user.id, bonus_plans, before=cutoff)
+
+    from backend.services.bonus_plans import bonus_gross
+    walked = [i for i in income_items if i.id in ss.paycheck_ids or i.id in bonus_plans]
+    occurrences = []
+    d = cutoff
+    # +2 days: a paycheck due on the 1st/2nd of next month can land on this
+    # month's last Friday, ahead of this month's own checks that day.
+    while d <= month_end + timedelta(days=2):
+        for order, item in enumerate(walked):
+            if _fires_on(item, d):
+                effective = _adjust_for_weekend(d)
+                if cutoff <= effective <= month_end:
+                    occurrences.append((effective, order, d, item))
+        d += timedelta(days=1)
+    occurrences.sort(key=lambda o: (o[0], o[1]))
+
+    boosts: dict[tuple[int, date], Decimal] = {}
+    for effective, _order, natural, item in occurrences:
+        ss.roll_year(effective)
+        if item.id not in ss.paycheck_ids:
+            # A bonus draws the base down; only paychecks are reported.
+            gross = bonus_gross(bonus_plans[item.id], user, natural.year)
+            if gross is not None:
+                ss.bonus_boost(effective, gross)
+            continue
+        boost = ss.paycheck_boost(effective)
+        if boost > 0 and natural.year == year and natural.month == month:
+            boosts[(item.id, natural)] = boost
+    return boosts
+
+
 @dataclass(frozen=True)
 class ScenarioProposal:
     """Transient, never-persisted stand-ins for what a scenario proposes.
@@ -548,71 +828,11 @@ def build_forecast(
 
     # SS paycheck boost setup
     user = db.query(models.User).filter(models.User.id == user_id).first()
-    from backend.services.bonus_plans import bonus_gross, bonus_net, is_bonus_shaped, plans_by_item
-    # A BonusPlan can only be attached to a yearly income item at creation
-    # time (routers/bonus_plans.py's _own_item), but nothing stops the user
-    # from editing that same item into a different type or frequency
-    # afterward on the Recurring page. Filtered here, once, via the same
-    # is_bonus_shaped() guard refresh_item_amounts uses, so every downstream
-    # use of bonus_plans -- the day-walk's own amount lookup below, the
-    # paycheck-tag skip, and the checkpoint-mode SS bonus reconciliation
-    # further down -- agrees with what the item actually is right now,
-    # instead of applying the plan's net to an item that no longer
-    # qualifies (e.g. firing it every month instead of once a year).
-    bonus_plans = {
-        item_id: plan
-        for item_id, plan in (plans_by_item(db, user_id) if user else {}).items()
-        if is_bonus_shaped(plan.recurring_item)
-    }
-    ss_paycheck_item_ids: set[int] = set()
-    ss_remaining_gross: Decimal | None = None
-    ss_boost_per_check = Decimal("0")
-    ss_limit_reached = False
-    ss_checkpoint_date: date | None = None
-    if (
-        user
-        and user.ss_gross_per_paycheck and user.ss_gross_per_paycheck > 0
-        and user.ss_wage_base and user.ss_wage_base > 0
-    ):
-        ss_gross = user.ss_gross_per_paycheck
-        if user.ss_withheld_ytd is not None and user.ss_withheld_ytd_as_of is not None:
-            # Preferred: a direct checkpoint off a real pay stub's YTD SS
-            # withholding line, rather than reconstructing YTD gross wages by
-            # counting actual paychecks against a flat per-paycheck figure.
-            # ss_withheld_ytd / 0.062 recovers gross wages actually subject to
-            # SS as of that stub -- correct through every raise in the year
-            # with no reconstruction, unlike ss_bonus_ytd below. the user's April
-            # raise alone misdated the 2026 crossing by a full paycheck under
-            # the old method (found 2026-08-14, YTD withheld $8,500.00 as of
-            # the 8/14 check implies gross $138,000.00, still $1,000.00 under
-            # the $184,500 base -- crossing is 8/31, not 8/14).
-            SS_EMPLOYEE_RATE = Decimal("0.062")
-            gross_ytd_at_checkpoint = (user.ss_withheld_ytd / SS_EMPLOYEE_RATE).quantize(Decimal("0.01"))
-            ss_remaining_gross = user.ss_wage_base - gross_ytd_at_checkpoint
-            ss_checkpoint_date = user.ss_withheld_ytd_as_of
-        else:
-            ss_bonus_ytd = user.ss_bonus_ytd or Decimal("0")
-            ss_remaining_gross = user.ss_wage_base - ss_bonus_ytd
-        # Quantized like the monthly interest credit -- it is a dollar amount
-        # landing in an account, and unrounded it produced paychecks of
-        # $5,000.00112.
-        ss_boost_per_check = (ss_gross * Decimal("0.062")).quantize(Decimal("0.01"))
-        # Which recurring income items are paychecks (and so stop having Social
-        # Security withheld once the wage base is hit)? Compared against
-        # ss_gross_per_paycheck, but note the units differ: a recurring income
-        # item holds the NET amount that lands in checking, while
-        # ss_gross_per_paycheck is gross. Net runs roughly 55-85% of gross after
-        # tax, retirement, and benefits, so the old two-sided 0.9..1.1 band
-        # could never match a real paycheck -- the user's is 5000.00/7000.00 = 0.714,
-        # which meant the boost silently never fired for anyone and left Q4 2026
-        # about $2,460 (6 paychecks x $410) low against his spreadsheet.
-        # Confirmed live 2026-08-12.
-        #
-        # The lower bound stays well above incidental recurring income (a
-        # smoothed bonus twelfth, a rental payment) without needing to know the
-        # exact withholding rate; the upper bound keeps net from exceeding gross
-        # by more than rounding.
-        ss_paycheck_item_ids = paycheck_item_ids(recurring_items, ss_gross, set(bonus_plans))
+    from backend.services.bonus_plans import bonus_gross, bonus_net
+    bonus_plans = effective_bonus_plans(db, user_id, user)
+    # Social Security wage-base state (see SSWageBaseTracker). None when the
+    # user hasn't configured it.
+    ss = SSWageBaseTracker.for_user(user, recurring_items, set(bonus_plans), start_date)
 
     # Known statement amounts for specific upcoming occurrences, keyed by
     # (recurring_item_id, due_date) so a lookup during the day walk is exact.
@@ -1435,87 +1655,17 @@ def build_forecast(
         if t.recurring_item_id:
             actual_by_ri.setdefault(t.recurring_item_id, []).append(t.date)
 
-    # Draw the wage base down for paychecks already RECEIVED this calendar year,
-    # before projecting forward. Past days are served from actuals, which
-    # `continue` past the projection branch where the drawdown lives, so without
-    # this the base only ever saw future paychecks and the boost landed far too
-    # late -- or never arrived at all.
-    #
-    # Counted from January 1 of the forecast year rather than from start_date,
-    # because the wage base is a calendar-year quantity. Scoping it to the
-    # window instead made the answer depend on the window: /forecast/risk asks
-    # for today..+90 and would see zero prior paychecks, so it never applied the
-    # boost and ran ~$410 short per paycheck against the Jan-anchored
-    # /forecast/quarters the chart draws. That put a false at-risk alert
-    # (-$200.00 on 2026-08-25) under a chart whose trough was +$1,000.00 on the
-    # very same day. Found live 2026-08-12.
-    #
-    # Counted, not summed: SS is withheld on gross, while the stored actual is
-    # the net deposit. Only paychecks strictly before today count -- from today
-    # onward the day walk does its own drawdown.
-    #
-    # With a checkpoint, this only needs to bridge the gap between the pay
-    # stub's date and today -- ss_remaining_gross already reflects everything
-    # through the checkpoint itself, so counting from Jan 1 would double-count
-    # every paycheck already folded into ss_withheld_ytd.
-    if ss_remaining_gross is not None and ss_paycheck_item_ids:
-        catchup_filter = (
-            models.Transaction.date > ss_checkpoint_date
-            if ss_checkpoint_date is not None
-            # No checkpoint: legacy behaviour, unchanged -- counts from Jan 1
-            # inclusive, matching how ss_bonus_ytd has always been reconciled.
-            else models.Transaction.date >= date(start_date.year, 1, 1)
-        )
-        received = (
-            db.query(models.Transaction)
-            .filter(
-                models.Transaction.user_id == user_id,
-                models.Transaction.is_actual == True,
-                models.Transaction.recurring_item_id.in_(ss_paycheck_item_ids),
-                catchup_filter,
-                models.Transaction.date < today,
-            )
-            .count()
-        )
-        if received:
-            ss_remaining_gross -= ss_gross * received
-            if ss_remaining_gross <= 0:
-                ss_limit_reached = True
-
-    # Bonuses received after the pay-stub checkpoint also used up wage base.
-    # Only in checkpoint mode: the legacy ss_bonus_ytd figure already holds
-    # the user's bonus, so counting deposits there would double it.
-    if ss_remaining_gross is not None and ss_checkpoint_date is not None and bonus_plans:
-        for t in db.query(models.Transaction).filter(
-            models.Transaction.user_id == user_id,
-            models.Transaction.is_actual == True,
-            models.Transaction.recurring_item_id.in_(list(bonus_plans)),
-            models.Transaction.date > ss_checkpoint_date,
-            models.Transaction.date < today,
-        ):
-            gross = bonus_gross(bonus_plans[t.recurring_item_id], user, t.date.year)
-            if gross is not None and t.date.year == ss_checkpoint_date.year:
-                ss_remaining_gross -= gross
-        if ss_remaining_gross <= 0:
-            ss_limit_reached = True
-
-    # The wage base is per calendar year. The figures above describe the year
-    # of the checkpoint (or of start_date without one); every later January 1
-    # starts over at the full base, so withholding resumes until the new
-    # year's base is met. Without this, a boost reached in one year carried
-    # into every later year's paychecks. The checkpoint year uses the user's
-    # own setting; a later year uses the published base when tax_service
-    # bundles it (the base rises each year), else the user's setting again.
-    ss_year = ss_checkpoint_date.year if ss_checkpoint_date is not None else start_date.year
+    # Draw the wage base down for wages already RECEIVED before today, before
+    # projecting forward -- from today onward the day walk does its own drawdown.
+    if ss is not None:
+        ss.catch_up(db, user_id, bonus_plans, before=today)
 
     entries: list[ForecastEntry] = []
     current = start_date
 
     while current <= end_date:
-        if ss_remaining_gross is not None and current.year != ss_year:
-            ss_year = current.year
-            ss_remaining_gross = ss_wage_base_for(current.year) or user.ss_wage_base
-            ss_limit_reached = False
+        if ss is not None:
+            ss.roll_year(current)
         day_transactions: list[ForecastTransaction] = []
         actuals_today = actuals_by_date.get(current, [])
         actual_recurring_ids = {t.recurring_item_id for t in actuals_today if t.recurring_item_id}
@@ -1608,53 +1758,12 @@ def build_forecast(
             is_cc = item.type == models.RecurringType.credit_card_payment
 
             # SS paycheck boost: accumulate gross, apply boost once wage base is hit
+            # (SSWageBaseTracker holds the rules, shared with ss_paycheck_boosts).
             ss_boost = Decimal("0")
-            # The checkpoint date's own paycheck is already fully accounted
-            # for inside ss_remaining_gross (the checkpoint is "as of and
-            # including" that date) -- decrementing for it again here would
-            # subtract it twice. This only matters on the one day where the
-            # checkpoint coincides with a day the live walk still projects
-            # (no actual on record for it yet, e.g. it landed today but bank
-            # sync hasn't imported it).
-            if ss_remaining_gross is not None and item.id in ss_paycheck_item_ids and current == ss_checkpoint_date:
-                pass
-            elif ss_remaining_gross is not None and item.id in ss_paycheck_item_ids:
-                if ss_limit_reached:
-                    ss_boost = ss_boost_per_check
-                else:
-                    # Draw down by GROSS, not item.amount -- the wage base is a
-                    # gross-wages figure, while item.amount is the net deposit.
-                    # Decrementing by net stretched the run-up ~40% too far
-                    # (the user: 118,260 remaining / 5,000.00 net = 19.5 paychecks,
-                    # landing in late Oct 2027 instead of autumn 2026), so the
-                    # boost never arrived inside the forecast window at all.
-                    ss_remaining_gross -= ss_gross
-                    if ss_remaining_gross <= 0:
-                        ss_limit_reached = True
-                        # The CROSSING paycheck only gets a partial boost: SS is
-                        # still withheld on the wages up to the base, and only
-                        # the remainder above it comes back. Granting the full
-                        # $500.00 here overstated that one check and, worse,
-                        # pulled the whole step-up a paycheck early -- caught
-                        # 2026-08-14 reconciling to Budget.xlsx, where the app
-                        # boosted the 8/14 check while the sheet held flat until
-                        # 9/15. After the subtraction above, -ss_remaining_gross
-                        # IS the gross above the base, so it needs no separate
-                        # bookkeeping. Every check after this one gets the full
-                        # boost via the ss_limit_reached branch.
-                        excess = min(-ss_remaining_gross, ss_gross)
-                        ss_boost = (excess * Decimal("0.062")).quantize(Decimal("0.01"))
-            elif ss_remaining_gross is not None and bonus_gross_amt is not None and current != ss_checkpoint_date:
-                # A bonus is wages too: its gross draws the base down, and SS
-                # withheld on whatever lies above the base comes back.
-                if ss_limit_reached:
-                    ss_boost = (bonus_gross_amt * Decimal("0.062")).quantize(Decimal("0.01"))
-                else:
-                    ss_remaining_gross -= bonus_gross_amt
-                    if ss_remaining_gross <= 0:
-                        ss_limit_reached = True
-                        excess = min(-ss_remaining_gross, bonus_gross_amt)
-                        ss_boost = (excess * Decimal("0.062")).quantize(Decimal("0.01"))
+            if ss is not None and item.id in ss.paycheck_ids:
+                ss_boost = ss.paycheck_boost(current)
+            elif ss is not None and bonus_gross_amt is not None:
+                ss_boost = ss.bonus_boost(current, bonus_gross_amt)
 
             signed = (base_amount + ss_boost) if item.type == models.RecurringType.income else -base_amount
             balance += signed
