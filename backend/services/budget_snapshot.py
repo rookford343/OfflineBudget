@@ -477,6 +477,22 @@ def _next_month_minimum(
     return minimum, minimum_date, start, label
 
 
+DEFAULT_SAFETY_CUSHION = Decimal("1000.00")
+
+
+def lookahead_status(minimum: Decimal, cushion: Decimal) -> str:
+    """How the 3-month low reads against the user's safety cushion:
+    "danger" strictly below $0, "warning" strictly below the cushion, else
+    "ok". Exactly AT the cushion is ok -- the cushion is the balance to stay
+    at or above, so landing on it is not a breach. Checked in that order, so
+    a $0 cushion leaves only the below-$0 signal."""
+    if minimum < 0:
+        return "danger"
+    if minimum < cushion:
+        return "warning"
+    return "ok"
+
+
 def _weekly_allowance(amount: Decimal, as_of: date) -> tuple[Decimal, int]:
     last_day = calendar.monthrange(as_of.year, as_of.month)[1]
     days_remaining = last_day - as_of.day + 1
@@ -723,7 +739,19 @@ def compute_budget_snapshot(
     lookahead_window = _lookahead_window(
         db, user.id, account_id, as_of, proposal=proposal, overrides=overrides,
     )
-    quarter_min, quarter_min_date = lookahead_window.minimum, lookahead_window.minimum_date
+    # Safety Margin's low: today through the END of next calendar month,
+    # sliced from lookahead_window with the same floor_mask rule (approved
+    # 2026-11-06). The 3-month low used to be its starting point, so a dip
+    # two months out (a big yearly bill) could drag this month's and this
+    # week's figures negative for weeks before it mattered. That low is now
+    # a warning signal instead: lookahead_minimum + lookahead_status below.
+    _nm_start, safety_window_end, _ = _next_calendar_month_bounds(as_of)
+    if lookahead_window.days:
+        safety_low, safety_low_date = _floor_minimum(
+            lookahead_window.days, lookahead_window.mask, as_of, end=safety_window_end,
+        )
+    else:
+        safety_low, safety_low_date = Decimal("0"), None
     display_window = _lookahead_window(
         db, user.id, account_id, as_of, proposal=proposal, overrides=overrides,
         include_unbilled_card_bills=True,
@@ -732,9 +760,13 @@ def compute_budget_snapshot(
     next_month_min, next_month_min_date, _next_month_start, next_month_label = _next_month_minimum(
         display_window, as_of,
     )
+    safety_cushion = (
+        user.safety_cushion if user.safety_cushion is not None else DEFAULT_SAFETY_CUSHION
+    )
+    display_status = lookahead_status(display_min, safety_cushion)
     # Safety Margin does NOT subtract card spending -- unlike Left to
-    # Spend, quarter_min here is a CHECKING-account balance that the new
-    # spending has already flowed through (a card swipe debits checking the
+    # Spend, safety_low here (quarter_min in the history below) is a
+    # CHECKING-account balance that the new spending has already flowed through (a card swipe debits checking the
     # moment the statement's payoff hits the forecast's due-date injection;
     # the money isn't sitting outside quarter_min waiting to be counted).
     # An earlier version subtracted it here too, on the theory that this
@@ -767,7 +799,7 @@ def compute_budget_snapshot(
     #      sheet here, not behind it, and this is expected to stay a
     #      permanent (small, ~$410/paycheck) divergence until the user updates
     #      the sheet formula to match.
-    safety_margin = quarter_min - cc_budget_total + charged_so_far
+    safety_margin = safety_low - cc_budget_total + charged_so_far
 
     safety_margin_weekly, days_remaining = _weekly_allowance(safety_margin, as_of)
 
@@ -896,20 +928,23 @@ def compute_budget_snapshot(
             + (f", on {low_date:%b %-d}" if low_date else "")
             + ". Excludes the already-scheduled card payoff."
         )
-    # Safety Margin's starting low comes from its own walk, which leaves this
-    # month's not-yet-charged card bills out (they're subtracted on the next
-    # row), so it can read higher than the 3-month lowest point shown on the
-    # Dashboard. The note says so rather than letting the two look like a
-    # mismatch.
+    # Safety Margin's starting low is next month's lowest point, from its own
+    # walk, which leaves this month's not-yet-charged card bills out (they're
+    # subtracted on the next row), so it can read higher than "Lowest next
+    # month" shown elsewhere. The note says so rather than letting the two
+    # look like a mismatch.
     safety_low_note = (
-        _low_note(quarter_min_date)
+        f"Lowest projected checking balance from today through {safety_window_end:%b %-d}"
+        + (f", on {safety_low_date:%b %-d}" if safety_low_date else "")
+        + ". Excludes the already-scheduled card payoff."
         + " Leaves out this month's card bills not charged yet; they're subtracted below."
+        + " Lows further out show as a warning on the 3-month lowest point instead."
     )
     # The card payments standing between today and each low point, read off
     # the SAME walk that low came from (the user's ask, 2026-10-29) -- never
     # an extra build_forecast call. The recent-statement-close heads-up is
     # lookahead_minimum only, per the same ask.
-    safety_cc_line_children = _cc_line_children(lookahead_window.days, as_of, quarter_min_date)
+    safety_cc_line_children = _cc_line_children(lookahead_window.days, as_of, safety_low_date)
     lookahead_informational_children = (
         _cc_line_children(display_window.days, as_of, display_min_date)
         + _recent_close_children(active_cards, as_of)
@@ -933,7 +968,7 @@ def compute_budget_snapshot(
             .divide("Days left this week", Decimal(days_left_in_week))
             .build(spendable_today),
         "safety_margin": ExplainBuilder("Safety Margin")
-            .start("3-month lowest point", quarter_min, note=safety_low_note,
+            .start("Next month's lowest point", safety_low, note=safety_low_note,
                    informational_children=safety_cc_line_children)
             .subtract("This month's card bills", cc_budget_total,
                       note="Every recurring subscription charged to a card this month")
@@ -973,6 +1008,8 @@ def compute_budget_snapshot(
         days_remaining_in_month=days_remaining,
         lookahead_minimum=display_min,
         lookahead_minimum_date=display_min_date,
+        lookahead_status=display_status,
+        safety_cushion=safety_cushion,
         next_month_minimum=next_month_min,
         next_month_minimum_date=next_month_min_date,
         next_month_label=next_month_label,

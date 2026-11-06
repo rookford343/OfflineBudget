@@ -706,9 +706,16 @@ def test_safety_floor_keeps_next_months_subscriptions_in_the_carried_cycle(db_se
 
 def test_safety_margin_counts_this_months_remaining_card_bills_exactly_once(db_session, monkeypatch):
     """Safety Margin = the floor walk's low minus this month's card bills not
-    yet charged. That must equal the low of the walk that keeps every
-    subscription in the payoff: "Late" counted once (by the subtraction),
-    not twice, not zero times, and next month's bills counted too."""
+    yet charged, with "Late" counted once (by the subtraction), not twice,
+    not zero times.
+
+    Since 2026-11-06 Safety Margin's low runs only through the end of next
+    month (4/30 here), so the 5/3 carried cycle -- still the 3-month low --
+    falls outside it. Inside that window neither walk has paid "Late" yet
+    (it rides the 5/3 payment), so both walks agree there and the
+    subtraction is the one place it's counted: Safety Margin equals the
+    Forecast-tab walk's next-month low minus "Late". Before, the window
+    reached 5/3 and Safety Margin equalled the full walk's 3-month low."""
     from backend.services import budget_snapshot
 
     user, account, today = _floor_cycle_scenario(db_session, monkeypatch)
@@ -719,9 +726,15 @@ def test_safety_margin_counts_this_months_remaining_card_bills_exactly_once(db_s
     mask = budget_snapshot.floor_mask(full, [c for c in db_session.query(models.CreditCard).all()])
     full_low, full_low_date = budget_snapshot._floor_minimum(full, mask, today)
 
-    assert full_low_date == date(2026, 5, 3), "the carried cycle must be the floor here"
+    assert full_low_date == date(2026, 5, 3), "the carried cycle must be the 3-month floor here"
     assert snap.lookahead_minimum_date == full_low_date
-    assert snap.safety_margin == full_low
+    assert snap.lookahead_minimum == full_low
+
+    window_low, window_low_date = budget_snapshot._floor_minimum(
+        full, mask, today, end=date(2026, 4, 30),
+    )
+    assert window_low_date is not None and window_low_date <= date(2026, 4, 30)
+    assert snap.safety_margin == window_low - Decimal("40.00")
 
 
 # --- 4. A statement close that already passed but hasn't billed yet -------

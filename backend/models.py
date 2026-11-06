@@ -120,6 +120,10 @@ class User(Base):
     # docstring for why this is a toggle, not a permanent column.
     debug_capture_raw_bank_data: Mapped[bool] = mapped_column(Boolean, default=False)
     transfer_increment: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("1000.00"))
+    # The balance the 3-month projected low should stay above. Below it the
+    # Dashboard and daily email show the low in amber; below $0, red. Null
+    # means budget_snapshot.DEFAULT_SAFETY_CUSHION ($1,000.00).
+    safety_cushion: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     # How the month is meant to balance, which changes whether the Savings
     # budget is a commitment. "save_monthly": the transfer is money you intend
     # to move out, so it leaves the spendable pool. "pull_from_savings": you

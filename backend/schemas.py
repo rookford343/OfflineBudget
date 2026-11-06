@@ -76,6 +76,7 @@ class UserOut(BaseModel):
     itemized_property_tax: Optional[Decimal] = None
     itemized_other: Optional[Decimal] = None
     transfer_increment: Optional[Decimal] = None
+    safety_cushion: Optional[Decimal] = None
     savings_strategy: Optional[str] = None
     budget_carry_forward: Optional[bool] = None
 
@@ -108,8 +109,19 @@ class UserUpdate(BaseModel):
     itemized_property_tax: Optional[Decimal] = None
     itemized_other: Optional[Decimal] = None
     transfer_increment: Optional[Decimal] = None
+    safety_cushion: Optional[Decimal] = None
     savings_strategy: Optional[str] = None
     budget_carry_forward: Optional[bool] = None
+
+    @field_validator("safety_cushion")
+    @classmethod
+    def _cushion_not_negative(cls, v):
+        # A negative cushion would make the warning fire only after the
+        # danger one, so it can never mean anything useful. Null clears it
+        # back to the $1,000.00 default.
+        if v is not None and v < 0:
+            raise ValueError("safety_cushion must be 0 or more")
+        return v
 
     @field_validator("savings_strategy")
     @classmethod
@@ -1852,7 +1864,8 @@ class BudgetSnapshot(BaseModel):
     on_pace: bool
     # Renamed from not_saving/not_saving_weekly 2026-08-13 -- "Not Saving"
     # didn't say what it measured and reads oddly once positive. This is the
-    # quarter's lowest projected checking balance after also reserving the
+    # lowest projected checking balance from today through the end of next
+    # month (the 3-month low until 2026-11-06) after also reserving the
     # recurring card bills still due this month: positive means that much
     # room above zero before touching savings; negative means the plan
     # already runs into savings even before anything unexpected happens.
@@ -1873,6 +1886,13 @@ class BudgetSnapshot(BaseModel):
     # by side).
     lookahead_minimum: Decimal = Decimal("0")
     lookahead_minimum_date: Optional[date] = None
+    # The 3-month low as a warning signal (approved 2026-11-06): "danger"
+    # strictly below $0, "warning" strictly below safety_cushion, else "ok"
+    # (exactly at the cushion is ok). safety_cushion is the user's setting,
+    # or $1,000.00 when unset. Defaulted so existing callers/fixtures that
+    # build a BudgetSnapshot without them keep working.
+    lookahead_status: str = "ok"
+    safety_cushion: Decimal = Decimal("1000.00")
     # The same floor, restricted to the calendar month after `as_of` -- the
     # daily email's "Lowest next month" line, read off the same forecast
     # walk as lookahead_minimum (see budget_snapshot._next_month_minimum).

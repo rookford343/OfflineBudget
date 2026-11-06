@@ -27,6 +27,16 @@ export default function PreferencesTab() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
   const [transferIncrement, setTransferIncrement] = useState("");
   useEffect(() => { if (me) setTransferIncrement(me.transfer_increment ?? "1000"); }, [me]);
+  // Null on the server means the $1,000 default, so the field shows that.
+  const [safetyCushion, setSafetyCushion] = useState("");
+  useEffect(() => { if (me) setSafetyCushion(me.safety_cushion ?? "1000"); }, [me]);
+  const cushionMut = useMutation({
+    mutationFn: authApi.updateMe,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["me"] });
+      qc.invalidateQueries({ queryKey: ["budget-snapshot"] });
+    },
+  });
   const [savingsStrategy, setSavingsStrategy] = useState("save_monthly");
   useEffect(() => { if (me) setSavingsStrategy(me.savings_strategy ?? "save_monthly"); }, [me]);
   const taxMut = useMutation({ mutationFn: authApi.updateMe });
@@ -214,6 +224,35 @@ export default function PreferencesTab() {
             </button>
           </div>
         </div>
+      </div>
+      <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Safety Cushion</span>
+            <p className="text-xs text-gray-400">The Dashboard and daily email flag the 3-month lowest balance in amber when it dips below this (red below $0). Leave blank for $1,000. Separate from the Wish List cushion.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              step="1"
+              min="0"
+              aria-label="Safety cushion"
+              className="input w-28 text-sm text-right"
+              value={safetyCushion}
+              onChange={(e) => setSafetyCushion(e.target.value)}
+            />
+            <button
+              onClick={() => cushionMut.mutate({ safety_cushion: safetyCushion ? parseFloat(safetyCushion) : null })}
+              disabled={cushionMut.isPending}
+              className="btn-secondary text-xs px-3 py-1.5"
+            >
+              {cushionMut.isPending ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+        {cushionMut.isError && (
+          <p className="text-xs text-red-600 dark:text-red-400 mt-1">Couldn't save — the cushion must be $0 or more.</p>
+        )}
       </div>
       <div className="pt-3 border-t border-gray-100 dark:border-gray-700">
         <div className="flex items-center gap-2 mb-2">

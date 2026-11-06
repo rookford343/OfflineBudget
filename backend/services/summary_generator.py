@@ -85,6 +85,24 @@ def _lowest_balance_rows(snap) -> list[tuple[str, Decimal, date]]:
     return rows
 
 
+def _lookahead_warning(snap) -> str | None:
+    """The short phrase that flags the 3-month low against the user's safety
+    cushion, or None when it's fine (snap.lookahead_status == "ok"). The
+    status itself is decided once in budget_snapshot.lookahead_status; this
+    only words it, for both the HTML and text bodies."""
+    if snap.lookahead_status == "danger":
+        return "below $0"
+    if snap.lookahead_status == "warning":
+        return f"below your {_fmt(snap.safety_cushion)} cushion"
+    return None
+
+
+def _is_lookahead_row(label: str) -> bool:
+    """Whether a _lowest_balance_rows row carries the 3-month low (alone or
+    combined with next month's) -- the row the cushion warning belongs to."""
+    return "next 3 months" in label
+
+
 def _last_txn_dates(db: Session, id_col, date_col, ids: list[int]) -> dict[int, date]:
     """Most recent transaction date per id, keyed off actual transaction rows
     rather than a bank-sync timestamp -- this way a manually-imported account
@@ -431,14 +449,25 @@ def generate_daily_summary(
         # _lowest_balance_rows/_move_to_checking_line so the two can't drift.
         lowest_rows = _lowest_balance_rows(snap)
         move_line = _move_to_checking_line(snap)
+        # The 3-month row is plain info when lookahead_status is "ok", amber
+        # below the cushion and red below $0, with a short phrase saying which.
+        lookahead_warning = _lookahead_warning(snap)
+        lookahead_color = {"warning": "#d97706", "danger": "#dc2626"}.get(snap.lookahead_status)
         lowest_html_parts: list[str] = []
         for i, (label, amount, d) in enumerate(lowest_rows):
             row_color = "#dc2626" if amount < 0 else "#065f46"
+            warning_html = ""
+            if lookahead_warning and _is_lookahead_row(label):
+                row_color = lookahead_color
+                warning_html = (
+                    f" <span style='color:{lookahead_color};font-weight:600'>"
+                    f"&middot; {lookahead_warning}</span>"
+                )
             margin = "12px 0 0" if i == 0 else "6px 0 0"
             lowest_html_parts.append(
                 f"<p style='color:#047857;font-size:12px;margin:{margin};text-align:center;"
                 f"word-break:break-word;overflow-wrap:break-word'>{label}: "
-                f"<b style='color:{row_color}'>{fmt(amount)}</b> on {d.strftime('%b %-d')}</p>"
+                f"<b style='color:{row_color}'>{fmt(amount)}</b> on {d.strftime('%b %-d')}{warning_html}</p>"
             )
             if i == 0 and move_line:
                 lowest_html_parts.append(
@@ -577,7 +606,9 @@ def generate_daily_summary(
         # Reuses lowest_rows/move_line computed above for household_html --
         # same same-date/combined-line/move-line logic, just rendered plain.
         lowest_text = "".join(
-            f"  {label}: {fmt(amount)} on {d.strftime('%b %-d')}.\n"
+            f"  {label}: {fmt(amount)} on {d.strftime('%b %-d')}"
+            + (f" ({lookahead_warning})" if lookahead_warning and _is_lookahead_row(label) else "")
+            + ".\n"
             + (f"  {move_line}.\n" if i == 0 and move_line else "")
             for i, (label, amount, d) in enumerate(lowest_rows)
         )

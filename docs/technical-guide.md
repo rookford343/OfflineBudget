@@ -413,6 +413,31 @@ and nothing is ever un-settled. There is no forecast-side guard: the
 matched data only changes when a sync runs, and a forecast that hid a plan
 the Planned list still shows open would disagree with itself.
 
+## Household Snapshot: Safety Margin and the 3-month warning
+
+`services/budget_snapshot.compute_budget_snapshot` builds two forecast walks
+over the same rolling 3-month window, both with the `floor_mask` rule (a
+locked card payoff can't be the low until the next income day):
+
+- **Safety Margin's walk** (`include_unbilled_card_bills=False`). Safety
+  Margin = its lowest point from today through the **end of next calendar
+  month** − this month's card bills + card bills already charged. Weekly and
+  per-day figures prorate that. Until 2026-11-06 it read the 3-month low, so
+  a big bill two months out dragged this week's figure negative long before
+  it mattered.
+- **The display walk** (the Forecast tab's, bills included) gives
+  `next_month_minimum` and `lookahead_minimum` (the 3-month low).
+  `lookahead_status` rates the 3-month low against `User.safety_cushion`
+  (nullable, `DEFAULT_SAFETY_CUSHION` = $1,000.00 when null):
+  `"danger"` strictly below $0, `"warning"` strictly below the cushion,
+  otherwise `"ok"` (exactly at the cushion is ok). The Dashboard and the
+  daily email color that line amber/red with a short phrase; `"ok"` shows it
+  as plain info.
+
+`User.safety_cushion` is its own setting, not the Wish List's cushion
+(`wish_plan.effective_cushion`, which falls back to the checking account's
+low-balance threshold).
+
 ## Shared Helpers (one place to fix)
 
 | Helper | Use it for |

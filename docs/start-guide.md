@@ -491,10 +491,17 @@ The daily report arrives at 7:15am by default, right after the morning bank sync
 reports fresh numbers:
 
 - **Household Snapshot**: Spendable this week, Safety Margin, and the lowest
-  projected balance in the next three months. Spendable counts card
+  projected balance next month and in the next three months. Spendable counts card
   purchases by calendar month (since the 1st, returns subtracted, card
   payments left out) plus pending card charges, so a statement closing
-  mid-month doesn't change it.
+  mid-month doesn't change it. **Safety Margin** starts from next month's
+  lowest projected checking balance (today through the last day of next
+  month), minus this month's card subscriptions not charged yet. The
+  **3-month lowest point** is a warning: plain when it's fine, amber with
+  "below your $1,000.00 cushion" when it dips under your safety cushion, and
+  red with "below $0" when it goes negative. The Dashboard shows it the same
+  way. Set the cushion in **Settings → Preferences → Safety Cushion** (blank
+  means $1,000). It's separate from the Wish List cushion.
 - **Checking Accounts**: each balance and when its last transaction posted.
 - **Upcoming (next 7 days)**: bills and income due this week, using a real
   bill amount when you've entered one.

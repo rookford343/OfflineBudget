@@ -349,18 +349,37 @@ export default function Dashboard() {
                   )}
                 </div>
               </div>
-              {snapshot.lookahead_minimum_date && (
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 text-center">
-                  Lowest projected balance in the next 3 months:{" "}
-                  <span className={`font-semibold tabular-nums ${parseFloat(snapshot.lookahead_minimum) < 0 ? "text-red-600 dark:text-red-400" : "text-gray-700 dark:text-gray-200"}`}>
-                    {fmt(parseFloat(snapshot.lookahead_minimum))}
-                  </span>{" "}
-                  on {new Date(snapshot.lookahead_minimum_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
-                  <span className="inline-flex align-middle">
-                    <HowCalculated title="3-month lowest point" explanations={[snapshot.explain?.lookahead_minimum]} />
-                  </span>
-                </p>
-              )}
+              {/* A warning signal, not a spending figure: Safety Margin reads
+                  next month's low, so a dip further out shows here instead --
+                  plain when ok, amber below the user's safety cushion, red
+                  below $0 (status decided by the backend's lookahead_status). */}
+              {snapshot.lookahead_minimum_date && (() => {
+                const status = snapshot.lookahead_status ?? "ok";
+                const figureClass = status === "danger"
+                  ? "text-red-600 dark:text-red-400"
+                  : status === "warning"
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-gray-700 dark:text-gray-200";
+                return (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 text-center">
+                    Lowest projected balance in the next 3 months:{" "}
+                    <span className={`font-semibold tabular-nums ${figureClass}`}>
+                      {fmt(parseFloat(snapshot.lookahead_minimum))}
+                    </span>{" "}
+                    on {new Date(snapshot.lookahead_minimum_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
+                    <span className="inline-flex align-middle">
+                      <HowCalculated title="3-month lowest point" explanations={[snapshot.explain?.lookahead_minimum]} />
+                    </span>
+                    {status !== "ok" && (
+                      <span className={`block mt-0.5 font-medium ${figureClass}`}>
+                        {status === "danger"
+                          ? "below $0"
+                          : `below your ${maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.safety_cushion ?? "1000")))} cushion`}
+                      </span>
+                    )}
+                  </p>
+                );
+              })()}
             </div>
           )}
       {/* Spans the row while the band is two-up: wrapping alone into a
