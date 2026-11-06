@@ -1865,8 +1865,10 @@ class BudgetSnapshot(BaseModel):
     # _blank_snapshot) keep working unchanged.
     safety_margin_today: Decimal = Decimal("0")
     days_remaining_in_month: int
-    # The quarter's projected low point and the day it lands. Already computed
-    # for safety_margin; surfaced because it is what the user checks before
+    # The quarter's projected low point and the day it lands, read off the
+    # same walk the Forecast tab draws (this month's not-yet-charged card
+    # bills included). safety_margin reads a separate walk that leaves those
+    # out and subtracts them itself. Surfaced because it is what the user checks before
     # approving a large purchase ('2026 Overview'!B23:C27 keeps the pair side
     # by side).
     lookahead_minimum: Decimal = Decimal("0")

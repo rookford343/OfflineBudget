@@ -328,9 +328,17 @@ def _lookahead_window(
     db: Session, user_id: int, account_id: int, as_of: date, months: int = 3,
     *, proposal: ScenarioProposal | None = None,
     overrides: list[dict] | None = None,
+    include_unbilled_card_bills: bool = False,
 ) -> LookaheadWindow:
     """The lowest projected checking balance over the NEXT `months` months and
     the day it lands, EXCLUDING the dip caused by the LOCKED-IN card payoff.
+
+    `include_unbilled_card_bills` picks the walk. False (the default) is
+    Safety Margin's walk: this month's not-yet-charged card subscriptions
+    stay out of the next card payment, because Safety Margin subtracts them
+    itself. True is the Forecast tab's walk, which the DISPLAYED lowest
+    points read (approved 2026-11-06), so "Lowest next month" and "Lowest in
+    the next 3 months" show the same balances the Forecast tab draws.
 
     `overrides` is a scenario's amount tweaks on EXISTING recurring items, in
     `build_forecast`'s shape ({"recurring_item_id", "amount_delta"}). It is
@@ -394,9 +402,10 @@ def _lookahead_window(
     days = build_forecast(
         db, user_id, account_id, as_of - timedelta(days=45), end,
         overrides=overrides, proposal=proposal,
-        # Safety Margin subtracts this month's card bills itself, so the
-        # walk must not also fold them into the carried cycle's payoff.
-        include_unbilled_card_bills=False,
+        # Safety Margin subtracts this month's card bills itself, so its
+        # walk (False) must not also fold them into the carried cycle's
+        # payoff. The displayed lows pass True, like the Forecast tab.
+        include_unbilled_card_bills=include_unbilled_card_bills,
     )
     if not days:
         return LookaheadWindow(Decimal("0"), None, [], [])
@@ -702,12 +711,26 @@ def compute_budget_snapshot(
     cc_budget_total = _cc_budget_total(db, user.id, as_of)
 
     left_to_spend = leftover - card_spending_this_month - pending_charges_total + charged_so_far
+    # Two walks, same window/start/floor_mask rules (approved 2026-11-06).
+    # `lookahead_window` leaves this month's not-yet-charged card bills out
+    # of the next card payment; Safety Margin reads it and subtracts those
+    # bills itself. `display_window` keeps them in, exactly as the Forecast
+    # tab does, and is what the displayed lows read: lookahead_minimum,
+    # next_month_minimum, their explain panels, and the email's lines and
+    # "Move $Y" amount. Before this, the displayed lows sat above the
+    # Forecast tab by this month's remaining card subscriptions on every
+    # day after the next card payment.
     lookahead_window = _lookahead_window(
         db, user.id, account_id, as_of, proposal=proposal, overrides=overrides,
     )
     quarter_min, quarter_min_date = lookahead_window.minimum, lookahead_window.minimum_date
+    display_window = _lookahead_window(
+        db, user.id, account_id, as_of, proposal=proposal, overrides=overrides,
+        include_unbilled_card_bills=True,
+    )
+    display_min, display_min_date = display_window.minimum, display_window.minimum_date
     next_month_min, next_month_min_date, _next_month_start, next_month_label = _next_month_minimum(
-        lookahead_window, as_of,
+        display_window, as_of,
     )
     # Safety Margin does NOT subtract card spending -- unlike Left to
     # Spend, quarter_min here is a CHECKING-account balance that the new
@@ -867,20 +890,30 @@ def compute_budget_snapshot(
         ExplainChild(label=c.name, amount=c.pending_charges, note="charged but not posted yet")
         for c in fed_cards
     ]
-    low_note = (
-        "Lowest projected checking balance in the next 3 months"
-        + (f", on {quarter_min_date:%b %-d}" if quarter_min_date else "")
-        + ". Excludes the already-scheduled card payoff."
+    def _low_note(low_date: date | None) -> str:
+        return (
+            "Lowest projected checking balance in the next 3 months"
+            + (f", on {low_date:%b %-d}" if low_date else "")
+            + ". Excludes the already-scheduled card payoff."
+        )
+    # Safety Margin's starting low comes from its own walk, which leaves this
+    # month's not-yet-charged card bills out (they're subtracted on the next
+    # row), so it can read higher than the 3-month lowest point shown on the
+    # Dashboard. The note says so rather than letting the two look like a
+    # mismatch.
+    safety_low_note = (
+        _low_note(quarter_min_date)
+        + " Leaves out this month's card bills not charged yet; they're subtracted below."
     )
-    # The card payments standing between today and the low point, read off
-    # the SAME walk _lookahead_window already built (lookahead_window.days)
-    # -- never a second build_forecast call. Shared by both "lookahead_minimum"
-    # and "safety_margin" (the user's ask, 2026-10-29): both panels bottom out
-    # at the same quarter_min/quarter_min_date, so they're explained by the
-    # same receipt. The recent-statement-close heads-up is lookahead_minimum
-    # only, per the same ask.
-    cc_line_children = _cc_line_children(lookahead_window.days, as_of, quarter_min_date)
-    lookahead_informational_children = cc_line_children + _recent_close_children(active_cards, as_of)
+    # The card payments standing between today and each low point, read off
+    # the SAME walk that low came from (the user's ask, 2026-10-29) -- never
+    # an extra build_forecast call. The recent-statement-close heads-up is
+    # lookahead_minimum only, per the same ask.
+    safety_cc_line_children = _cc_line_children(lookahead_window.days, as_of, quarter_min_date)
+    lookahead_informational_children = (
+        _cc_line_children(display_window.days, as_of, display_min_date)
+        + _recent_close_children(active_cards, as_of)
+    )
     explain = {
         "left_to_spend": ExplainBuilder("Left to Spend")
             .start("Leftover", leftover, note="Income after bills, savings and groceries",
@@ -900,8 +933,8 @@ def compute_budget_snapshot(
             .divide("Days left this week", Decimal(days_left_in_week))
             .build(spendable_today),
         "safety_margin": ExplainBuilder("Safety Margin")
-            .start("3-month lowest point", quarter_min, note=low_note,
-                   informational_children=cc_line_children)
+            .start("3-month lowest point", quarter_min, note=safety_low_note,
+                   informational_children=safety_cc_line_children)
             .subtract("This month's card bills", cc_budget_total,
                       note="Every recurring subscription charged to a card this month")
             .add("Card bills already charged", charged_so_far,
@@ -914,9 +947,9 @@ def compute_budget_snapshot(
             .divide("Days left this week", Decimal(days_left_in_week))
             .build(safety_margin_today),
         "lookahead_minimum": ExplainBuilder("3-month lowest point")
-            .start("Lowest projected checking balance", quarter_min, note=low_note,
+            .start("Lowest projected checking balance", display_min, note=_low_note(display_min_date),
                    informational_children=lookahead_informational_children)
-            .build(quarter_min),
+            .build(display_min),
     }
 
     return BudgetSnapshot(
@@ -938,8 +971,8 @@ def compute_budget_snapshot(
         safety_margin_weekly=safety_margin_weekly,
         safety_margin_today=safety_margin_today,
         days_remaining_in_month=days_remaining,
-        lookahead_minimum=quarter_min,
-        lookahead_minimum_date=quarter_min_date,
+        lookahead_minimum=display_min,
+        lookahead_minimum_date=display_min_date,
         next_month_minimum=next_month_min,
         next_month_minimum_date=next_month_min_date,
         next_month_label=next_month_label,
