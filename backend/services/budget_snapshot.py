@@ -9,7 +9,7 @@ import calendar
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_CEILING
 from typing import NamedTuple
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
 from backend.services.explain import ExplainBuilder
@@ -121,7 +121,9 @@ def _card_spending_this_month(
     if not totals:
         return totals
     from backend.services.real_spend import classify_card
-    rows = db.query(models.CreditCardTransaction).filter(
+    rows = db.query(models.CreditCardTransaction).options(
+        joinedload(models.CreditCardTransaction.category),
+    ).filter(
         models.CreditCardTransaction.user_id == user_id,
         models.CreditCardTransaction.card_id.in_(list(totals)),
         models.CreditCardTransaction.date >= as_of.replace(day=1),

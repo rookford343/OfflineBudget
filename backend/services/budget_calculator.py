@@ -2,7 +2,7 @@ from calendar import monthrange
 from datetime import date
 from decimal import Decimal
 from sqlalchemy.orm import Session
-from backend.services.real_spend import classified_rows
+from backend.services.real_spend import classified_rows, savings_moved_rows
 from backend.services.budget_buckets import assignable_category_ids, drop_uncarried_defaults
 from backend import models
 from backend.schemas import BudgetOverviewRow
@@ -36,12 +36,17 @@ def compute_overview(
         budget_by_cat[a.category_id] = a.budgeted_amount
 
     # Actuals per category from the one real-spending rule, split by
-    # source. Refunds net (a line can go negative); transfers, card payoffs,
-    # savings-category rows and income-category debits are not spending.
+    # source. Refunds net (a line can go negative); transfers, card payoffs
+    # and income-category debits are not spending. A savings-type line's
+    # actual is instead what moved into savings (savings_moved_rows): it is
+    # that line's Track Budgets "spent" figure and drives its rollover, while
+    # every spending total still excludes it.
     checking_by_cat: dict[int, Decimal] = {}
     cards_by_cat: dict[int, Decimal] = {}
-    for r in classified_rows(db, user_id, start, end):
-        if r.verdict.kind != "spend" or r.category_id is None:
+    classified = classified_rows(db, user_id, start, end)
+    spend = [r for r in classified if r.verdict.kind == "spend"]
+    for r in spend + savings_moved_rows(classified):
+        if r.category_id is None:
             continue
         bucket = checking_by_cat if r.source == "checking" else cards_by_cat
         bucket[r.category_id] = bucket.get(r.category_id, Decimal("0")) + r.verdict.amount

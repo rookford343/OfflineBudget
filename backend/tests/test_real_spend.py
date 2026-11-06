@@ -18,6 +18,7 @@ from backend.services.real_spend import (
     Verdict,
     classify_card,
     classify_checking,
+    savings_moved,
     spend_totals,
 )
 
@@ -191,6 +192,38 @@ def test_savings_category_card_row_is_transfer(db_session):
     assert spend_totals(db_session, user.id, START, END).spend == Decimal("0")
 
 
+def test_savings_line_tracks_money_moved_not_spend(db_session):
+    from backend.services.budget_calculator import apply_rollover, compute_overview
+
+    user = _user(db_session)
+    acct = _account(db_session, user)
+    card = _card(db_session, user)
+    savings = _cat(db_session, user, "Emergency Fund", models.CategoryType.savings)
+    savings.rollover_enabled = True
+    _chk(db_session, user, acct, "-500.00", "EXAMPLE BROKERAGE DEPOSIT", savings)
+    # Money pulled back out of savings is not subtracted from "moved".
+    _chk(db_session, user, acct, "100.00", "EXAMPLE BROKERAGE WITHDRAWAL", savings, day=12)
+    _cc(db_session, user, card, "40.00", "EXAMPLE SHOP")
+    db_session.add(models.BudgetAllocation(
+        user_id=user.id, category_id=savings.id, year=2026, month=3,
+        budgeted_amount=Decimal("800.00"),
+    ))
+    db_session.commit()
+
+    assert savings_moved(db_session, user.id, START, END) == {savings.id: Decimal("500.00")}
+    totals = spend_totals(db_session, user.id, START, END)
+    assert totals.spend == Decimal("40.00")
+    assert savings.id not in totals.by_category
+
+    row = next(r for r in compute_overview(db_session, user.id, 2026, 3) if r.category_id == savings.id)
+    assert row.actual_total == Decimal("500.00")
+    assert row.actual_checking == Decimal("500.00")
+
+    assert apply_rollover(db_session, user.id, 2026, 3) == 1
+    db_session.refresh(savings)
+    assert savings.rollover_balance == Decimal("300.00")
+
+
 def test_planned_checking_rows_do_not_count(db_session):
     user = _user(db_session)
     acct = _account(db_session, user)
@@ -259,7 +292,11 @@ def test_all_spend_surfaces_agree(db_session):
     assert sum(category_totals_for_range(db_session, user.id, START, END).values()) == expected
 
     overview = compute_overview(db_session, user.id, 2026, 3)
-    assert sum((r.actual_total for r in overview if r.parent_id is None), Decimal("0")) == expected
+    # Savings-type lines track money moved to savings, not spending.
+    spend_rows = [r for r in overview if r.parent_id is None and r.category_type != "savings"]
+    assert sum((r.actual_total for r in spend_rows), Decimal("0")) == expected
+    savings_row = next(r for r in overview if r.category_type == "savings")
+    assert savings_row.actual_total == Decimal("250.00")
 
     _, debits, credits = _month_spending_by_category(db_session, user.id, 2026, 3)
     assert debits == expected

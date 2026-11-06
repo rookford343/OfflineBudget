@@ -202,6 +202,36 @@ def totals_of(rows: list[ClassifiedRow]) -> SpendTotals:
     return SpendTotals(by_category=by_category, spend=spend, income=income)
 
 
+def savings_moved_rows(rows: list[ClassifiedRow]) -> list[ClassifiedRow]:
+    """The rows that moved money into a savings-type category: transfer
+    verdicts on checking debits and card charges filed under one. A credit
+    filed there (money pulled back out) is not counted, as before the rule
+    existed."""
+    out = []
+    for r in rows:
+        if r.verdict.kind != "transfer" or r.row.category is None:
+            continue
+        if r.row.category.type != models.CategoryType.savings:
+            continue
+        is_outflow = r.row.amount < 0 if r.source == "checking" else r.row.amount > 0
+        if is_outflow:
+            out.append(r)
+    return out
+
+
+def savings_moved(db: Session, user_id: int, start: date, end: date) -> dict[int, Decimal]:
+    """Money moved into each savings-type category in [start, end].
+
+    Not spending -- every spend total excludes it -- but a savings-type
+    budget line tracks it as that line's actual ("moved to savings") and
+    rolls over against it.
+    """
+    moved: dict[int, Decimal] = {}
+    for r in savings_moved_rows(classified_rows(db, user_id, start, end)):
+        moved[r.category_id] = moved.get(r.category_id, _ZERO) + r.verdict.amount
+    return moved
+
+
 def spend_totals(db: Session, user_id: int, start: date, end: date) -> SpendTotals:
     """Real spending (net of refunds) and income in [start, end]."""
     return totals_of(classified_rows(db, user_id, start, end))
