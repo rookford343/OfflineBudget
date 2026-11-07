@@ -139,6 +139,11 @@ def update_card(
         setattr(card, field, value)
     _clear_pending_if_balance_due_changed(card, previous_balance_due)
     _stamp_pending_charges_freshness(card, previous_pending_charges)
+    if "pending_charges" in updates:
+        # Same deliberate exception: an explicit save is a fresh, hand-entered
+        # signal even when the amount is unchanged, so re-entering it makes a
+        # stale figure live again. Zero means nothing pending, nothing to date.
+        card.pending_charges_updated_at = datetime.utcnow() if card.pending_charges > 0 else None
     if "balance_due" in updates:
         # Deliberate exception to the "stamp only on a real change" rule:
         # saving balance_due is the user confirming the statement as of now, even

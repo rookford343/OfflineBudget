@@ -133,3 +133,27 @@ def test_endpoints_expose_the_figures(db_session):
     assert Decimal(row["pending_charges"]) == Decimal("40.00")  # raw stays for the edit form
     assert Decimal(row["pending_effective"]) == Decimal("0")
     assert Decimal(row["spent_this_cycle"]) == Decimal("300.00")
+
+
+def test_explicit_pending_save_restamps_even_when_unchanged(db_session):
+    user = _user(db_session)
+    stale = datetime.now() - timedelta(days=8)
+    card = _card(db_session, user, pending="40.00", stamped=stale)
+    app = FastAPI()
+    app.include_router(cards_router.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: user
+    client = TestClient(app)
+    assert Decimal(client.get(f"/credit-cards/{card.id}").json()["pending_effective"]) == Decimal("0")
+    row = client.patch(f"/credit-cards/{card.id}", json={"pending_charges": 40}).json()
+    assert Decimal(row["pending_effective"]) == Decimal("40.00")
+    assert Decimal(row["spent_this_cycle"]) == Decimal("340.00")
+    # An unrelated edit leaves the stamp alone; saving zero clears it.
+    db_session.refresh(card)
+    stamp = card.pending_charges_updated_at
+    client.patch(f"/credit-cards/{card.id}", json={"notes": "x"})
+    db_session.refresh(card)
+    assert card.pending_charges_updated_at == stamp
+    client.patch(f"/credit-cards/{card.id}", json={"pending_charges": 0})
+    db_session.refresh(card)
+    assert card.pending_charges_updated_at is None

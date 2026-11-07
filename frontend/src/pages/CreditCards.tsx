@@ -58,9 +58,9 @@ export default function CreditCards() {
   const [payForm, setPayForm] = useState({ ...emptyPayment });
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
-  const createMut = useMutation({ mutationFn: cardsApi.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); close(); } });
-  const updateMut = useMutation({ mutationFn: ({ id, data }: any) => cardsApi.update(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); close(); } });
-  const deleteMut = useMutation({ mutationFn: cardsApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); setDeleteId(null); } });
+  const createMut = useMutation({ mutationFn: cardsApi.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts", "net-position"] }); close(); } });
+  const updateMut = useMutation({ mutationFn: ({ id, data }: any) => cardsApi.update(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts", "net-position"] }); close(); } });
+  const deleteMut = useMutation({ mutationFn: cardsApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts", "net-position"] }); setDeleteId(null); } });
   const payMut = useMutation({ mutationFn: ({ id, data }: any) => cardsApi.pay(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); setPayCard(null); } });
   const markSentMut = useMutation({
     mutationFn: cardsApi.markPaymentSent,
@@ -113,6 +113,8 @@ export default function CreditCards() {
       // unrelated field like notes would silently re-confirm the statement.
       const payload: Record<string, unknown> = { ...data };
       if (parseFloat(form.balance_due) === parseFloat(editCard.balance_due)) delete payload.balance_due;
+      // Same for pending_charges: an explicit save re-stamps its freshness.
+      if ((parseFloat(form.pending_charges) || 0) === (parseFloat(editCard.pending_charges ?? "0") || 0)) delete payload.pending_charges;
       updateMut.mutate({ id: editCard.id, data: payload });
     } else createMut.mutate(data);
   }

@@ -99,9 +99,10 @@ def test_creating_a_card_with_no_pending_charges_leaves_the_timestamp_null(clien
     assert card.pending_charges_updated_at is None
 
 
-def test_repatching_the_same_pending_charges_value_does_not_restamp(client, db_session):
-    """Re-sending the same value (a no-op edit) is not a fresh signal --
-    only a real change updates the timestamp."""
+def test_repatching_the_same_pending_charges_value_restamps(client, db_session):
+    """An explicit pending save is a fresh, hand-entered signal even when the
+    amount is unchanged (mirrors balance_due), so re-entering a stale figure
+    makes it live again. The frontend only sends the field when it was edited."""
     test_client, user, card = client
     card.pending_charges = Decimal("116.99")
     from datetime import datetime, timedelta
@@ -113,4 +114,4 @@ def test_repatching_the_same_pending_charges_value_does_not_restamp(client, db_s
     assert resp.status_code == 200
 
     db_session.refresh(card)
-    assert abs((card.pending_charges_updated_at - old_stamp).total_seconds()) < 1
+    assert (card.pending_charges_updated_at - old_stamp).total_seconds() > 2 * 24 * 3600

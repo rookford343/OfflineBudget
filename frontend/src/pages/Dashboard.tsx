@@ -76,6 +76,7 @@ export default function Dashboard() {
     mutationFn: ({ id, data }: { id: number; data: object }) => cardsApi.update(id, data),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["credit-cards"] });
+      qc.invalidateQueries({ queryKey: ["accounts", "net-position"] });
       qc.invalidateQueries({ queryKey: ["budget-snapshot"] });
       qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
       qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
@@ -647,7 +648,10 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <div className="mt-1 text-xs text-gray-500">
-                        {editingPending === c.id ? (
+                        {pendingCount > 0 ? (
+                          // The bank reports this card's pending rows; the hand-typed figure is ignored.
+                          <span>Pending: {maskIfHidden(balancesHidden, fmt(pendingEffective))} (from bank)</span>
+                        ) : editingPending === c.id ? (
                           <span className="inline-flex items-center gap-1">
                             Pending:
                             <input
@@ -655,14 +659,22 @@ export default function Dashboard() {
                               className="input !w-20 !py-0.5 !text-xs"
                               value={pendingValue}
                               onChange={(e) => setPendingValue(e.target.value)}
-                              onBlur={() => updatePendingMut.mutate({ id: c.id, data: { pending_charges: parseFloat(pendingValue) || 0 } })}
+                              onBlur={() => {
+                                const next = parseFloat(pendingValue) || 0;
+                                // Send only a real edit of the hand-typed figure.
+                                if (next !== (parseFloat(String(c.pending_charges)) || 0)) {
+                                  updatePendingMut.mutate({ id: c.id, data: { pending_charges: next } });
+                                } else {
+                                  setEditingPending(null);
+                                }
+                              }}
                               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
                             />
                           </span>
                         ) : (
                           <button
                             className="hover:underline"
-                            onClick={() => { setEditingPending(c.id); setPendingValue(String(pendingEffective)); }}
+                            onClick={() => { setEditingPending(c.id); setPendingValue(String(parseFloat(String(c.pending_charges)) || 0)); }}
                           >
                             Pending: {maskIfHidden(balancesHidden, fmt(pendingEffective))} ✎
                           </button>
