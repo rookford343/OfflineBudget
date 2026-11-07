@@ -13,6 +13,11 @@ When one of these fails, route the figure through the shared layer (see the
 provenance table in docs/architecture.md). Allowlist it only when the code is
 presentational (grouping or formatting figures the shared layer already
 produced) or writes a stored value, and say why on the entry.
+
+The scan covers bare `sum(...)` and SQL `func.sum(...)` / `sa.func.sum(...)`.
+Known evasions it cannot see: accumulating through a temp variable
+(`x = row.amount; total += x`), `functools.reduce`, `getattr(row, "amount")`,
+and `Decimal` arithmetic spread across statements. Review catches those.
 """
 import ast
 from pathlib import Path
@@ -40,6 +45,7 @@ SHARED_LAYER = {
     "services/plaid_sync_service.py": "writes synced balances and pending charges",
     "services/import_service.py": "writes imported balances",
     "services/planned_auto_settle.py": "settles a one-off against a real charge",
+    "services/statement_reconcile.py": "reconciliation domain: matches a statement's credits to synced card rows, not a headline figure",
 }
 
 # The few other places that touch these attributes, one function at a time, each with a reason.
@@ -54,6 +60,7 @@ PRESENTATIONAL_OR_WRITER = {
     "routers/spending.py:spending_yearly_trends": "buckets real_spend verdicts by month",
     "routers/spending.py:spending_rolling_monthly": "buckets real_spend verdicts by month",
     "routers/spending.py:tax_summary": "total line of the tax export",
+    "routers/spending.py:tax_estimate": "tax domain: sums the year's deductible transactions as an input to estimate_taxes",
     "routers/forecast.py:get_monthly_summary": "opening balance read off a forecast day (custom range)",
     "services/explain.py:children_consistent": "checks an explanation's own arithmetic",
     "services/explain.py:replay": "replays an explanation's own rows",
@@ -88,13 +95,22 @@ def _has_money_attr(node: ast.AST) -> bool:
     return any(isinstance(n, ast.Attribute) and n.attr in MONEY_ATTRS for n in ast.walk(node))
 
 
+def _is_sum(func: ast.expr) -> bool:
+    """`sum`, `func.sum` or `sa.func.sum` (a SQL aggregate)."""
+    if isinstance(func, ast.Name):
+        return func.id == "sum"
+    return (isinstance(func, ast.Attribute) and func.attr == "sum"
+            and (isinstance(func.value, ast.Name) and func.value.id == "func"
+                 or isinstance(func.value, ast.Attribute) and func.value.attr == "func"))
+
+
 def find_violations(source: str) -> list[tuple[str, int, str]]:
     """(top-level function or class, line, check) for each violation in `source`."""
     found = []
     for top in ast.parse(source).body:
         name = getattr(top, "name", "<module>")
         for node in ast.walk(top):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "sum"
+            if (isinstance(node, ast.Call) and _is_sum(node.func)
                     and any(_has_money_attr(a) for a in node.args)):
                 found.append((name, node.lineno, "sum"))
             elif (isinstance(node, ast.AugAssign) and isinstance(node.op, (ast.Add, ast.Sub))
@@ -109,8 +125,8 @@ def find_violations(source: str) -> list[tuple[str, int, str]]:
 def _scan() -> list[tuple[str, str, int, str]]:
     out = []
     for folder in SCANNED:
-        for path in sorted((BACKEND / folder).glob("*.py")):
-            rel = f"{folder}/{path.name}"
+        for path in sorted((BACKEND / folder).rglob("*.py")):
+            rel = path.relative_to(BACKEND).as_posix()
             for func, line, check in find_violations(path.read_text()):
                 out.append((rel, func, line, check))
     return out
@@ -158,6 +174,9 @@ def test_allowlist_has_no_stale_entries():
     ("def f(rows):\n    total = 0\n    for r in rows:\n        total += r.amount\n    return total\n", "augmented"),
     ("def f(a, b):\n    a.current_balance -= b.balance_due\n", "augmented"),
     ("def f(card):\n    return card.pending_charges\n", "pending_read"),
+    ("def f(db):\n    return db.query(func.sum(Transaction.amount)).scalar()\n", "sum"),
+    ("def f(db):\n    return db.query(sa.func.sum(-Card.current_balance)).scalar()\n", "sum"),
+    ("def f(db):\n    return db.query(func.coalesce(func.sum(T.amount), 0)).scalar()\n", "sum"),
 ])
 def test_the_scan_catches_what_it_claims_to(source, check):
     assert [c for _, _, c in find_violations(source)] == [check]

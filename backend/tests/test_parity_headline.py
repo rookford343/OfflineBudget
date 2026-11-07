@@ -21,6 +21,7 @@ from backend.dependencies import get_current_user, get_db
 from backend.routers import forecast as forecast_router_module
 from backend.routers import recurring as recurring_router_module
 from backend.routers import budget as budget_router_module
+from backend.routers import exports as exports_router_module
 from backend.routers import spending as spending_router_module
 from backend.services import budget_snapshot
 from backend.services.budget_snapshot import compute_budget_snapshot
@@ -204,9 +205,11 @@ def test_each_cards_next_payment_agrees_across_forecast_explain_and_model(db_ses
 
 
 def _spending_fixture(db):
-    """October 2026 spending, all in its last week. Not spending: a card
+    """October 2026 spending, nearly all in its last week (one earlier row, Oct 10,
+    sits outside the digest's trailing 7 days). Not spending: a card
     autopay, a transfer to savings and a paycheck. Netted: a checking refund
-    and a card refund. Spend: 120 + 60 + (40 - 15) + (80 - 15) = 270."""
+    and a card refund. Spend: 35 (Oct 10) + 120 + 60 + (40 - 15) + (80 - 15) = 305,
+    of which 270 falls in the last week."""
     user = models.User(username="parityspend", hashed_password="x", display_name="PS")
     db.add(user)
     db.flush()
@@ -233,6 +236,7 @@ def _spending_fixture(db):
     pay = cat("Pay", models.CategoryType.income)
     savings = cat("Savings", models.CategoryType.savings)
     for amount, desc, category, day in (
+        ("-35.00", "EXAMPLE PHARMACY", groceries, 10),
         ("-120.00", "EXAMPLE GROCER", groceries, 26),
         ("-60.00", "Zelle payment to Example Person", dining, 27),
         ("-40.00", "EXAMPLE HARDWARE", dining, 27),
@@ -261,7 +265,8 @@ def _spending_fixture(db):
 def test_last_months_spend_is_one_number_on_every_surface(db_session, monkeypatch):
     _pin_today(monkeypatch, date(2026, 10, 31))
     user, acct = _spending_fixture(db_session)
-    expected = D("270.00")
+    expected = D("305.00")
+    last_week = D("270.00")  # the same month without the Oct 10 row
     assert spend_totals(db_session, user.id, date(2026, 10, 1), date(2026, 10, 31)).spend == expected
 
     # Month in Review: its debits, and the net cashflow it narrates (income less spend).
@@ -269,7 +274,7 @@ def test_last_months_spend_is_one_number_on_every_surface(db_session, monkeypatc
     assert debits == expected
     assert generate_summary(db_session, user.id, 2026, 10).net_cashflow == credits - expected
 
-    client = _client(db_session, user, spending_router_module, budget_router_module)
+    client = _client(db_session, user, spending_router_module, budget_router_module, exports_router_module)
     sankey = client.get("/spending/sankey/2026/10")
     assert sankey.status_code == 200
     expense_links = [lk for lk in sankey.json()["links"] if lk["target"].startswith("expense:")]
@@ -285,5 +290,16 @@ def test_last_months_spend_is_one_number_on_every_surface(db_session, monkeypatc
     ) == expected
 
     digest = generate_weekly_digest(db_session, user, acct.id)
-    assert digest.total_spent == expected
-    assert sum((c.total for c in digest.categories), D("0")) == expected
+    # The digest is the trailing 7 days: it excludes the Oct 10 row the monthly surfaces include.
+    assert digest.total_spent == last_week
+    assert sum((c.total for c in digest.categories), D("0")) == last_week
+
+    # The budget export is the Budget page: same actual per category, nothing re-summed.
+    export = client.get("/export/budget-report", params={"year": 2026, "month": 10, "format": "json"})
+    assert export.status_code == 200
+    exported = {r["category"]: D(r["actual"]) for r in export.json()}
+    by_page = {r.category_name: r.actual_total for r in compute_overview(db_session, user.id, 2026, 10)
+               if r.actual_total != 0 or r.budgeted != 0}
+    assert exported == by_page
+    # Dining: Zelle 60 + hardware (40 - 15) + cafe card (80 - 15); the transfer and autopay are not spend.
+    assert exported["Dining"] == D("150.00")

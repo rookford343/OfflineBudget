@@ -3,12 +3,9 @@ from __future__ import annotations
 import csv
 import io
 import json
-from calendar import monthrange
 from datetime import date
-from decimal import Decimal
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
 from backend.dependencies import get_db, get_current_user
@@ -80,45 +77,21 @@ def export_budget_report(
     user: models.User = Depends(get_current_user),
 ):
     """Export monthly budget vs. actuals to CSV or JSON."""
-    start = date(year, month, 1)
-    end = date(year, month, monthrange(year, month)[1])
-
-    allocs = {
-        a.category_id: a.budgeted_amount
-        for a in db.query(models.BudgetAllocation).filter(
-            models.BudgetAllocation.user_id == user.id,
-            models.BudgetAllocation.year == year,
-            models.BudgetAllocation.month == month,
-        ).all()
-    }
-
-    actuals: dict[int, Decimal] = dict(
-        db.query(models.Transaction.category_id, func.sum(models.Transaction.amount))
-        .filter(
-            models.Transaction.user_id == user.id,
-            models.Transaction.date >= start,
-            models.Transaction.date <= end,
-            models.Transaction.category_id.isnot(None),
-        )
-        .group_by(models.Transaction.category_id)
-        .all()
-    )
-
-    cats = {c.id: c for c in db.query(models.Category).filter(models.Category.user_id == user.id).all()}
-    rows = []
-    for cat_id in sorted(set(allocs) | set(actuals)):
-        cat = cats.get(cat_id)
-        if not cat:
-            continue
-        budgeted = allocs.get(cat_id, Decimal("0"))
-        actual = actuals.get(cat_id, Decimal("0"))
-        rows.append({
-            "category": cat.name,
-            "type": cat.type.value,
-            "budgeted": str(budgeted),
-            "actual": str(actual),
-            "variance": str(budgeted - actual),
-        })
+    # The same rows the Budget page shows: budgets plus real spending from the
+    # one real-spending rule (cards included; transfers and card payments
+    # excluded; refunds netted). The export never sums transactions itself.
+    from backend.services.budget_calculator import compute_overview
+    rows = [
+        {
+            "category": r.category_name,
+            "type": r.category_type,
+            "budgeted": str(r.budgeted),
+            "actual": str(r.actual_total),
+            "variance": str(r.variance),
+        }
+        for r in compute_overview(db, user.id, year, month)
+        if r.budgeted != 0 or r.actual_total != 0
+    ]
 
     filename = f"budget-{year}-{month:02d}"
 

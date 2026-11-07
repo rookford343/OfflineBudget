@@ -62,7 +62,7 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Real spending (rule) | Whether a row is spend, income, a transfer or a card payment, and its signed amount: card payments and own-account transfers are neither, savings-category rows are transfers, refunds net as negative spend, an income-category debit reduces income | `classify_checking`, `classify_card`, `classified_rows`, `spend_totals` (services/real_spend.py); description checks `is_card_payment`, `looks_like_internal_transfer` (services/spending_helpers.py), `card_matches_description`, `looks_like_card_autopay` (services/card_matching.py) | everything below |
 | Category / merchant totals | Real spending per category or merchant over a range | `category_totals_for_range` (= `spend_totals().by_category`), `merchant_totals` (services/spending_helpers.py, both over services/real_spend.py); `spending_breakdown` (services/budget_snapshot.py) | Weekly digest, Budget overview, snapshot explain |
 | Spending page charts | Monthly, line items, by category, by card, yearly, rolling, Sankey, merchants | `spending_monthly`, `spending_line_items`, `spending_monthly_by_category`, `spending_by_category`, `spending_by_card`, `spending_yearly_trends`, `spending_rolling_monthly`, `spending_sankey`, `spending_by_merchant` (routers/spending.py), all reading `_spend_rows` / `classified_rows` (services/real_spend.py) | Spending page |
-| Budget actuals | Real spend per budget line, split checking / cards; savings-type lines show money moved to savings | `compute_overview` (services/budget_calculator.py) over `classified_rows` and `savings_moved_rows`; `merchant_totals` use in routers/budget.py | Budget page |
+| Budget actuals | Real spend per budget line, split checking / cards; savings-type lines show money moved to savings | `compute_overview` (services/budget_calculator.py) over `classified_rows` and `savings_moved_rows`; `merchant_totals` use in routers/budget.py; `/export/budget-report` (routers/exports.py) reads `compute_overview` | Budget page, budget export |
 | Monthly summary / Month in Review | Category totals, debits, credits, month-over-month change, net cashflow | `_month_spending_by_category` (= `spend_totals`), `generate_summary` (services/summary_generator.py) | Monthly email, Month in Review, `/spending/monthly-summary` |
 | Weekly digest | Trailing 7 days of spending plus forward balance risk | `generate_weekly_digest` (services/summary_generator.py) | Weekly email, `/spending/weekly-digest` |
 | Daily email | Headline figures, cards, upcoming, stale-connection notes | `generate_daily_summary` (services/summary_generator.py) | Daily email |
@@ -265,7 +265,8 @@ Two tests keep the layer from eroding; both run in the normal suite.
   document: the shared-layer modules are `month_base`, `real_spend`, `pending`, `forecast_walk`,
   `forecast_engine`, `card_payment_model`, `cushion`, `calc_version`, `tax_service` (tax estimates),
   and the writers `bank_sync_service`, `plaid_sync_service`, `import_service` and
-  `planned_auto_settle`.
+  `planned_auto_settle`, plus `statement_reconcile` (matches a statement's credits to synced card
+  rows, not a headline figure). The scan also covers SQL `func.sum(...)`.
 
 ## Decisions log
 
