@@ -200,6 +200,10 @@ def _send_daily_summaries_locked() -> None:
                     since = since_last_email(db, user, readings, as_of=today)
                 except Exception:  # noqa: BLE001 -- history must never stop the email
                     logger.exception("Daily summary: since-last-email lines failed for %s", user.username)
+                    try:
+                        db.rollback()  # a DB-level error must not break the session for the report
+                    except Exception:  # noqa: BLE001
+                        logger.exception("Daily summary: rollback after history failure failed")
                     readings, since = None, {}
                 html_body, text_body = generate_daily_summary(
                     db, user, weekly_digest=weekly_digest, since_lines=since,

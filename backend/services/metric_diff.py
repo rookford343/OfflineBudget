@@ -422,10 +422,13 @@ def since_last_email(
         prev = before.get(reading.key)
         if prev is None:
             continue
-        delta = reading.value - Decimal(str(prev.value))
-        if abs(delta) < CENT:
-            continue
-        cur = _transient_reading(user.id, reading, sources_json, as_of, taken_at)
-        causes = _causes_or_fallback(db, user.id, reading.key, prev, cur)
-        out[reading.key] = _fit(summarize("", delta, "since last email", causes, max_items=2))
+        try:
+            delta = reading.value - Decimal(str(prev.value))
+            if abs(delta) < CENT:
+                continue
+            cur = _transient_reading(user.id, reading, sources_json, as_of, taken_at)
+            causes = _causes_or_fallback(db, user.id, reading.key, prev, cur)
+            out[reading.key] = _fit(summarize("", delta, "since last email", causes, max_items=2))
+        except Exception:  # noqa: BLE001 -- one bad stored reading drops only its own line
+            logger.exception("Change history: no since-last-email line for %s", reading.key)
     return out

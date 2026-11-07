@@ -23,6 +23,8 @@ now refuses or neutralizes it.
   - bank-sync credential audit: /bank-sync/connect and /bank-sync/plaid/exchange
     request bodies (SimpleFIN setup_token, Plaid public_token) are never
     captured into audit_logs.body_summary, even when body capture works.
+  - daily email since-lines: a pending merchant named like markup is HTML-escaped
+    in the email body, never emitted as a tag.
 """
 import logging
 from decimal import Decimal
@@ -697,3 +699,28 @@ def test_history_causes_never_name_another_users_rows(db_session):
     assert secret not in changes[0].summary
     assert all(secret not in c.text for c in changes[0].causes)
     assert [c.text for c in changes[0].causes] == ["Base −$100.00"]  # the receipt line only
+
+
+def test_since_line_escapes_a_markup_merchant_name(db_session, monkeypatch):
+    """A bank-supplied merchant name reaches the email through the since line;
+    it must be escaped, not rendered."""
+    from datetime import datetime
+    from backend import models
+    from backend.services.metric_diff import since_last_email
+    from backend.services.metric_history import collect_headline_metrics
+    from backend.services.summary_generator import generate_daily_summary
+    from backend.tests.test_email_since_lines import _set_previous, _world, TODAY
+
+    user, _ = _world(db_session, monkeypatch)
+    visa = db_session.query(models.CreditCard).filter_by(name="Test Visa").one()
+    db_session.add(models.CardPendingTransaction(
+        user_id=user.id, card_id=visa.id, external_id="x-1", date=TODAY, amount=Decimal("10.00"),
+        merchant="<b>&Co", synced_at=datetime(2026, 11, 2, 8, 0),
+    ))
+    db_session.commit()
+    _set_previous(db_session, user, "safety_margin_week", Decimal("-400.00"))
+    since = since_last_email(db_session, user, collect_headline_metrics(db_session, user, TODAY), as_of=TODAY)
+    assert "<b>&Co" in since["safety_margin_week"]
+    html, _text = generate_daily_summary(db_session, user, since_lines=since)
+    assert "&lt;b&gt;&amp;Co" in html
+    assert "<b>&Co" not in html

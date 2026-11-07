@@ -78,9 +78,37 @@ def test_no_line_for_an_unmoved_figure(db_session, monkeypatch):
     _add_pending(db_session, user, 1)
     _set_previous(db_session, user, "safety_margin_week", D("-400.00"))
     since = _since(db_session, user)
-    assert "safety_margin_week" in since and "leftover" not in since
-    html, _text = generate_daily_summary(db_session, user, since_lines={"safety_margin_week": "X-LINE"})
-    assert html.count("X-LINE") == 1
+    assert "safety_margin_week" in since
+    # Card pending charges never touch the checking balance: a real unmoved figure.
+    assert "checking_balance" not in since
+
+
+def test_a_cent_is_a_move_and_no_change_is_not(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    _add_pending(db_session, user, 1)
+    _set_previous(db_session, user, "checking_balance", D("0.01"))
+    assert _since(db_session, user)["checking_balance"].startswith("+$0.01 since last email")
+    _set_previous(db_session, user, "checking_balance", D("0.00"))
+    assert "checking_balance" not in _since(db_session, user)
+
+
+def test_one_corrupt_reading_drops_only_its_own_line(db_session, monkeypatch):
+    from backend.services import metric_diff
+    user, _ = _world(db_session, monkeypatch)
+    _add_pending(db_session, user, 1)
+    _set_previous(db_session, user, "safety_margin_week", D("-400.00"))
+    _set_previous(db_session, user, "spendable_week", D("-25.00"))
+    real = metric_diff._causes_or_fallback
+
+    def flaky(db, user_id, key, prev, cur):
+        if key == "safety_margin_week":
+            raise RuntimeError("corrupt reading")
+        return real(db, user_id, key, prev, cur)
+
+    monkeypatch.setattr(metric_diff, "_causes_or_fallback", flaky)
+    since = _since(db_session, user)
+    assert "safety_margin_week" not in since
+    assert "spendable_week" in since
 
 
 def test_no_since_line_without_a_previous_email(db_session, monkeypatch):
@@ -117,8 +145,84 @@ def test_a_unreadable_older_snapshot_degrades_to_inputs_changed(db_session, monk
 
 
 def test_every_mapped_figure_is_a_real_key():
+    from backend.services import summary_generator as sg
+    assert set(sg.SINCE_KEYS) <= set(metric_history.METRIC_KEYS)
+    assert set(sg.SINCE_KEYS) == {
+        sg.SINCE_SPENDABLE, sg.SINCE_MARGIN, sg.SINCE_NEXT_MONTH, sg.SINCE_QUARTER, sg.SINCE_CHECKING,
+    }
+
+
+def test_fit_cuts_at_a_word_boundary():
+    from backend.services.metric_diff import EMAIL_LINE_MAX, _fit
+    line = " ".join(["word"] * 40)
+    out = _fit(line)
+    assert len(out) <= EMAIL_LINE_MAX and out.endswith("…") and not out.endswith(" …")
+    assert line.startswith(out[:-1]) and out[:-1].endswith("word")
+
+
+def test_fit_cuts_a_line_with_no_spaces():
+    from backend.services.metric_diff import EMAIL_LINE_MAX, _fit
+    out = _fit("x" * 300)
+    assert len(out) == EMAIL_LINE_MAX and out.endswith("…")
+
+
+def test_fit_leaves_exactly_120_characters_alone():
+    from backend.services.metric_diff import _fit
+    line = ("ab " * 40)[:120]
+    assert len(line) == 120 and _fit(line) == line
+    assert _fit(line + "z") != line + "z"
+
+
+# ── Every place a line is printed ────────────────────────────────────────────
+
+def _marked():
     from backend.services.summary_generator import SINCE_KEYS
-    assert set(SINCE_KEYS) <= set(metric_history.METRIC_KEYS)
+    return {k: f"MARK-{k}" for k in SINCE_KEYS}
+
+
+def test_spendable_card_prints_its_line(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    html, text = generate_daily_summary(db_session, user, since_lines=_marked())
+    assert html.index("Spendable this week") < html.index("MARK-spendable_week") < html.index("Safety Margin (this week)")
+    assert text.index("Spendable this week:") < text.index("    MARK-spendable_week\n") < text.index("Safety margin (this week)")
+
+
+def test_safety_margin_card_prints_its_line(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    html, text = generate_daily_summary(db_session, user, since_lines=_marked())
+    assert html.index("Safety Margin (this week)") < html.index("MARK-safety_margin_week") < html.index("Lowest")
+    assert text.index("Safety margin (this week)") < text.index("    MARK-safety_margin_week\n") < text.index("Monthly:")
+
+
+def test_each_lowest_balance_row_prints_its_line(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    html, text = generate_daily_summary(db_session, user, since_lines=_marked())
+    for body, nm_row, q_row in ((html, "Lowest next month", "Lowest in the next 3 months"),
+                                (text, "  Lowest next month", "  Lowest in the next 3 months")):
+        assert body.index(nm_row) < body.index("MARK-next_month_minimum") < body.index(q_row)
+        assert body.index(q_row) < body.index("MARK-lookahead_minimum")
+    assert "    MARK-next_month_minimum\n" in text and "    MARK-lookahead_minimum\n" in text
+
+
+def test_lowest_row_lines_by_row_shape():
+    from backend.services.summary_generator import _lowest_row_since
+    both = {"next_month_minimum": "NM", "lookahead_minimum": "Q"}
+    combined = "Lowest next month (December) and in the next 3 months"
+    assert _lowest_row_since("Lowest next month (December)", both) == "NM"
+    assert _lowest_row_since("Lowest in the next 3 months", both) == "Q"
+    assert _lowest_row_since(combined, both) == "NM"
+    assert _lowest_row_since(combined, {"lookahead_minimum": "Q"}) == "Q"
+    assert _lowest_row_since("Lowest next month (December)", {"lookahead_minimum": "Q"}) is None
+    assert _lowest_row_since(combined, {}) is None
+
+
+def test_primary_checking_row_prints_its_line(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    html, text = generate_daily_summary(db_session, user, since_lines=_marked())
+    assert html.index("Checking") < html.index("MARK-checking_balance") < html.index("Upcoming")
+    assert text.index("CHECKING ACCOUNTS") < text.index("    MARK-checking_balance\n") < text.index("UPCOMING BILLS")
+    # Only the primary checking carries it.
+    assert text.count("MARK-checking_balance") == 1
 
 
 # ── The send loop ────────────────────────────────────────────────────────────
