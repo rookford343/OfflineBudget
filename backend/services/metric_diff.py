@@ -11,6 +11,9 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from functools import reduce
+from itertools import combinations
+from operator import add
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -179,6 +182,39 @@ def _unmatched(pending: list[_Item], posted: list[_Item]) -> list[_Item]:
     return [p for p in pending if not _take_match(posted, p)]
 
 
+_SPLIT_MAX_PARTS = 4
+_SPLIT_MAX_ROWS = 12
+
+
+def _total(rows: list[_Item]) -> Decimal:
+    return reduce(add, (row.amount for row in rows), Decimal("0"))
+
+
+def _take_split(posted: list[_Item], pending: _Item) -> bool:
+    """Remove 2-4 posted rows on the same card/account that sum exactly to `pending`.
+
+    A merchant sometimes posts one pending charge as several rows. Smallest subset
+    wins; among equal sizes the earliest rows (list order). Skipped when the owner
+    has more than _SPLIT_MAX_ROWS candidates, to cap the search.
+    """
+    idx = [i for i, row in enumerate(posted) if row.owner_id == pending.owner_id]
+    if len(idx) > _SPLIT_MAX_ROWS:
+        return False
+    for size in range(2, _SPLIT_MAX_PARTS + 1):
+        for combo in combinations(idx, size):
+            if _total([posted[i] for i in combo]) == pending.amount:
+                for i in reversed(combo):
+                    del posted[i]
+                return True
+    return False
+
+
+def _unmatched_gone(pending: list[_Item], posted: list[_Item]) -> list[_Item]:
+    """Gone pending: exact one-to-one first for all, then split matching on the rest."""
+    left = _unmatched(pending, posted)
+    return [p for p in left if not _take_split(posted, p)]
+
+
 def _group(kind_text: str, owner: str, items: list[_Item], *, plural: str, singular: str) -> Cause:
     noun = singular if len(items) == 1 else plural
     head = kind_text.format(owner=owner, noun=noun)
@@ -223,7 +259,7 @@ def _source_causes(
         for r in posted_rows
     ]
     new_pending = _unmatched(new_pending, posted)
-    gone_pending = _unmatched(gone_pending, posted)
+    gone_pending = _unmatched_gone(gone_pending, posted)
     causes += _grouped_causes(
         new_pending, gone_pending, posted, lambda oid: _feeds_card(metric_key, oid),
         pending_noun=("charge", "charges"), posted_noun=("transaction", "transactions"),
@@ -247,7 +283,7 @@ def _source_causes(
         ).order_by(models.Transaction.id).all()
         c_posted = [_Item(account.id, account.name, r.description, Decimal(str(r.amount))) for r in rows]
     c_new = _unmatched(c_new, c_posted)
-    c_gone = _unmatched(c_gone, c_posted)
+    c_gone = _unmatched_gone(c_gone, c_posted)
     causes += _grouped_causes(
         c_new, c_gone, c_posted,
         lambda _oid: _feeds_checking_pending(metric_key),

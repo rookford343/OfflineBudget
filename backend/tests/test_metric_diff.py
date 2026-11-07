@@ -376,3 +376,97 @@ def test_no_causes_reads_inputs_changed(db_session):
     user, _chk, _v, _m = _world(db_session)
     prev, cur = _pair(db_session, user, "left_to_spend")
     assert [c.text for c in _causes(db_session, user, "left_to_spend", prev, cur)] == ["inputs changed"]
+
+
+# ── A pending charge that posts as several rows ──────────────────────────────
+
+def _card_rows(db, user, card, *amounts):
+    rows = [
+        models.CreditCardTransaction(card_id=card.id, user_id=user.id, date=date(2026, 11, 2),
+                                     amount=D(a), merchant=f"Split Shop {n}", created_at=BETWEEN)
+        for n, a in enumerate(amounts, 1)
+    ]
+    db.add_all(rows)
+    db.commit()
+
+
+def _card_texts(db, user, prev_pending, cur_pending):
+    prev, cur = _pair(
+        db, user, "left_to_spend",
+        prev_kw={"sources": _sources(card_pending=prev_pending)},
+        cur_kw={"sources": _sources(card_pending=cur_pending)},
+    )
+    return [c.text for c in _causes(db, user, "left_to_spend", prev, cur)]
+
+
+def test_split_posting_is_not_reported_twice(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    _card_rows(db_session, user, visa, "25.00", "35.00")
+    texts = _card_texts(db_session, user, [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")], [])
+    assert texts == ["inputs changed"]
+
+
+def test_split_leaves_remainder_as_new_transaction(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    _card_rows(db_session, user, visa, "25.00", "35.00", "10.00")
+    texts = _card_texts(db_session, user, [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")], [])
+    assert texts == ["new Visa transaction: Split Shop 3 $10.00"]
+
+
+def test_exact_match_beats_split(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    _card_rows(db_session, user, visa, "30.00", "20.00")
+    texts = _card_texts(db_session, user, [
+        _pend(visa.id, "Visa", "p1", "Small Store", "30.00"),
+        _pend(visa.id, "Visa", "p2", "Large Store", "50.00"),
+    ], [])
+    assert texts == [
+        "pending Visa charge dropped: Large Store $50.00",
+        "new Visa transaction: Split Shop 2 $20.00",
+    ]
+
+
+def test_new_pending_is_never_split_matched(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    _card_rows(db_session, user, visa, "25.00", "35.00")
+    texts = _card_texts(db_session, user, [], [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")])
+    assert texts == [
+        "new pending Visa charge: Big Store $60.00",
+        "new Visa transactions: Split Shop 1 $25.00, Split Shop 2 $35.00",
+    ]
+
+
+def test_split_rows_on_another_card_do_not_pair(db_session):
+    user, _chk, visa, mc = _world(db_session)
+    _card_rows(db_session, user, mc, "25.00", "35.00")
+    texts = _card_texts(db_session, user, [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")], [])
+    assert texts == [
+        "pending Visa charge dropped: Big Store $60.00",
+        "new Mastercard transactions: Split Shop 1 $25.00, Split Shop 2 $35.00",
+    ]
+
+
+def test_split_search_is_capped_per_owner(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    _card_rows(db_session, user, visa, "25.00", "35.00", *["1.00"] * 11)
+    texts = _card_texts(db_session, user, [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")], [])
+    assert texts[0] == "pending Visa charge dropped: Big Store $60.00"
+
+
+def test_split_posting_on_checking_is_not_reported_twice(db_session):
+    user, chk, _v, _m = _world(db_session)
+    pending = {"account_id": chk.id, "account": "Example Checking", "external_id": "c1",
+               "description": "Utility Co", "amount": "-60.00"}
+    db_session.add_all([
+        models.Transaction(user_id=user.id, account_id=chk.id, date=date(2026, 11, 2), amount=D(a),
+                           description=f"Utility Part {n}", is_actual=True, created_at=BETWEEN)
+        for n, a in enumerate(("-25.00", "-35.00"), 1)
+    ])
+    db_session.commit()
+    prev, cur = _pair(
+        db_session, user, "checking_balance",
+        prev_kw={"sources": _sources(checking_pending=[pending])},
+        cur_kw={"sources": _sources()},
+    )
+    assert [c.text for c in _causes(db_session, user, "checking_balance", prev, cur)] == [
+        "inputs changed"]
