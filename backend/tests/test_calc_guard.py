@@ -53,7 +53,6 @@ SHARED_LAYER = {
     "services/recurring_math.py": "a recurring item's monthly equivalent and an override's variance",
     "services/forecast_baseline.py": "the saved start-of-month forecast and Balance Flow's headline figures",
     "services/savings_series.py": "combined savings balance per day for the Forecast chart",
-    "services/metric_history.py": "change history: collects every headline figure and receipt, sums a pending list for the checking-balance receipt",
     "services/calc_version.py": "the calculation version",
     "services/tax_service.py": "tax estimates, their own domain",
     "services/bank_sync_service.py": "writes synced balances and pending charges",

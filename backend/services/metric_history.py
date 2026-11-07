@@ -22,7 +22,7 @@ from backend.services.budget_snapshot import _cc_basis_note, compute_budget_snap
 from backend.services.card_payment_model import card_payments
 from backend.services.explain import ExplainBuilder
 from backend.services.month_summary import build_month_summary
-from backend.services.pending import checking_pending_rows
+from backend.services.pending import checking_balance_with_pending, checking_pending_rows
 from backend.services.primary_account import primary_checking
 from backend.services.real_spend import active_cards
 from backend.schemas import ExplainChild
@@ -51,17 +51,14 @@ def _checking_balance_reading(
     db: Session, account: models.Account, as_of: date,
 ) -> MetricReadingData:
     posted = Decimal(str(account.current_balance))
-    rows = checking_pending_rows(db, account, as_of)
+    value = checking_balance_with_pending(db, account, as_of)
     builder = ExplainBuilder("Checking balance").start("Posted balance", posted)
-    pending = ZERO
-    if rows:
+    if value != posted:
         children = [
-            ExplainChild(label=r.description, amount=Decimal(str(r.amount))) for r in rows
+            ExplainChild(label=r.description, amount=Decimal(str(r.amount)))
+            for r in checking_pending_rows(db, account, as_of)
         ]
-        pending = sum((c.amount for c in children), ZERO)
-        if pending:
-            builder.add("Pending", pending, children=children)
-    value = posted + pending
+        builder.add("Pending", value - posted, children=children)
     return MetricReadingData(
         "checking_balance", "Checking balance", value, builder.build(value),
     )

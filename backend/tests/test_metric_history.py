@@ -60,6 +60,10 @@ def test_readings_equal_their_surfaces(db_session, monkeypatch):
     assert got["left_to_spend"].value == snap.left_to_spend
     assert got["spendable_week"].value == snap.left_to_spend_weekly
     assert got["spendable_today"].value == snap.spendable_today
+    # Each pair differs, so a swapped field would fail above.
+    for a, b in (("spendable_week", "spendable_today"), ("safety_margin_week", "safety_margin_today"),
+                 ("lookahead_minimum", "next_month_minimum")):
+        assert got[a].value != got[b].value, (a, b)
     assert got["safety_margin"].value == snap.safety_margin
     assert got["safety_margin_week"].value == snap.safety_margin_weekly
     assert got["safety_margin_today"].value == snap.safety_margin_today
@@ -161,3 +165,46 @@ def test_next_month_minimum_explain_is_static_and_replays(db_session, monkeypatc
     assert replay(ex) == snap.next_month_minimum
     assert ex.rows[0].note.startswith("Lowest projected checking balance next month")
     assert "$" not in ex.rows[0].note
+
+
+def test_checking_balance_with_live_pending_rows(db_session, monkeypatch):
+    _pin_today(monkeypatch, TODAY)
+    user, checking = _headline_fixture(db_session)
+    conn = models.BankConnection(
+        user_id=user.id, provider="plaid", access_url_encrypted="tok", plaid_item_id="item-1",
+    )
+    db_session.add(conn)
+    db_session.flush()
+    db_session.add(models.BankConnectionAccountLink(
+        connection_id=conn.id, simplefin_account_id="a-1", simplefin_account_name="Checking",
+        local_account_id=checking.id, is_active=True,
+    ))
+    db_session.add_all([
+        models.AccountPendingTransaction(
+            user_id=user.id, account_id=checking.id, external_id="c-1", date=TODAY,
+            amount=D("40.00"), description="Example Deposit", synced_at=datetime(2026, 11, 2, 8, 0),
+        ),
+        models.AccountPendingTransaction(
+            user_id=user.id, account_id=checking.id, external_id="d-1", date=TODAY,
+            amount=D("-15.50"), description="Example Market", synced_at=datetime(2026, 11, 2, 8, 0),
+        ),
+    ])
+    db_session.commit()
+
+    reading = _by_key(collect_headline_metrics(db_session, user, TODAY))["checking_balance"]
+    assert reading.value == checking_balance_with_pending(db_session, checking, TODAY)
+    assert reading.value == D("3000.00") + D("24.50")
+    assert replay(reading.explain) == reading.value
+    pending_row = reading.explain.rows[1]
+    assert pending_row.label == "Pending"
+    assert pending_row.amount == D("24.50")
+    assert {(c.label, c.amount) for c in pending_row.children} == {
+        ("Example Deposit", D("40.00")), ("Example Market", D("-15.50")),
+    }
+    sources = collect_sources(db_session, user, TODAY)
+    assert sorted(sources["checking_pending"], key=lambda e: e["external_id"]) == [
+        {"account_id": checking.id, "account": checking.name, "external_id": "c-1",
+         "description": "Example Deposit", "amount": "40.00"},
+        {"account_id": checking.id, "account": checking.name, "external_id": "d-1",
+         "description": "Example Market", "amount": "-15.50"},
+    ]
