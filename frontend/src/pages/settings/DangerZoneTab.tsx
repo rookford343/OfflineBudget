@@ -54,7 +54,7 @@ export default function DangerZoneTab() {
           <button onClick={() => setShowClearHistory(true)} className="text-sm text-red-600 hover:underline">
             Clear change history…
           </button>
-          <p className="text-xs text-gray-400">Deletes the recorded readings behind the "what changed" views. Your figures are not affected; history starts again at the next refresh.</p>
+          <p className="text-xs text-gray-400">Deletes the recorded readings behind the "what changed" views. Your figures are not affected; history starts again at the next bank sync or daily email.</p>
           <ConfirmDialog
             open={showClearHistory}
             onOpenChange={setShowClearHistory}

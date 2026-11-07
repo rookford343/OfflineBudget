@@ -53,18 +53,21 @@ forecasts, and your user record.
 
 **Wish List:** wishes, prices, trade-in values and payment options you enter. Stored only in the local database.
 
-**Change history:** at each bank sync and each emailed report, the app stores
-every headline figure (Left to Spend, Safety Margin, and the rest), the
-calculation steps behind it, and the names and amounts of the pending charges
-at that moment, so a later screen can explain why a figure moved. Snapshots
-older than 13 months are deleted automatically. It lives only in the local
-database and never leaves the machine.
+**Change history:** the app stores every headline figure (Left to Spend,
+Safety Margin, and the rest), the calculation steps behind it, and the names
+and amounts of the pending charges at that moment, so a later screen can
+explain why a figure moved. This covers pending card merchants and amounts,
+and also the descriptions and amounts of pending checking-account charges.
+A reading is recorded at each bank sync, after each daily email is sent
+successfully, on demand, and after an app update that changes a calculation.
+Snapshots older than 13 months are deleted automatically. It lives only in
+the local database and never leaves the machine.
 
 **Pending card charges:** if you connect a bank, the charges your card issuer
 currently lists as pending (date, merchant, amount). Each sync replaces the
 whole list, so a charge is deleted from it as soon as it posts. The list is a
 live snapshot, except that change history (above) keeps the names and amounts
-of pending charges for 13 months.
+of pending card and checking charges for 13 months.
 
 **Encrypted at rest** (Fernet, keyed by `APP_ENCRYPTION_KEY`):
 
