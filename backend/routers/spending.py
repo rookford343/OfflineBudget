@@ -13,7 +13,7 @@ from backend.services.real_spend import ClassifiedRow, classified_rows
 from backend.services.summary_generator import generate_weekly_digest
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.recent_activity import get_recent_activity
-from backend.services.spending_figures import direct_actual, mean_total, monthly_averages
+from backend.services.spending_figures import direct_actual, discretionary_left, mean_total, merge_breakdowns, monthly_averages
 
 # Bands on the stacked monthly chart before the tail collapses into "Other".
 _MAX_STACK_CATEGORIES = 8
@@ -283,12 +283,24 @@ def spending_by_category(
     # spend by its own flag, parent be damned.
     disc_actual = Decimal("0")
     disc_budgeted = Decimal("0")
+    disc_ids: list[int] = []
     for cat in categories:
         if not getattr(cat, "is_discretionary", False):
             continue
         own_spend = sum(sub_breakdown.get(cat.id, {}).values(), Decimal("0"))
         disc_actual += own_spend
         disc_budgeted += row_budget.get(cat.id, Decimal("0"))
+        disc_ids.append(cat.id)
+
+    # The same split by source, over the same categories as the headlines:
+    # every category's own spend, filed by its own discretionary flag.
+    counted_ids = [t.category_id for t in result] + [
+        ch.category_id for t in result for ch in t.children
+    ]
+    fixed_ids = [i for i in counted_ids if i not in set(disc_ids)]
+    disc_by_source = merge_breakdowns(sub_breakdown.get(i, {}) for i in disc_ids)
+    fixed_by_source = merge_breakdowns(sub_breakdown.get(i, {}) for i in fixed_ids)
+    total_by_source = merge_breakdowns([disc_by_source, fixed_by_source])
 
     return schemas.SpendingOverview(
         start_date=start,
@@ -300,7 +312,10 @@ def spending_by_category(
         discretionary_actual=disc_actual,
         discretionary_budgeted=disc_budgeted,
         fixed_actual=total_actual - disc_actual,
-        discretionary_left=disc_budgeted - disc_actual,
+        discretionary_left=discretionary_left(disc_budgeted, disc_actual),
+        discretionary_by_source=disc_by_source,
+        fixed_by_source=fixed_by_source,
+        total_by_source=total_by_source,
     )
 
 

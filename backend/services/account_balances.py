@@ -13,7 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
-from backend.services.pending import checking_pending_rows
+from backend.services.pending import checking_balance_with_pending, checking_pending_rows
 
 ZERO = Decimal("0")
 # A start-of-month balance closer to zero than this gives no meaningful percentage.
@@ -40,8 +40,10 @@ def account_balances(db: Session, user_id: int, today: date) -> schemas.AccountB
     for account in accounts:
         posted = Decimal(str(account.current_balance))
         rows = checking_pending_rows(db, account, today)
-        pending_total = sum((Decimal(str(r.amount)) for r in rows), ZERO)
-        after = posted + pending_total
+        # One recipe for the after-pending balance (services/pending.py); the
+        # pending part is what it adds to the posted balance.
+        after = checking_balance_with_pending(db, account, today)
+        pending_total = after - posted
         posted_flow = _posted_month_flow(db, account, month_start)
         # Start of month = posted balance before this month's posted flow; the
         # pending flow is inside `after` and is not in the start.
@@ -73,8 +75,8 @@ def running_balance(
     Pending rows walk forward from the posted balance, oldest first, so the
     last one ends at `after_pending`. Posted rows walk backward from the posted
     balance, newest first: a posted row's figure is the balance right after it
-    posted. Posted rows are every row from `start` to `today`, as the page's
-    list has always counted them.
+    posted. Posted rows are every actual row (the same rows as the month's posted
+    flow) from `start` to `today`.
     """
     account = db.query(models.Account).filter(
         models.Account.id == account_id, models.Account.user_id == user_id,
@@ -89,6 +91,7 @@ def running_balance(
     txns = db.query(models.Transaction).filter(
         models.Transaction.user_id == user_id,
         models.Transaction.account_id == account_id,
+        models.Transaction.is_actual == True,
         models.Transaction.date >= start,
         models.Transaction.date <= today,
     ).order_by(models.Transaction.date.desc(), models.Transaction.id.desc()).all()

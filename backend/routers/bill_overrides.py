@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
+from backend.services.recurring_math import bill_variance
 
 router = APIRouter(prefix="/bill-overrides", tags=["bill-overrides"])
 
@@ -29,7 +30,7 @@ def _to_out(o: models.BillAmountOverride) -> schemas.BillAmountOverrideOut:
         due_date=o.due_date,
         actual_amount=o.actual_amount,
         projected_amount=projected,
-        variance=o.actual_amount - projected,
+        variance=bill_variance(o.actual_amount, projected),
         notes=o.notes,
     )
 

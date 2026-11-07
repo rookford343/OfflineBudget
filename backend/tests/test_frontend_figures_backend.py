@@ -392,3 +392,58 @@ def test_balance_flow_404_for_another_users_account(db_session, monkeypatch):
     resp = _client(db_session, other, forecast_router_module).get(
         "/forecast/balance-flow", params={"account_id": acct.id})
     assert resp.status_code == 404
+
+
+# ── Source splits and combined savings (Plan 2 fix wave) ──────────────────────
+
+def test_overview_splits_spend_by_source_and_the_parts_match_the_headlines(db_session):
+    user, acct = _spend_user(db_session)
+    card = models.CreditCard(user_id=user.id, name="Visa", credit_limit=D("5000"),
+                             statement_day=28, due_day=15)
+    db_session.add(card)
+    db_session.flush()
+    fun = _cat(db_session, user, "Fun")
+    fun.is_discretionary = True
+    rent = _cat(db_session, user, "Housing")
+    _spend(db_session, user, acct, fun, "-40.00", date(2026, 3, 5))
+    _spend(db_session, user, acct, rent, "-100.00", date(2026, 3, 6))
+    db_session.add(models.CreditCardTransaction(
+        card_id=card.id, user_id=user.id, date=date(2026, 3, 7), amount=D("25.00"),
+        merchant="Shop", category_id=fun.id))
+    db_session.commit()
+    body = _client(db_session, user, spending_router_module).get(
+        "/spending/by-category", params={"start": "2026-03-01", "end": "2026-03-31"}).json()
+
+    def split(key):
+        return {k: D(str(v)) for k, v in body[key].items()}
+
+    assert split("discretionary_by_source") == {"Checking": D("40.00"), "Visa": D("25.00")}
+    assert split("fixed_by_source") == {"Checking": D("100.00")}
+    assert split("total_by_source") == {"Checking": D("140.00"), "Visa": D("25.00")}
+    assert sum(split("discretionary_by_source").values()) == D(str(body["discretionary_actual"]))
+    assert sum(split("fixed_by_source").values()) == D(str(body["fixed_actual"]))
+    assert sum(split("total_by_source").values()) == D(str(body["total_actual"]))
+
+
+def test_combined_savings_adds_active_savings_accounts_per_day(db_session, monkeypatch):
+    from backend.routers import forecast as forecast_router_module
+
+    _freeze_today(monkeypatch, TODAY)
+    user, _ = _spend_user(db_session)
+    for name, bal, kind, active in [
+        ("S1", "100.00", models.AccountType.savings, True),
+        ("S2", "250.00", models.AccountType.savings, True),
+        ("Old", "999.00", models.AccountType.savings, False),
+        ("MM", "777.00", models.AccountType.money_market, True),
+    ]:
+        db_session.add(models.Account(user_id=user.id, name=name, type=kind,
+                                      current_balance=D(bal), is_active=active))
+    db_session.commit()
+    c = _client(db_session, user, forecast_router_module)
+    body = c.get("/forecast/combined-savings", params={"year": TODAY.year, "years": 1}).json()
+    by_date = {r["date"]: D(str(r["balance"])) for r in body}
+    assert by_date[TODAY.isoformat()] == D("350.00")
+    assert len(by_date) >= 365
+    multi = c.get("/forecast/combined-savings", params={"year": TODAY.year, "years": 2}).json()
+    assert len(multi) >= 730
+    assert {r["date"]: D(str(r["balance"])) for r in multi}[TODAY.isoformat()] == D("350.00")

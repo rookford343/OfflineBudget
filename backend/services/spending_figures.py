@@ -2,6 +2,8 @@
 
 * `direct_actual`: what is filed on a parent category itself rather than on
   one of its children.
+* `merge_breakdowns`: the by-source split of a set of categories (the Spending
+  page's Discretionary / Fixed / Total source lines).
 * `mean_total`: the average line on the monthly spending bars.
 * `monthly_averages`: each category's mean monthly total over the full months
   in a monthly-by-category response. The current calendar month is partial, so
@@ -10,7 +12,7 @@
 """
 from __future__ import annotations
 from decimal import Decimal
-from typing import Mapping
+from typing import Iterable, Mapping
 
 ZERO = Decimal("0")
 
@@ -18,6 +20,20 @@ ZERO = Decimal("0")
 def direct_actual(parent_breakdown: Mapping[str, Decimal]) -> Decimal:
     """A parent's own spend: its by-source breakdown, children excluded."""
     return sum(parent_breakdown.values(), ZERO)
+
+
+def merge_breakdowns(breakdowns: Iterable[Mapping[str, Decimal]]) -> dict[str, Decimal]:
+    """Add by-source breakdowns together, source by source."""
+    merged: dict[str, Decimal] = {}
+    for breakdown in breakdowns:
+        for label, amount in breakdown.items():
+            merged[label] = merged.get(label, ZERO) + amount
+    return merged
+
+
+def discretionary_left(budgeted: Decimal, actual: Decimal) -> Decimal:
+    """Discretionary budget minus discretionary spend; negative means over."""
+    return budgeted - actual
 
 
 def mean_total(totals: list[Decimal]) -> Decimal | None:

@@ -143,6 +143,8 @@ export const forecastApi = {
     api.post("/forecast/quarters-scenario", {
       account_id: accountId, year, scenario_id: scenarioId,
     }).then((r) => r.data),
+  combinedSavings: (year: number, years: number) =>
+    api.get("/forecast/combined-savings", { params: { year, years } }).then((r) => r.data),
   multiYear: (accountId: number, startYear: number, years: number) =>
     api.get("/forecast/multi-year", { params: { account_id: accountId, start_year: startYear, years } }).then((r) => r.data),
   monthlySummary: (accountId: number, year: number, month: number) =>

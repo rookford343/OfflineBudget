@@ -117,3 +117,9 @@ def walk_risk(
             risk = {**overdraft, "threshold": cushion}
             status = "danger"
     return risk, status
+
+
+def checkpoint_delta(saved: Decimal | None, forecast_close: Decimal) -> Decimal | None:
+    """A saved quarter-end balance minus the forecast close; None without a
+    saved balance."""
+    return None if saved is None else saved - forecast_close

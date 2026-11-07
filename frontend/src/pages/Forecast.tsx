@@ -151,26 +151,17 @@ export default function Forecast() {
     return dates.length ? dates.sort()[0] : null;
   })();
 
-  const savingsQueries = useQueries({
-    queries: savingsAccounts.map((a: any) => ({
-      queryKey: ["forecast-quarters", a.id, year, forecastYears],
-      queryFn: () => (forecastYears === 1
-        ? forecastApi.quarters(a.id, year)
-        : forecastApi.multiYear(a.id, year, forecastYears)),
-      enabled: showSavings && savingsAccounts.length > 0,
-    })),
+  // date -> combined savings balance, added up by the backend. Every day is
+  // kept, not every third: this is a lookup and the bar series samples it
+  // through chartData's own filter, so extra keys are simply never read.
+  const { data: combinedSavings = [] } = useQuery({
+    queryKey: ["forecast-quarters", "combined-savings", year, forecastYears],
+    queryFn: () => forecastApi.combinedSavings(year, forecastYears),
+    enabled: showSavings && savingsAccounts.length > 0,
   });
-  // date -> combined savings balance. Every day is kept, not every third:
-  // this is a lookup and the bar series samples it through chartData's own
-  // filter, so extra keys are simply never read.
-  const savingsByDate: Record<string, number> = {};
-  savingsQueries.forEach((q: any) => {
-    (q.data ?? []).forEach((quarter: any) =>
-      (quarter.days ?? []).forEach((d: any) => {
-        savingsByDate[d.date] = (savingsByDate[d.date] ?? 0) + parseFloat(d.projected_balance);
-      })
-    );
-  });
+  const savingsByDate: Record<string, number> = Object.fromEntries(
+    combinedSavings.map((d: any) => [d.date, parseFloat(d.balance)]),
+  );
   const hasSavingsSeries = showSavings && Object.keys(savingsByDate).length > 0;
 
   const { data: scenarios = [] } = useQuery({

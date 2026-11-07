@@ -12,7 +12,8 @@ from backend.dependencies import get_db, get_current_user
 from backend.services import scenario_service
 from backend.services.forecast_engine import build_forecast, build_quarters, find_transfer_signal, suggest_transfer
 from backend.services.cushion import cushion_for
-from backend.services.forecast_walk import standard_walk, walk_from, walk_risk
+from backend.services.savings_series import combined_savings_balances
+from backend.services.forecast_walk import checkpoint_delta, standard_walk, walk_from, walk_risk
 from backend.services.reconciliation_helper import compute_reconciliation
 
 logger = logging.getLogger(__name__)
@@ -226,7 +227,7 @@ def _attach_quarter_checkpoints(
             if q_end - timedelta(days=7) <= d <= q_end
         ]
         checkpoint_val = min(candidates, key=lambda x: x[0])[1] if candidates else None
-        delta = None if checkpoint_val is None else checkpoint_val - q.close_balance
+        delta = checkpoint_delta(checkpoint_val, q.close_balance)
         updated.append(q.model_copy(update={
             "quarter_end_checkpoint": checkpoint_val,
             "checkpoint_delta": delta,
@@ -244,6 +245,21 @@ def get_quarters(
 ):
     quarters = build_quarters(db, user.id, account_id, year)
     return _attach_quarter_checkpoints(quarters, db, user.id, account_id)
+
+
+@router.get("/combined-savings", response_model=list[schemas.CombinedSavingsDay])
+def get_combined_savings(
+    year: int = Query(default=date.today().year),
+    years: int = Query(default=1, ge=1, le=5),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Every active savings account's projected balance added up per day, for
+    the Forecast chart's savings bars (same walks as /quarters and /multi-year)."""
+    return [
+        schemas.CombinedSavingsDay(date=d, balance=b)
+        for d, b in combined_savings_balances(db, user.id, year, years)
+    ]
 
 
 @router.get("/multi-year", response_model=list[schemas.QuarterSummary])

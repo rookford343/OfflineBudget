@@ -534,25 +534,13 @@ export default function Spending() {
             const pct = discBudget > 0 ? (disc / discBudget) * 100 : 0;
             const over = left < 0;
 
-            // breakdown_by_source lives on each child category; bucket by
-            // the PARENT's is_discretionary flag to get discretionary vs.
-            // fixed vs. total split by source, with no new backend call.
-            const discBySource: Record<string, number> = {};
-            const fixedBySource: Record<string, number> = {};
-            (overview.categories ?? []).forEach((top: any) => {
-              const bucket = top.is_discretionary ? discBySource : fixedBySource;
-              (top.children ?? []).forEach((ch: any) => {
-                Object.entries(ch.breakdown_by_source ?? {}).forEach(([label, amt]) => {
-                  bucket[label] = (bucket[label] ?? 0) + parseFloat(amt as string);
-                });
-              });
-            });
-            const totalBySource: Record<string, number> = {};
-            [discBySource, fixedBySource].forEach(bucket => {
-              Object.entries(bucket).forEach(([label, amt]) => {
-                totalBySource[label] = (totalBySource[label] ?? 0) + amt;
-              });
-            });
+            // The by-source split of each headline comes from the backend,
+            // filed by each category's own discretionary flag.
+            const sourceMap = (m: Record<string, string> | undefined): Record<string, number> =>
+              Object.fromEntries(Object.entries(m ?? {}).map(([k, v]) => [k, parseFloat(v)]));
+            const discBySource = sourceMap(overview.discretionary_by_source);
+            const fixedBySource = sourceMap(overview.fixed_by_source);
+            const totalBySource = sourceMap(overview.total_by_source);
 
             return (
               <div className="space-y-4">

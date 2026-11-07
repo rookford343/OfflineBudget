@@ -260,7 +260,9 @@ export default function Dashboard() {
                 <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
                   <span>One-offs</span>
                   {/* Net of one-off inflows, so it can be a credit. */}
-                  <span className="tabular-nums text-red-500 dark:text-red-400 font-medium">
+                  <span className={`tabular-nums font-medium ${parseFloat(ats.one_offs_net) < 0
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-red-500 dark:text-red-400"}`}>
                     {parseFloat(ats.one_offs_net) < 0 ? "+" : "−"}{fmt(Math.abs(parseFloat(ats.one_offs_net)))}
                   </span>
                 </div>

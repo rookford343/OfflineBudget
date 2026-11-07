@@ -653,6 +653,11 @@ class ForecastEntry(BaseModel):
     anchor_delta: Optional[Decimal] = None
 
 
+class CombinedSavingsDay(BaseModel):
+    date: date
+    balance: Decimal  # every active savings account's projected balance, added up
+
+
 class ForecastRisk(BaseModel):
     at_risk: bool
     date: Optional[date]
@@ -1227,6 +1232,11 @@ class SpendingOverview(BaseModel):
     fixed_actual: Decimal = Decimal("0")
     # Discretionary budget minus discretionary spend; negative means over.
     discretionary_left: Decimal = Decimal("0")
+    # Spend by where it landed ("Checking", a card's name), split the way the
+    # headline figures are: discretionary categories, the rest, and both.
+    discretionary_by_source: dict[str, Decimal] = {}
+    fixed_by_source: dict[str, Decimal] = {}
+    total_by_source: dict[str, Decimal] = {}
 
 
 class MonthlySpendingEntry(BaseModel):

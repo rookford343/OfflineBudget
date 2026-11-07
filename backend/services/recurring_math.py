@@ -23,6 +23,11 @@ MONTHLY_FACTOR = {
 }
 
 
+def bill_variance(actual: Decimal, projected: Decimal) -> Decimal:
+    """An override's actual amount minus the item's projected amount."""
+    return actual - projected
+
+
 def monthly_equivalent(item) -> Decimal:
     """`item` is any object with `.amount` and `.frequency` -- a real
     RecurringItem or a transient one built from a scenario proposal."""

@@ -14,7 +14,10 @@ import { join, relative } from "path";
  *    whose name or initializer mentions a money identifier, or one derived from
  *    another tainted local), or between a money local and a parse call or
  *    money-named property (`discBudget - disc`, `actual - projected`),
- * 4. `+=` / `-=` accumulating a money local or a parsed money figure.
+ * 4. `+=` / `-=` accumulating a money local or a parsed money figure,
+ * 5. a write to an object key that accumulates anything but a literal
+ *    (`bucket[k] += amt`, `obj[k] = (obj[k] ?? 0) + amt`): a per-key money sum
+ *    whose operands the taint pass cannot see (callback parameters).
  *
  * Money identifiers: amount, balance, pending, actual, budget, committed,
  * flexible, income, spent, available, total, ... Sort comparators are ignored.
@@ -82,6 +85,14 @@ const BINARY = new RegExp(String.raw`(${OPERAND})\s*(?<![+\-])[+-](?![+\-=>])\s*
 const MONEY_PROP = new RegExp(String.raw`\.\w*(${MONEY.join("|")})\w*$`, "i");
 const DECL = /\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]+)?=\s*(.*)$/;
 
+// `obj[k] += x` and `obj[k] = (obj[k] ?? 0) + x` (also `|| 0`, or no default).
+const KEY_ACCUMULATE = [
+  /[\w$.]+\[[^\]]+\]\s*[-+]=\s*([^;]*)/,
+  /([\w$.]+\[[^\]]+\])\s*=\s*\(?\s*\1\s*(?:(?:\?\?|\|\|)\s*0\s*)?\)?\s*[-+]\s*([^;]*)/,
+];
+// A plain count or step (`+= 1`, `+ 0.5`, a string), not a figure.
+const LITERAL = /^(\d+(\.\d+)?|["'`].*)\s*[,;)]*$/;
+
 export function findViolations(src: string): string[] {
   const lines = src.split("\n");
   const lineStart: number[] = [];
@@ -135,6 +146,7 @@ export function findViolations(src: string): string[] {
       if (acc && !/^[`"']/.test(acc[2].trim()) && (taint.has(acc[1]) || moneyish(acc[2].trim().split(/[\s;,)]/)[0] ?? "") ||
         (/(parseFloat|Number)\(/.test(acc[2]) && mentionsMoney(acc[2])))) found = true;
     }
+    if (!found && KEY_ACCUMULATE.some((r) => { const k = r.exec(l); return k && !LITERAL.test(k[k.length - 1].trim()); })) found = true;
     if (found) hits.push(l.trim());
   }
   return hits;
@@ -208,6 +220,27 @@ describe("guard self-tests", () => {
   test("flags loop accumulation of a money local", () => {
     const sample = "let total = parseFloat(first.amount);\nfor (const r of rows) { total += parseFloat(r.amount); }";
     expect(findViolations(sample).length).toBeGreaterThan(0);
+  });
+
+  test("flags per-key money accumulation, both spellings", () => {
+    const sample = [
+      "Object.entries(m).forEach(([label, amt]) => {",
+      "  bucket[label] += parseFloat(amt);",
+      "  totals[label] = (totals[label] ?? 0) + amt;",
+      "  byDate[d.date] = (byDate[d.date] || 0) + parseFloat(d.projected_balance);",
+      "});",
+    ].join("\n");
+    expect(findViolations(sample)).toHaveLength(3);
+  });
+
+  test("allows counting per key and plain key assignment", () => {
+    const sample = [
+      "counts[k] += 1;",
+      "counts[k] = (counts[k] ?? 0) + 1;",
+      "byId[r.id] = r.amount;",
+      "const next = obj[k] + 1;",
+    ].join("\n");
+    expect(findViolations(sample)).toEqual([]);
   });
 
   test("allows subtraction of non-money locals", () => {

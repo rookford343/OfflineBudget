@@ -102,3 +102,18 @@ def test_endpoint_shape_and_ownership(db_session):
     assert body[0]["id"] == txn.id and Decimal(body[0]["balance_after"]) == Decimal("1000.00")
     assert client.get(f"/accounts/{foreign.id}/running-balance",
                       params={"start": "2000-01-01"}).status_code == 404
+
+
+def test_a_non_actual_row_is_not_a_posted_row_and_does_not_shift_balances(db_session):
+    user = _user(db_session)
+    acct = _account(db_session, user, "1000.00")
+    newest = _txn(db_session, user, acct, "-100.00", date(2027, 3, 14))
+    planned = _txn(db_session, user, acct, "-40.00", date(2027, 3, 12))
+    planned.is_actual = False
+    older = _txn(db_session, user, acct, "300.00", date(2027, 3, 10))
+    db_session.flush()
+    rows = running_balance(db_session, user.id, acct.id, date(2027, 3, 1), TODAY)
+    assert [(r.id, r.balance_after) for r in rows] == [
+        (newest.id, Decimal("1000.00")),
+        (older.id, Decimal("1100.00")),
+    ]

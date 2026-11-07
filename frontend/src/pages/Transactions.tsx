@@ -357,7 +357,7 @@ export default function Transactions() {
   const balancesHidden = useBalancesHidden();
   const balanceAccount = primaryChecking(accounts as any[]);
   const { data: runningBalance = [] } = useQuery<any[]>({
-    queryKey: ["transactions-running-balance", balanceAccount?.id, start, today()],
+    queryKey: ["accounts", balanceAccount?.id, "running-balance", start, today()],
     queryFn: () => accountsApi.runningBalance(balanceAccount!.id, start),
     enabled: txnTab === "checking" && !!balanceAccount,
   });
