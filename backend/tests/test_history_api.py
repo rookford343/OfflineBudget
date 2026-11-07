@@ -182,3 +182,15 @@ def test_malformed_readings_degrade_to_inputs_changed(db_session):
     ]
     assert "inputs changed" in changes[0].summary
     assert _client(db_session, user).get("/history/leftover").status_code == 200
+
+
+@pytest.mark.parametrize("method, path", [
+    ("GET", "/history/leftover"),
+    ("POST", "/history/snapshot"),
+    ("DELETE", "/history"),
+])
+def test_history_routes_require_a_login(db_session, method, path):
+    app = FastAPI()
+    app.include_router(history_router.router)
+    app.dependency_overrides[get_db] = lambda: db_session  # no auth override
+    assert TestClient(app).request(method, path).status_code == 401
