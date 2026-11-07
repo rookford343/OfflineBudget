@@ -11,6 +11,7 @@ import { ConfirmDialog } from "../components/ConfirmDialog";
 import MonthlyAccuracyRow from "../components/MonthlyAccuracyRow";
 import { RiskBanner } from "../components/RiskBanner";
 import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
+import { useMinWidth } from "../lib/useMinWidth";
 import { sortCategoryList, byName } from "../lib/selectOptions";
 
 function isDarkMode(): boolean {
@@ -402,7 +403,10 @@ export default function Forecast() {
     projected: d.date >= todayStr ? d.balance : null,
   }));
   const chartDates = chartData.map((d) => d.date);
-  const xAxis = axisTicks(chartDates);
+  const isSm = useMinWidth(640);
+  const axis = axisTicks(chartDates);
+  // Below sm the month/day labels collide, so show every third tick.
+  const xAxis = isSm ? axis : { ...axis, ticks: axis.ticks.filter((_, i) => i % 3 === 0) };
   const todayOnChart = chartDates.includes(todayStr) ? todayStr : null;
 
   // Merge scenario trace into chart data
@@ -499,7 +503,7 @@ export default function Forecast() {
   const hasThresholdLine = (lowBalanceThreshold != null && lowBalanceThreshold > 0) || risk?.action_threshold != null;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 tap-44">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Forecast <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
@@ -673,7 +677,7 @@ export default function Forecast() {
               </label>
             )}
           </div>
-          <ResponsiveContainer width="100%" height={280}>
+          <ResponsiveContainer width="100%" height={isSm ? 280 : 240}>
             {chartView === "net" ? (
               <BarChart data={netBarData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={chartTheme().grid} />
@@ -1303,18 +1307,18 @@ export default function Forecast() {
                         {fmt(d.projected_balance)}
                       </td>
                       <td className="py-2 pl-2">
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div className="flex items-center gap-1 max-lg:opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                           <button
                             title="Set actual balance for this date"
                             onClick={() => setDayCheckpoint({ date: d.date, value: hasCp ? String(dayCheckpointMap[d.date]) : "" })}
-                            className="p-1 text-gray-400 hover:text-indigo-500 rounded"
+                            className="p-1 max-lg:p-3 text-gray-400 hover:text-indigo-500 rounded"
                           >
                             <Pencil size={12} />
                           </button>
                           <button
                             title="Add transaction on this date"
                             onClick={() => { setAddTxnDate(d.date); setAddTxnForm({ description: "", amount: "", category_id: "" }); }}
-                            className="p-1 text-gray-400 hover:text-green-500 rounded"
+                            className="p-1 max-lg:p-3 text-gray-400 hover:text-green-500 rounded"
                           >
                             <Plus size={12} />
                           </button>

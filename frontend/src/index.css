@@ -131,3 +131,14 @@
 .dark .text-amber-600:not([class*="dark:text"])  { color: #fbbf24; }
 .dark .text-amber-700:not([class*="dark:text"])  { color: #fcd34d; }
 .dark .text-blue-600:not([class*="dark:text"])   { color: #60a5fa; }
+
+/* Phone tap targets: pages that opt in with `tap-44` get 44px controls below
+   `lg`. Desktop (>=1024px) is untouched. */
+@media (max-width: 1023px) {
+  .tap-44 :is(.input, .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger) {
+    min-height: 44px;
+  }
+  .tap-44 .btn-ghost.p-1 {
+    min-width: 44px;
+  }
+}

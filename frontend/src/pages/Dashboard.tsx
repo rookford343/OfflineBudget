@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { accountsApi, cardsApi, recurringApi, analyticsApi, budgetApi, forecastApi, bankSyncApi } from "../api";
@@ -26,20 +26,7 @@ import SpendableTile from "../components/phone/SpendableTile";
 import UpcomingOneOffs from "../components/phone/UpcomingOneOffs";
 import PlanOneOffSheet from "../components/phone/PlanOneOffSheet";
 import { lastBankSync } from "../lib/freshness";
-
-/** True while the viewport is at least `px` wide (Tailwind's sm=640, lg=1024). */
-function useMinWidth(px: number): boolean {
-  const query = `(min-width: ${px}px)`;
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
-  useEffect(() => {
-    const mql = window.matchMedia(query);
-    const onChange = () => setMatches(mql.matches);
-    onChange();
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
-  }, [query]);
-  return matches;
-}
+import { useMinWidth } from "../lib/useMinWidth";
 
 /** The next date on/after `today` whose day-of-month is `dueDay` (clamped to
  *  the month's last day), plus the day-count to reach it -- both derived
