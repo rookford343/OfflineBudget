@@ -48,7 +48,7 @@ function nextCardDueOccurrence(dueDay: number, today: Date): { date: Date; days:
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
 
 Key sections:
-• Available to Spend — income minus bills minus what you've already spent
+• Available to Spend — income minus bills minus one-offs minus spending so far, before the groceries and savings budgets
 • Recent transactions — latest checking and card activity, transfers and card payments left out
 • Credit card balances and amounts due
 • Monthly narrative summary — plain-English recap

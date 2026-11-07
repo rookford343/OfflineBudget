@@ -31,6 +31,7 @@ pending card charges are added on top.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date
 from decimal import Decimal
 
@@ -43,6 +44,7 @@ from backend.services.pending import card_pending
 from backend.services.primary_account import primary_checking
 from backend.services.real_spend import ClassifiedRow, active_cards, classified_rows
 
+logger = logging.getLogger(__name__)
 ZERO = Decimal("0")
 ONE_OFF_MATCH_DAYS = 3
 _CENT = Decimal("0.01")
@@ -67,7 +69,9 @@ def _settled_one_off_row_ids(
     claimed: set[int] = set()
     for o in sorted(settled, key=lambda o: o.date):
         plan = plans.get(o.planned_expense_id)
-        if plan is None:
+        # An unrouted plan (no card, no account) says nowhere its charge landed,
+        # so no row can be matched to it safely: skip it.
+        if plan is None or (plan.card_id is None and plan.account_id is None):
             continue
         best: ClassifiedRow | None = None
         for r in spend_rows:
@@ -76,7 +80,7 @@ def _settled_one_off_row_ids(
             if plan.card_id is not None:
                 if r.source != "card" or r.row.card_id != plan.card_id:
                     continue
-            elif plan.account_id is not None:
+            else:
                 if r.source != "checking" or r.row.account_id != plan.account_id:
                     continue
             gap = abs((r.row.date - o.date).days)
@@ -168,7 +172,11 @@ def _walk_to_left_to_spend(
     if account is None:
         return None
     from backend.services.budget_snapshot import compute_budget_snapshot
-    snapshot = compute_budget_snapshot(db, user, account.id, as_of)
+    try:
+        snapshot = compute_budget_snapshot(db, user, account.id, as_of)
+    except Exception:  # the card still shows its own figures without the walk
+        logger.exception("Available to Spend: snapshot failed, omitting the walk to Left to Spend")
+        return None
     builder = (
         ExplainBuilder("From Available to Spend to Left to Spend")
         .start("Available to Spend", available)

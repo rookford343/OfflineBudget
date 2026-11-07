@@ -214,7 +214,17 @@ def test_walk_to_left_to_spend_ends_at_snapshot_value(db_session):
     _card_row(db_session, user, visa, "Lawn", "25.00", day=2)       # the weekly card bill, posted
     _card_row(db_session, user, visa, "Some Shop", "60.00", day=2)
     _debit(db_session, user, checking, "COFFEE", "12.00", day=2)
+    # A settled one-off charged to a card, with its own posted charge: Left to
+    # Spend adds it back ("Card one-offs already charged"), Available holds it
+    # in one-offs and leaves the row out of spending.
+    db_session.add(models.PlannedExpense(
+        user_id=user.id, card_id=visa.id, name="Dentist", amount=D("180.00"),
+        expected_date=date(2026, 11, 2), settled_on=date(2026, 11, 2), actual_amount=D("180.00")))
+    _card_row(db_session, user, visa, "DENTIST OFFICE", "180.00", day=2)
     db_session.commit()
+    # The fixture's savings-funded one-off (New roof) is really there.
+    assert db_session.query(models.PlannedExpense).filter(
+        models.PlannedExpense.funding_account_id.isnot(None)).count() == 1
     as_of = date(2026, 11, 2)
 
     r = _ats(db_session, user, as_of=as_of)
@@ -226,9 +236,30 @@ def test_walk_to_left_to_spend_ends_at_snapshot_value(db_session):
     assert r.to_left_to_spend.rows[0].amount == r.available
     labels = [row.label for row in r.to_left_to_spend.rows]
     assert "Groceries budget" in labels and "Savings set aside" in labels
+    assert "Card one-offs already charged" in labels
     # Spending so far: the coffee, the shop, and the 75 pending; the posted
     # lawn charge is the bill already in bills.
     assert r.spent_this_month == D("12.00") + D("60.00") + D("75.00")
+
+
+def test_an_unrouted_settled_one_off_claims_nothing(db_session):
+    user, acct, card = _seed(db_session)
+    db_session.add(models.PlannedExpense(
+        user_id=user.id, name="Tires", amount=D("300.00"),
+        expected_date=date(2026, 11, 4), settled_on=date(2026, 11, 4), actual_amount=D("300.00")))
+    db_session.commit()
+    _debit(db_session, user, acct, "TIRE SHOP", "300.00", day=4)
+    assert _ats(db_session, user).spent_this_month == D("300.00")
+
+
+def test_a_failing_snapshot_drops_the_walk_not_the_card(db_session, monkeypatch):
+    user, acct, card = _seed(db_session)
+
+    def boom(*a, **k):
+        raise RuntimeError("snapshot down")
+    monkeypatch.setattr("backend.services.budget_snapshot.compute_budget_snapshot", boom)
+    r = _ats(db_session, user)
+    assert r.to_left_to_spend is None and r.available == D("4000.00")
 
 
 def test_no_checking_account_means_no_walk(db_session):
