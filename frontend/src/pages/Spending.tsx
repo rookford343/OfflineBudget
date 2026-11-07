@@ -32,27 +32,6 @@ function chartTheme() {
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-// Mean of one category's monthly totals over the full months present in
-// `rows` (as returned by /spending/monthly-by-category). The current
-// calendar month is excluded when present -- it's a partial month, and
-// mixing a partial month into the average would silently understate it. A
-// full month with $0 for this category still counts (drags the average
-// down); only months that actually appear in `rows` are considered, since
-// there's no synthesizing of months the chart never fetched.
-function categoryMonthlyAverage(
-  rows: { month: string; categories: { category_id: number; total: number | string }[] }[],
-  categoryKey: number,
-  currentMonthKey: string,
-): number | null {
-  const fullMonths = rows.filter(r => r.month !== currentMonthKey);
-  if (fullMonths.length === 0) return null;
-  const sum = fullMonths.reduce((s, r) => {
-    const match = r.categories.find(c => c.category_id === categoryKey);
-    return s + (match ? parseFloat(String(match.total)) : 0);
-  }, 0);
-  return sum / fullMonths.length;
-}
-
 // Y-axis tick label: `$500` under $1k; `$1.0k`/`$1.5k` under $10k (one
 // decimal); `$12k` at $10k+ (none). Replaces the old `${(v/1000).toFixed(0)}k`,
 // which rounded everything under $1,000 to a duplicate "$0k" tick and
@@ -162,7 +141,7 @@ export default function Spending() {
     checking: parseFloat(m.checking),
     cards: parseFloat(m.cards),
   }));
-  const avg = barData.length > 1 ? barData.reduce((s: number, d: any) => s + d.total, 0) / barData.length : 0;
+  const avg = monthly[0]?.monthly_average != null ? parseFloat(monthly[0].monthly_average) : 0;
 
   // Recharts data for category stacked bars
   const stackedData = useMemo(() => {
@@ -197,8 +176,7 @@ export default function Spending() {
       });
       // Spending filed on the parent itself rather than one of its children
       // would silently vanish if only children were listed.
-      const kidSum = kids.reduce((s: number, ch: any) => s + parseFloat(ch.actual), 0);
-      const direct = parseFloat(parent.actual) - kidSum;
+      const direct = parseFloat(parent.direct_actual ?? "0");
       if (direct > 0.005) {
         out.push({
           category_id: -parent.category_id, category_name: `${parent.category_name} (uncategorized)`,
@@ -293,22 +271,20 @@ export default function Spending() {
       ))
     : 0;
 
-  // This calendar month is a partial month -- excluded from every category's
-  // average below so a still-accumulating month doesn't understate it.
-  const currentMonthKey = (() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  })();
-
+  // Each category's monthly average comes from the backend (full months only,
+  // the current partial month excluded); it is the same on every row the
+  // category appears in.
   const visibleCatAverages = useMemo(() => {
     const map = new Map<number, number | null>();
-    allTopCats.forEach(cat => {
-      if (visibleCatIds.has(cat.id)) {
-        map.set(cat.id, categoryMonthlyAverage(monthlyByCat, cat.id, currentMonthKey));
-      }
+    monthlyByCat.forEach((row: any) => {
+      row.categories.forEach((c: any) => {
+        if (visibleCatIds.has(c.category_id) && !map.has(c.category_id)) {
+          map.set(c.category_id, c.monthly_average == null ? null : parseFloat(c.monthly_average));
+        }
+      });
     });
     return map;
-  }, [allTopCats, visibleCatIds, monthlyByCat, currentMonthKey]);
+  }, [visibleCatIds, monthlyByCat]);
 
   const singleVisibleAvg = visibleCatIds.size === 1
     ? (visibleCatAverages.get(allTopCats.find(c => visibleCatIds.has(c.id))?.id ?? -1) ?? null)

@@ -34,6 +34,7 @@ from backend import models, schemas
 from backend.schemas import ExplainChild
 from backend.services.budget_buckets import assignable_category_ids, drop_uncarried_defaults
 from backend.services.budget_calculator import compute_overview
+from backend.services.budget_track import line_available, track_totals
 from backend.services.explain import ExplainBuilder
 from backend.services.month_summary import build_month_summary
 
@@ -149,12 +150,15 @@ def compute_budget_plan(db: Session, user: models.User, year: int, month: int) -
 
     def line(cid: int, name: str, *, is_group: bool, committed, flexible, budget, actual) -> schemas.PlanTrackLine:
         ov = overview.get(cid)
-        return schemas.PlanTrackLine(
+        tl = schemas.PlanTrackLine(
             category_id=cid, category_name=name, is_group=is_group,
             committed=committed, flexible=flexible, budget=budget, actual_total=actual,
             rollover_enabled=bool(ov.rollover_enabled) if ov else False,
             rollover_balance=ov.rollover_balance if ov else ZERO,
         )
+        tl.available = line_available(tl)
+        tl.left = tl.available - tl.actual_total
+        return tl
 
     groups: list[schemas.PlanGroup] = []
     lines: list[schemas.PlanTrackLine] = []
@@ -235,6 +239,9 @@ def compute_budget_plan(db: Session, user: models.User, year: int, month: int) -
     income_total = summary.income_total + summary.one_off_in_total
     committed_total = sum((g.committed for g in groups), ZERO)
     flexible_total = sum((g.flexible for g in groups), ZERO)
+    listed = [g for g in groups if g.kind != "uncategorized"]
+    committed_visible_total = sum((g.committed for g in listed), ZERO)
+    flexible_visible_total = sum((g.flexible for g in listed), ZERO)
     left_to_assign = income_total - committed_total - flexible_total
 
     income_children: dict[str, Decimal] = defaultdict(lambda: ZERO)
@@ -273,6 +280,9 @@ def compute_budget_plan(db: Session, user: models.User, year: int, month: int) -
         carry_forward=bool(user.budget_carry_forward),
         groups=groups,
         lines=lines,
+        track_totals=track_totals(lines),
+        committed_visible_total=committed_visible_total,
+        flexible_visible_total=flexible_visible_total,
         explain_left_to_assign=explain,
     )
 

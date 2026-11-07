@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
-  availableOf, flexibleSaveMonth, leftToAssignStatus, trackTotals, unbudgetedSpend,
+  flexibleSaveMonth, leftToAssignStatus, unbudgetedSpend,
   type OverviewRow, type PlanTrackLine,
 } from "../src/lib/budgetPlan";
 
 const line = (category_id: number, budget: string, actual_total: string, extra: Partial<PlanTrackLine> = {}): PlanTrackLine =>
-  ({ category_id, category_name: `C${category_id}`, is_group: false, budget, actual_total, ...extra });
+  ({ category_id, category_name: `C${category_id}`, is_group: false, budget, actual_total, available: budget, left: "0", ...extra });
 const ov = (category_id: number, actual_total: string, parent_id: number | null = null, category_type = "expense"): OverviewRow =>
   ({ category_id, category_name: `C${category_id}`, parent_id, category_type, budgeted: "0", actual_total });
 
@@ -26,23 +26,6 @@ describe("flexibleSaveMonth", () => {
   });
   test("an assignable bucket with carry-forward off saves for the viewed month only", () => {
     expect(flexibleSaveMonth(10, true, false)).toBe(10);
-  });
-});
-
-describe("trackTotals", () => {
-  test("budgeted is the plain sum of line budgets", () => {
-    const t = trackTotals([line(1, "3000.00", "2050.00"), line(2, "500.00", "600.00"), line(3, "140.10", "0")]);
-    expect(t.budgeted).toBe(3640.1);
-    expect(t.spent).toBe(2650);
-    expect(t.left).toBe(990.1);
-    expect(t.overCount).toBe(1);
-  });
-  test("rollover only counts when enabled", () => {
-    expect(availableOf(line(1, "100.00", "0", { rollover_enabled: true, rollover_balance: "50.00" }))).toBe(150);
-    expect(availableOf(line(1, "100.00", "0", { rollover_enabled: false, rollover_balance: "50.00" }))).toBe(100);
-  });
-  test("no lines means nothing over and no division by zero", () => {
-    expect(trackTotals([])).toMatchObject({ available: 0, pct: 0, overCount: 0 });
   });
 });
 

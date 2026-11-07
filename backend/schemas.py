@@ -453,6 +453,9 @@ class RecurringBreakdown(BaseModel):
     ongoing: list[RecurringBreakdownItem]
     # Soonest roll-off first -- the list doubles as the expiration timeline.
     ending: list[RecurringBreakdownItem]
+    # Paused items, listed so the page can show their monthly equivalent. They
+    # never feed any total here.
+    inactive: list[RecurringBreakdownItem] = []
     # Expenses only: income is not burn.
     ongoing_monthly: Decimal
     ending_monthly: Decimal
@@ -642,6 +645,12 @@ class ForecastEntry(BaseModel):
     date: date
     projected_balance: Decimal
     transactions: list[ForecastTransaction]
+    # A day checkpoint exists for this day and it moved the walked balance by
+    # 0.005 or more (the first day of a window always counts). anchor_delta is
+    # checkpoint minus walked; None when the day has no checkpoint or is the
+    # window's first day.
+    anchor_moved: bool = False
+    anchor_delta: Optional[Decimal] = None
 
 
 class ForecastRisk(BaseModel):
@@ -1195,6 +1204,8 @@ class SpendingTopLevel(BaseModel):
     # started. Without the split the page headlines Mortgage and Tithe as if
     # they were choices and buries the part that is actually steerable.
     is_discretionary: bool = False
+    # Spend filed on this parent itself, not on one of its children.
+    direct_actual: Decimal = Decimal("0")
     children: list[SpendingSubCategory]
 
 
@@ -1215,6 +1226,9 @@ class MonthlySpendingEntry(BaseModel):
     total: Decimal
     checking: Decimal
     cards: Decimal
+    # Mean of `total` over every month in the response (the bar chart's average
+    # line); None unless the response holds more than one month.
+    monthly_average: Optional[Decimal] = None
 
 
 class CategoryMonthlyTotal(BaseModel):
@@ -1222,6 +1236,9 @@ class CategoryMonthlyTotal(BaseModel):
     category_name: str
     color: str
     total: Decimal
+    # Mean of this category's totals over the full months in the response (the
+    # current calendar month excluded); None when no full month is present.
+    monthly_average: Optional[Decimal] = None
 
 
 class MonthlyCategoryRow(BaseModel):
@@ -2164,6 +2181,18 @@ class PlanTrackLine(BaseModel):
     actual_total: Decimal
     rollover_enabled: bool = False
     rollover_balance: Decimal = Decimal("0")
+    available: Decimal = Decimal("0")  # budget + rollover (when enabled): what the line may spend
+    left: Decimal = Decimal("0")       # available - actual_total
+
+
+class TrackTotals(BaseModel):
+    """Track Budgets' headline over `BudgetPlanOut.lines`, cents-exact."""
+    budgeted: Decimal
+    available: Decimal
+    spent: Decimal
+    left: Decimal
+    pct: Decimal                       # spent / available * 100; 0 when nothing is available
+    over_count: int                    # lines whose spend exceeds what they have available
 
 
 class BudgetPlanOut(BaseModel):
@@ -2180,6 +2209,11 @@ class BudgetPlanOut(BaseModel):
     carry_forward: bool
     groups: list[PlanGroup]
     lines: list[PlanTrackLine]
+    track_totals: TrackTotals
+    # The Committed / Flexible footer of the groups the page lists (every group
+    # but "Not in a category"); the full totals above include that one.
+    committed_visible_total: Decimal = Decimal("0")
+    flexible_visible_total: Decimal = Decimal("0")
     explain_left_to_assign: Optional[Explanation] = None
 
 

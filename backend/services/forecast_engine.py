@@ -1581,10 +1581,26 @@ def build_forecast(
                 balance += line.amount
                 day_transactions.append(line)
 
+        # Did the day's checkpoint move the balance? Walked is yesterday's
+        # balance plus the day's settled lines (pending card payments land
+        # after the anchor, so they are not part of what it replaced). The
+        # window's first day has no yesterday and always counts as moved.
+        anchor_moved, anchor_delta = False, None
+        if current in day_checkpoint_map:
+            if entries:
+                walked = entries[-1].projected_balance + sum(
+                    (t.amount for t in day_transactions if not t.is_pending), Decimal("0"),
+                )
+                anchor_delta = day_checkpoint_map[current] - walked
+                anchor_moved = abs(anchor_delta) >= Decimal("0.005")
+            else:
+                anchor_moved = True
         entries.append(ForecastEntry(
             date=current,
             projected_balance=balance,
             transactions=day_transactions,
+            anchor_moved=anchor_moved,
+            anchor_delta=anchor_delta,
         ))
         current += timedelta(days=1)
 

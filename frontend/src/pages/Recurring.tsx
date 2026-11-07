@@ -159,16 +159,11 @@ export default function Recurring() {
   const ccCharges = items.filter((i: any) => i.type === "expense" && i.card_id && i.is_active);
   const ccPayments = items.filter((i: any) => i.type === "credit_card_payment" && i.is_active);
   const inactive = items.filter((i: any) => !i.is_active);
-  // Monthly-equivalent and end-date runway both come from /recurring/breakdown
-  // rather than being recomputed here: the local version handled only yearly
-  // and quarterly, so a weekly item would have been counted at a quarter of
-  // its real monthly cost and a biweekly at under half. The backend handles
-  // every frequency, and one implementation can't disagree with itself.
-  const breakdownItems = [...(breakdown?.ongoing ?? []), ...(breakdown?.ending ?? [])];
+  // Monthly-equivalent and end-date runway come from /recurring/breakdown,
+  // which lists every item (active, ending and paused) for every frequency.
+  const breakdownItems = [...(breakdown?.ongoing ?? []), ...(breakdown?.ending ?? []), ...(breakdown?.inactive ?? [])];
   const byId: Record<number, any> = Object.fromEntries(breakdownItems.map((i: any) => [i.id, i]));
-  const perMonth = (i: any) =>
-    byId[i.id] ? parseFloat(byId[i.id].monthly_equivalent)
-      : parseFloat(i.amount) / (i.frequency === "yearly" ? 12 : i.frequency === "quarterly" ? 3 : 1);
+  const perMonth = (i: any) => parseFloat(byId[i.id]?.monthly_equivalent ?? "0");
 
   function ItemRow({ item }: { item: any }) {
     const isYearly = item.frequency === "yearly";
@@ -218,7 +213,7 @@ export default function Recurring() {
             <span className={`text-sm font-bold tabular-nums ${item.type === "income" ? "text-green-600" : "text-red-600"}`}>
               {item.type === "income" ? "+" : "-"}{fmt(item.amount)}
             </span>
-            {(isYearly || isQuarterly) && <p className="text-xs text-gray-400 tabular-nums">{fmt(perMonth(item))}/mo</p>}
+            {(isYearly || isQuarterly) && byId[item.id] && <p className="text-xs text-gray-400 tabular-nums">{fmt(perMonth(item))}/mo</p>}
           </div>
           {canOverride && (
             <button

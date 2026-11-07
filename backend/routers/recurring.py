@@ -134,10 +134,10 @@ def get_breakdown(
     what is temporary and when it frees up (ending, soonest first), and how
     much of the monthly burn is each.
     """
-    items = db.query(models.RecurringItem).filter(
+    all_items = db.query(models.RecurringItem).filter(
         models.RecurringItem.user_id == user.id,
-        models.RecurringItem.is_active == True,
     ).all()
+    items = [i for i in all_items if i.is_active]
     # Scoped to this user only -- an item's category_id is looked up through
     # this dict, so a category belonging to someone else (or since deleted)
     # simply misses and the item falls into Unclassified rather than leaking
@@ -239,8 +239,17 @@ def get_breakdown(
             items=sorted(unclassified["items"], key=lambda i: i.monthly_equivalent, reverse=True),
         ))
 
+    inactive = [
+        schemas.RecurringBreakdownItem(
+            id=i.id, name=i.name, amount=i.amount, type=i.type, frequency=i.frequency,
+            monthly_equivalent=_monthly_equivalent(i), end_date=i.end_date,
+            months_remaining=_months_until(today, i.end_date) if i.end_date else None,
+        )
+        for i in sorted((i for i in all_items if not i.is_active), key=lambda i: i.name.lower())
+    ]
+
     return schemas.RecurringBreakdown(
-        ongoing=ongoing, ending=ending,
+        ongoing=ongoing, ending=ending, inactive=inactive,
         ongoing_monthly=ongoing_monthly, ending_monthly=ending_monthly,
         income_monthly=income_monthly, expense_monthly=expense_monthly,
         by_category=by_category,

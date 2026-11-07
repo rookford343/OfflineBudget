@@ -1246,15 +1246,11 @@ export default function Forecast() {
                     // An anchor matters only where it moved the balance. Most daily
                     // bank-sync anchors land exactly where the day's transactions
                     // already put it; listing those as "snapped" was just noise.
+                    // The backend decides (anchor_moved); a quarter's first day
+                    // always lists its anchor.
                     const moved: Record<string, boolean> = {};
                     q.days.forEach((d: any, i: number) => {
-                      if (dayCheckpointMap[d.date] === undefined) return;
-                      if (i === 0) { moved[d.date] = true; return; }
-                      // Pending card payments land after the anchor, so they're not part of what it replaced.
-                      const walked = Number(q.days[i - 1].projected_balance)
-                        + d.transactions.filter((t: any) => !t.is_pending)
-                          .reduce((sum: number, t: any) => sum + Number(t.amount), 0);
-                      moved[d.date] = Math.abs(Number(dayCheckpointMap[d.date]) - walked) >= 0.005;
+                      if (dayCheckpointMap[d.date] !== undefined) moved[d.date] = i === 0 || d.anchor_moved === true;
                     });
                     return q.days.filter((d: any) => d.transactions.length > 0 || moved[d.date]).map((d: any) => {
                     const hasCp = moved[d.date] === true;

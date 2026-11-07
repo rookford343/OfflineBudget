@@ -1,8 +1,8 @@
 /** Pure helpers for the Budget page. The backend's GET /budget/plan does the
- * money math (Committed + Flexible = Budget, Left to assign); these only
- * decide how to show it and which month a Flexible save writes to. Amounts
- * arrive as decimal strings; sums here work in integer cents so they can't
- * drift off the backend's Decimal totals. */
+ * money math (Committed + Flexible = Budget, Left to assign, Track Budgets
+ * totals and each line's available/left); these only decide how to show it
+ * and which month a Flexible save writes to. Amounts arrive as decimal
+ * strings. */
 
 const cents = (v: string | number | null | undefined): number =>
   Math.round(parseFloat(String(v ?? "0")) * 100) || 0;
@@ -15,6 +15,13 @@ export type PlanTrackLine = {
   actual_total: string;
   rollover_enabled?: boolean;
   rollover_balance?: string;
+  available: string;
+  left: string;
+};
+
+/** The plan's Track Budgets headline, as the backend sends it. */
+export type TrackTotals = {
+  budgeted: string; available: string; spent: string; left: string; pct: string; over_count: number;
 };
 
 export type OverviewRow = {
@@ -40,25 +47,6 @@ export function leftToAssignStatus(value: string | number): { over: boolean; amo
  * carry-forward is off, whose every-month row the backend ignores by design. */
 export function flexibleSaveMonth(month: number, isAssignable: boolean, carryForward: boolean): number {
   return isAssignable && !carryForward ? month : 0;
-}
-
-/** Budget plus any rolled-over balance: what a Track line may spend. */
-export function availableOf(line: PlanTrackLine): number {
-  return (cents(line.budget) + (line.rollover_enabled ? cents(line.rollover_balance) : 0)) / 100;
-}
-
-export function trackTotals(lines: PlanTrackLine[]) {
-  const available = lines.reduce((s, l) => s + Math.round(availableOf(l) * 100), 0);
-  const budgeted = lines.reduce((s, l) => s + cents(l.budget), 0);
-  const spent = lines.reduce((s, l) => s + cents(l.actual_total), 0);
-  return {
-    budgeted: budgeted / 100,
-    available: available / 100,
-    spent: spent / 100,
-    left: (available - spent) / 100,
-    pct: available > 0 ? (spent / available) * 100 : 0,
-    overCount: lines.filter(l => cents(l.actual_total) > Math.round(availableOf(l) * 100)).length,
-  };
 }
 
 /** Expense categories with spend this month and no Budget behind them.

@@ -9,8 +9,8 @@ import HowCalculated from "../components/HowCalculated";
 import MonthYearPicker from "../components/MonthYearPicker";
 import { CategoryOptions } from "../lib/selectOptions";
 import {
-  availableOf, flexibleSaveMonth, leftToAssignStatus, trackTotals, unbudgetedSpend,
-  type OverviewRow, type PlanTrackLine,
+  flexibleSaveMonth, leftToAssignStatus, unbudgetedSpend,
+  type OverviewRow, type PlanTrackLine, type TrackTotals,
 } from "../lib/budgetPlan";
 
 /**
@@ -48,7 +48,8 @@ interface PlanGroup {
 interface Plan {
   income_total: string; committed_total: string; flexible_total: string; budget_total: string;
   left_to_assign: string; category_budget_total: string; unclassified_count: number;
-  carry_forward: boolean; groups: PlanGroup[]; lines: PlanTrackLine[]; explain_left_to_assign: any;
+  carry_forward: boolean; groups: PlanGroup[]; lines: PlanTrackLine[]; track_totals: TrackTotals;
+  committed_visible_total: string; flexible_visible_total: string; explain_left_to_assign: any;
 }
 
 type BudgetTab = "track" | "set";
@@ -155,7 +156,12 @@ export default function Budget() {
   });
 
   const lines = plan?.lines ?? [];
-  const totals = trackTotals(lines);
+  const tt = plan?.track_totals;
+  const totals = {
+    budgeted: parseFloat(tt?.budgeted ?? "0"), available: parseFloat(tt?.available ?? "0"),
+    spent: parseFloat(tt?.spent ?? "0"), left: parseFloat(tt?.left ?? "0"),
+    pct: parseFloat(tt?.pct ?? "0"), overCount: tt?.over_count ?? 0,
+  };
   const unbudgeted = unbudgetedSpend(overview, lines);
   const shownIds = new Set(
     (plan?.groups ?? []).flatMap(g => [
@@ -382,9 +388,9 @@ export default function Budget() {
 
   // Track Budgets: the Budget relative to reality. Read-only.
   function monitorRow(line: PlanTrackLine) {
-    const available = availableOf(line);
+    const available = parseFloat(line.available || "0");
     const spent = parseFloat(line.actual_total || "0");
-    const left = available - spent;
+    const left = parseFloat(line.left || "0");
     const pct = available > 0 ? (spent / available) * 100 : 0;
     const k = `track:${line.category_id}`;
     const isOpen = expanded.has(k);
@@ -568,10 +574,10 @@ export default function Budget() {
               line4(
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Budget across categories</span>,
                 <span className="text-sm tabular-nums text-gray-500">
-                  {fmt(categoryGroups.reduce((s, g) => s + parseFloat(g.committed), 0))}
+                  {fmt(plan.committed_visible_total)}
                 </span>,
                 <span className="text-sm tabular-nums text-gray-500">
-                  {fmt(categoryGroups.reduce((s, g) => s + parseFloat(g.flexible), 0))}
+                  {fmt(plan.flexible_visible_total)}
                 </span>,
                 <span className="text-sm font-semibold tabular-nums text-gray-900 dark:text-white">{fmt(plan.category_budget_total)}</span>,
                 "pt-2 mt-2 border-t border-gray-200 dark:border-gray-700",

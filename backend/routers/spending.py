@@ -13,6 +13,7 @@ from backend.services.real_spend import ClassifiedRow, classified_rows
 from backend.services.summary_generator import generate_weekly_digest
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.recent_activity import get_recent_activity
+from backend.services.spending_figures import direct_actual, mean_total, monthly_averages
 
 # Bands on the stacked monthly chart before the tail collapses into "Other".
 _MAX_STACK_CATEGORIES = 8
@@ -45,7 +46,7 @@ def spending_monthly(
         bucket = results.setdefault(month, {"checking": Decimal("0"), "cards": Decimal("0")})
         bucket["checking" if r.source == "checking" else "cards"] += r.verdict.amount
 
-    return [
+    entries = [
         schemas.MonthlySpendingEntry(
             month=month,
             total=data["checking"] + data["cards"],
@@ -54,6 +55,10 @@ def spending_monthly(
         )
         for month, data in sorted(results.items())
     ]
+    average = mean_total([e.total for e in entries])
+    for e in entries:
+        e.monthly_average = average
+    return entries
 
 
 @router.get("/transactions", response_model=list[schemas.SpendingLineItem])
@@ -172,6 +177,16 @@ def spending_monthly_by_category(
                 color="#9ca3af", total=other,
             ))
         output.append(schemas.MonthlyCategoryRow(month=month, total=total, categories=cats))
+    # The average reads the bands as drawn (a category's refund-only month has
+    # no band and counts as $0), averaged over the full months shown.
+    averages = monthly_averages(
+        {row.month: {c.category_id: c.total for c in row.categories} for row in output},
+        date.today().strftime("%Y-%m"),
+    )
+    if averages is not None:
+        for row in output:
+            for c in row.categories:
+                c.monthly_average = averages[c.category_id]
     return output
 
 
@@ -240,7 +255,8 @@ def spending_by_category(
 
         # Also catch transactions categorized directly to top-level
         top_direct = sub_breakdown.get(top.id, {})
-        top_actual += sum(top_direct.values(), Decimal("0"))
+        top_direct_actual = direct_actual(top_direct)
+        top_actual += top_direct_actual
         # The group's Budget from the plan: its rows' Budgets, or its parent
         # line when that is larger (the line is the group's total).
         top_budgeted = top_budget.get(top.id, Decimal("0"))
@@ -256,6 +272,7 @@ def spending_by_category(
             actual=top_actual,
             variance=top_budgeted - top_actual,
             is_discretionary=bool(getattr(top, "is_discretionary", False)),
+            direct_actual=top_direct_actual,
             children=children_out,
         ))
 

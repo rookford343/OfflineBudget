@@ -43,6 +43,8 @@ SHARED_LAYER = {
     "services/forecast_engine.py": "the day-by-day forecast",
     "services/card_payment_model.py": "the card-payment model",
     "services/cushion.py": "the one cushion",
+    "services/budget_track.py": "Track Budgets: each line's available amount and the page headline",
+    "services/spending_figures.py": "Spending page: a parent's direct spend and a category's monthly average",
     "services/calc_version.py": "the calculation version",
     "services/tax_service.py": "tax estimates, their own domain",
     "services/bank_sync_service.py": "writes synced balances and pending charges",
