@@ -95,7 +95,7 @@ def export_budget_report(
 
     # A parent row's actual already includes its subcategories (the Budget page
     # rolls them up), so summing a column over every row would count them twice.
-    # Sum the rows with no parent, or the rows not flagged "Includes subcategories".
+    # Sum the top-level rows.
     rows = [
         {
             "category": label(r),

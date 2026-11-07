@@ -9,6 +9,7 @@ For each day in the requested range:
 """
 from __future__ import annotations
 from calendar import monthrange
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_CEILING, ROUND_FLOOR
@@ -102,6 +103,7 @@ def _card_payoff_date_for_charge(card: "models.CreditCard", charge_date: date) -
 
 def _card_subscription_charges(
     items: list["models.RecurringItem"], start_date: date, end_date: date,
+    skip: Callable[["models.RecurringItem", date], bool] | None = None,
 ) -> dict[date, Decimal]:
     """Total charged to a card on each day by its own recurring subscriptions.
 
@@ -114,12 +116,15 @@ def _card_subscription_charges(
 
     Reuses _fires_on so quarterly, yearly, weekly and biweekly subscriptions
     all land on the same dates the checking walk would put them on.
+
+    `skip(item, day)` drops one charge (the Safety Margin walk uses it for
+    this month's card bills it subtracts on its own).
     """
     charges: dict[date, Decimal] = {}
     current = start_date - timedelta(days=70)
     while current <= end_date:
         for item in items:
-            if _fires_on(item, current):
+            if _fires_on(item, current) and not (skip and skip(item, current)):
                 charges[current] = charges.get(current, Decimal("0")) + item.amount
         current += timedelta(days=1)
     return charges

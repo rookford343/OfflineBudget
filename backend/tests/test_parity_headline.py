@@ -325,3 +325,48 @@ def test_last_months_spend_is_one_number_on_every_surface(db_session, monkeypatc
     top_level_total = sum((D(r["actual"]) for r in rows if r["category"] in root_names), D("0"))
     assert top_level_total == sum((r.actual_total for r in overview_rows if r.parent_id is None), D("0"))
     assert top_level_total == expected + D("250.00")
+
+
+def test_a_refund_across_a_month_boundary_is_one_number_on_every_surface(db_session, monkeypatch):
+    """A -40 debit on Oct 20 and a +15 credit with the same description on Nov 3:
+    the credit is a refund wherever it is read from, so it nets against
+    November's spending (-15, no income) in single-month windows (Budget
+    overview, Sankey, spend_totals) and in the multi-month ones (yearly trends,
+    rolling months). It used to read as income unless the debit shared the window."""
+    _pin_today(monkeypatch, date(2026, 11, 6))
+    monkeypatch.setattr("backend.routers.spending.date", type(
+        "_Fixed", (date,), {"today": classmethod(lambda cls: date(2026, 11, 6))},
+    ))
+    user = models.User(username="parityrefund", hashed_password="x", display_name="PR")
+    db_session.add(user)
+    db_session.flush()
+    acct = models.Account(
+        user_id=user.id, name="Checking", type=models.AccountType.checking,
+        current_balance=D("5000.00"),
+    )
+    db_session.add(acct)
+    db_session.flush()
+    hardware = models.Category(user_id=user.id, name="Hardware", type=models.CategoryType.expense, color="#888888")
+    db_session.add(hardware)
+    db_session.flush()
+    for amount, day, month in (("-40.00", 20, 10), ("15.00", 3, 11)):
+        db_session.add(models.Transaction(
+            user_id=user.id, account_id=acct.id, date=date(2026, month, day), amount=D(amount),
+            description="EXAMPLE HARDWARE STORE", is_actual=True, category_id=hardware.id,
+        ))
+    db_session.commit()
+
+    november = spend_totals(db_session, user.id, date(2026, 11, 1), date(2026, 11, 30))
+    assert november.spend == D("-15.00")
+    assert november.income == D("0")
+
+    client = _client(db_session, user, spending_router_module, budget_router_module)
+    overview = client.get("/budget/overview", params={"year": 2026, "month": 11})
+    assert overview.status_code == 200
+    hardware_row = next(r for r in overview.json() if r["category_name"] == "Hardware")
+    assert D(str(hardware_row["actual_total"])) == D("-15.00")
+
+    yearly = client.get("/spending/yearly-trends", params={"years": 1}).json()
+    assert D(str(yearly[0]["months"]["11"])) == D("-15.00")
+    rolling = {m["month"]: m for m in client.get("/spending/rolling-monthly", params={"months": 3}).json()}
+    assert D(str(rolling["2026-11"]["total"])) == D("-15.00")

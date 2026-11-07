@@ -159,7 +159,8 @@ def card_bill_occurrences(base: MonthBase, *, include_proposed: bool = False) ->
     are not charged to the card, so nothing in card spending needs adding
     back, and the weekly pacer's card-bill take-out must not count them. The
     Safety Margin's card-bills total passes `include_proposed=True`: the
-    safety walk drops this month's card bills from the card payment on the
+    safety walk drops this month's still-to-come card bills from the card
+    payment, on every path (cycle estimate and subscription fallback), on the
     assumption that total subtracts them, proposals included.
     """
     return [

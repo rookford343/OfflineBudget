@@ -16,8 +16,8 @@ Verdicts (see docs/architecture.md, "Real-spending rule"):
   - income: a checking credit; a debit filed under an income category is
     income with a negative amount (a paycheck reversal reduces income).
   - spend: everything else. Card refunds are negative spend, and so is a
-    checking credit whose description matches a spend debit in the same
-    window (a same-merchant refund). Refunds may push a category negative;
+    checking credit whose description matches a spend debit in the 90 days
+    before it (a same-merchant refund, whatever the query window). Refunds may push a category negative;
     totals are never clamped.
 
 Only actual (`is_actual`) checking rows count. Card rows have no planned
@@ -26,7 +26,7 @@ state, and a card with no transaction feed simply contributes no rows.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Literal
 
@@ -92,8 +92,8 @@ def classify_checking(
 ) -> Verdict:
     """The verdict for one actual checking row.
 
-    `refund_descriptions` holds the descriptions of spend debits in the same
-    window; a credit matching one is a refund (negative spend) rather than
+    `refund_descriptions` holds the descriptions of spend debits the credit can
+    refund; a credit matching one is a refund (negative spend) rather than
     income. spend_totals / classified_rows compute it for you.
     """
     if not txn.is_actual:
@@ -133,20 +133,31 @@ def active_cards(db: Session, user_id: int) -> list[models.CreditCard]:
     ).all()
 
 
+# How far back before its own date a credit looks for the debit it refunds.
+# A fixed span, so the verdict never depends on how wide the query window is.
+REFUND_LOOKBACK_DAYS = 90
+
+
 def classify_checking_rows(
     rows: list[models.Transaction], cards: list[models.CreditCard],
+    context: list[models.Transaction] = (),
 ) -> list[ClassifiedRow]:
-    """Classify a window of actual checking rows together, so a credit that
-    matches a spend debit in the same window nets as a refund."""
-    first_pass = [(t, classify_checking(t, cards)) for t in rows]
-    refund_descriptions = frozenset(
-        t.description for t, v in first_pass
-        if v.kind == "spend" and t.amount < 0 and t.description
-    )
+    """Classify actual checking rows so a credit that matches an earlier spend
+    debit nets as a refund. A credit matches a spend debit with the same
+    description dated up to REFUND_LOOKBACK_DAYS before it (same day counts),
+    wherever the query window sits: `context` holds the debits from before
+    the window that the lookback can reach."""
+    debit_dates: dict[str, list[date]] = {}
+    for t in (*context, *rows):
+        if t.amount < 0 and t.description and classify_checking(t, cards).kind == "spend":
+            debit_dates.setdefault(t.description, []).append(t.date)
     out = []
-    for t, v in first_pass:
-        if v.kind == "income" and t.amount > 0 and t.description in refund_descriptions:
-            v = classify_checking(t, cards, refund_descriptions=refund_descriptions)
+    for t in rows:
+        v = classify_checking(t, cards)
+        if v.kind == "income" and t.amount > 0 and t.description in debit_dates:
+            earliest = t.date - timedelta(days=REFUND_LOOKBACK_DAYS)
+            if any(earliest <= d <= t.date for d in debit_dates[t.description]):
+                v = classify_checking(t, cards, refund_descriptions=frozenset({t.description}))
         out.append(ClassifiedRow(t, "checking", v))
     return out
 
@@ -175,7 +186,16 @@ def classified_rows(
         )
         if account_id:
             q = q.filter(models.Transaction.account_id == account_id)
-        out += classify_checking_rows(q.all(), active_cards(db, user_id))
+        lookback = db.query(models.Transaction).options(joinedload(models.Transaction.category)).filter(
+            models.Transaction.user_id == user_id,
+            models.Transaction.is_actual == True,
+            models.Transaction.amount < 0,
+            models.Transaction.date >= start - timedelta(days=REFUND_LOOKBACK_DAYS),
+            models.Transaction.date < start,
+        )
+        if account_id:
+            lookback = lookback.filter(models.Transaction.account_id == account_id)
+        out += classify_checking_rows(q.all(), active_cards(db, user_id), lookback.all())
     if include_cards:
         q = db.query(models.CreditCardTransaction).options(
             joinedload(models.CreditCardTransaction.category),

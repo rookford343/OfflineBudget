@@ -321,3 +321,28 @@ def test_all_spend_surfaces_agree(db_session):
 
     monthly = client.get("/spending/monthly", params={"start": START, "end": END})
     assert Decimal(str(monthly.json()[0]["total"])) == expected
+
+
+def test_checking_refund_looks_back_ninety_days_and_only_backwards(db_session):
+    """The refund verdict is the credit's own: a same-merchant debit up to 90
+    days before it nets it (even outside the query window); one 91 days
+    before, or one dated after it, does not."""
+    user = _user(db_session)
+    acct = _account(db_session, user)
+    for desc, amount, when in (
+        ("EXAMPLE NEAR DEBIT", "-40.00", date(2026, 3, 1)),
+        ("EXAMPLE NEAR DEBIT", "15.00", date(2026, 5, 30)),    # 90 days later: a refund
+        ("EXAMPLE FAR DEBIT", "-40.00", date(2026, 3, 1)),
+        ("EXAMPLE FAR DEBIT", "15.00", date(2026, 5, 31)),     # 91 days later: income
+        ("EXAMPLE LATER DEBIT", "15.00", date(2026, 5, 5)),    # credit first: income
+        ("EXAMPLE LATER DEBIT", "-40.00", date(2026, 5, 20)),
+    ):
+        db_session.add(models.Transaction(
+            user_id=user.id, account_id=acct.id, date=when, amount=Decimal(amount),
+            description=desc, is_actual=True,
+        ))
+    db_session.commit()
+    # May alone: the March debits are outside the window.
+    totals = spend_totals(db_session, user.id, date(2026, 5, 1), date(2026, 5, 31))
+    assert totals.income == Decimal("30.00")                  # far + later credits
+    assert totals.spend == Decimal("40.00") - Decimal("15.00")  # later debit, less the near refund

@@ -138,7 +138,9 @@ card (no transaction feed) has no spend rows, so the payments come from its bala
 
 `include_unbilled_card_bills=False` (Safety Margin's walk) leaves this month's not yet charged card
 bills out of the cycle estimate because Safety Margin subtracts them itself
-(`cc_budget_total`). That total includes a scenario's proposed card bills (negative ids,
+(`cc_budget_total`). Every path honors this: the cycle estimate, and the subscription fallback
+(no estimate, or charges past the cycle's close), skip a charge still to come in today's month that is on
+that month's card-bills list; before v8 the fallback kept them and took each off twice. That total includes a scenario's proposed card bills (negative ids,
 `card_bill_occurrences(base, include_proposed=True)`), which the safety walk drops from the payment
 too; before v5 nothing subtracted them. Proposals are not in posted card spending, so they stay out
 of `charged_so_far` and the pacer's card-bill take-out. Tests: `tests/test_card_payment_model.py`
@@ -162,8 +164,8 @@ Verdicts, checked in this order:
      is negative income.
   4. `spend` for any other debit. A "Zelle payment to <person>" stays spend; only
      own-account wording is a transfer.
-  5. A credit whose description matches a spend debit in the same window is a refund:
-     negative `spend`. Any other credit is `income`.
+  5. A credit whose description matches a spend debit in the 90 days before it
+     (`REFUND_LOOKBACK_DAYS`, whatever the query window) is a refund: negative `spend`. Any other credit is `income`.
 - **Card rows** (`classify_card`): `card_payment` for payment wording (`is_card_payment`),
   `transfer` under a savings-type category, otherwise `spend` with the row's sign, so a
   refund is negative spend. Card rows are never income.
@@ -320,9 +322,10 @@ When two places show different numbers for the same concept:
 Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 
 - v1: baseline after 2026-11-06 fixes.
-- v2: one real-spending rule; refunds net everywhere
+- v2: one real-spending rule; refunds net everywhere; savings budget lines show money moved to savings
 - v3: one pending freshness rule
 - v4: one walk policy; weekend overrides
 - v5: card-payment model shared by forecast and snapshot; scenario card bills in Safety Margin
 - v6: one cushion for safety, risk and wish list
 - v7: budget export reads the Budget page's actuals
+- v8: subscription-fallback cards no longer double-count in Safety Margin; refunds match by lookback, not query window

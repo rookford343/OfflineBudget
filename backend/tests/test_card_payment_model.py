@@ -161,7 +161,6 @@ GOLDEN = {
         ('2026-11-19', 'CC Payment: Balance Only', '-250.00', '{due_date=2026-11-19, kind=locked}'),
         ('2026-11-25', 'CC Payment: Hop Card', '-500.00', '{due_date=2026-11-25, kind=locked}'),
         ('2026-12-09', 'CC Estimate: Flat Card', '-250.00', '{kind=flat, monthly_amount=250.00}'),
-        ('2026-12-11', 'CC Estimate: Sub Card', '-30.00', '{kind=subscription_flat, monthly_amount=30.00}'),
         ('2026-12-17', 'CC Estimate: Locked Card', '-300.00', '{close_date=2026-11-20, kind=cycle_estimate, one_offs=0, pending=0, spent_since_statement=300.00, statement_date=2026-10-20, subscriptions_before_close=0}'),
         ('2026-12-25', 'Trip (via Hop Card)', '-90.00', ''),
         ('2026-12-25', 'CC Estimate: Hop Card', '-500.00', '{close_date=2026-11-28, kind=cycle_estimate, one_offs=90.00, pending=100.00, spent_since_statement=400.00, statement_date=2026-10-28, subscriptions_before_close=0}'),
@@ -196,7 +195,7 @@ GOLDEN = {
         ('2027-02-25', 'CC Estimate: Hop Card', '-800.00', '{kind=flat, monthly_amount=800.00}'),
     ],
 }
-GOLDEN_FINAL = {"display": "14720.00", "safety": "14760.00", "from_today": "14720.00"}
+GOLDEN_FINAL = {"display": "14720.00", "safety": "14790.00", "from_today": "14720.00"}
 
 
 def test_scenario_proposed_card_bill_in_cc_budget(db_session, monkeypatch):
@@ -284,3 +283,34 @@ def test_a_savings_account_draws_no_card_payments(db_session, monkeypatch):
         db_session, user, savings, as_of, date(2027, 1, 31),
         include_unbilled_card_bills=True, today=as_of,
     ) == []
+
+
+def _safety_with_card_subscription(db_session, monkeypatch, *, with_item: bool, username: str):
+    from backend.services.budget_snapshot import compute_budget_snapshot
+    as_of = _freeze_today(monkeypatch)  # Nov 3
+    user = _user(db_session, username=username)
+    account = _checking(db_session, user, balance="9000.00")
+    card = _card(db_session, user, name="Fallback Card", statement_day=25, due_day=15,
+                 balance_due=Decimal("0"), current_balance=Decimal("0"))
+    db_session.commit()
+    if with_item:
+        db_session.add(models.RecurringItem(
+            user_id=user.id, account_id=account.id, card_id=card.id, name="Streaming",
+            amount=Decimal("100.00"), type=models.RecurringType.expense,
+            frequency=models.RecurringFrequency.monthly, day_of_month=20,
+            start_date=date(2026, 1, 20), is_active=True, include_in_forecast=True,
+        ))
+        db_session.commit()
+    return compute_budget_snapshot(db_session, user, account.id, as_of=as_of).safety_margin
+
+
+def test_safety_margin_does_not_double_count_this_months_subscription_on_a_fallback_card(
+    db_session, monkeypatch,
+):
+    """A card with no estimate and no balance is paid off from its subscriptions.
+    A $100 charge on the 20th (statement the 25th, due the 15th) is subtracted
+    once by the cc-bills total; the payoff of Nov's charge must not take it a
+    second time. Last month's charge, paid Nov 15, is the other $100."""
+    without = _safety_with_card_subscription(db_session, monkeypatch, with_item=False, username="fbnone")
+    with_item = _safety_with_card_subscription(db_session, monkeypatch, with_item=True, username="fbsub")
+    assert without - with_item == Decimal("200.00")

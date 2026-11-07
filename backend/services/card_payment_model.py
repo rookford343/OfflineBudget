@@ -390,9 +390,9 @@ def card_payment_plan(
             # flatten them into one "pending" label: live pending_charges
             # (money the bank already knows about, not yet posted) versus
             # spending that already POSTED to current_balance since the last
-            # statement closed but was never itself "pending" (the user's
-            # real Apple Card, 2026-10-30: $0 pending, $145.30 carried --
-            # labeling that "pending" was simply wrong). pending_live is
+            # statement closed but was never itself "pending" (a card with
+            # $0 pending and spending carried -- labeling that "pending" was
+            # simply wrong). pending_live is
             # capped at `carried` so the split can never claim more live
             # pending than the carried total actually contains (the carried
             # clamp to >= 0 above can shrink the total below the card's own
@@ -609,9 +609,23 @@ def card_payment_plan(
             # the due date in their own month -- a subscription billed the 30th
             # misses that statement's close and is not paid off for another full
             # cycle.
+            #
+            # The Safety Margin walk (include_unbilled_card_bills=False) leaves
+            # out the charges it subtracts on its own: a bill still to come in
+            # today's month that is on that month's card-bills list (the same
+            # rule as the cycle estimate's cursor above). Keeping them here
+            # took each one off twice.
+            def _subtracted_elsewhere(item, charge_date: date) -> bool:
+                return (
+                    not include_unbilled_card_bills
+                    and charge_date > today
+                    and (charge_date.year, charge_date.month) == (today.year, today.month)
+                    and is_card_bill_in_month(item, charge_date)
+                )
+
             by_payoff: dict[date, Decimal] = {}
             for charge_date, amount in _card_subscription_charges(
-                card_items_by_card.get(card.id, []), start, end,
+                card_items_by_card.get(card.id, []), start, end, skip=_subtracted_elsewhere,
             ).items():
                 payoff = _card_payoff_date_for_charge(card, charge_date)
                 by_payoff[payoff] = by_payoff.get(payoff, Decimal("0")) + amount
