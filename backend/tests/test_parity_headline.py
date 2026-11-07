@@ -208,8 +208,8 @@ def _spending_fixture(db):
     """October 2026 spending, nearly all in its last week (one earlier row, Oct 10,
     sits outside the digest's trailing 7 days). Not spending: a card
     autopay, a transfer to savings and a paycheck. Netted: a checking refund
-    and a card refund. Spend: 35 (Oct 10) + 120 + 45 (a subcategory) + 60 + (40 - 15) + (80 - 15) = 350,
-    of which 315 falls in the last week."""
+    and a card refund. Spend: 35 (Oct 10) + 120 + 45 (a subcategory) + 20 (directly on its parent) + 60 + (40 - 15) + (80 - 15) = 370,
+    of which 335 falls in the last week."""
     user = models.User(username="parityspend", hashed_password="x", display_name="PS")
     db.add(user)
     db.flush()
@@ -242,6 +242,7 @@ def _spending_fixture(db):
         ("-35.00", "EXAMPLE PHARMACY", groceries, 10),
         ("-120.00", "EXAMPLE GROCER", groceries, 26),
         ("-45.00", "EXAMPLE HARDWARE STORE", repairs, 28),
+        ("-20.00", "EXAMPLE HOME SUPPLY", home, 28),
         ("-60.00", "Zelle payment to Example Person", dining, 27),
         ("-40.00", "EXAMPLE HARDWARE", dining, 27),
         ("15.00", "EXAMPLE HARDWARE", dining, 29),
@@ -269,8 +270,8 @@ def _spending_fixture(db):
 def test_last_months_spend_is_one_number_on_every_surface(db_session, monkeypatch):
     _pin_today(monkeypatch, date(2026, 10, 31))
     user, acct = _spending_fixture(db_session)
-    expected = D("350.00")
-    last_week = D("315.00")  # the same month without the Oct 10 row
+    expected = D("370.00")
+    last_week = D("335.00")  # the same month without the Oct 10 row
     assert spend_totals(db_session, user.id, date(2026, 10, 1), date(2026, 10, 31)).spend == expected
 
     # Month in Review: its debits, and the net cashflow it narrates (income less spend).
@@ -313,20 +314,14 @@ def test_last_months_spend_is_one_number_on_every_surface(db_session, monkeypatc
     # Dining: Zelle 60 + hardware (40 - 15) + cafe card (80 - 15); the transfer and autopay are not spend.
     assert exported["Dining"] == D("150.00")
     # A subcategory is named under its parent; the parent says it includes it.
-    assert exported["Home / Repairs"] == D("45.00") and exported["Home"] == D("45.00")
-    assert {r["category"]: r["includes_subcategories"] for r in rows}["Home"] == "yes"
-    assert {r["category"]: r["includes_subcategories"] for r in rows}["Home / Repairs"] == ""
-    # A spreadsheet user gets one copy whichever set they sum: top-level rows, or leaf rows.
-    top_level = sum(
-        (r.actual_total for r in overview_rows if r.parent_id is None and r.category_type != "income"),
-        D("0"),
-    )
-    assert top_level == expected - D("0") + savings_moved_in_export(rows)
-    summed_top = sum((D(r["actual"]) for r in rows if " / " not in r["category"]), D("0"))
-    summed_leaf = sum((D(r["actual"]) for r in rows if not r["includes_subcategories"]), D("0"))
-    assert summed_top == summed_leaf == top_level
-
-
-def savings_moved_in_export(rows) -> Decimal:
-    """Savings-type lines show money moved to savings (the 250.00 transfer), not spending."""
-    return next((D(r["actual"]) for r in rows if r["category"] == "Savings"), D("0"))
+    # Home: 20 filed directly on the parent plus 45 on its child.
+    assert exported["Home / Repairs"] == D("45.00") and exported["Home"] == D("65.00")
+    flags = {r["category"]: r["includes_subcategories"] for r in rows}
+    assert flags["Home"] == "yes" and flags["Home / Repairs"] == ""
+    # Totalling the file: sum the top-level rows (those with no parent in the overview). A flagged
+    # parent already includes its subcategories and its own spend. 370.00 of spending plus the
+    # 250.00 moved into the Savings line.
+    root_names = {r.category_name for r in overview_rows if r.parent_id is None}
+    top_level_total = sum((D(r["actual"]) for r in rows if r["category"] in root_names), D("0"))
+    assert top_level_total == sum((r.actual_total for r in overview_rows if r.parent_id is None), D("0"))
+    assert top_level_total == expected + D("250.00")
