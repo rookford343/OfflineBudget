@@ -145,3 +145,28 @@ def test_issue_cert__renew_moves_old_pair_aside(tmp_path: Path) -> None:
     assert len(list(out.glob("server.*.bak.crt"))) == 1
     assert len(list(out.glob("server.*.bak.key"))) == 1
     assert (out / "server.crt").exists()
+
+
+def test_issue_cert__renew_signing_failure_keeps_original(tmp_path: Path) -> None:
+    ca = tmp_path / "ca"
+    ca.mkdir()
+    subprocess.run(  # noqa: S603 - fixed openssl invocation on temp paths
+        ["/usr/bin/openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:P-256", "-days", "2",
+         "-subj", "/CN=t", "-passout", "pass:right", "-keyout", str(ca / "ca.key"), "-out", str(ca / "ca.crt")],
+        check=True, capture_output=True,
+    )
+    good, bad = tmp_path / "good.pass", tmp_path / "bad.pass"
+    good.write_text("right\n")
+    bad.write_text("wrong\n")
+    out = tmp_path / "ssl"
+    script = ROOT / "scripts" / "tls" / "issue-cert.sh"
+    first = _run(script, str(ca), "host.local", str(out), env={"OB_CA_PASSFILE": str(good)})
+    assert first.returncode == 0, first.stderr
+    before = ((out / "server.crt").read_bytes(), (out / "server.key").read_bytes())
+    r = _run(script, "--renew", str(ca), "host.local", str(out), env={"OB_CA_PASSFILE": str(bad)})
+    assert r.returncode != 0
+    assert ((out / "server.crt").read_bytes(), (out / "server.key").read_bytes()) == before
+    assert not list(out.glob("*.bak.*"))
+    ok = _run(script, "--renew", str(ca), "host.local", str(out), env={"OB_CA_PASSFILE": str(good)})
+    assert ok.returncode == 0, ok.stderr
+    assert (list(out.glob("server.*.bak.key"))[0].stat().st_mode & 0o777) == 0o600

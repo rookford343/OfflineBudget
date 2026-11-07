@@ -18,6 +18,8 @@ scripts/tls/issue-cert.sh --renew ~/.offlinebudget-ca df-macbookpro16.local ssl
 scripts/deploy.sh
 ```
 
+Delete the `ssl/server.*.bak.*` files once the renewed certificate is verified on the phone.
+
 ### 2. Trust the CA on the iPhone
 
 1. AirDrop `~/.offlinebudget-ca/ca.crt` to the phone, then install the profile from Settings, General, VPN & Device Management.
