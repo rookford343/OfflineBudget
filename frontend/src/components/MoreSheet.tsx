@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { NavLink } from "react-router-dom";
 import { LogOut, Eye, EyeOff, Moon, Sun, X, Settings as SettingsIcon } from "lucide-react";
 import { NAV_GROUPS, SETTINGS_ITEM } from "../lib/navItems";
@@ -15,6 +16,15 @@ interface Props {
 
 /** Phone "More" bottom sheet: every page, Settings, display toggles, Log out. */
 export default function MoreSheet({ onClose, onLogout, balancesHidden, onToggleBalances, isDark, onToggleTheme, badgeFor }: Props) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  // Focus the Close button on open; Escape closes. (Layout restores focus to
+  // the More button once the sheet is gone.)
+  useEffect(() => {
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
   const row = "flex min-h-[44px] items-center gap-3 rounded-lg px-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50";
   return (
     <div className="fixed inset-0 z-[60] lg:hidden" role="dialog" aria-modal="true" aria-label="More">
@@ -22,7 +32,7 @@ export default function MoreSheet({ onClose, onLogout, balancesHidden, onToggleB
       <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-2xl bg-white dark:bg-gray-800 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl">
         <div className="flex items-center justify-between pb-2">
           <h2 className="text-base font-semibold text-gray-900 dark:text-white">More</h2>
-          <button onClick={onClose} aria-label="Close" className="flex h-11 w-11 items-center justify-center text-gray-500"><X size={20} /></button>
+          <button ref={closeRef} onClick={onClose} aria-label="Close" className="flex h-11 w-11 items-center justify-center text-gray-500"><X size={20} /></button>
         </div>
         {NAV_GROUPS.map(group => (
           <div key={group.key} className="pb-2">

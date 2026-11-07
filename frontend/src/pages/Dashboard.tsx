@@ -24,7 +24,7 @@ import CheckingBalancesCard from "../components/CheckingBalancesCard";
 import SafetyMarginHero from "../components/phone/SafetyMarginHero";
 import SpendableTile from "../components/phone/SpendableTile";
 import UpcomingOneOffs from "../components/phone/UpcomingOneOffs";
-import { summarizePending, lastBankSync } from "../lib/freshness";
+import { lastBankSync } from "../lib/freshness";
 
 /** True while the viewport is at least `px` wide (Tailwind's sm=640, lg=1024). */
 function useMinWidth(px: number): boolean {
@@ -263,7 +263,7 @@ export default function Dashboard() {
                 weekly={num(snapshot.safety_margin_weekly)}
                 month={num(snapshot.safety_margin)}
                 perDay={num(snapshot.safety_margin_today)}
-                pending={summarizePending(cards)}
+                pending={{ count: snapshot.pending_cards_count ?? 0, total: num(snapshot.pending_cards_total) }}
                 lastSync={lastBankSync(bankConnections)}
                 hidden={balancesHidden}
               />

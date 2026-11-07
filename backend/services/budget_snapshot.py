@@ -20,6 +20,7 @@ from backend.services.forecast_engine import (
     _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
 )
 from backend.services.card_spending import card_month_spending
+from backend.services.pending import card_pending
 from backend.services.card_payment_model import CardPayment
 from backend.services.month_base import build_month_base, card_bill_occurrences
 from backend.services.spendable_pacer import compute_weekly_spendable
@@ -556,6 +557,12 @@ def compute_budget_snapshot(
     # which can be a past date a scenario or the weekly email is replaying)
     # -- matches CreditCardOut.statement_stale_reason exactly for the
     # CardSnapshot list below.
+    # Active cards carrying fresh pending right now: the count and total the
+    # phone hero shows. Same accessor and freshness rule as the forecast.
+    pending_by_card = [card_pending(c, as_of) for c in active_cards]
+    pending_cards = [p for p in pending_by_card if p > 0]
+    pending_cards_count = len(pending_cards)
+    pending_cards_total = sum(pending_cards, Decimal("0"))
     stale_today = date.today()
     card_stale_reasons = {c.id: statement_stale_reason(c, stale_today) for c in active_cards}
     # The 'Credit Card Bills' list: this month's card-linked bill
@@ -865,6 +872,8 @@ def compute_budget_snapshot(
         safety_margin=safety_margin,
         safety_margin_weekly=safety_margin_weekly,
         safety_margin_today=safety_margin_today,
+        pending_cards_count=pending_cards_count,
+        pending_cards_total=pending_cards_total,
         days_remaining_in_month=days_remaining,
         lookahead_minimum=display_min,
         lookahead_minimum_date=display_min_date,

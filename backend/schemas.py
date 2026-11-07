@@ -1983,6 +1983,11 @@ class BudgetSnapshot(BaseModel):
     # without it (e.g. test_summary_generator_next_month_low's
     # _blank_snapshot) keep working unchanged.
     safety_margin_today: Decimal = Decimal("0")
+    # How many active cards carry fresh pending charges, and their combined
+    # total (pending.card_pending, non-zero cards only). Defaulted so existing
+    # callers/fixtures building a BudgetSnapshot without them keep working.
+    pending_cards_count: int = 0
+    pending_cards_total: Decimal = Decimal("0")
     days_remaining_in_month: int
     # The quarter's projected low point and the day it lands, read off the
     # same walk the Forecast tab draws (this month's not-yet-charged card

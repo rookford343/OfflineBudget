@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clearAuth, getUser } from "../store/auth";
@@ -81,6 +81,12 @@ export default function Layout() {
   // More, which opens the sheet with every page, Settings and Log out.
   const barItems = phoneBarItems(pinned);
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
+  const closeMore = useCallback(() => {
+    setMoreOpen(false);
+    // After the sheet unmounts, hand focus back to the button that opened it.
+    requestAnimationFrame(() => moreBtnRef.current?.focus());
+  }, []);
 
   function logout() {
     clearAuth();
@@ -310,6 +316,7 @@ export default function Layout() {
           </NavLink>
         ))}
         <button
+          ref={moreBtnRef}
           onClick={() => setMoreOpen(true)}
           className="flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium text-gray-500 dark:text-gray-400"
         >
@@ -319,7 +326,7 @@ export default function Layout() {
       </nav>
       {moreOpen && (
         <MoreSheet
-          onClose={() => setMoreOpen(false)}
+          onClose={closeMore}
           onLogout={logout}
           balancesHidden={balancesHidden}
           onToggleBalances={toggleBalancesHidden}
