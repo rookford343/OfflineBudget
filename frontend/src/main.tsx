@@ -15,7 +15,15 @@ initTheme()
 // MutationCache/QueryCache onError fire for EVERY mutation and query, and a
 // local onError on an individual call still runs alongside this, so existing
 // bespoke handling keeps working.
+//
+// Net Position is also refreshed here, after ANY successful mutation. It is
+// the backend's checking-minus-card-statements figure, so it depends on
+// accounts, cards, imports, syncs and data resets alike; listing it in each
+// mutation's invalidations kept missing one (wizard, danger zone, ...). It is
+// one cheap query, so refetching it (only if mounted) is simpler than being
+// right per call site.
 const mutationCache = new MutationCache({
+  onSuccess: () => { void queryClient.invalidateQueries({ queryKey: ["accounts", "net-position"] }) },
   onError: (error) => publishAppError(describeError(error)),
 })
 

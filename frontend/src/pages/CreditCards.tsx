@@ -58,9 +58,9 @@ export default function CreditCards() {
   const [payForm, setPayForm] = useState({ ...emptyPayment });
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
-  const createMut = useMutation({ mutationFn: cardsApi.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts", "net-position"] }); close(); } });
-  const updateMut = useMutation({ mutationFn: ({ id, data }: any) => cardsApi.update(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts", "net-position"] }); close(); } });
-  const deleteMut = useMutation({ mutationFn: cardsApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts", "net-position"] }); setDeleteId(null); } });
+  const createMut = useMutation({ mutationFn: cardsApi.create, onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); close(); } });
+  const updateMut = useMutation({ mutationFn: ({ id, data }: any) => cardsApi.update(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); close(); } });
+  const deleteMut = useMutation({ mutationFn: cardsApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); setDeleteId(null); } });
   const payMut = useMutation({ mutationFn: ({ id, data }: any) => cardsApi.pay(id, data), onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts"] }); setPayCard(null); } });
   const markSentMut = useMutation({
     mutationFn: cardsApi.markPaymentSent,
@@ -86,7 +86,7 @@ export default function CreditCards() {
   // (the backend stamps freshness on any PATCH that includes balance_due).
   const confirmStatementMut = useMutation({
     mutationFn: (c: Card) => cardsApi.update(c.id, { balance_due: parseFloat(c.balance_due) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts", "net-position"] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); },
   });
 
   function openNew() { setForm({ ...emptyCard }); setEditCard(null); setShowForm(true); }

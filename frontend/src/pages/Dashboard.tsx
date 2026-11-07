@@ -76,7 +76,6 @@ export default function Dashboard() {
     mutationFn: ({ id, data }: { id: number; data: object }) => cardsApi.update(id, data),
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ["credit-cards"] });
-      qc.invalidateQueries({ queryKey: ["accounts", "net-position"] });
       qc.invalidateQueries({ queryKey: ["budget-snapshot"] });
       qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
       qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
