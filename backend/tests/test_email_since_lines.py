@@ -39,7 +39,7 @@ def _add_pending(db, user, n):
 
 
 def _since(db, user):
-    return since_last_email(db, user, collect_headline_metrics(db, user, TODAY), as_of=TODAY)
+    return since_last_email(db, user, collect_headline_metrics(db, user, TODAY))
 
 
 def _set_previous(db, user, key, delta):

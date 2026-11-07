@@ -92,7 +92,7 @@ def test_history_lists_changes_newest_first(db_session):
     assert newest["previous_taken_at"].startswith("2026-11-02T18:30")
     assert newest["trigger"] == "sync"
     assert newest["calc_changed"] is False
-    assert newest["headline"] == "Base −$30.00" and older["headline"] == "Base +$50.00"
+    assert newest["headline"] == "Base changed" and older["headline"] == "Base changed"
     # previous snapshot is a different local day -> weekday shown
     assert newest["summary"].startswith("Leftover −$30.00 since Mon 1:30 PM")
     # same local day -> time only (7:00 AM Eastern)
@@ -199,3 +199,22 @@ def test_history_routes_require_a_login(db_session, method, path):
     app.include_router(history_router.router)
     app.dependency_overrides[get_db] = lambda: db_session  # no auth override
     assert TestClient(app).request(method, path).status_code == 401
+
+
+def test_grouped_cause_serializes_head_and_items(db_session):
+    user = _user(db_session)
+    card = models.CreditCard(user_id=user.id, name="Visa", credit_limit=D("5000"),
+                             statement_day=20, due_day=10)
+    db_session.add(card)
+    db_session.commit()
+    pending = [{"card_id": card.id, "card": "Visa", "external_id": f"p{n}", "merchant": m, "amount": a}
+               for n, (m, a) in enumerate([("Example Insurance Co.", "250.00"), ("Grocery Store", "100.00")])]
+    _snap(db_session, user, T1, "500.00", key="safety_margin", explain_json=_explain("1"))
+    _snap(db_session, user, T2, "150.00", key="safety_margin", explain_json=_explain("1"), sources_json=json.dumps({
+        "card_pending": pending, "checking_pending": [], "max_txn_id": 0, "max_card_txn_id": 0}))
+    change = _client(db_session, user).get("/history/safety_margin").json()["changes"][0]
+    assert change["headline"] == "New pending Visa charges"
+    grouped = change["causes"][0]
+    assert grouped["head"] == "new pending Visa charges"
+    assert [(i["name"], D(i["amount"])) for i in grouped["items"]] == [
+        ("Example Insurance Co.", D("250.00")), ("Grocery Store", D("100.00"))]

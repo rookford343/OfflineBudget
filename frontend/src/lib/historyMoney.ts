@@ -11,6 +11,13 @@ export function signedMoney(hidden: boolean, v: string | null, plus: boolean): s
 }
 
 // A grouped cause's item amount: the figure as the bank listed it, no sign.
-export function itemMoney(hidden: boolean, v: string): string {
+export function itemMoney(hidden: boolean, v: string | null): string {
+  if (v == null) return "";
   return maskIfHidden(hidden, fmt(v.startsWith("-") ? v.slice(1) : v));
+}
+
+// True when two backend decimal strings display as the same signed figure.
+// Compares the formatted text; no arithmetic.
+export function sameFigure(a: string | null, b: string | null): boolean {
+  return signedMoney(false, a, true) === signedMoney(false, b, true);
 }

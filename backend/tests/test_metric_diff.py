@@ -10,6 +10,7 @@ from backend import models, schemas
 from backend.services.metric_diff import (
     Cause,
     LineChange,
+    _history_cause,
     diff_explanations,
     explain_change,
     headline,
@@ -454,6 +455,90 @@ def test_split_search_is_capped_per_owner(db_session):
     assert texts[0] == "pending Visa charge dropped: Big Store $60.00"
 
 
+def test_split_cap_boundary_is_twelve_owner_rows(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    _card_rows(db_session, user, visa, "25.00", "35.00", *["1.00"] * 10)  # 12 rows: searched
+    texts = _card_texts(db_session, user, [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")], [])
+    assert texts == ["new Visa transactions: Split Shop 3 $1.00, Split Shop 4 $1.00, Split Shop 5 $1.00, "
+                     "Split Shop 6 $1.00, Split Shop 7 $1.00, Split Shop 8 $1.00, Split Shop 9 $1.00, "
+                     "Split Shop 10 $1.00, Split Shop 11 $1.00, Split Shop 12 $1.00"]
+
+
+def test_split_cap_boundary_thirteen_rows_is_not_searched(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    _card_rows(db_session, user, visa, "25.00", "35.00", *["1.00"] * 11)  # 13 rows: skipped
+    texts = _card_texts(db_session, user, [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")], [])
+    assert texts[0] == "pending Visa charge dropped: Big Store $60.00"
+
+
+def test_split_parts_must_share_the_pending_sign(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    _card_rows(db_session, user, visa, "80.00", "-20.00")  # sums to 60.00 but one is a refund
+    texts = _card_texts(db_session, user, [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")], [])
+    assert texts[0] == "pending Visa charge dropped: Big Store $60.00"
+
+
+def _derived_pair(db, user, *, parent_in_prev=True, calc=(12, 12), pending=None):
+    """safety_margin_week whose receipt has a 'safety_margin' row; the parent's own
+    receipt moved on its 'Next month lowest' line."""
+    week = lambda v: _ex(_row("start", "safety_margin", v))  # noqa: E731
+    parent = lambda v: _ex(_row("start", "Next month lowest", v))  # noqa: E731
+    prev_readings = {"safety_margin_week": ("100.00", week("400.00"))}
+    if parent_in_prev:
+        prev_readings["safety_margin"] = ("400.00", parent("400.00"))
+    prev = _snap(db, user, readings=prev_readings, calc_version=calc[0])
+    cur = _snap(db, user, taken_at=CUR_AT, calc_version=calc[1],
+                sources=_sources(card_pending=pending or ()), readings={
+                    "safety_margin_week": ("50.00", week("200.00")),
+                    "safety_margin": ("200.00", parent("200.00")),
+                })
+    return (next(r for r in prev.readings if r.metric_key == "safety_margin_week"),
+            next(r for r in cur.readings if r.metric_key == "safety_margin_week"))
+
+
+def test_derived_figure_shows_its_parents_causes(db_session):
+    user, _chk, _v, _m = _world(db_session)
+    prev, cur = _derived_pair(db_session, user)
+    causes = _causes(db_session, user, "safety_margin_week", prev, cur)
+    assert [(c.text, c.amount) for c in causes] == [("Next month lowest changed", None)]
+    assert all("safety_margin" not in c.text for c in causes)
+
+
+def test_derived_figure_inherits_grouped_cause_without_amounts_and_dedupes(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    pending = [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")]
+    prev, cur = _derived_pair(db_session, user, pending=pending)
+    causes = _causes(db_session, user, "safety_margin_week", prev, cur)
+    # The week figure already has the source cause itself; the parent's copy is not repeated.
+    assert [c.head for c in causes].count("new pending Visa charge") == 1
+    assert [c.text for c in causes][-1] == "Next month lowest changed"
+
+
+def test_inherited_grouped_cause_keeps_names_and_drops_amounts():
+    from backend.services.metric_diff import _inherited
+    g = Cause("g: A $1.00", None, head="g", items=("A $1.00",), rows=(("A", D("1.00")),))
+    out = _history_cause(_inherited(g))
+    assert out.text == "g: A" and out.head == "g"
+    assert [(i.name, i.amount) for i in out.items] == [("A", None)]
+
+
+def test_derived_figure_keeps_its_own_line_when_parent_reading_is_missing(db_session):
+    user, _chk, _v, _m = _world(db_session)
+    prev, cur = _derived_pair(db_session, user, parent_in_prev=False)
+    causes = _causes(db_session, user, "safety_margin_week", prev, cur)
+    assert [(c.short, c.amount) for c in causes] == [("safety_margin changed", D("-200.00"))]
+
+
+def test_line_cause_headline_has_no_amount():
+    from backend.services.metric_diff import _line_cause
+    for change, tail in ((LineChange("CC Estimate: Apple Card", None, D("50")), "added"),
+                         (LineChange("CC Estimate: Apple Card", D("50"), None), "removed"),
+                         (LineChange("CC Estimate: Apple Card", D("50"), D("20")), "changed")):
+        c = _line_cause(change)
+        assert headline([c]) == f"CC Estimate: Apple Card {tail}"
+        assert "$" in c.text and "$" not in headline([c])
+
+
 def test_split_posting_on_checking_is_not_reported_twice(db_session):
     user, chk, _v, _m = _world(db_session)
     pending = {"account_id": chk.id, "account": "Example Checking", "external_id": "c1",
@@ -480,8 +565,8 @@ def test_grouped_cause_carries_head_and_items(db_session):
         db_session, user, "safety_margin",
         cur_kw={"sources": _sources(card_pending=[_pend(visa.id, "Visa", *i) for i in items])},
     )
-    out = schemas_cause = __import__("backend.services.metric_diff", fromlist=["x"])._history_cause(
-        _causes(db_session, user, "safety_margin", prev, cur)[0])
+    schemas_cause = _causes(db_session, user, "safety_margin", prev, cur)[0]
+    out = _history_cause(schemas_cause)
     assert out.head == "new pending Visa charges"
     assert [(i.name, i.amount) for i in out.items] == [
         ("Example Insurance Co.", D("250.00")), ("Grocery Store", D("100.00"))]
@@ -495,8 +580,9 @@ def test_headline_for_a_grouped_first_cause():
 
 
 def test_headline_for_a_line_cause_and_more():
-    causes = [Cause("Paycheck +$5.00", D("5")), Cause("Rent −$2.00", D("-2")), Cause("new month (Dec)", None)]
-    assert headline(causes) == "Paycheck +$5.00 + 2 more"
+    causes = [Cause("Paycheck +$5.00", D("5"), short="Paycheck changed"),
+              Cause("Rent −$2.00", D("-2"), short="Rent changed"), Cause("new month (Dec)", None)]
+    assert headline(causes) == "Paycheck changed + 2 more"
 
 
 def test_headline_counts_causes_not_items():

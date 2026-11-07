@@ -197,7 +197,7 @@ def _send_daily_summaries_locked() -> None:
                     from backend.services.metric_diff import since_last_email
                     today = date.today()
                     readings = metric_history.collect_headline_metrics(db, user, today)
-                    since = since_last_email(db, user, readings, as_of=today)
+                    since = since_last_email(db, user, readings)
                 except Exception:  # noqa: BLE001 -- history must never stop the email
                     logger.exception("Daily summary: since-last-email lines failed for %s", user.username)
                     try:

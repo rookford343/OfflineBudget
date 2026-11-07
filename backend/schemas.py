@@ -2737,7 +2737,7 @@ class BonusAllocationOut(BaseModel):
 
 class HistoryCauseItem(BaseModel):
     name: str
-    amount: Decimal
+    amount: Optional[Decimal] = None  # None for a cause inherited from a parent figure
 
 
 class HistoryCause(BaseModel):

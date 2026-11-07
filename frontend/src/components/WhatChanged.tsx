@@ -3,7 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { History, X, ChevronRight, ChevronDown } from "lucide-react";
 import { historyApi, type MetricChange } from "../api";
-import { itemMoney, signedMoney } from "../lib/historyMoney";
+import { itemMoney, sameFigure, signedMoney } from "../lib/historyMoney";
 import { maskMoneyText } from "../lib/maskMoney";
 import { useBalancesHidden } from "../store/balanceVisibility";
 
@@ -42,7 +42,11 @@ function MetricList({ metricKey, title, showTitle }: { metricKey: string; title:
         <p className="text-sm text-gray-400">No changes recorded yet.</p>
       )}
       {changes.map((c, i) => {
-        const hasCauses = c.causes.length > 0;
+        // Expandable only when opening shows more than the row already says:
+        // several causes, a grouped cause's items, or a cause amount that is
+        // not the row's own delta. A lone line cause equal to the delta adds nothing.
+        const hasCauses = c.causes.length > 1
+          || c.causes.some(k => k.items.length > 0 || (k.amount != null && !sameFigure(k.amount, c.delta)));
         const isOpen = hasCauses && expanded.has(i);
         return (
           <div key={`${c.taken_at}-${i}`} className="py-1.5 border-b border-gray-100 dark:border-gray-700 last:border-b-0">
@@ -73,7 +77,9 @@ function MetricList({ metricKey, title, showTitle }: { metricKey: string; title:
                           {k.items.map((it, ii) => (
                             <li key={ii} className="flex justify-between gap-2">
                               <span className="min-w-0 truncate" title={hidden ? undefined : it.name}>{it.name}</span>
-                              <span className="tabular-nums whitespace-nowrap">{itemMoney(hidden, it.amount)}</span>
+                              {it.amount != null && (
+                                <span className="tabular-nums whitespace-nowrap">{itemMoney(hidden, it.amount)}</span>
+                              )}
                             </li>
                           ))}
                         </ul>

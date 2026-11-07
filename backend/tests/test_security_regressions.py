@@ -723,7 +723,7 @@ def test_since_line_carries_no_merchant_name(db_session, monkeypatch):
     ))
     db_session.commit()
     _set_previous(db_session, user, "safety_margin_week", Decimal("-400.00"))
-    since = since_last_email(db_session, user, collect_headline_metrics(db_session, user, TODAY), as_of=TODAY)
+    since = since_last_email(db_session, user, collect_headline_metrics(db_session, user, TODAY))
     assert since["safety_margin_week"] == "−$400.00 since last email"
     html, text = generate_daily_summary(db_session, user, since_lines=since)
     assert "<b>&Co" not in html and "&Co" not in html and "&Co" not in text

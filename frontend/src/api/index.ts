@@ -456,7 +456,7 @@ export const checkingLevelApi = {
 };
 
 // ── Change history (what moved each headline figure) ────────────────────────
-export interface HistoryCauseItem { name: string; amount: string }
+export interface HistoryCauseItem { name: string; amount: string | null }
 export interface HistoryCause { text: string; amount: string | null; head: string | null; items: HistoryCauseItem[] }
 export interface MetricChange {
   taken_at: string; previous_taken_at: string | null; trigger: string;

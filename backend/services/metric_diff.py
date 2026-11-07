@@ -12,7 +12,7 @@ import json
 import logging
 from dataclasses import dataclass
 from itertools import combinations
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -50,7 +50,8 @@ class Cause:
     amount: Decimal | None
     head: str = ""
     items: tuple[str, ...] = ()
-    rows: tuple[tuple[str, Decimal], ...] = ()  # (name, amount) per item, for the app
+    rows: tuple[tuple[str, Decimal | None], ...] = ()  # (name, amount) per item, for the app
+    short: str = ""  # headline form of a line cause, without its amount
 
 
 def money(amount: Decimal) -> str:
@@ -122,11 +123,13 @@ def diff_explanations(old: schemas.Explanation, new: schemas.Explanation) -> lis
 
 def _line_cause(change: LineChange) -> Cause:
     if change.old is None:
-        return Cause(f"{change.label} added ({money(change.new)})", change.new)
+        return Cause(f"{change.label} added ({money(change.new)})", change.new,
+                     short=f"{change.label} added")
     if change.new is None:
-        return Cause(f"{change.label} removed ({money(change.old)})", -change.old)
+        return Cause(f"{change.label} removed ({money(change.old)})", -change.old,
+                     short=f"{change.label} removed")
     delta = change.new - change.old
-    return Cause(f"{change.label} {signed_money(delta)}", delta)
+    return Cause(f"{change.label} {signed_money(delta)}", delta, short=f"{change.label} changed")
 
 
 # ── Source events ────────────────────────────────────────────────────────────
@@ -191,13 +194,16 @@ def _total(rows: list[_Item]) -> Decimal:
 def _take_split(posted: list[_Item], pending: _Item) -> bool:
     """Remove 2-4 posted rows on the same card/account that sum exactly to `pending`.
 
-    A merchant sometimes posts one pending charge as several rows. Smallest subset
+    A merchant sometimes posts one pending charge as several rows, all of the
+    pending amount's sign. Smallest subset
     wins; among equal sizes the earliest rows (list order). Skipped when the owner
     has more than _SPLIT_MAX_ROWS candidates, to cap the search.
     """
-    idx = [i for i, row in enumerate(posted) if row.owner_id == pending.owner_id]
-    if len(idx) > _SPLIT_MAX_ROWS:
+    owned = [i for i, row in enumerate(posted) if row.owner_id == pending.owner_id]
+    if len(owned) > _SPLIT_MAX_ROWS:
         return False
+    # A posted row of the opposite sign (a refund beside charges) is never a part.
+    idx = [i for i in owned if (posted[i].amount < 0) == (pending.amount < 0)]
     for size in range(2, _SPLIT_MAX_PARTS + 1):
         for combo in combinations(idx, size):
             if _total([posted[i] for i in combo]) == pending.amount:
@@ -311,13 +317,61 @@ def _grouped_causes(new_pending, gone_pending, posted, feeds, *, pending_noun, p
 
 # ── Public ───────────────────────────────────────────────────────────────────
 
+# A week or day figure is its parent figure divided down, so its receipt has
+# the parent as a row. That row's only cause would read "<parent> $X"; the
+# parent's own causes explain it instead. Verified against the receipts built
+# in budget_snapshot.py: each tree starts with its parent's label.
+DERIVED_FROM: dict[str, str] = {
+    "spendable_week": "left_to_spend",
+    "spendable_today": "spendable_week",
+    "safety_margin_week": "safety_margin",
+    "safety_margin_today": "safety_margin_week",
+}
+_MAX_INHERIT_DEPTH = 3
+_NOTHING_NAMED = "inputs changed"
+
+
+def _reading_of(snapshot: models.MetricSnapshot, key: str) -> models.MetricReading | None:
+    return next((r for r in snapshot.readings if r.metric_key == key), None)
+
+
+def _inherited(cause: Cause) -> Cause:
+    """A parent's cause shown under its derived figure: in the parent's units,
+    so no amount is carried (grouped items keep their names only)."""
+    if cause.head:
+        names = tuple(name for name, _ in cause.rows)
+        return Cause(f"{cause.head}: {', '.join(names)}", None, head=cause.head, items=names,
+                     rows=tuple((name, None) for name in names))
+    return Cause(cause.short or cause.text, None, short=cause.short)
+
+
+def _parent_causes(
+    db: Session, user_id: int, metric_key: str, prev: models.MetricReading, cur: models.MetricReading,
+    own: list[Cause], depth: int,
+) -> tuple[str, list[Cause]] | None:
+    """(parent row label, the parent's causes not already in `own`), or None
+    when this figure has no parent, the parent is missing from either snapshot,
+    or the parent has nothing nameable."""
+    parent_key = DERIVED_FROM.get(metric_key)
+    if parent_key is None or depth >= _MAX_INHERIT_DEPTH:
+        return None
+    prev_parent, cur_parent = _reading_of(prev.snapshot, parent_key), _reading_of(cur.snapshot, parent_key)
+    if prev_parent is None or cur_parent is None:
+        return None
+    parent = explain_change(db, user_id, parent_key, prev_parent, cur_parent, _depth=depth + 1)
+    texts = {c.text for c in own}
+    fresh = [c for c in parent if c.text not in texts and c.text != _NOTHING_NAMED]
+    return (cur_parent.label, fresh) if fresh else None
+
+
 def explain_change(
     db: Session, user_id: int, metric_key: str,
-    prev: models.MetricReading, cur: models.MetricReading,
+    prev: models.MetricReading, cur: models.MetricReading, *, _depth: int = 0,
 ) -> list[Cause]:
     """Why `metric_key` differs between two readings: calculation change first,
-    then source events, then receipt lines by size. `[Cause("inputs changed")]`
-    when nothing nameable differs."""
+    then source events, then receipt lines by size. A derived figure's line for
+    its parent is replaced by the parent's causes (see DERIVED_FROM).
+    `[Cause("inputs changed")]` when nothing nameable differs."""
     prev_snap, cur_snap = prev.snapshot, cur.snapshot
     causes: list[Cause] = []
     if prev_snap.calc_version != cur_snap.calc_version:
@@ -334,9 +388,16 @@ def explain_change(
             schemas.Explanation.model_validate_json(prev.explain_json),
             schemas.Explanation.model_validate_json(cur.explain_json),
         )
-        line_causes = [_line_cause(c) for c in lines]
-        causes.extend(sorted(line_causes, key=lambda c: abs(c.amount), reverse=True))
-    return causes or [Cause("inputs changed", None)]
+        ordered = sorted(lines, key=lambda c: abs(_line_cause(c).amount), reverse=True)
+        inherit = _parent_causes(db, user_id, metric_key, prev, cur, causes, _depth)
+        for line in ordered:
+            if inherit is not None and line.label == inherit[0]:
+                causes.extend(_inherited(c) for c in inherit[1])
+            else:
+                causes.append(_line_cause(line))
+    seen: set[str] = set()
+    unique = [c for c in causes if not (c.text in seen or seen.add(c.text))]
+    return unique or [Cause(_NOTHING_NAMED, None)]
 
 
 def summarize(label: str, delta: Decimal, since_text: str, causes: list[Cause], *, max_items: int) -> str:
@@ -359,12 +420,12 @@ def summarize(label: str, delta: Decimal, since_text: str, causes: list[Cause], 
 
 
 def headline(causes: list[Cause]) -> str:
-    """Short label for a collapsed history row: the first cause (a group's head
-    or a line's text), capitalized, plus " + N more" for the other causes."""
+    """Short label for a collapsed history row: the first cause (a group's head,
+    a line's short form without its amount, or the text), capitalized, plus " + N more" for the other causes."""
     if not causes:
         return "Inputs changed"
     first = causes[0]
-    text = first.head or first.text
+    text = first.head or first.short or first.text
     text = text[:1].upper() + text[1:]
     more = len(causes) - 1
     return f"{text} + {more} more" if more else text
@@ -437,7 +498,7 @@ def changes_for(
 # ── The daily email's "since last email" lines ───────────────────────────────
 
 def since_last_email(
-    db: Session, user: models.User, readings: list[MetricReadingData], *, as_of: date | None = None,
+    db: Session, user: models.User, readings: list[MetricReadingData],
 ) -> dict[str, str]:
     """Metric key -> "<signed amount> since last email" for each figure that
     moved (by a cent or more) since the last "email" snapshot; `{}` when there
