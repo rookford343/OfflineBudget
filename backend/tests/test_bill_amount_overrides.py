@@ -1,11 +1,29 @@
+import sys
 from datetime import date, timedelta
 from decimal import Decimal
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from backend import models
 from backend.dependencies import get_db, get_current_user
 from backend.routers import bill_overrides as bill_overrides_router_module
 from backend.services.forecast_engine import build_forecast, _next_occurrence_on_or_after, _adjust_for_weekend
+
+FIXED_TODAY = date(2026, 11, 2)  # a Monday; Duke's day-8 bill posts Fri Nov 6, ahead of it
+
+
+@pytest.fixture(autouse=True)
+def _pin_today(monkeypatch):
+    """Pin date.today() for this module, the forecast engine and the override
+    router. Without it the 'next due date' helpers race the real calendar: a
+    weekend due date posts on the Friday before, which can already be past."""
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return FIXED_TODAY
+    monkeypatch.setattr(sys.modules[__name__], "date", _FixedDate)
+    monkeypatch.setattr("backend.services.forecast_engine.date", _FixedDate)
+    monkeypatch.setattr("backend.routers.bill_overrides.date", _FixedDate)
 
 
 def _client(db_session, user):
