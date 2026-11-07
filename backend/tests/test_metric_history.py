@@ -24,7 +24,7 @@ from backend.services import metric_history
 from backend.services.calc_version import CALC_VERSION
 from backend.services.month_summary import build_month_summary
 from backend.services.pending import checking_balance_with_pending
-from backend.tests.test_parity_headline import TODAY, _headline_fixture, _pin_today
+from backend.tests.test_parity_headline import TODAY, _headline_fixture, _pin_today, _seed
 
 D = Decimal
 
@@ -277,16 +277,24 @@ def test_prune_keeps_thirteen_months(db_session, monkeypatch):
     assert db_session.query(models.MetricReading).count() == len(readings)
 
 
-def test_record_for_users_never_raises(db_session, monkeypatch):
+def test_record_for_users_never_raises(db_session, monkeypatch, caplog):
     _pin_today(monkeypatch, TODAY)
-    user, _ = _headline_fixture(db_session)
+    first, _ = _headline_fixture(db_session)
+    second, _ = _seed(db_session, "other", remaining=D("0"))
+    db_session.commit()  # the first user's failure rolls back, so the second must be committed
+    real = metric_history.collect_headline_metrics
 
-    def boom(*a, **k):
-        raise RuntimeError("collector down")
+    def flaky(db, user, as_of):
+        if user.id == first.id:
+            raise RuntimeError("collector down")
+        return real(db, user, as_of)
 
-    monkeypatch.setattr(metric_history, "collect_headline_metrics", boom)
-    record_for_users(db_session, [user.id], "sync")
-    assert _count(db_session) == 0
+    monkeypatch.setattr(metric_history, "collect_headline_metrics", flaky)
+    with caplog.at_level("ERROR"):
+        record_for_users(db_session, [first.id, second.id], "sync")
+    stored = db_session.query(models.MetricSnapshot).all()
+    assert [s.user_id for s in stored] == [second.id]
+    assert f"user {first.id}" in caplog.text
 
 
 def test_user_without_checking_records_nothing(db_session):

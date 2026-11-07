@@ -202,6 +202,21 @@ def test_sync_now_invokes_service_and_reports_errors(client, db_session):
     assert body["skipped_duplicates"] == 0
 
 
+def test_sync_now_records_history_with_sync_trigger(client, db_session):
+    test_client, user = client
+    db_session.add(models.BankConnection(
+        user_id=user.id, access_url_encrypted=crypto.encrypt("https://access.url"),
+    ))
+    db_session.commit()
+    calls = []
+    with patch("backend.routers.bank_sync.sync_connection", return_value=(0, 0)), \
+            patch("backend.routers.bank_sync.record_for_users",
+                  side_effect=lambda db, ids, trigger: calls.append((list(ids), trigger))):
+        resp = test_client.post("/bank-sync/sync-now")
+    assert resp.status_code == 200
+    assert calls == [([user.id], "sync")]
+
+
 def test_sync_now_reports_imported_and_skipped_counts(client, db_session):
     """Regression: Sync Now used to only expose synced_connections/errors --
     a clean run that found nothing new looked identical to one that pulled in

@@ -342,7 +342,7 @@ def sync_now(
             if connection.last_error:
                 errors.append(connection.last_error)
         settle_after_sync(db, [user.id])
-        record_for_users(db, [user.id], "manual")
+        record_for_users(db, [user.id], "sync")
         return schemas.BankSyncNowResponse(
             synced_connections=len(connections), errors=errors,
             imported=total_imported, skipped_duplicates=total_skipped,
@@ -396,7 +396,7 @@ def plaid_first_import(
         except PlaidError as exc:
             raise _plaid_http_error(exc)
         settle_after_sync(db, [user.id])
-        record_for_users(db, [user.id], "manual")
+        record_for_users(db, [user.id], "sync")
     finally:
         _bank_sync_lock.release()
     return _first_import_response(report)

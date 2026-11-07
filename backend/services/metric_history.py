@@ -34,7 +34,7 @@ from backend.schemas import ExplainChild
 logger = logging.getLogger(__name__)
 
 ZERO = Decimal("0")
-RETENTION_DAYS = 395  # about 13 months
+RETENTION_DAYS = 396  # about 13 months
 CENT = Decimal("0.01")
 # Triggers that are stored even when nothing changed since the last snapshot.
 ALWAYS_STORE_TRIGGERS = frozenset({"email"})

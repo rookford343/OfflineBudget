@@ -62,8 +62,9 @@ database and never leaves the machine.
 
 **Pending card charges:** if you connect a bank, the charges your card issuer
 currently lists as pending (date, merchant, amount). Each sync replaces the
-whole list, so a charge is deleted from it as soon as it posts; nothing about
-pending charges is kept as history.
+whole list, so a charge is deleted from it as soon as it posts. The list is a
+live snapshot, except that change history (above) keeps the names and amounts
+of pending charges for 13 months.
 
 **Encrypted at rest** (Fernet, keyed by `APP_ENCRYPTION_KEY`):
 
