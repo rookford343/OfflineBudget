@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { spendingApi, accountsApi, cardsApi, analyticsApi, merchantsApi, budgetApi } from "../api";
+import ScrollX from "../components/phone/ScrollX";
 import { sankey as d3Sankey, sankeyLinkHorizontal, sankeyLeft } from "d3-sankey";
 import { fmt, firstOfMonth, today, quickRange } from "../lib/utils";
 import {
@@ -435,7 +436,7 @@ export default function Spending() {
   }, [rollingMonthly]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 tap-44">
       {/* Header + controls */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -450,7 +451,7 @@ export default function Spending() {
           </select>
           <div className="flex gap-1">
             {([["Mo", "month"], ["3 Mo", "3months"], ["YTD", "ytd"], ["Last Yr", "lastyear"]] as const).map(([label, p]) => (
-              <button key={p} type="button" className="px-2 py-1 text-xs rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-400" onClick={() => { const r = quickRange(p); setStart(r.start); setEnd(r.end); }}>{label}</button>
+              <button key={p} type="button" className="px-2 py-1 max-lg:px-3 max-lg:min-h-[44px] text-xs rounded-md bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 dark:hover:text-indigo-400" onClick={() => { const r = quickRange(p); setStart(r.start); setEnd(r.end); }}>{label}</button>
             ))}
           </div>
           <input type="date" className="input w-auto" value={start} onChange={e => setStart(e.target.value)} />
@@ -465,7 +466,7 @@ export default function Spending() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium capitalize border-b-2 transition-colors ${
+            className={`px-4 py-2 max-lg:min-h-[44px] text-sm font-medium capitalize border-b-2 transition-colors ${
               activeTab === tab
                 ? "border-indigo-500 text-indigo-600 dark:text-indigo-300"
                 : "border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
@@ -561,7 +562,7 @@ export default function Spending() {
                     </div>
                   </div>
                 )}
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="stat-card">
                     <span className="stat-label">Discretionary</span>
                     <span className="stat-value text-gray-900 dark:text-[#c4ccd8]">{fmt(disc)}</span>
@@ -964,7 +965,7 @@ export default function Spending() {
                                     bad grouping visible and fixable instead of quietly wrong. */}
                                 <button
                                   onClick={() => { setRenameTarget(m.name); setRenameValue(m.name); }}
-                                  className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-indigo-500 transition-opacity"
+                                  className="max-lg:opacity-100 max-lg:p-3 lg:opacity-0 lg:group-hover:opacity-100 text-gray-300 hover:text-indigo-500 transition-opacity"
                                   title="Rename or merge this merchant"
                                 >
                                   <Pencil size={11} />
@@ -1066,9 +1067,10 @@ function SankeyChart({ data }: { data: any }) {
   const fmt2 = (v: number) => v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`;
 
   return (
-    <div className="card overflow-x-auto">
+    <div className="card">
       <h3 className="font-semibold text-gray-900 mb-4">Income → Expense Flow</h3>
-      <svg width="100%" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="min-w-[520px]">
+      <ScrollX>
+      <svg width="100%" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="min-w-[520px] max-sm:min-w-[640px]">
         {graph.links.map((l: any, i: number) => (
           <path
             key={i}
@@ -1101,6 +1103,7 @@ function SankeyChart({ data }: { data: any }) {
           );
         })}
       </svg>
+      </ScrollX>
 
     </div>
   );
