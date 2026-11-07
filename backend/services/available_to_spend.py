@@ -13,6 +13,8 @@ Everything here reads the shared layer:
 * spending: `real_spend.classified_rows` verdicts, month to date, refunds
   netting against spending (a refund never counts as income);
 * card pending: `pending.card_pending`;
+* balance-only cards (no itemized feed): `card_spending.balance_based_card_spend`,
+  the same fallback Left to Spend uses;
 * the walk's tail: the rows of the snapshot's own Left to Spend explanation,
   so the walk can't drift from `compute_budget_snapshot(...).left_to_spend`.
 
@@ -38,6 +40,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
+from backend.services.card_spending import balance_based_card_spend, transaction_fed_card_ids
 from backend.services.explain import ExplainBuilder
 from backend.services.month_base import MonthBase, build_month_base, card_bill_occurrences
 from backend.services.pending import card_pending
@@ -110,21 +113,39 @@ def available_to_spend(db: Session, user: models.User, as_of: date) -> schemas.A
     first = as_of.replace(day=1)
     base = build_month_base(db, user, as_of.year, as_of.month)
 
+    cards = active_cards(db, user.id)
+    # Same per-card rule as Left to Spend (services/card_spending): a card with
+    # an itemized feed is read from its posted rows; a balance-only card falls
+    # back to current_balance - balance_due + pending.
+    fed_ids = transaction_fed_card_ids(db, user.id, cards, as_of)
     rows = [
         r for r in classified_rows(db, user.id, first, as_of)
         if r.verdict.kind == "spend"
         # A checking row tied to a recurring item is that bill, already in bills.
         and not (r.source == "checking" and r.row.recurring_item_id is not None)
+        and (r.source == "checking" or r.row.card_id in fed_ids)
     ]
     held = _settled_one_off_row_ids(db, base, rows)
     rows = [r for r in rows if id(r) not in held]
     checking_spent = sum((r.verdict.amount for r in rows if r.source == "checking"), ZERO)
-    card_posted = sum((r.verdict.amount for r in rows if r.source == "card"), ZERO)
-    card_bills_charged = sum(
-        (o.amount for o in card_bill_occurrences(base) if o.date <= as_of), ZERO,
-    )
-    card_spent = max(card_posted - card_bills_charged, ZERO)
-    pending = sum((card_pending(c, as_of) for c in active_cards(db, user.id)), ZERO)
+    # Card-linked bills already charged come out of the card they were charged
+    # to (card rows carry no recurring link, so by amount), never below zero.
+    bills_by_card: dict[int, Decimal] = {}
+    for o in card_bill_occurrences(base):
+        if o.date <= as_of:
+            bills_by_card[o.card_id] = bills_by_card.get(o.card_id, ZERO) + o.amount
+    posted_by_card: dict[int, Decimal] = {}
+    for r in rows:
+        if r.source == "card":
+            posted_by_card[r.row.card_id] = posted_by_card.get(r.row.card_id, ZERO) + r.verdict.amount
+    card_spent = ZERO
+    pending = ZERO
+    for c in cards:
+        if c.id in fed_ids:
+            card_spent += max(posted_by_card.get(c.id, ZERO) - bills_by_card.get(c.id, ZERO), ZERO)
+            pending += card_pending(c, as_of)
+        else:  # balance-only: its pending is already inside the balance figure
+            card_spent += max(balance_based_card_spend(c, as_of) - bills_by_card.get(c.id, ZERO), ZERO)
     spent = checking_spent + card_spent + pending
 
     income = base.income_total
@@ -149,7 +170,8 @@ def available_to_spend(db: Session, user: models.User, as_of: date) -> schemas.A
                       schemas.ExplainChild(label="Checking spending", amount=checking_spent),
                       schemas.ExplainChild(
                           label="Card spending", amount=card_spent,
-                          note="Posted card purchases, less the card bills already counted above"),
+                          note="Posted card purchases, less the card bills already counted above; a card "
+                               "with no itemized feed counts its balance less what its last statement holds"),
                       schemas.ExplainChild(label="Pending card charges", amount=pending),
                   ])
         .build(available)

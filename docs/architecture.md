@@ -5,7 +5,7 @@ screen or in an email to the function that computes it, and the checklist for
 consolidating those functions into one shared layer.
 
 Design background: `docs/superpowers/specs/2026-11-06-calculation-consistency-design.md`.
-Status: every money figure is computed in `backend/services` (calculation version 11), and the
+Status: every money figure is computed in `backend/services` (calculation version 12), and the
 frontend displays them. `frontend/tests/moneyGuard.test.ts` fails if browser code starts adding or
 subtracting money again. Each row's "function" column is where the figure is computed.
 
@@ -355,3 +355,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 - v9: risk banner skips locked statement-payment dips, like the 3-month low
 - v10: net worth has one recipe; assets include account balances
 - v11: Available to Spend rebuilt before budgets on the shared layer
+- v12: Available to Spend counts balance-only cards like Left to Spend

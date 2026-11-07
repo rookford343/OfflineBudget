@@ -58,7 +58,8 @@ def _debit(db, user, acct, description, amount, day=10, **kw):
 def _card_row(db, user, card, merchant, amount, day=10):
     db.add(models.CreditCardTransaction(
         card_id=card.id, user_id=user.id, date=date(2026, 11, day),
-        amount=D(amount), merchant=merchant))
+        amount=D(amount), merchant=merchant,
+        source=models.CardTransactionSource.bank_sync))
     db.commit()
 
 
@@ -282,3 +283,52 @@ def test_route_returns_the_service_figures(db_session, monkeypatch):
     r = available_route(db=db_session, user=user)
     assert r.available == D("3937.00")
     assert r.explain.result == r.available
+
+
+def _balance_only_card(db, user, name="Bal", balance="500.00", due="200.00"):
+    card = models.CreditCard(user_id=user.id, name=name, credit_limit=D("5000"),
+                             statement_day=28, due_day=15,
+                             current_balance=D(balance), balance_due=D(due))
+    db.add(card)
+    db.commit()
+    return card
+
+
+def test_balance_only_card_counts_like_left_to_spend(db_session):
+    user = models.User(username="b", hashed_password="x", display_name="B")
+    db_session.add(user)
+    db_session.flush()
+    acct = models.Account(user_id=user.id, name="Chk", type=models.AccountType.checking,
+                          current_balance=D("2000.00"))
+    db_session.add(acct)
+    db_session.flush()
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=acct.id, name="Pay", amount=D("5000.00"),
+        type=models.RecurringType.income, frequency=models.RecurringFrequency.monthly,
+        day_of_month=1, start_date=date(2026, 1, 1), is_active=True))
+    _balance_only_card(db_session, user)
+
+    r = _ats(db_session, user)
+    snap = compute_budget_snapshot(db_session, user, acct.id, TODAY)
+    assert r.spent_this_month == D("300.00")
+    assert r.available == snap.left_to_spend == D("4700.00")
+    assert r.to_left_to_spend is not None
+    assert replay(r.to_left_to_spend) == snap.left_to_spend
+
+
+def test_bill_on_balance_only_card_does_not_reduce_another_cards_spend(db_session):
+    user, acct, fed = _seed(db_session)
+    _card_row(db_session, user, fed, "Some Shop", "250.00")
+    bal = _balance_only_card(db_session, user, balance="300.00", due="0.00")
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=acct.id, card_id=bal.id, name="Streaming",
+        amount=D("40.00"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly, day_of_month=5,
+        start_date=date(2026, 1, 1), is_active=True))
+    db_session.commit()
+
+    r = _ats(db_session, user)
+    # fed card: 250 untouched; balance-only card: 300 less its own 40 bill
+    assert r.spent_this_month == D("510.00")
+    assert replay(r.to_left_to_spend) == compute_budget_snapshot(
+        db_session, user, acct.id, TODAY).left_to_spend

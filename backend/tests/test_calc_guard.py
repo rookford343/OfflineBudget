@@ -34,6 +34,7 @@ MONEY_ATTRS = {"amount", "pending_charges", "balance_due", "current_balance"}
 SHARED_LAYER = {
     "services/month_base.py": "the month model",
     "services/real_spend.py": "the real-spending rule",
+    "services/card_spending.py": "card spending this month per card, with the balance-only fallback",
     "services/pending.py": "the pending and freshness rule",
     "services/account_balances.py": "pending-adjusted account balances and the month's change on them",
     "services/net_worth.py": "net worth: assets, liabilities and the one recipe behind the live view and snapshots",
@@ -71,7 +72,6 @@ PRESENTATIONAL_OR_WRITER = {
     "services/explain.py:children_consistent": "checks an explanation's own arithmetic",
     "services/explain.py:replay": "replays an explanation's own rows",
     "services/budget_snapshot.py:leftover_parts": "composes the month model's primitives",
-    "services/budget_snapshot.py:_card_spending_this_month": "composes real_spend verdicts per card",
     "services/budget_snapshot.py:compute_budget_snapshot": "composes the shared primitives into Left to Spend",
     "services/spendable_pacer.py:_recurring_card_charges_in_range": "sums month-model card bills",
     "services/spendable_pacer.py:discretionary_spend_card": "sums real_spend verdicts the pacer keeps",

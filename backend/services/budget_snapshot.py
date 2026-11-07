@@ -9,7 +9,7 @@ import calendar
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_CEILING
 from typing import NamedTuple
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
 from backend.services.explain import ExplainBuilder
@@ -19,7 +19,7 @@ from backend.services.forecast_engine import (
     ScenarioProposal,
     _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
 )
-from backend.services.pending import card_pending
+from backend.services.card_spending import card_month_spending
 from backend.services.card_payment_model import CardPayment
 from backend.services.month_base import build_month_base, card_bill_occurrences
 from backend.services.spendable_pacer import compute_weekly_spendable
@@ -115,60 +115,6 @@ def leftover_children(parts: LeftoverParts) -> list[ExplainChild]:
         ExplainChild(label="Groceries budget", amount=-parts.groceries_budget),
     ]
     return children
-
-
-def _card_spending_this_month(
-    db: Session, user_id: int, active_cards: list, as_of: date,
-) -> dict[int, Decimal]:
-    """Per active card: posted card transactions dated from the 1st of
-    `as_of`'s month through `as_of`. Charges add, returns subtract (the
-    card convention, positive = charge), and card payments are skipped, per
-    the real-spending rule (services/real_spend.classify_card). Pending rows live in their own
-    table and are counted separately through pending_charges."""
-    totals = {c.id: Decimal("0.00") for c in active_cards}
-    if not totals:
-        return totals
-    from backend.services.real_spend import classify_card
-    rows = db.query(models.CreditCardTransaction).options(
-        joinedload(models.CreditCardTransaction.category),
-    ).filter(
-        models.CreditCardTransaction.user_id == user_id,
-        models.CreditCardTransaction.card_id.in_(list(totals)),
-        models.CreditCardTransaction.date >= as_of.replace(day=1),
-        models.CreditCardTransaction.date <= as_of,
-    ).all()
-    for t in rows:
-        verdict = classify_card(t)
-        if verdict.kind == "spend":
-            totals[t.card_id] += verdict.amount
-    return totals
-
-
-_TRANSACTION_FED_WINDOW_DAYS = 60
-
-
-def _transaction_fed_card_ids(
-    db: Session, user_id: int, active_cards: list, as_of: date,
-) -> set[int]:
-    """Active cards with at least one bank-sync or CSV-imported transaction
-    in the 60 days up to `as_of`. A card outside this set has a feed that
-    sends balances only (the user's Apple Card via SimpleFIN, 2026-10-30),
-    so summing its transactions would read zero; Left to Spend falls back to
-    its balance-based figure instead. Manual rows don't count: a hand-entered
-    charge doesn't mean the feed itemizes the rest."""
-    ids = [c.id for c in active_cards]
-    if not ids:
-        return set()
-    rows = db.query(models.CreditCardTransaction.card_id).filter(
-        models.CreditCardTransaction.user_id == user_id,
-        models.CreditCardTransaction.card_id.in_(ids),
-        models.CreditCardTransaction.source.in_([
-            models.CardTransactionSource.bank_sync, models.CardTransactionSource.csv_import,
-        ]),
-        models.CreditCardTransaction.date >= as_of - timedelta(days=_TRANSACTION_FED_WINDOW_DAYS),
-        models.CreditCardTransaction.date <= as_of,
-    ).distinct().all()
-    return {card_id for (card_id,) in rows}
 
 
 class LookaheadWindow(NamedTuple):
@@ -597,19 +543,15 @@ def compute_budget_snapshot(
     # late-month charge that posts on the 1st lands in the next month.
     #
     # Per-card fallback: a card whose feed sends no transactions (see
-    # _transaction_fed_card_ids) keeps the old balance-based figure,
+    # card_spending.transaction_fed_card_ids) keeps the old balance-based figure,
     # current_balance - balance_due + pending_charges. Its pending is already
     # inside that figure, so it is left out of the separate pending term.
     month_start = as_of.replace(day=1)
-    fed_ids = _transaction_fed_card_ids(db, user.id, active_cards, as_of)
-    card_month_spending = _card_spending_this_month(db, user.id, active_cards, as_of)
-    pending_by_card = {c.id: card_pending(c, as_of) for c in active_cards}
-    for c in active_cards:
-        if c.id not in fed_ids:
-            card_month_spending[c.id] = c.current_balance - c.balance_due + pending_by_card[c.id]
+    spending = card_month_spending(db, user.id, active_cards, as_of)
+    card_spending_this_month = sum(spending.by_card.values(), Decimal("0"))
+    pending_charges_total = spending.pending_outside
+    fed_ids = spending.fed_ids
     fed_cards = [c for c in active_cards if c.id in fed_ids]
-    card_spending_this_month = sum(card_month_spending.values(), Decimal("0"))
-    pending_charges_total = sum((pending_by_card[c.id] for c in fed_cards), Decimal("0"))
     # Computed once per card, with real wall-clock "today" (not `as_of`,
     # which can be a past date a scenario or the weekly email is replaying)
     # -- matches CreditCardOut.statement_stale_reason exactly for the
@@ -782,7 +724,7 @@ def compute_budget_snapshot(
         CardSnapshot(
             id=c.id, name=c.name, current_balance=c.current_balance,
             balance_due=c.balance_due,
-            pending_charges=pending_by_card[c.id], credit_limit=c.credit_limit,
+            pending_charges=spending.pending_by_card[c.id], credit_limit=c.credit_limit,
             utilization_pct=round(float(c.current_balance) / float(c.credit_limit) * 100, 1) if c.credit_limit else 0.0,
             due_day=c.due_day,
             statement_stale_reason=card_stale_reasons[c.id],
@@ -812,17 +754,17 @@ def compute_budget_snapshot(
     card_children = [
         ExplainChild(
             label=f"{c.name}: purchases since {since}",
-            amount=card_month_spending[c.id],
+            amount=spending.by_card[c.id],
             note="returns subtract, card payments excluded",
         ) if c.id in fed_ids else ExplainChild(
             label=f"{c.name}: balance since its last statement (this card's feed sends no transactions)",
-            amount=card_month_spending[c.id],
+            amount=spending.by_card[c.id],
             note="current balance − last statement + pending charges",
         )
         for c in active_cards
     ]
     pending_children = [
-        ExplainChild(label=c.name, amount=pending_by_card[c.id], note="charged but not posted yet")
+        ExplainChild(label=c.name, amount=spending.pending_by_card[c.id], note="charged but not posted yet")
         for c in fed_cards
     ]
     def _low_note(low_date: date | None) -> str:
