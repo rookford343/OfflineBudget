@@ -170,3 +170,43 @@ def test_issue_cert__renew_signing_failure_keeps_original(tmp_path: Path) -> Non
     ok = _run(script, "--renew", str(ca), "host.local", str(out), env={"OB_CA_PASSFILE": str(good)})
     assert ok.returncode == 0, ok.stderr
     assert (list(out.glob("server.*.bak.key"))[0].stat().st_mode & 0o777) == 0o600
+
+
+def _make_constrained_ca(tmp_path: Path) -> tuple[Path, dict[str, str]]:
+    passfile = tmp_path / "ca.pass"
+    passfile.write_text("test-passphrase\n")
+    env = {"OB_CA_PASSFILE": str(passfile)}
+    ca = tmp_path / "ca"
+    r = _run(ROOT / "scripts" / "tls" / "make-ca.sh", str(ca), env=env)
+    assert r.returncode == 0, r.stderr
+    return ca, env
+
+
+def test_make_ca__is_name_constrained_and_pathlen_zero(tmp_path: Path) -> None:
+    ca, _env = _make_constrained_ca(tmp_path)
+    text = subprocess.run(  # noqa: S603 - fixed openssl invocation on a temp cert
+        ["/usr/bin/openssl", "x509", "-in", str(ca / "ca.crt"), "-noout", "-text"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    assert "pathlen:0" in text
+    assert "Name Constraints: critical" in text
+    assert "DNS:df-macbookpro16.local" in text
+    assert "DNS:budget.thedigitaltrailhead.com" in text
+
+
+def test_make_ca__signs_own_host_but_not_other_domains(tmp_path: Path) -> None:
+    ca, env = _make_constrained_ca(tmp_path)
+    issue = ROOT / "scripts" / "tls" / "issue-cert.sh"
+    results = {}
+    for host in ("df-macbookpro16.local", "example.com"):
+        out = tmp_path / f"ssl-{host}"
+        r = _run(issue, str(ca), host, str(out), env=env)
+        assert r.returncode == 0, r.stderr  # signing succeeds; the verifier is what refuses
+        results[host] = subprocess.run(  # noqa: S603 - fixed openssl invocation on temp paths
+            ["/usr/bin/openssl", "verify", "-CAfile", str(ca / "ca.crt"), str(out / "server.crt")],
+            capture_output=True, text=True, check=False,
+        )
+    assert results["df-macbookpro16.local"].returncode == 0, results["df-macbookpro16.local"].stderr
+    bad = results["example.com"]
+    assert bad.returncode != 0
+    assert "permitted subtree violation" in (bad.stdout + bad.stderr)

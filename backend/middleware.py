@@ -12,7 +12,12 @@ from backend import models
 logger = logging.getLogger(__name__)
 
 # Paths to skip logging entirely
-_SKIP_PATHS = {"/api/health", "/api/docs", "/api/redoc", "/api/openapi.json"}
+# The one-off preview writes nothing, so it must leave no audit trace either
+# (it fires on every debounce while a draft is edited).
+_SKIP_PATHS = {
+    "/api/health", "/api/docs", "/api/redoc", "/api/openapi.json",
+    "/api/planned-expenses/preview",
+}
 
 # Only log mutating methods (skip GET, HEAD, OPTIONS)
 _LOG_METHODS = {"POST", "PUT", "PATCH", "DELETE"}

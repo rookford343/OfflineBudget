@@ -5,7 +5,7 @@ from backend.database import SessionLocal
 from backend.auth import decode_token
 from backend import models
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
 def get_db():

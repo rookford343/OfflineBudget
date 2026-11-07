@@ -12,15 +12,36 @@ DB_URL="${DATABASE_URL:-sqlite:///./data/dev.db}"
 DB_PATH="${DB_URL#sqlite:///}"
 case "$DB_PATH" in /*) ;; *) DB_PATH="$ROOT/$DB_PATH" ;; esac
 
-# Resolve to an absolute path without requiring directories to exist.
+# Resolve to an absolute, normalized path without requiring directories to
+# exist: "." and ".." are folded away lexically first (so data/../data/x.db is
+# data/x.db even in a fresh clone with no data/), then the directory is
+# physically resolved when it exists (symlinked directories).
 resolve() {
-  local d b
-  d="$(dirname "$1")"; b="$(basename "$1")"
+  local d b part IFS=/
+  local -a out=()
+  for part in $1; do
+    case "$part" in
+      ""|.) ;;
+      ..) if [ ${#out[@]} -gt 0 ]; then unset 'out[${#out[@]}-1]'; fi ;;
+      *) out+=("$part") ;;
+    esac
+  done
+  IFS=' '
+  d="/"; b=""
+  if [ ${#out[@]} -gt 0 ]; then
+    b="${out[${#out[@]}-1]}"
+    unset 'out[${#out[@]}-1]'
+    IFS=/; d="/${out[*]-}"; IFS=' '
+  fi
   if [ -d "$d" ]; then d="$(cd "$d" && pwd -P)"; fi
-  echo "$d/$b"
+  echo "${d%/}/$b"
 }
 RESOLVED="$(resolve "$DB_PATH")"
-LIVE="$(resolve "$ROOT/data/budget.db")"
+# One source for the live path: Settings.LIVE_DATABASE_PATH (default data/budget.db).
+LIVE_REL="$(uv run --locked --no-sync python -c "from backend.config import settings; print(settings.LIVE_DATABASE_PATH)" 2>/dev/null | tail -n 1 || true)"
+LIVE_REL="${LIVE_REL:-data/budget.db}"
+case "$LIVE_REL" in /*) ;; *) LIVE_REL="$ROOT/$LIVE_REL" ;; esac
+LIVE="$(resolve "$LIVE_REL")"
 
 lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 same_file=0

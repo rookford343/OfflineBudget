@@ -35,7 +35,7 @@ def _enrich(goal: models.SavingsGoal) -> dict:
     }
 
 
-@router.get("/", response_model=list[schemas.SavingsGoalOut])
+@router.get("", response_model=list[schemas.SavingsGoalOut])
 def list_goals(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
@@ -47,7 +47,7 @@ def list_goals(
     return [_enrich(g) for g in goals]
 
 
-@router.post("/", response_model=schemas.SavingsGoalOut)
+@router.post("", response_model=schemas.SavingsGoalOut)
 def create_goal(
     data: schemas.SavingsGoalCreate,
     db: Session = Depends(get_db),

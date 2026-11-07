@@ -1755,6 +1755,12 @@ class PlannedExpenseCreate(BaseModel):
     funding_amount: Optional[Decimal] = None
     funding_lead_days: int = 0
 
+    @model_validator(mode="after")
+    def _outflow_amount_is_positive(self):
+        if self.direction == PlannedDirection.outflow and self.amount <= 0:
+            raise ValueError("amount must be greater than zero for an outflow")
+        return self
+
 
 class PlannedExpenseUpdate(BaseModel):
     name: Optional[str] = None

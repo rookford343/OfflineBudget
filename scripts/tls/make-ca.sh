@@ -3,6 +3,9 @@
 # Usage: scripts/tls/make-ca.sh <out_dir>      (default: ~/.offlinebudget-ca)
 # ca.key is AES-256 encrypted with a passphrase (prompted, or read from the file
 # named by OB_CA_PASSFILE for non-interactive runs). Refuses to overwrite.
+# The CA is constrained: it can sign only for df-macbookpro16.local and the
+# fallback host, and cannot sign sub-CAs, so a leaked CA key cannot impersonate
+# any other site on a phone that trusts it.
 set -euo pipefail
 
 out_dir="${1:-$HOME/.offlinebudget-ca}"
@@ -31,7 +34,8 @@ chmod 600 "$key"
 
 openssl req -x509 -new -key "$key" ${passin_args[@]+"${passin_args[@]}"} \
   -sha256 -days 3650 -subj "/CN=OfflineBudget Home CA" \
-  -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+  -addext "nameConstraints=critical,permitted;DNS:df-macbookpro16.local,permitted;DNS:budget.thedigitaltrailhead.com" \
   -addext "keyUsage=critical,keyCertSign,cRLSign" \
   -addext "subjectKeyIdentifier=hash" \
   -out "$crt"

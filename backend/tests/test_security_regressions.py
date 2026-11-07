@@ -48,6 +48,20 @@ now refuses or neutralizes it.
     in-process scheduler, so only the production instance runs bank sync and emails.
   - api docs off: /api/docs, /api/redoc and the OpenAPI schema (and the old /docs paths)
     are 404 unless API_DOCS_ENABLED is set.
+  - api routes with the SPA mounted: no API route path ends in "/" (a trailing-slash route
+    only worked through a redirect the SPA catch-all swallows), and GET /api/goals is
+    200 JSON, never the SPA, with the frontend mounted.
+  - preview leaves no trace: POST /api/planned-expenses/preview writes no audit_logs row
+    (a draft's name and amount never persist), while a real create is still audited.
+  - one-off outflow amount: a planned-expense preview or create with an amount of zero or
+    less for an outflow is 422 and writes nothing.
+  - home CA name constraints: the private CA is pathlen:0 and name-constrained to the
+    app's hostnames, so a certificate for any other domain signed by it fails
+    openssl verify (tests in test_run_scripts.py).
+  - cross-references in test_run_scripts.py: production serves HTTPS only
+    (test_production__*), dev binds loopback with the scheduler off
+    (test_dev__check__loopback_and_scheduler_off), and dev refuses the live database
+    by path, symlink, hard link and case (test_dev__*live_db__refuses).
 """
 import logging
 from decimal import Decimal
@@ -1055,3 +1069,102 @@ def test_planned_expense__other_users_category__is_404(db_session):
     """Preview, create and patch with another user's category_id are 404 and write nothing."""
     client, mine, _theirs, _card, own, body, models, their_category = _planned_expense_fixture(db_session)
     _assert_planned_expense_404(db_session, client, mine, own, body, models, "category_id", their_category.id)
+
+
+def _spa_and_api_app(tmp_path):
+    """The real API router mounted last-before-SPA exactly as backend.main does."""
+    import backend.main as main
+    from backend.web import mount_frontend
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("SPA")
+    app = FastAPI()
+    app.include_router(main.api_router)
+    mount_frontend(app, str(dist))
+    return app
+
+
+def test_api_routes__no_trailing_slash_paths():
+    """A route registered as "/" under a prefix is /api/x/, reachable without the slash
+    only via a 307 redirect, which the SPA catch-all (mounted last) turns into 404/405."""
+    import backend.main as main
+    paths = [p for p in main.app.openapi()["paths"] if p.startswith("/api")]
+    assert len(paths) > 100
+    assert [p for p in paths if p.endswith("/")] == []
+
+
+def test_goals__with_spa_mounted__get_is_json_not_the_spa(db_session, tmp_path):
+    from backend import models
+    from backend.dependencies import get_current_user, get_db
+    user = models.User(username="goal-owner", hashed_password="x", display_name="G")
+    db_session.add(user)
+    db_session.commit()
+    app = _spa_and_api_app(tmp_path)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: user
+    resp = TestClient(app).get("/api/goals")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/json")
+    assert resp.json() == []
+
+
+def _real_app_client(db_session, user):
+    import backend.main as main
+    from backend.dependencies import get_current_user, get_db
+    main.app.dependency_overrides[get_db] = lambda: db_session
+    main.app.dependency_overrides[get_current_user] = lambda: user
+    return TestClient(main.app), main.app
+
+
+def test_preview__writes_no_audit_row_but_create_still_does(db_session):
+    from sqlalchemy.orm import sessionmaker
+    from datetime import date, timedelta
+    from backend import models
+    user = models.User(username="prev-owner", hashed_password="x", display_name="P")
+    db_session.add(user)
+    db_session.flush()
+    acct = models.Account(user_id=user.id, name="Chk", type=models.AccountType.checking,
+                          current_balance=Decimal("100"))
+    db_session.add(acct)
+    db_session.commit()
+    client, app = _real_app_client(db_session, user)
+    body = {"name": "Secret draft name", "amount": "12.00",
+            "expected_date": (date.today() + timedelta(days=9)).isoformat()}
+    try:
+        with patch("backend.middleware.SessionLocal", sessionmaker(bind=db_session.get_bind())):
+            for _ in range(2):
+                r = client.post(f"/api/planned-expenses/preview?account_id={acct.id}", json=body)
+                assert r.status_code == 200, r.text
+            assert db_session.query(models.AuditLog).count() == 0
+            assert client.post("/api/planned-expenses", json=body).status_code == 201
+            assert db_session.query(models.AuditLog).filter_by(path="/api/planned-expenses").count() == 1
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("amount", ["0", "0.00", "-5.00"])
+def test_planned_expense__outflow_amount_not_positive__is_422(db_session, amount, monkeypatch):
+    from datetime import date, timedelta
+    from backend import models
+    user = models.User(username="amt-owner", hashed_password="x", display_name="A")
+    db_session.add(user)
+    db_session.flush()
+    acct = models.Account(user_id=user.id, name="Chk", type=models.AccountType.checking,
+                          current_balance=Decimal("100"))
+    db_session.add(acct)
+    db_session.commit()
+    # The audit middleware opens its own session; keep it off the real database file.
+    from sqlalchemy.orm import sessionmaker
+    monkeypatch.setattr("backend.middleware.SessionLocal", sessionmaker(bind=db_session.get_bind()))
+    client, app = _real_app_client(db_session, user)
+    body = {"name": "Bad", "amount": amount,
+            "expected_date": (date.today() + timedelta(days=9)).isoformat()}
+    try:
+        assert client.post(f"/api/planned-expenses/preview?account_id={acct.id}", json=body).status_code == 422
+        assert client.post("/api/planned-expenses", json=body).status_code == 422
+        assert db_session.query(models.PlannedExpense).count() == 0
+        # An inflow is not an outflow: a negative amount there is left to the existing rules.
+        ok = client.post("/api/planned-expenses", json={**body, "amount": "5.00"})
+        assert ok.status_code == 201
+    finally:
+        app.dependency_overrides.clear()
