@@ -81,15 +81,31 @@ def export_budget_report(
     # one real-spending rule (cards included; transfers and card payments
     # excluded; refunds netted). The export never sums transactions itself.
     from backend.services.budget_calculator import compute_overview
+    overview = compute_overview(db, user.id, year, month)
+    by_id = {r.category_id: r for r in overview}
+    parents_of_children = {r.parent_id for r in overview if r.parent_id in by_id}
+
+    def label(r) -> str:
+        # "Parent / Child": the flat file has no hierarchy column.
+        names = [r.category_name]
+        while r.parent_id in by_id:
+            r = by_id[r.parent_id]
+            names.append(r.category_name)
+        return " / ".join(reversed(names))
+
+    # A parent row's actual already includes its subcategories (the Budget page
+    # rolls them up), so summing a column over every row would count them twice.
+    # Sum the rows with no parent, or the rows not flagged "Includes subcategories".
     rows = [
         {
-            "category": r.category_name,
+            "category": label(r),
             "type": r.category_type,
             "budgeted": str(r.budgeted),
             "actual": str(r.actual_total),
             "variance": str(r.variance),
+            "includes_subcategories": "yes" if r.category_id in parents_of_children else "",
         }
-        for r in compute_overview(db, user.id, year, month)
+        for r in overview
         if r.budgeted != 0 or r.actual_total != 0
     ]
 
@@ -104,9 +120,10 @@ def export_budget_report(
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Category", "Type", "Budgeted", "Actual", "Variance"])
+    writer.writerow(["Category", "Type", "Budgeted", "Actual", "Variance", "Includes subcategories"])
     for r in rows:
-        writer.writerow([r["category"], r["type"], r["budgeted"], r["actual"], r["variance"]])
+        writer.writerow([r["category"], r["type"], r["budgeted"], r["actual"], r["variance"],
+                         r["includes_subcategories"]])
     output.seek(0)
     return StreamingResponse(
         output,
