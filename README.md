@@ -111,7 +111,7 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 
 Open **http://localhost:5173** → Create an account → Run through the Quick Start wizard.
 
-> **HTTPS on LAN:** Run `./scripts/setup-ssl.sh` to generate a self-signed certificate for your local IP, then restart. The start script detects the certs automatically.
+> **Phone on your home Wi-Fi:** the private-CA HTTPS setup is in [Phone on home Wi-Fi](docs/SETUP.md#phone-on-home-wi-fi). `start.sh` is dev-only and binds 127.0.0.1.
 
 ---
 
@@ -166,8 +166,10 @@ OfflineBudget/
 │       └── lib/           Formatting utilities, date helpers
 ├── cli/                   Typer CLI (direct DB access, no HTTP)
 ├── scripts/
-│   ├── start.sh           Launcher (detects SSL certs, starts both servers)
-│   └── setup-ssl.sh       Self-signed cert generator for LAN HTTPS
+│   ├── start.sh           Dev launcher (loopback, data/dev.db)
+│   ├── run-production.sh  HTTPS production server (LaunchAgent)
+│   ├── deploy.sh          Build, back up, restart, health-check
+│   └── tls/               Private CA and server certificate scripts
 ├── data/                  SQLite database (gitignored — back this up)
 ├── docs/                  Detailed guides
 ├── docker-compose.yml     Container stack for cloud deploy
@@ -502,12 +504,7 @@ error with a **Reconnect** button; reconnecting runs a sync straight away.
 
 ## HTTPS on LAN
 
-```bash
-./scripts/setup-ssl.sh   # generates ssl/cert.pem and ssl/key.pem for your LAN IP
-./scripts/start.sh       # automatically picks up the certs
-```
-
-`setup-ssl.sh` generates a self-signed certificate with a Subject Alternative Name for both `localhost` and your current LAN IP. For CA-signed certificates with no browser warnings, use `mkcert` — see [SECURITY.md](SECURITY.md).
+Production serves HTTPS on port 443 with a certificate from your own private CA (`scripts/tls/`). Full steps: [Phone on home Wi-Fi](docs/SETUP.md#phone-on-home-wi-fi).
 
 ---
 

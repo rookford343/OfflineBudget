@@ -61,8 +61,9 @@ OfflineBudget/
 ├── data/             SQLite database file (gitignored)
 ├── docs/             This documentation
 ├── scripts/
-│   ├── start.sh      Launcher — detects ssl/ certs, starts both servers
-│   └── setup-ssl.sh  Self-signed cert generator for LAN HTTPS
+│   ├── start.sh      Dev launcher (loopback, data/dev.db)
+│   ├── run-production.sh  HTTPS production server
+│   └── tls/          Private CA + server cert scripts
 └── docker-compose.yml  Container stack for cloud deploy
 ```
 

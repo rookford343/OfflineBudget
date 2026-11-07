@@ -50,7 +50,7 @@
 - ✅ Multi-user support (admin and view-only roles)
 - ✅ Audit log for all write operations
 - ✅ Daily email summary (requires SMTP config)
-- ✅ HTTPS on LAN (self-signed cert via `scripts/setup-ssl.sh`)
+- ✅ HTTPS on LAN (private CA via `scripts/tls/`)
 - ✅ Data export (transactions CSV, budget report)
 - ✅ Danger Zone: clear transactions, clear CC transactions, delete account
 - ✅ Navigation order customization (per-browser localStorage)

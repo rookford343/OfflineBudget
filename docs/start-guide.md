@@ -114,13 +114,7 @@ them unlinked and they get a budget of their own.
 
 For encrypted connections when accessing from other devices:
 
-```bash
-./scripts/setup-ssl.sh
-```
-
-This generates `ssl/cert.pem` and `ssl/key.pem` with your current LAN IP in the Subject Alternative Name. The start script detects these files automatically and enables HTTPS for both the API and frontend.
-
-After setup, access the app at `https://localhost:5173` and `https://192.168.1.42:5173`.
+HTTPS now comes from a private CA and the production runner, not the dev script. See [SETUP.md](SETUP.md#phone-on-home-wi-fi). `scripts/start.sh` is dev-only: loopback, `data/dev.db`.
 
 > Browsers will show a security warning for self-signed certificates. To eliminate warnings, install `mkcert` and use CA-signed certs instead — see [SECURITY.md](../SECURITY.md).
 
@@ -479,7 +473,7 @@ Check that `ALLOWED_ORIGINS` in `.env` includes the URL you're accessing from. R
 If you changed `JWT_SECRET` in `.env`, all existing tokens are invalidated. Log in again.
 
 **HTTPS cert not trusted by browser**
-Self-signed certificates from `setup-ssl.sh` will show a warning. Click "Advanced → Proceed" once per browser. For permanent trust, use `mkcert` — see [SECURITY.md](../SECURITY.md).
+Install and trust the CA profile on the device (see [SETUP.md](SETUP.md#phone-on-home-wi-fi)).
 
 ---
 
