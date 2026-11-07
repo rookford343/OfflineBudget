@@ -1031,6 +1031,23 @@ class AccountPendingTransactionOut(BaseModel):
     synced_at: datetime
 
 
+class AccountBalanceOut(BaseModel):
+    """One account's posted balance and the balance as if its pending rows go through."""
+    account_id: int
+    posted: Decimal
+    pending_total: Decimal  # signed sum of live pending rows (0 when not live)
+    pending_count: int
+    pending: list[AccountPendingTransactionOut] = []  # the live rows, newest first
+    after_pending: Decimal  # posted + pending_total
+    month_start_balance: Decimal  # after_pending minus this month's posted and pending flow
+    month_change_pct: Decimal | None  # percent change over the month; None when the start is ~0
+
+
+class AccountBalancesOut(BaseModel):
+    accounts: list[AccountBalanceOut]  # every active account, in id order
+    total_after_pending: Decimal  # sum of after_pending over the list
+
+
 class CardTransactionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int

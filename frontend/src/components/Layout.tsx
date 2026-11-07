@@ -2,16 +2,16 @@ import { useState, useEffect } from "react";
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clearAuth, getUser } from "../store/auth";
-import { authApi, accountsApi, transactionsApi, recurringApi } from "../api";
+import { authApi, accountsApi, recurringApi } from "../api";
 import QuickStartWizard from "./QuickStartWizard";
 import { TrendBadge } from "./TrendBadge";
 import { LogOut, Eye, EyeOff, Moon, Sun, ChevronDown, ChevronsUpDown, KeyRound, Settings as SettingsIcon } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { cx, fmt, firstOfMonth } from "../lib/utils";
+import { cx, fmt } from "../lib/utils";
 import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
 import { useBalancesHidden, toggleBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { useIsDarkMode, toggleTheme } from "../store/theme";
-import { usePendingBalances } from "../lib/usePendingBalances";
+import { usePendingBalances, useAccountBalances } from "../lib/usePendingBalances";
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -21,15 +21,6 @@ export default function Layout() {
   const { data: accounts = [], isSuccess: accountsLoaded } = useQuery({
     queryKey: ["accounts"],
     queryFn: accountsApi.list,
-    staleTime: 30_000,
-  });
-  // This month's transactions, fetched once and grouped per-account below --
-  // there's no stored per-account balance history, so "% change" is derived
-  // from actual transaction flow (net this-month flow ÷ start-of-month
-  // balance) rather than a number with no real basis behind it.
-  const { data: monthTxns = [] } = useQuery({
-    queryKey: ["transactions", { start: firstOfMonth() }],
-    queryFn: () => transactionsApi.list({ start: firstOfMonth() }),
     staleTime: 30_000,
   });
   const { data: triage } = useQuery({ queryKey: ["recurring-triage"], queryFn: recurringApi.triage, staleTime: 60_000 });
@@ -107,28 +98,15 @@ export default function Layout() {
     if (!!a.is_emergency_fund !== !!b.is_emergency_fund) return a.is_emergency_fund ? 1 : -1;
     return a.type.localeCompare(b.type) || a.name.localeCompare(b.name);
   });
-  // Balances as if bank-pending items go through (same figures as the
-  // Dashboard's Checking card); an account with no pending rows is unchanged.
-  const pendingFor = usePendingBalances(accounts as any[]);
-  const totalAccountBalance = sortedAccounts.reduce((sum, a: any) => sum + pendingFor(a).afterPending, 0);
-
-  // Net flow this month per account, from the transactions query above.
-  const flowByAccount: Record<number, number> = {};
-  (monthTxns as any[]).forEach(t => {
-    flowByAccount[t.account_id] = (flowByAccount[t.account_id] ?? 0) + parseFloat(t.amount);
-  });
-
-  // % change = this month's net flow (pending included) over the balance
-  // before the month: (after-pending balance - start) / start, where start is
-  // the posted balance minus this month's posted flow. Null when
-  // the start-of-month balance is too close to zero for a percentage to be
-  // meaningful (avoids a wild or divide-by-near-zero number).
-  function pctChangeFor(a: any): number | null {
-    const { posted, afterPending } = pendingFor(a);
-    const startBalance = posted - (flowByAccount[a.id] ?? 0);
-    if (Math.abs(startBalance) < 0.01) return null;
-    return ((afterPending - startBalance) / startBalance) * 100;
-  }
+  // Balances as if bank-pending items go through, the total and each
+  // account's change this month: all figured by the backend.
+  const pendingFor = usePendingBalances();
+  const { data: balances } = useAccountBalances();
+  const totalAccountBalance = parseFloat(balances?.total_after_pending ?? "0");
+  const pctByAccount = new Map<number, number | null>(
+    (balances?.accounts ?? []).map((b: any) => [b.account_id, b.month_change_pct == null ? null : parseFloat(b.month_change_pct)]),
+  );
+  const pctChangeFor = (a: any): number | null => pctByAccount.get(a.id) ?? null;
 
   return (
     <div className="flex h-screen overflow-hidden">

@@ -1,9 +1,12 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.routers._shared import owned_or_404
+from backend.services.account_balances import account_balances
 from backend.services.pending import pending_snapshot_is_live
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -18,6 +21,17 @@ def list_accounts(
         models.Account.user_id == user.id,
         models.Account.is_active == True,
     ).all()
+
+
+@router.get("/balances", response_model=schemas.AccountBalancesOut)
+def get_account_balances(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Every active account's balance as if its pending rows go through, the
+    total the sidebar shows, and each account's change this month. Declared
+    before /{account_id} so "balances" is not parsed as an id."""
+    return account_balances(db, user.id, date.today())
 
 
 @router.post("", response_model=schemas.AccountOut, status_code=status.HTTP_201_CREATED)

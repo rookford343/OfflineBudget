@@ -23,7 +23,7 @@ export function PendingBadge() {
 export default function CheckingBalancesCard({ accounts, hidden }: { accounts: any[]; hidden: boolean }) {
   const navigate = useNavigate();
   const checking = accounts.filter((a) => a.type === "checking" && a.is_active !== false);
-  const pendingFor = usePendingBalances(accounts);
+  const pendingFor = usePendingBalances();
   if (checking.length === 0) return null;
   const money = (n: number) => maskIfHidden(hidden, fmt(n));
 

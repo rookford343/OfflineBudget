@@ -99,9 +99,27 @@ def checking_pending_debits(
     return [r for r in rows if match_payment_card(cards, r.description) is not None]
 
 
+def checking_pending_rows(
+    db: Session, account: models.Account, today: date,
+) -> list[models.AccountPendingTransaction]:
+    """Every pending row on a checking account, credits and debits alike,
+    newest first. Empty unless an active Plaid link keeps the snapshot
+    fresh (`pending_snapshot_is_live`)."""
+    if not pending_snapshot_is_live(db, account):
+        return []
+    return db.query(models.AccountPendingTransaction).filter(
+        models.AccountPendingTransaction.user_id == account.user_id,
+        models.AccountPendingTransaction.account_id == account.id,
+    ).order_by(
+        models.AccountPendingTransaction.date.desc(), models.AccountPendingTransaction.id,
+    ).all()
+
+
 def checking_balance_with_pending(db: Session, account: models.Account, today: date) -> Decimal:
-    """Posted balance minus every pending debit (card payments or not)."""
-    debits = checking_pending_debits(db, account, today, card_payments_only=False)
+    """Posted balance plus every live pending row, credits and debits alike
+    (a pending deposit raises it, a pending charge lowers it). Equals the
+    posted balance when the snapshot is not live."""
+    rows = checking_pending_rows(db, account, today)
     return Decimal(str(account.current_balance)) + sum(
-        (Decimal(str(r.amount)) for r in debits), Decimal("0"),
+        (Decimal(str(r.amount)) for r in rows), Decimal("0"),
     )

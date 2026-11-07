@@ -125,11 +125,11 @@ def test_checking_pending_ignored_without_live_plaid_link(db_session):
     assert checking_balance_with_pending(db_session, acct, TODAY) == Decimal("1000.00")
 
 
-def test_balance_with_pending_subtracts_all_debits(db_session):
+def test_balance_with_pending_includes_debits_and_credits(db_session):
     user = _user(db_session)
     _card(db_session, user)
     acct = _checking(db_session, user)
     _debit(db_session, user, acct, "-300.00", "CHASE CREDIT CRD AUTOPAY 1234", "a")
     _debit(db_session, user, acct, "-40.00", "GROCERY MART 55", "b")
     _debit(db_session, user, acct, "50.00", "REFUND", "c")
-    assert checking_balance_with_pending(db_session, acct, TODAY) == Decimal("660.00")
+    assert checking_balance_with_pending(db_session, acct, TODAY) == Decimal("710.00")
