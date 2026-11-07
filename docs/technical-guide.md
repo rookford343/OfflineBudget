@@ -457,6 +457,9 @@ table in [architecture.md](architecture.md). The layer:
 | `forecast_walk.py` | The standard forecast walk (`display` or `safety` purpose) |
 | `card_payment_model.py` | What each card will pay out of checking, and when |
 | `cushion.py` | The one cushion and its amber/red status |
+| `account_balances.py`, `net_position.py`, `net_worth.py` | Pending-adjusted balances, Net Position and card cycle figures, net worth |
+| `available_to_spend.py` | Available to Spend (before budgets) and its walk to Left to Spend |
+| `budget_track.py`, `spending_figures.py` | Track Budgets totals; Spending averages and a parent's direct spend |
 | `calc_version.py` | `CALC_VERSION`, bumped by hand when a calculation's meaning changes |
 
 Two test files hold the line. `tests/test_parity_headline.py` reads each
@@ -465,7 +468,12 @@ month's spend) off every surface that shows it, from one fixture, and requires
 the same value. `tests/test_calc_guard.py` scans `routers/` and `services/` for
 new `sum(...)` or `+=` over money attributes and for reads of `.pending_charges`
 outside `pending.py`; its allowlist carries a reason per entry, and adding a
-module to it needs a line in architecture.md.
+module to it needs a line in architecture.md. The parity file also checks
+Available to Spend's walk to Left to Spend, Net Position, and live vs stored
+net worth. On the browser side, `frontend/tests/moneyGuard.test.ts` (run with
+`cd frontend && bun test`) fails when a page adds or subtracts money figures
+with `.reduce(` or `parseFloat(...) - parseFloat(...)`: add the figure to the
+backend response and display it instead of computing it in React.
 
 ## Shared Helpers (one place to fix)
 

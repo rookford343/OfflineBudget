@@ -300,6 +300,7 @@ def spending_by_category(
         discretionary_actual=disc_actual,
         discretionary_budgeted=disc_budgeted,
         fixed_actual=total_actual - disc_actual,
+        discretionary_left=disc_budgeted - disc_actual,
     )
 
 

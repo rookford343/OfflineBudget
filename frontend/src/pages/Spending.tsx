@@ -379,6 +379,8 @@ export default function Spending() {
   // when the two disagree by more than a cent. Omit `headline` when the
   // bucket IS the full total already (e.g. a leaf category's own
   // breakdown_by_source), since there's no gap to reconcile.
+  // The reduce below is a consistency check (do the parts add up to the headline?),
+  // not a displayed figure, so it stays here.
   function sourceSplitLabel(breakdown: Record<string, number>, headline?: number): string | null {
     const nonZero = Object.entries(breakdown).filter(([, v]) => v > 0.005);
     if (nonZero.length < 2) return null;
@@ -528,7 +530,7 @@ export default function Spending() {
             const disc = parseFloat(overview.discretionary_actual ?? "0");
             const discBudget = parseFloat(overview.discretionary_budgeted ?? "0");
             const fixed = parseFloat(overview.fixed_actual ?? "0");
-            const left = discBudget - disc;
+            const left = parseFloat(overview.discretionary_left ?? "0");
             const pct = discBudget > 0 ? (disc / discBudget) * 100 : 0;
             const over = left < 0;
 

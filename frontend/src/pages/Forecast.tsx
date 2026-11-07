@@ -1109,10 +1109,9 @@ export default function Forecast() {
           const qKey = `${q.year}-${q.quarter}`;
           const qEndDate = quarterEndDate(q);
           const isPastQuarter = qEndDate < today_date;
-          const forecastClose = parseFloat(q.close_balance);
           const savedBalance = q.quarter_end_checkpoint != null ? parseFloat(q.quarter_end_checkpoint) : undefined;
-          const delta = savedBalance !== undefined ? savedBalance - forecastClose : null;
-          const hasConflict = delta !== null && Math.abs(delta) > 1;
+          const delta = q.checkpoint_delta != null ? parseFloat(q.checkpoint_delta) : null;
+          const hasConflict = q.checkpoint_conflict === true;
           // Last day of this quarter as YYYY-MM-DD for day checkpoint
           const qLastDay = (() => {
             const d = quarterEndDate(q);

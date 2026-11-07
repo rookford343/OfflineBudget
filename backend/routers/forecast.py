@@ -214,7 +214,12 @@ def _attach_quarter_checkpoints(
             if q_end - timedelta(days=7) <= d <= q_end
         ]
         checkpoint_val = min(candidates, key=lambda x: x[0])[1] if candidates else None
-        updated.append(q.model_copy(update={"quarter_end_checkpoint": checkpoint_val}))
+        delta = None if checkpoint_val is None else checkpoint_val - q.close_balance
+        updated.append(q.model_copy(update={
+            "quarter_end_checkpoint": checkpoint_val,
+            "checkpoint_delta": delta,
+            "checkpoint_conflict": delta is not None and abs(delta) > 1,
+        }))
     return updated
 
 

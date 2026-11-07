@@ -8,6 +8,7 @@ forecast still needs for October. These records pin the real amount to a
 single due date and leave the model alone.
 """
 from datetime import date
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from backend import models, schemas
@@ -20,13 +21,15 @@ def _to_out(o: models.BillAmountOverride) -> schemas.BillAmountOverrideOut:
     """Carries the projected amount alongside the actual so a caller can show
     the variance without a second round trip -- comparing the two is the
     entire point of the feature."""
+    projected = o.recurring_item.amount if o.recurring_item else Decimal("0")
     return schemas.BillAmountOverrideOut(
         id=o.id,
         recurring_item_id=o.recurring_item_id,
         recurring_item_name=o.recurring_item.name if o.recurring_item else "",
         due_date=o.due_date,
         actual_amount=o.actual_amount,
-        projected_amount=o.recurring_item.amount if o.recurring_item else 0,
+        projected_amount=projected,
+        variance=o.actual_amount - projected,
         notes=o.notes,
     )
 

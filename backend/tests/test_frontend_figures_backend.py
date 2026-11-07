@@ -257,3 +257,81 @@ def test_monthly_bars_carry_their_average(db_session):
     _spend(db_session, user, acct, dining, "-50.00", date(2026, 2, 10))
     two = c.get("/spending/monthly", params={"start": "2026-01-01", "end": "2026-02-28"}).json()
     assert [D(str(e["monthly_average"])) for e in two] == [D("75.00"), D("75.00")]
+
+
+# ── Discretionary left, bill variance, checkpoint conflict (Plan 2, Task 7) ───
+
+def test_discretionary_left_is_budget_minus_spend_and_goes_negative(db_session):
+    user, acct = _spend_user(db_session)
+    fun = _cat(db_session, user, "Fun")
+    fun.is_discretionary = True
+    db_session.add(models.BudgetAllocation(user_id=user.id, category_id=fun.id, year=2026, month=3,
+                                           budgeted_amount=D("100.00")))
+    _spend(db_session, user, acct, fun, "-40.00", date(2026, 3, 5))
+    db_session.commit()
+    c = _client(db_session, user, spending_router_module)
+    params = {"start": "2026-03-01", "end": "2026-03-31"}
+    body = c.get("/spending/by-category", params=params).json()
+    assert D(str(body["discretionary_budgeted"])) == D("100.00")
+    assert D(str(body["discretionary_actual"])) == D("40.00")
+    assert D(str(body["discretionary_left"])) == D("60.00")
+    _spend(db_session, user, acct, fun, "-85.00", date(2026, 3, 9))
+    db_session.commit()
+    over = c.get("/spending/by-category", params=params).json()
+    assert D(str(over["discretionary_left"])) == D("-25.00")
+
+
+def test_bill_override_carries_its_variance(db_session):
+    from backend.routers import bill_overrides as overrides_router_module
+    from backend.tests.test_month_leftover_parity import _expense, _seed
+
+    user, acct = _seed(db_session, "variance", remaining=D("0"))
+    item = _expense(db_session, user, acct, "Water", "80.00")
+    db_session.commit()
+    c = _client(db_session, user, overrides_router_module)
+    high = c.post("/bill-overrides", json={
+        "recurring_item_id": item.id, "due_date": "2027-02-10", "actual_amount": "92.50"})
+    assert high.status_code == 201
+    assert D(str(high.json()["variance"])) == D("12.50")
+    low = c.post("/bill-overrides", json={
+        "recurring_item_id": item.id, "due_date": "2027-02-10", "actual_amount": "75.00"})
+    assert D(str(low.json()["variance"])) == D("-5.00")
+    listed = c.get("/bill-overrides", params={"upcoming_only": False}).json()
+    assert [D(str(o["variance"])) for o in listed] == [D("-5.00")]
+
+
+def test_quarter_checkpoint_delta_and_conflict(db_session, monkeypatch):
+    from backend.routers import forecast as forecast_router_module
+
+    _freeze_today(monkeypatch, TODAY)
+    user, acct = _spend_user(db_session)
+    c = _client(db_session, user, forecast_router_module)
+
+    def quarters():
+        resp = c.get("/forecast/quarters", params={"account_id": acct.id, "year": TODAY.year})
+        assert resp.status_code == 200
+        return {q["quarter"]: q for q in resp.json()}
+
+    none = quarters()[2]
+    assert none["quarter_end_checkpoint"] is None
+    assert none["checkpoint_delta"] is None and none["checkpoint_conflict"] is False
+
+    # A checkpoint a few days before quarter end re-anchors the walk; bills that
+    # fall after it move the close away from the saved figure.
+    from backend.tests.test_month_leftover_parity import _expense
+
+    year = TODAY.year
+    db_session.add(models.ForecastDayCheckpoint(
+        user_id=user.id, account_id=acct.id, date=date(year, 6, 26), actual_balance=D("1000.00")))
+    _expense(db_session, user, acct, "Small", "0.50", day_of_month=29)
+    db_session.commit()
+    near = quarters()[2]
+    assert D(str(near["quarter_end_checkpoint"])) == D("1000.00")
+    assert D(str(near["checkpoint_delta"])) == D("1000.00") - D(str(near["close_balance"])) == D("0.50")
+    assert near["checkpoint_conflict"] is False  # within a dollar
+
+    _expense(db_session, user, acct, "Large", "40.00", day_of_month=30)
+    db_session.commit()
+    far = quarters()[2]
+    assert D(str(far["checkpoint_delta"])) == D("40.50")
+    assert far["checkpoint_conflict"] is True

@@ -782,6 +782,10 @@ class QuarterSummary(BaseModel):
     net: Decimal
     days: list[ForecastEntry]
     quarter_end_checkpoint: Optional[Decimal] = None
+    # Saved balance minus the forecast close (None without a checkpoint), and
+    # whether the two disagree by more than a dollar.
+    checkpoint_delta: Optional[Decimal] = None
+    checkpoint_conflict: bool = False
 
 
 # ── Budget ────────────────────────────────────────────────────────────────────
@@ -837,6 +841,8 @@ class BillAmountOverrideOut(BaseModel):
     due_date: date
     actual_amount: Decimal
     projected_amount: Decimal = Decimal("0")
+    # actual_amount minus projected_amount; positive means the bill ran high.
+    variance: Decimal = Decimal("0")
     notes: Optional[str] = None
 
 
@@ -1219,6 +1225,8 @@ class SpendingOverview(BaseModel):
     discretionary_actual: Decimal = Decimal("0")
     discretionary_budgeted: Decimal = Decimal("0")
     fixed_actual: Decimal = Decimal("0")
+    # Discretionary budget minus discretionary spend; negative means over.
+    discretionary_left: Decimal = Decimal("0")
 
 
 class MonthlySpendingEntry(BaseModel):

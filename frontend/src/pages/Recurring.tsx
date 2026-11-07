@@ -185,7 +185,7 @@ export default function Recurring() {
     const override = dueDate ? overrideByKey[`${item.id}|${dueDate}`] : null;
     const projected = parseFloat(item.amount || "0");
     const actual = override ? parseFloat(override.actual_amount) : null;
-    const variance = actual !== null ? actual - projected : 0;
+    const variance = override ? parseFloat(override.variance ?? "0") : 0;
 
     return (
       <div className="py-2.5 border-b border-gray-50 last:border-0">

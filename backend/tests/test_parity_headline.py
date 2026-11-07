@@ -18,7 +18,9 @@ from fastapi.testclient import TestClient
 
 from backend import models, schemas
 from backend.dependencies import get_current_user, get_db
+from backend.routers import accounts as accounts_router_module
 from backend.routers import forecast as forecast_router_module
+from backend.routers import networth as networth_router_module
 from backend.routers import recurring as recurring_router_module
 from backend.routers import budget as budget_router_module
 from backend.routers import exports as exports_router_module
@@ -27,6 +29,7 @@ from backend.services import budget_snapshot
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.budget_calculator import compute_overview
 from backend.services.card_payment_model import card_payments
+from backend.services.explain import replay
 from backend.services.month_base import build_month_base
 from backend.services.real_spend import spend_totals
 from backend.services.summary_generator import (
@@ -202,6 +205,77 @@ def test_each_cards_next_payment_agrees_across_forecast_explain_and_model(db_ses
         label_date, explain_amount = explain_line[name]
         assert label_date == f"{due:%b} {due.day}"
         assert explain_amount == amount
+
+
+def test_available_to_spend_walks_to_the_snapshots_left_to_spend(db_session, monkeypatch):
+    """Available to Spend (before budgets) is the same month as Left to Spend:
+    its walk replays to the snapshot's figure, and 'spent' agrees with the
+    refund-netting spend rule."""
+    _pin_today(monkeypatch, TODAY)
+    monkeypatch.setattr("backend.routers.spending.date", type(
+        "_Fixed", (date,), {"today": classmethod(lambda cls: TODAY)},
+    ))
+    user, checking = _headline_fixture(db_session)
+    snap = compute_budget_snapshot(db_session, user, checking.id, as_of=TODAY)
+
+    resp = _client(db_session, user, spending_router_module).get("/spending/available-to-spend")
+    assert resp.status_code == 200
+    body = resp.json()
+    available = schemas.AvailableToSpend.model_validate(body)
+    assert replay(available.explain) == available.available == available.explain.result
+    assert available.to_left_to_spend is not None
+    assert replay(available.to_left_to_spend) == snap.left_to_spend
+    assert available.to_left_to_spend.result == snap.left_to_spend
+    # Same month model underneath: its income and bills are the month base's.
+    base = build_month_base(db_session, user, 2026, 11)
+    assert available.monthly_income == base.income_total
+    assert available.committed_expenses == base.expense_total
+
+
+def test_net_position_is_checking_posted_less_cards_due(db_session, monkeypatch):
+    _pin_today(monkeypatch, TODAY)
+    user, checking = _headline_fixture(db_session)
+    resp = _client(db_session, user, accounts_router_module).get("/accounts/net-position")
+    assert resp.status_code == 200
+    out = resp.json()
+    posted = sum((a.current_balance for a in db_session.query(models.Account).filter(
+        models.Account.user_id == user.id, models.Account.type == models.AccountType.checking,
+        models.Account.is_active == True)), D("0"))  # noqa: E712
+    due = sum((c.balance_due for c in db_session.query(models.CreditCard).filter(
+        models.CreditCard.user_id == user.id, models.CreditCard.is_active == True)), D("0"))  # noqa: E712
+    assert posted == D("3000.00") and due == D("650.00")
+    assert D(str(out["checking_total"])) == posted
+    assert D(str(out["cards_due_total"])) == due
+    assert D(str(out["net_position"])) == posted - due == D("2350.00")
+    assert replay(schemas.NetPositionOut.model_validate(out).explain) == posted - due
+
+
+def test_net_worth_live_and_snapshot_are_one_number(db_session, monkeypatch):
+    """The live view and the stored snapshot use one recipe: assets are manual
+    assets plus every account balance, liabilities are manual liabilities plus
+    card current balances."""
+    _pin_today(monkeypatch, TODAY)
+    monkeypatch.setattr("backend.routers.networth.date", type(
+        "_Fixed", (date,), {"today": classmethod(lambda cls: TODAY)},
+    ))
+    user, checking = _headline_fixture(db_session)
+    db_session.add_all([
+        models.ManualAsset(user_id=user.id, name="Truck", asset_type="vehicle",
+                           current_value=D("12000.00"), as_of_date=TODAY),
+        models.ManualLiability(user_id=user.id, name="Loan", liability_type="loan",
+                               current_balance=D("4000.00"), as_of_date=TODAY),
+    ])
+    db_session.commit()
+    client = _client(db_session, user, networth_router_module)
+    live = client.get("/net-worth").json()
+    snap = client.post("/net-worth/snapshot").json()
+
+    assets = D("12000.00") + D("3000.00") + D("30000.00")
+    liabilities = D("4000.00") + D("400.00") + D("250.00")
+    assert D(str(live["total_assets"])) == assets == D(str(snap["total_assets"]))
+    assert D(str(live["total_liabilities"])) == liabilities == D(str(snap["total_liabilities"]))
+    assert D(str(live["net_worth"])) == assets - liabilities == D(str(snap["net_worth"]))
+    assert replay(schemas.NetWorthTotals.model_validate(live).explain) == assets - liabilities
 
 
 def _spending_fixture(db):

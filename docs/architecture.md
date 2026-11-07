@@ -5,10 +5,9 @@ screen or in an email to the function that computes it, and the checklist for
 consolidating those functions into one shared layer.
 
 Design background: `docs/superpowers/specs/2026-11-06-calculation-consistency-design.md`.
-Status: the backend shared layer is built (calculation version 6). Rows marked `-> Plan 2` are
-the frontend figures and the Available to Spend rebuild still to move; until they do, the
-"function" column is where that math really lives. Everything else points at a function in
-`backend/services`.
+Status: every money figure is computed in `backend/services` (calculation version 11), and the
+frontend displays them. `frontend/tests/moneyGuard.test.ts` fails if browser code starts adding or
+subtracting money again. Each row's "function" column is where the figure is computed.
 
 ## System overview
 
@@ -55,7 +54,7 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Forecast balances | Day-by-day projected checking balance | `build_forecast` (services/forecast_engine.py) | Forecast tab, lows, risk banner, Wish List, upcoming bills, baselines |
 | Forecast walk start/flags | The standard walk: starts 45 days before today; purpose `display` (unbilled card bills in) or `safety` (out). Every start gives the same balances from that horizon on | `standard_walk` (services/forecast_walk.py), horizon and bridges in `build_forecast` (services/forecast_engine.py). Custom ranges, with a comment: GET /forecast, /multi-year, /monthly-summary (routers/forecast.py), `build_quarters` | Forecast tab, lows, risk banner, digest, upcoming bills, Wish List, baselines |
 | Card payment amount (payoff) | Locked statement payoff, cycle estimate (pending + spent since statement + subscriptions before close + one-offs), second-hop rule, flat estimate, subscription fallback; basis kept on `ForecastTransaction.basis` | `card_payments`, `card_payment_plan` (services/card_payment_model.py); helpers `_card_payoff_date_for_charge`, `_card_subscription_charges`, `_cc_actual_nearby` (services/forecast_engine.py) | Forecast tab, Safety Margin, explain notes (`_cc_basis_note`) |
-| Pending charges (fresh) | Hand-typed or synced pending total, ignored when older than 7 days | `card_pending` (services/pending.py), read by the forecast, Left to Spend, available-to-spend, the email and statement checks. The frontend still reads the raw field -> Plan 2 | Forecast, Left to Spend, Credit Cards page, email |
+| Pending charges (fresh) | Hand-typed or synced pending total, ignored when older than 7 days | `card_pending` (services/pending.py), read by the forecast, Left to Spend, available-to-spend, the email and statement checks. The frontend shows the already-resolved `pending_effective` (on `CreditCardOut`); it reads the raw field only to pre-fill the edit box | Forecast, Left to Spend, Credit Cards page, email |
 | Social Security boost | Extra take-home per paycheck once the wage base is met | `ss_paycheck_boosts`, `SSWageBaseTracker`, `pay_year_dates` (services/forecast_engine.py); month model calls them | Forecast, Recurring, Leftover |
 | Weekend shift | Posting day moves off a weekend; override keyed by natural due date everywhere | `_adjust_for_weekend`, `_matches_schedule`, the override lookup in `build_forecast` (services/forecast_engine.py); `build_month_base` (services/month_base.py) and `upcoming_bills` (services/upcoming_bills.py) key by the natural date | Forecast, Recurring, Upcoming bills |
 | Card bill in month | Whether a card-paid recurring bill belongs to a month (quarterly lands whole in its due month) | `is_card_bill_in_month` (services/forecast_engine.py) | Month model, forecast |
@@ -81,6 +80,9 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Net worth | Assets = manual assets plus active account balances; liabilities = manual liabilities plus active card current balances; net worth = assets minus liabilities (decision b). An overdrawn account lowers assets. One recipe for the live view and the stored daily snapshots | `net_worth_totals` (services/net_worth.py), called by `get_totals` and `capture_snapshot` (routers/networth.py) | Net Worth page, Net Worth history |
 | Checking balance with pending | Posted balance plus every live pending row, credits and debits alike, only while an active Plaid link keeps the snapshot live; otherwise the posted balance. The same service gives each account's month start and percent change (start = posted balance before this month's actual flow) | `account_balances` (services/account_balances.py) over `checking_balance_with_pending`, `checking_pending_rows`, `pending_snapshot_is_live` (services/pending.py); `GET /accounts/balances` (routers/accounts.py) | Sidebar list, total and % badge, Dashboard Checking card |
 | Transactions running balance | Each pending row's balance walking forward from posted (oldest first; the last equals the after-pending balance); each posted row's balance right after it posted, walking backward from posted (newest first) | `running_balance` (services/account_balances.py) over `checking_pending_rows`; `GET /accounts/{id}/running-balance` (routers/accounts.py) | Transactions page Balance column (checking tab) |
+| Discretionary left | Discretionary budget minus discretionary spend (negative = over) | `discretionary_left` on `SpendingOverview` (`spending_by_category`, routers/spending.py) | Spending page, Discretionary card |
+| Bill variance | An override's actual amount minus the item's projected amount | `variance` on `BillAmountOverrideOut` (`_to_out`, routers/bill_overrides.py) | Recurring page |
+| Quarter checkpoint conflict | Saved quarter-end balance minus the forecast close, and whether they differ by more than $1 | `checkpoint_delta`, `checkpoint_conflict` on `QuarterSummary` (`_attach_quarter_checkpoints`, routers/forecast.py) | Forecast page |
 | Calculation version | Hand-bumped integer naming the current calculation meaning | `CALC_VERSION` (services/calc_version.py) | Explain panels, changelog below |
 
 ## Shared primitives
@@ -255,14 +257,16 @@ so upcoming bills shows the forecast's paycheck amount as it is.
 
 ### Guards and parity tests
 
-Two tests keep the layer from eroding; both run in the normal suite.
+Three tests keep the layer from eroding; all run in the normal suite.
 
 - `backend/tests/test_parity_headline.py` builds one fixture (a paycheck past the Social Security
   base, a weekly card bill, a quarterly bill, a savings-funded one-off, a refund, a pending charge)
   and requires the same value from every surface: Leftover (`build_month_base`,
   `/recurring/month-summary`, the snapshot), the lowest point (snapshot vs the `/forecast` endpoint
   with the floor mask), each card's next payment (forecast line, snapshot explain, `card_payments`)
-  and last month's spend (Month in Review, Sankey, Budget overview, weekly digest).
+  and last month's spend (Month in Review, Sankey, Budget overview, weekly digest). It also checks
+  that Available to Spend's walk replays to the snapshot's Left to Spend, that Net Position is
+  checking posted minus cards due, and that the live net worth and the stored snapshot are equal.
 - `backend/tests/test_calc_guard.py` is an AST scan of `routers/` and `services/`. It fails on
   `sum(...)` or `+=` / `-=` over `amount`, `pending_charges`, `balance_due` or `current_balance`
   outside the shared-layer modules, and on any read of `.pending_charges` outside `pending.py` and
@@ -274,6 +278,14 @@ Two tests keep the layer from eroding; both run in the normal suite.
   and the writers `bank_sync_service`, `plaid_sync_service`, `import_service` and
   `planned_auto_settle`, plus `statement_reconcile` (matches a statement's credits to synced card
   rows, not a headline figure). The scan also covers SQL `func.sum(...)`.
+
+- `frontend/tests/moneyGuard.test.ts` (`bun test`) scans `frontend/src/**/*.{ts,tsx}` for a
+  `.reduce(` that adds or subtracts, and for `+` / `-` between `parseFloat(...)` / `Number(...)`
+  results, when the statement names a money identifier (`amount`, `balance`, `pending`, `actual`,
+  `budget`, `available`, ...). Sort comparators are ignored. Fix a hit by moving the figure to the
+  backend. Its allowlist (path plus snippet, with a reason, stale entries fail) holds only
+  presentational code and unsaved-form previews. Percent-of-total ratios are not caught and may stay
+  (decision (c)).
 
 ## Decisions log
 
@@ -294,8 +306,9 @@ Settled by the principal. Record any behavior change here.
 - **One cushion everywhere.** The risk banner, the 3-month low and the Wish List all use the single cushion (default $1,000): amber below it, red below $0. The per-account `low_balance_threshold` and the Wish List cushion are retired; any existing non-default value migrates into the single setting.
 - **Overrides are keyed by the item's natural due date.** The weekend shift moves only the posting day.
 - **Budget export = Budget page.** `/export/budget-report` emits `compute_overview` rows: actuals are positive real spend including cards, budgeted uses the overview's month fallback, savings lines show money moved to savings, income lines show 0. Child rows are named "Parent / Child" and parents carry "Includes subcategories" = yes, because a parent's actual already includes its children. To total the file, sum the top-level rows (no ' / ' in Category); a flagged parent row already includes its subcategories and any spend filed directly on the parent (calculation v7).
-- **A pending-adjusted checking balance (decision (a))** is the posted balance plus every live pending row, credits and debits alike, and only while the pending snapshot is live; otherwise it is the posted balance. The sidebar's month percent change is measured from the posted balance before this month's actual (non-planned) transactions, over the absolute start, and is blank when the start is under one cent. The forecast keeps its own card-payment-only pending debits (`checking_pending_debits`).
+- **A pending-adjusted checking balance (decision (a))** is the posted balance plus every live pending row, credits and debits alike, and only while the pending snapshot is live; otherwise it is the posted balance. The sidebar's month percent change is measured from the posted balance before this month's actual (non-planned) transactions, over the absolute start, and is blank when the start is under one cent. The month flow counts actual (non-planned) transactions only; planned rows never move it. The forecast keeps its own card-payment-only pending debits (`checking_pending_debits`).
 - **Net worth (decision (b))** uses one definition everywhere, the one stored history already used: assets = manual assets plus active account balances; liabilities = manual liabilities plus active card current balances. Net worth itself is unchanged; only the Assets and Liabilities subtotals moved.
+- **Percent and share ratios (decision (c))** over figures the backend already sent (a progress bar's percent of budget, a pie slice's share of the total) are presentational and may be computed in the frontend. Anything that adds or subtracts money is not.
 - **Workflow:** build in the live working tree. Take a `backup_database()` copy before schema changes, and run a before/after on a database copy for any step that moves a visible number.
 
 ## Tracing a mismatch
