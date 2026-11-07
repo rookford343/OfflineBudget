@@ -88,6 +88,36 @@ def _lowest_balance_rows(snap) -> list[tuple[str, Decimal, date]]:
     return rows
 
 
+# The headline keys that have a place in the email, for `since_lines`.
+SINCE_KEYS = (
+    "spendable_week", "safety_margin_week", "next_month_minimum", "lookahead_minimum",
+    "checking_balance",
+)
+
+
+def _lowest_row_since(label: str, since: dict[str, str]) -> str | None:
+    """The since line for a `_lowest_balance_rows` row: next month's low, the
+    3-month low, or (on the combined row, which shows both) whichever moved."""
+    if label.startswith("Lowest next month"):
+        keys = ["next_month_minimum"] + (["lookahead_minimum"] if _is_lookahead_row(label) else [])
+    else:
+        keys = ["lookahead_minimum"]
+    return next((since[k] for k in keys if k in since), None)
+
+
+def _since_html(line: str | None, margin: str = "3px 0 0", align: str = "") -> str:
+    if not line:
+        return ""
+    return (
+        f"<p style='margin:{margin};color:#9ca3af;font-size:11px;line-height:1.4;{align}"
+        f"white-space:normal;word-break:break-word;overflow-wrap:break-word'>{html_lib.escape(line)}</p>"
+    )
+
+
+def _since_text(line: str | None) -> str:
+    return f"    {line}\n" if line else ""
+
+
 def _lookahead_warning(snap) -> str | None:
     """The short phrase that flags the 3-month low against the user's safety
     cushion, or None when it's fine (snap.lookahead_status == "ok"). The
@@ -252,6 +282,7 @@ def _fires_soon(item: models.RecurringItem, today: date, days_ahead: int = 7) ->
 
 def generate_daily_summary(
     db: Session, user: models.User, *, weekly_digest: WeeklyDigest | None = None,
+    since_lines: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     """Return (html_body, text_body) for a daily budget summary email.
 
@@ -259,7 +290,11 @@ def generate_daily_summary(
     Weekly Digest runs -- its spending-by-category/top-merchants/balance-risk
     sections get appended to this same email instead of going out as a
     separate one.
+
+    `since_lines` maps a headline key (SINCE_KEYS) to a short "since last
+    email" line (metric_diff.since_last_email), printed under that figure.
     """
+    since = since_lines or {}
     today = date.today()
     month_start = today.replace(day=1)
 
@@ -329,7 +364,10 @@ def generate_daily_summary(
 
     acct_rows = "".join(
         f"<tr><td style='padding:6px 12px 6px 0;color:#374151'>{a.name}"
-        f"<br><span style='color:#9ca3af;font-size:11px;font-weight:400'>{_last_txn_label(acct_last_txn.get(a.id))}</span></td>"
+        f"<br><span style='color:#9ca3af;font-size:11px;font-weight:400'>{_last_txn_label(acct_last_txn.get(a.id))}</span>"
+        + (_since_html(since.get("checking_balance"), "2px 0 0", "font-weight:400;")
+           if primary_account is not None and a.id == primary_account.id else "")
+        + "</td>"
         f"<td style='padding:6px 0;text-align:right'><b style='color:#111827'>{fmt(a.current_balance)}</b></td></tr>"
         for a in accounts
     ) or "<tr><td style='color:#9ca3af'>No checking accounts</td></tr>"
@@ -471,6 +509,7 @@ def generate_daily_summary(
                 f"<p style='color:#047857;font-size:12px;margin:{margin};text-align:center;"
                 f"word-break:break-word;overflow-wrap:break-word'>{label}: "
                 f"<b style='color:{row_color}'>{fmt(amount)}</b> on {d.strftime('%b %-d')}{warning_html}</p>"
+                + _since_html(_lowest_row_since(label, since), "2px 0 0", "text-align:center;")
             )
             if i == 0 and move_line:
                 lowest_html_parts.append(
@@ -499,6 +538,7 @@ def generate_daily_summary(
           <p class='ob-card-figure' style='margin:0;color:{spendable_color};font-size:17px;font-weight:700;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.left_to_spend_weekly)}</p>
           <p class='ob-card-pace' style='margin:5px 0 0;color:{pace_color};font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{spendable_today_sign}{fmt(abs(snap.spendable_today))}/day &middot; {"on pace" if snap.on_pace else "over pace"}</p>
           <p class='ob-card-foot' style='margin:3px 0 0;color:#9ca3af;font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.left_to_spend)} this month</p>
+          {_since_html(since.get("spendable_week"))}
         </div>
       </td>
       <td width='50%' valign='top' style='width:50%;padding:0 0 0 4px;vertical-align:top'>
@@ -508,6 +548,7 @@ def generate_daily_summary(
           <p class='ob-card-pace' style='margin:5px 0 0;color:{margin_color};font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{margin_today_sign}{fmt(abs(snap.safety_margin_today))}/day</p>
           <p class='ob-card-foot' style='margin:3px 0 0;color:#9ca3af;font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.safety_margin)} this month</p>
           {pull_savings_html}
+          {_since_html(since.get("safety_margin_week"))}
         </div>
       </td>
     </tr>
@@ -586,7 +627,11 @@ def generate_daily_summary(
 </body></html>"""
 
     acct_text = "\n".join(
-        f"  {a.name}: {fmt(a.current_balance)} ({_last_txn_label(acct_last_txn.get(a.id))})" for a in accounts
+        f"  {a.name}: {fmt(a.current_balance)} ({_last_txn_label(acct_last_txn.get(a.id))})"
+        + (f"\n{_since_text(since.get('checking_balance')).rstrip(chr(10))}"
+           if since.get("checking_balance") and primary_account is not None and a.id == primary_account.id
+           else "")
+        for a in accounts
     ) or "  No checking accounts"
     upcoming_text = "\n".join(
         f"  {_day_label(b.due_date):<10} {b.name}: {'+' if b.type == models.RecurringType.income else '-'}{fmt(b.amount)}"
@@ -612,18 +657,21 @@ def generate_daily_summary(
             f"  {label}: {fmt(amount)} on {d.strftime('%b %-d')}"
             + (f" ({lookahead_warning})" if lookahead_warning and _is_lookahead_row(label) else "")
             + ".\n"
+            + _since_text(_lowest_row_since(label, since))
             + (f"  {move_line}.\n" if i == 0 and move_line else "")
             for i, (label, amount, d) in enumerate(lowest_rows)
         )
         household_text = (
             "HOUSEHOLD SNAPSHOT\n"
             f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}\n"
+            + _since_text(since.get("spendable_week"))
             + f"  Safety margin (this week): {fmt(snap.safety_margin_weekly)}"
             + f" ({margin_today_sign}{fmt(abs(snap.safety_margin_today))}/day)"
             + ("" if snap.savings_pull_needed <= 0 else
                f"  (pull {fmt(snap.savings_pull_needed)} from savings)")
             + "\n"
-            f"  Monthly: {fmt(snap.left_to_spend)} left to spend, {fmt(snap.safety_margin)} before your spending starts eating into savings.\n"
+            + _since_text(since.get("safety_margin_week"))
+            + f"  Monthly: {fmt(snap.left_to_spend)} left to spend, {fmt(snap.safety_margin)} before your spending starts eating into savings.\n"
             + lowest_text
         )
     else:

@@ -92,7 +92,7 @@ def _run_send_daily_summaries(monkeypatch, *, recipients: str, today: date, week
 
     captured = {"weekly_digest": "not-called"}
 
-    def _fake_generate_daily_summary(db, u, *, weekly_digest=None):
+    def _fake_generate_daily_summary(db, u, *, weekly_digest=None, since_lines=None):
         captured["weekly_digest"] = weekly_digest
         return ("<html>", "text")
 

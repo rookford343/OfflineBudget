@@ -327,6 +327,8 @@ Change history answers "why did this number move?" It stores each headline figur
 
 **How a change is explained.** `changes_for` pairs consecutive readings of one figure and keeps pairs that moved by a cent or more. `explain_change` names the causes in this order: a calculation change (quoting `CALC_CHANGELOG`), source events (pending or posted rows that arrived or went away, matched so a pending row that posted is not counted twice), a new month, then the receipt lines whose amounts differ, largest first. If nothing nameable differs, or a stored receipt or sources record cannot be read, the cause is "inputs changed". Every query is scoped to the caller's user id.
 
+**The daily email.** `since_last_email` (services/metric_diff.py) compares today's readings, not yet stored, with the latest `email` snapshot and returns one short line (at most 120 characters) per figure that moved; `generate_daily_summary` prints it under Spendable this week, Safety Margin (this week), the lowest-balance rows and the primary checking balance. The email snapshot is stored only after a send succeeds, and a failure building the lines sends the email without them.
+
 **Keeping it honest.** `CALC_CHANGELOG` (services/calc_version.py) must gain a line with every `CALC_VERSION` bump, because change history quotes it when a figure moved because the rules did.
 
 ## Tracing a mismatch

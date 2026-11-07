@@ -11,13 +11,18 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
-from backend.services.calc_version import CALC_CHANGELOG
+from backend.services.calc_version import CALC_CHANGELOG, CALC_VERSION
+from backend.services.metric_history import (
+    MetricReadingData,
+    collect_sources,
+    latest_snapshot,
+)
 from backend.services.primary_account import primary_checking
 
 logger = logging.getLogger(__name__)
@@ -363,4 +368,64 @@ def changes_for(
             causes=[schemas.HistoryCause(text=c.text, amount=c.amount) for c in causes],
             calc_changed=prev_snap.calc_version != cur_snap.calc_version,
         ))
+    return out
+
+
+# ── The daily email's "since last email" lines ───────────────────────────────
+
+EMAIL_LINE_MAX = 120
+
+
+def _fit(line: str, limit: int = EMAIL_LINE_MAX) -> str:
+    """`line` cut at a word boundary to at most `limit` characters, ending in "…"."""
+    if len(line) <= limit:
+        return line
+    cut = line[: limit - 1]
+    space = cut.rfind(" ")
+    if space > 0:
+        cut = cut[:space]
+    return cut.rstrip(" ,;:") + "…"
+
+
+def _transient_reading(
+    user_id: int, reading: MetricReadingData, sources_json: str, as_of: date, taken_at: datetime,
+) -> models.MetricReading:
+    """The reading as it would be stored, without adding it to any session, so
+    `explain_change` can compare it with a stored one before the email goes."""
+    snapshot = models.MetricSnapshot(
+        user_id=user_id, taken_at=taken_at, trigger="email", calc_version=CALC_VERSION,
+        as_of=as_of, sources_json=sources_json,
+    )
+    row = models.MetricReading(
+        metric_key=reading.key, label=reading.label, value=reading.value,
+        explain_json=reading.explain.model_dump_json(),
+    )
+    row.snapshot = snapshot
+    return row
+
+
+def since_last_email(
+    db: Session, user: models.User, readings: list[MetricReadingData], *, as_of: date | None = None,
+) -> dict[str, str]:
+    """Metric key -> one short line for each figure that moved (by a cent or
+    more) since the last "email" snapshot; `{}` when there is none. The line
+    has no leading label: the email prints it under the figure's own."""
+    previous = latest_snapshot(db, user.id, "email")
+    if previous is None:
+        return {}
+    as_of = as_of or date.today()
+    taken_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    sources_json = json.dumps(collect_sources(db, user, as_of), sort_keys=True)
+    before = {r.metric_key: r for r in previous.readings}
+    out: dict[str, str] = {}
+    for reading in readings:
+        prev = before.get(reading.key)
+        if prev is None:
+            continue
+        delta = reading.value - Decimal(str(prev.value))
+        if abs(delta) < CENT:
+            continue
+        cur = _transient_reading(user.id, reading, sources_json, as_of, taken_at)
+        causes = _causes_or_fallback(db, user.id, reading.key, prev, cur)
+        out[reading.key] = _fit(summarize("", delta, "since last email", causes, max_items=2))
     return out

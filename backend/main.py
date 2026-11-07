@@ -187,10 +187,27 @@ def _send_daily_summaries_locked() -> None:
                     checking = next((a for a in accounts if a.type == models.AccountType.checking), None)
                     if checking:
                         weekly_digest = generate_weekly_digest(db, user, checking.id)
-                html_body, text_body = generate_daily_summary(db, user, weekly_digest=weekly_digest)
+                # Readings are collected before the send and stored only after
+                # one succeeds. Any failure here costs the since-lines (and
+                # this email's snapshot), never the email.
+                readings = None
+                since: dict[str, str] = {}
+                try:
+                    from backend.services import metric_history
+                    from backend.services.metric_diff import since_last_email
+                    today = date.today()
+                    readings = metric_history.collect_headline_metrics(db, user, today)
+                    since = since_last_email(db, user, readings, as_of=today)
+                except Exception:  # noqa: BLE001 -- history must never stop the email
+                    logger.exception("Daily summary: since-last-email lines failed for %s", user.username)
+                    readings, since = None, {}
+                html_body, text_body = generate_daily_summary(
+                    db, user, weekly_digest=weekly_digest, since_lines=since,
+                )
                 subject = f"Daily Budget Summary — {date.today().strftime('%B %-d, %Y')}"
                 if weekly_digest is not None:
                     subject += " + Weekly Digest"
+                any_sent = False
                 for recipient in recipients:
                     ok, err = send_email_via(db, recipient, subject, html_body, text_body)
                     # Marked whether or not the send succeeded: the goal is
@@ -200,6 +217,14 @@ def _send_daily_summaries_locked() -> None:
                     sent_to.add(recipient)
                     if not ok:
                         last_error = f"{recipient}: {err}"
+                    else:
+                        any_sent = True
+                if any_sent and readings:
+                    try:
+                        metric_history.record_snapshot(db, user, "email", readings=readings)
+                    except Exception:  # noqa: BLE001 -- the email already went out
+                        logger.exception("Daily summary: email snapshot failed for %s", user.username)
+                        db.rollback()
             except Exception as exc:
                 logger.error("Summary failed for %s: %s", user.username, exc)
                 last_error = f"{user.username}: {exc}"
