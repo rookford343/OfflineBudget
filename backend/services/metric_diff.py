@@ -198,6 +198,12 @@ def _source_causes(
 ) -> list[Cause]:
     old, new = _load(prev.sources_json), _load(cur.sources_json)
     causes: list[Cause] = []
+    # Posted rows count as new when they were added to the database between the
+    # two recordings (created_at, naive UTC like taken_at) and dated no earlier
+    # than the previous reading's month, so an old-dated import is not blamed.
+    # Rows without a created_at never match. Row ids are not used: they are
+    # reused after "clear all transactions".
+    window_start = prev.as_of.replace(day=1)
 
     # Card rows: pending that appeared or went away, and posted rows in between.
     old_p = _pending_items(old["card_pending"], "card_id", "card", "merchant")
@@ -206,8 +212,9 @@ def _source_causes(
     gone_pending = [v for k, v in old_p.items() if k not in new_p]
     posted_rows = db.query(models.CreditCardTransaction).filter(
         models.CreditCardTransaction.user_id == user_id,
-        models.CreditCardTransaction.id > old["max_card_txn_id"],
-        models.CreditCardTransaction.id <= new["max_card_txn_id"],
+        models.CreditCardTransaction.created_at > prev.taken_at,
+        models.CreditCardTransaction.created_at <= cur.taken_at,
+        models.CreditCardTransaction.date >= window_start,
     ).order_by(models.CreditCardTransaction.id).all()
     card_names = {c.id: c.name for c in db.query(models.CreditCard).filter(
         models.CreditCard.user_id == user_id).all()}
@@ -234,8 +241,9 @@ def _source_causes(
             models.Transaction.user_id == user_id,
             models.Transaction.account_id == account.id,
             models.Transaction.is_actual == True,  # noqa: E712
-            models.Transaction.id > old["max_txn_id"],
-            models.Transaction.id <= new["max_txn_id"],
+            models.Transaction.created_at > prev.taken_at,
+            models.Transaction.created_at <= cur.taken_at,
+            models.Transaction.date >= window_start,
         ).order_by(models.Transaction.id).all()
         c_posted = [_Item(account.id, account.name, r.description, Decimal(str(r.amount))) for r in rows]
     c_new = _unmatched(c_new, c_posted)

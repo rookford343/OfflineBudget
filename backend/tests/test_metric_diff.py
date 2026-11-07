@@ -63,9 +63,15 @@ def _world(db):
     return user, checking, cards[0], cards[1]
 
 
-def _snap(db, user, *, as_of=date(2026, 11, 2), calc_version=12, sources=None, readings=None):
+PREV_AT = datetime(2026, 11, 2, 7, 0)
+BETWEEN = datetime(2026, 11, 2, 9, 0)   # a row created between the two snapshots
+CUR_AT = datetime(2026, 11, 2, 12, 0)
+
+
+def _snap(db, user, *, as_of=date(2026, 11, 2), calc_version=12, sources=None, readings=None,
+          taken_at=PREV_AT):
     snap = models.MetricSnapshot(
-        user_id=user.id, taken_at=datetime(2026, 11, 2, 7, 0), trigger="sync",
+        user_id=user.id, taken_at=taken_at, trigger="sync",
         calc_version=calc_version, as_of=as_of,
         sources_json=json.dumps(sources or _sources(), sort_keys=True),
     )
@@ -84,7 +90,8 @@ def _pair(db, user, key, *, prev_kw=None, cur_kw=None, prev_val="100.00", cur_va
           prev_ex=None, cur_ex=None):
     flat = _ex(_row("start", "Base", "100.00"))
     prev = _snap(db, user, readings={key: (prev_val, prev_ex or flat)}, **(prev_kw or {}))
-    cur = _snap(db, user, readings={key: (cur_val, cur_ex or flat)}, **(cur_kw or {}))
+    cur = _snap(db, user, readings={key: (cur_val, cur_ex or flat)},
+                **{"taken_at": CUR_AT, **(cur_kw or {})})
     return prev.readings[0], cur.readings[0]
 
 
@@ -128,7 +135,7 @@ def test_pending_that_posted_is_not_a_cause(db_session):
     prev_sources = _sources(card_pending=[_pend(visa.id, "Visa", "p1", "Grocery Store", "100.00")])
     posted = models.CreditCardTransaction(
         card_id=visa.id, user_id=user.id, date=date(2026, 11, 2), amount=D("100.00"),
-        merchant="Grocery Store",
+        merchant="Grocery Store", created_at=BETWEEN,
     )
     db_session.add(posted)
     db_session.commit()
@@ -145,7 +152,7 @@ def test_pending_that_posted_is_not_a_cause(db_session):
             card_pending=[_pend(visa.id, "Visa", "p9", "Grocery Store", "100.00")],
             max_card_txn=posted.id)},
     )
-    # prev max is 0 here, so the posted row is in range and cancels the new pending row.
+    # The posted row was created between the snapshots, so it cancels the new pending row.
     assert [c.text for c in _causes(db_session, user, "left_to_spend", prev2, cur2)] == ["inputs changed"]
 
 
@@ -153,7 +160,7 @@ def test_unmatched_posted_and_dropped_pending_are_named(db_session):
     user, _chk, visa, _mc = _world(db_session)
     posted = models.CreditCardTransaction(
         card_id=visa.id, user_id=user.id, date=date(2026, 11, 2), amount=D("42.00"),
-        merchant="Example Cafe",
+        merchant="Example Cafe", created_at=BETWEEN,
     )
     db_session.add(posted)
     db_session.commit()
@@ -252,11 +259,11 @@ def test_checking_rows_use_account_name_and_actual_filter(db_session):
                "description": "Utility Co", "amount": "-80.00"}
     posted = models.Transaction(
         user_id=user.id, account_id=chk.id, date=date(2026, 11, 2), amount=D("-20.00"),
-        description="Coffee Stand", is_actual=True,
+        description="Coffee Stand", is_actual=True, created_at=BETWEEN,
     )
     planned = models.Transaction(
         user_id=user.id, account_id=chk.id, date=date(2026, 11, 9), amount=D("-999.00"),
-        description="Planned Thing", is_actual=False,
+        description="Planned Thing", is_actual=False, created_at=BETWEEN,
     )
     db_session.add_all([posted, planned])
     db_session.commit()
@@ -271,6 +278,57 @@ def test_checking_rows_use_account_name_and_actual_filter(db_session):
     # Checking posted rows do not feed Left to Spend.
     prev, cur = _pair(db_session, user, "left_to_spend",
                       cur_kw={"sources": _sources(max_txn=planned.id)})
+    assert [c.text for c in _causes(db_session, user, "left_to_spend", prev, cur)] == ["inputs changed"]
+
+
+def test_old_dated_import_between_snapshots_is_not_a_cause(db_session):
+    user, chk, _v, _m = _world(db_session)
+    db_session.add_all([
+        # Imported between the snapshots but dated months ago: not why today moved.
+        models.Transaction(user_id=user.id, account_id=chk.id, date=date(2026, 6, 14), amount=D("-31.00"),
+                           description="Old Import", is_actual=True, created_at=BETWEEN),
+        models.Transaction(user_id=user.id, account_id=chk.id, date=date(2026, 11, 2), amount=D("-20.00"),
+                           description="Coffee Stand", is_actual=True, created_at=BETWEEN),
+    ])
+    db_session.commit()
+    prev, cur = _pair(db_session, user, "checking_balance")
+    texts = [c.text for c in _causes(db_session, user, "checking_balance", prev, cur)]
+    assert texts == ["new Example Checking transaction: Coffee Stand $20.00"]
+
+
+def test_current_month_card_row_created_between_snapshots_is_a_cause(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    db_session.add_all([
+        models.CreditCardTransaction(card_id=visa.id, user_id=user.id, date=date(2026, 11, 1),
+                                     amount=D("42.00"), merchant="Example Cafe", created_at=BETWEEN),
+        # Dated before the previous reading's month: outside the window.
+        models.CreditCardTransaction(card_id=visa.id, user_id=user.id, date=date(2026, 10, 31),
+                                     amount=D("9.00"), merchant="Too Old", created_at=BETWEEN),
+    ])
+    db_session.commit()
+    prev, cur = _pair(db_session, user, "left_to_spend")
+    assert [c.text for c in _causes(db_session, user, "left_to_spend", prev, cur)] == [
+        "new Visa transaction: Example Cafe $42.00"]
+
+
+def test_rows_created_outside_the_snapshot_window_are_not_causes(db_session):
+    """A row created before the previous snapshot is not new even when its id is
+    above the stored high-water mark (ids are reused after a clear-all), and a
+    row created after the current snapshot is not new yet. A NULL created_at is skipped."""
+    user, chk, visa, _mc = _world(db_session)
+    db_session.add_all([
+        models.CreditCardTransaction(card_id=visa.id, user_id=user.id, date=date(2026, 11, 2),
+                                     amount=D("11.00"), merchant="Before", created_at=datetime(2026, 11, 2, 6, 0)),
+        models.CreditCardTransaction(card_id=visa.id, user_id=user.id, date=date(2026, 11, 2),
+                                     amount=D("12.00"), merchant="After", created_at=datetime(2026, 11, 2, 13, 0)),
+        models.CreditCardTransaction(card_id=visa.id, user_id=user.id, date=date(2026, 11, 2),
+                                     amount=D("13.00"), merchant="NoStamp", created_at=None),
+    ])
+    db_session.commit()
+    # Every row's id sits inside the stored high-water range, as after id reuse.
+    prev, cur = _pair(db_session, user, "left_to_spend",
+                      prev_kw={"sources": _sources(max_card_txn=0)},
+                      cur_kw={"sources": _sources(max_card_txn=99)})
     assert [c.text for c in _causes(db_session, user, "left_to_spend", prev, cur)] == ["inputs changed"]
 
 

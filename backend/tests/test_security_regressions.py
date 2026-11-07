@@ -658,8 +658,8 @@ def test_history_is_scoped_to_the_caller(db_session):
 
 def test_history_causes_never_name_another_users_rows(db_session):
     """A second user's card transactions, checking transactions and pending rows
-    (ids inside the first user's (prev.max, cur.max] range) never appear in the
-    first user's causes."""
+    (created between the first user's two snapshots) never appear in the first
+    user's causes."""
     from datetime import datetime
     from backend.services.metric_diff import changes_for
 
@@ -677,12 +677,14 @@ def test_history_causes_never_name_another_users_rows(db_session):
     secret = "OtherUserSecretMerchant"
     db_session.add_all([
         models.CreditCardTransaction(card_id=other_card.id, user_id=other.id, date=date(2026, 11, 2),
-                                     amount=Decimal("77.00"), merchant=secret),
+                                     amount=Decimal("77.00"), merchant=secret, created_at=datetime(2026, 11, 2, 15, 0)),
         models.Transaction(user_id=other.id, account_id=other_checking.id, date=date(2026, 11, 2),
-                           amount=Decimal("-88.00"), description=secret, is_actual=True),
+                           amount=Decimal("-88.00"), description=secret, is_actual=True,
+                           created_at=datetime(2026, 11, 2, 15, 0)),
         # Even a row of theirs pointing at the owner's account must stay out.
         models.Transaction(user_id=other.id, account_id=owner_checking.id, date=date(2026, 11, 2),
-                           amount=Decimal("-99.00"), description=secret, is_actual=True),
+                           amount=Decimal("-99.00"), description=secret, is_actual=True,
+                           created_at=datetime(2026, 11, 2, 15, 0)),
         models.CardPendingTransaction(user_id=other.id, card_id=other_card.id, external_id="x1", date=date(2026, 11, 2),
                                       synced_at=datetime(2026, 11, 2, 12, 0),
                                       merchant=secret, amount=Decimal("55.00")),
