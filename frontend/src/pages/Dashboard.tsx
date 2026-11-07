@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { accountsApi, cardsApi, recurringApi, analyticsApi, budgetApi, forecastApi } from "../api";
+import { accountsApi, cardsApi, recurringApi, analyticsApi, budgetApi, forecastApi, bankSyncApi } from "../api";
 import { fmt, utilColor, utilBg, firstOfMonth, today } from "../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { maskMoneyText } from "../lib/maskMoney";
@@ -21,6 +21,24 @@ import { VerificationFlagButton } from "../components/VerificationFlagButton";
 import RecentTransactions from "../components/RecentTransactions";
 import BankSyncStatusLine from "../components/BankSyncStatusLine";
 import CheckingBalancesCard from "../components/CheckingBalancesCard";
+import SafetyMarginHero from "../components/phone/SafetyMarginHero";
+import SpendableTile from "../components/phone/SpendableTile";
+import UpcomingOneOffs from "../components/phone/UpcomingOneOffs";
+import { summarizePending, lastBankSync } from "../lib/freshness";
+
+/** True while the viewport is at least `px` wide (Tailwind's sm=640, lg=1024). */
+function useMinWidth(px: number): boolean {
+  const query = `(min-width: ${px}px)`;
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const onChange = () => setMatches(mql.matches);
+    onChange();
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, [query]);
+  return matches;
+}
 
 /** The next date on/after `today` whose day-of-month is `dueDay` (clamped to
  *  the month's last day), plus the day-count to reach it -- both derived
@@ -66,6 +84,8 @@ const NET_POSITION_HELP = "What's left in checking right now after this month's 
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const isDesktop = useMinWidth(1024);
+  const isWide = useMinWidth(640);
   const balancesHidden = useBalancesHidden();
   const [showHelp, setShowHelp] = useState(false);
   // Backend already returns the digest's top categories highest-first --
@@ -179,6 +199,7 @@ export default function Dashboard() {
     enabled: !!primaryChecking,
   });
   const isDark = useIsDarkMode();
+  const { data: bankConnections = [] } = useQuery<any[]>({ queryKey: ["bank-connections"], queryFn: bankSyncApi.status });
   const { data: snapshot } = useQuery<any>({
     queryKey: ["budget-snapshot", primaryChecking?.id],
     queryFn: () => analyticsApi.budgetSnapshot(primaryChecking.id),
@@ -212,6 +233,85 @@ export default function Dashboard() {
         return prev === 0 ? null : ((cur - prev) / prev) * 100;
       })()
     : null;
+
+  // Below lg: the phone layout. lg and up falls through to the desktop
+  // layout below, which is unchanged.
+  if (!isDesktop) {
+    const num = (v: any) => (v == null ? 0 : parseFloat(v));
+    const reference: any[] = baseline?.points ?? lastMonthFlow;
+    const byDay = new Map<number, { day: number; thisMonth?: number; reference?: number }>();
+    for (const e of reference) {
+      const day = parseInt(e.date.slice(-2), 10);
+      byDay.set(day, { day, reference: parseFloat(e.projected_balance) });
+    }
+    for (const e of balanceFlow) {
+      const day = parseInt(e.date.slice(-2), 10);
+      const row = byDay.get(day) ?? { day };
+      row.thisMonth = parseFloat(e.projected_balance);
+      byDay.set(day, row);
+    }
+    const phoneChart = [...byDay.values()].sort((a, b) => a.day - b.day);
+    const lineColor = isDark ? "#a5b4fc" : "#6366f1";
+    const priorLineColor = isDark ? "#5b6577" : "#9ca3af";
+    const axisColor = isDark ? "#8f99a8" : "#6b7280";
+    return (
+      <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+        <div className="space-y-4 min-w-0">
+          {snapshot ? (
+            <>
+              <SafetyMarginHero
+                weekly={num(snapshot.safety_margin_weekly)}
+                month={num(snapshot.safety_margin)}
+                perDay={num(snapshot.safety_margin_today)}
+                pending={summarizePending(cards)}
+                lastSync={lastBankSync(bankConnections)}
+                hidden={balancesHidden}
+              />
+              <SpendableTile
+                weekly={num(snapshot.left_to_spend_weekly)}
+                today={num(snapshot.spendable_today)}
+                onPace={!!snapshot.on_pace}
+                hidden={balancesHidden}
+              />
+            </>
+          ) : (
+            <div className="card text-sm text-gray-400">Loading…</div>
+          )}
+          {/* Task 8 attaches the one-off planning flow to this button. */}
+          <button type="button" className="btn-primary w-full min-h-[44px]" disabled>+ Plan a one-off</button>
+          {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
+          <PlannedTransferReminder />
+          <BillsToConfirm />
+          <AmountDrift />
+        </div>
+        {isWide && (
+          <div className="space-y-4 min-w-0">
+            {phoneChart.length > 0 && (
+              <div className="card">
+                <h3 className="mb-2 font-semibold text-gray-900 dark:text-gray-100">Balance flow</h3>
+                <ResponsiveContainer width="100%" height={220}>
+                  <AreaChart data={phoneChart} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#3a4051" : "#e5e7eb"} />
+                    <XAxis dataKey="day" tick={{ fontSize: 11, fill: axisColor }} />
+                    <YAxis tick={{ fontSize: 11, fill: axisColor }} tickFormatter={(v: number) => balancesHidden ? "•••" : fmt(v)} width={balancesHidden ? 40 : 76} domain={["auto", "auto"]} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: isDark ? "#2a2f3d" : "#ffffff", border: `1px solid ${isDark ? "#3a4051" : "#e5e7eb"}`, borderRadius: 8, fontSize: 12 }}
+                      formatter={(v: number) => [maskIfHidden(balancesHidden, fmt(v))]}
+                      labelFormatter={(d: number) => `Day ${d}`}
+                    />
+                    <Area type="monotone" dataKey="thisMonth" stroke={lineColor} strokeWidth={2} fill={lineColor} fillOpacity={0.12} dot={false} connectNulls />
+                    <Line type="monotone" dataKey="reference" stroke={priorLineColor} strokeWidth={1.5} strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            <RecentTransactions />
+            <UpcomingOneOffs />
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

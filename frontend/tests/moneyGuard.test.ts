@@ -54,6 +54,8 @@ const ALLOWED: Record<string, string> = {
     "decision (c): percent change between two figures the backend already sent",
   "pages/Dashboard.tsx:return prev === 0 ? null : ((cur - prev) / prev) * 100;":
     "decision (c): percent change between two figures the backend already sent",
+  "lib/freshness.ts:total += v;":
+    "presentational freshness note ('pending on N cards ($X)'): totals the per-card pending_effective figures the backend already sent, for the phone hero's caption only; feeds no decision or other figure (Task 7 brief mandates this signature)",
 };
 
 const MONEY = [

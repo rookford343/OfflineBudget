@@ -6,10 +6,11 @@ import { authApi, accountsApi, recurringApi } from "../api";
 import ConnectionBanner from "./ConnectionBanner";
 import QuickStartWizard from "./QuickStartWizard";
 import { TrendBadge } from "./TrendBadge";
-import { LogOut, Eye, EyeOff, Moon, Sun, ChevronDown, ChevronsUpDown, KeyRound, Settings as SettingsIcon } from "lucide-react";
+import { LogOut, Eye, EyeOff, Moon, Sun, Menu, Home, ChevronDown, ChevronsUpDown, KeyRound, Settings as SettingsIcon } from "lucide-react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { cx, fmt } from "../lib/utils";
-import { DASHBOARD_ITEM, SETTINGS_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS } from "../lib/navItems";
+import { DASHBOARD_ITEM, NAV_GROUPS, loadPinnedNav, PINNABLE_ITEMS, phoneBarItems } from "../lib/navItems";
+import MoreSheet from "./MoreSheet";
 import { useBalancesHidden, toggleBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { useIsDarkMode, toggleTheme } from "../store/theme";
 import { usePendingBalances, useAccountBalances } from "../lib/usePendingBalances";
@@ -75,13 +76,11 @@ export default function Layout() {
   // happened to tick the checkboxes in. Filtering PINNABLE_ITEMS by membership
   // preserves that order for free and can't yield a miss to filter out.
   const pinnedItems = PINNABLE_ITEMS.filter(item => pinnedSet.has(item.to));
-  // The sidebar is `hidden md:flex`, so below md this bottom bar is the ONLY
-  // navigation. With no pins it must still offer real destinations, and
-  // Settings must always survive the cap since it's the only route to the pin
-  // picker. Slicing the middle to 3 (rather than the whole array to 5) reserves
-  // the last slot for Settings no matter how many items are pinned.
-  const middleItems = pinnedItems.length > 0 ? pinnedItems : PINNABLE_ITEMS.slice(0, 3);
-  const mobileItems = [DASHBOARD_ITEM, ...middleItems.slice(0, 3), SETTINGS_ITEM];
+  // The sidebar only shows from lg up, so below lg this bottom bar is the ONLY
+  // navigation: Home, three pinned pages (defaults when none are pinned), and
+  // More, which opens the sheet with every page, Settings and Log out.
+  const barItems = phoneBarItems(pinned);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   function logout() {
     clearAuth();
@@ -113,7 +112,7 @@ export default function Layout() {
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
-      <aside className="hidden md:flex w-60 flex-col bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 shrink-0">
+      <aside className="hidden lg:flex w-60 flex-col bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 shrink-0">
         <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-bold text-indigo-600">OfflineBudget</h1>
@@ -278,7 +277,7 @@ export default function Layout() {
             wide monitor empty, but an unbounded width stretches table rows and
             two-column cards until the eye has to travel across the whole
             display to pair a label with its value. */}
-        <div className="w-full max-w-[120rem] mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <div className="w-full max-w-[120rem] mx-auto px-4 sm:px-6 lg:px-8 py-6 pb-24 lg:pb-6">
           <Outlet />
         </div>
       </main>
@@ -293,22 +292,42 @@ export default function Layout() {
         />
       )}
 
-      {/* Mobile bottom nav */}
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around px-2 py-2 z-50">
-        {mobileItems.map(item => (
+      {/* Phone / folded-and-unfolded bottom nav: below lg, 44px+ targets,
+          padded for the home-indicator inset. The page content above carries
+          matching bottom padding (pb-24) so nothing hides behind it. */}
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around px-2 pt-1 pb-[env(safe-area-inset-bottom)]">
+        {[{ ...DASHBOARD_ITEM, label: "Home", icon: Home }, ...barItems].map(item => (
           <NavLink
             key={item.to}
             to={item.to}
             className={({ isActive }) =>
-              cx("flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-xs font-medium",
-                isActive ? "text-indigo-600" : "text-gray-500")
+              cx("flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium",
+                isActive ? "text-indigo-600 dark:text-indigo-400" : "text-gray-500 dark:text-gray-400")
             }
           >
             <item.icon size={20} />
             <span>{item.label.split(" ")[0]}</span>
           </NavLink>
         ))}
+        <button
+          onClick={() => setMoreOpen(true)}
+          className="flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium text-gray-500 dark:text-gray-400"
+        >
+          <Menu size={20} />
+          <span>More</span>
+        </button>
       </nav>
+      {moreOpen && (
+        <MoreSheet
+          onClose={() => setMoreOpen(false)}
+          onLogout={logout}
+          balancesHidden={balancesHidden}
+          onToggleBalances={toggleBalancesHidden}
+          isDark={isDark}
+          onToggleTheme={toggleTheme}
+          badgeFor={badgeFor}
+        />
+      )}
     </div>
   );
 }

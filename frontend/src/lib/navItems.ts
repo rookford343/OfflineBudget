@@ -88,3 +88,18 @@ export function loadPinnedNav(): string[] {
 
   return [];
 }
+
+/** The three destinations the phone bottom bar shows between Home and More
+ *  when the owner hasn't pinned anything. */
+export const DEFAULT_PHONE_PINS = ["/spending", "/forecast", "/recurring"];
+
+/** The phone bar's pinned slots: the defaults, in their listed order, when
+ *  nothing is saved; otherwise the saved pins in PINNABLE_ITEMS' fixed order
+ *  (at most 3). */
+export function phoneBarItems(pins: string[]): NavItem[] {
+  if (pins.length === 0) {
+    return DEFAULT_PHONE_PINS.flatMap(to => PINNABLE_ITEMS.filter(i => i.to === to));
+  }
+  const wanted = new Set(pins);
+  return PINNABLE_ITEMS.filter(i => wanted.has(i.to)).slice(0, 3);
+}
