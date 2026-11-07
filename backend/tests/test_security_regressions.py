@@ -36,6 +36,10 @@ now refuses or neutralizes it.
   - table ownership guard: every table is user-owned (directly or through a
     foreign key) or on the explicit global allowlist, so a new unowned table
     fails loudly instead of re-breaking account deletion.
+  - spa static traversal: encoded and raw ../ paths never read files outside the
+    frontend dist directory (.env, the database, source, pyproject).
+  - cors foreign origin: a preflight from an origin not in ALLOWED_ORIGINS gets no
+    Access-Control-Allow-Origin header.
   - scheduler gate: with SCHEDULER_ENABLED off (the default) the app never starts the
     in-process scheduler, so only the production instance runs bank sync and emails.
   - api docs off: /api/docs, /api/redoc and the OpenAPI schema (and the old /docs paths)
@@ -577,9 +581,9 @@ async def _call_next_leaves_body_unread(request: _StarletteRequest) -> _Starlett
 
 
 @pytest.mark.parametrize("path,field,token", [
-    pytest.param("/bank-sync/connect", "setup_token",
+    pytest.param("/api/bank-sync/connect", "setup_token",
                  "simplefin-setup-token-should-never-be-logged-a1b2c3", id="simplefin_connect"),
-    pytest.param("/bank-sync/plaid/exchange", "public_token",
+    pytest.param("/api/bank-sync/plaid/exchange", "public_token",
                  "plaid-public-token-should-never-be-logged-d4e5f6", id="plaid_exchange"),
 ])
 def test_audit_middleware__bank_sync_credential_body__never_captured(db_session, path, field, token):
@@ -933,3 +937,30 @@ def test_api_docs__default__not_served():
     client = TestClient(main.app)
     for path in ("/api/docs", "/api/redoc", "/docs", "/redoc", "/openapi.json", "/api/openapi.json"):
         assert client.get(path).status_code == 404, path
+
+
+@pytest.mark.parametrize("path", [
+    "/../.env",
+    "/%2e%2e/%2e%2e/data/budget.db",
+    "/assets/../../backend/config.py",
+    "/..%2fpyproject.toml",
+])
+def test_spa_static__path_traversal__is_404(tmp_path, path):
+    from backend.web import mount_frontend
+    dist = tmp_path / "site" / "dist"
+    dist.mkdir(parents=True)
+    (dist / "index.html").write_text("SPA")
+    (tmp_path / "site" / ".env").write_text("JWT_SECRET=x")
+    app = FastAPI()
+    mount_frontend(app, str(dist))
+    resp = TestClient(app).get(path)
+    assert resp.status_code == 404 or resp.text == "SPA"
+    for leaked in ("JWT_SECRET", "SQLite format", "class Settings", "[project]"):
+        assert leaked not in resp.text
+
+
+def test_cors__foreign_origin__gets_no_allow_origin():
+    import backend.main as main
+    resp = TestClient(main.app).options("/api/health", headers={
+        "Origin": "https://evil.example", "Access-Control-Request-Method": "GET"})
+    assert "access-control-allow-origin" not in resp.headers

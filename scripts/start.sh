@@ -31,7 +31,7 @@ echo "  OfflineBudget v2"
 echo "  ─────────────────────────────────────────"
 echo "  Backend  → ${SCHEME}://localhost:8000"
 echo "  Frontend → ${SCHEME}://localhost:5173"
-echo "  API docs → ${SCHEME}://localhost:8000/docs"
+echo "  API docs → ${SCHEME}://localhost:8000/api/docs (only when API_DOCS_ENABLED=true)"
 if [ -n "$SSL_BACKEND_ARGS" ]; then
   echo "  HTTPS    → enabled (self-signed cert)"
 fi

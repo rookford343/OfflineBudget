@@ -46,9 +46,9 @@ Paste the output into `.env` as the value for `JWT_SECRET`.
 ```
 
 This starts:
-- **Backend API** at `http://localhost:8000`
+- **Backend API** at `http://localhost:8000/api` (the dev server on :5173 proxies `/api` to it)
 - **Frontend UI** at `http://localhost:5173`
-- **API docs** at `http://localhost:8000/docs`
+- **API docs** at `http://localhost:8000/api/docs`, off by default; set `API_DOCS_ENABLED=true` in `.env` to turn them on
 
 ---
 

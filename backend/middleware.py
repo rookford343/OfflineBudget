@@ -12,7 +12,7 @@ from backend import models
 logger = logging.getLogger(__name__)
 
 # Paths to skip logging entirely
-_SKIP_PATHS = {"/health", "/docs", "/redoc", "/openapi.json"}
+_SKIP_PATHS = {"/api/health", "/api/docs", "/api/redoc", "/api/openapi.json"}
 
 # Only log mutating methods (skip GET, HEAD, OPTIONS)
 _LOG_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -24,16 +24,16 @@ _LOG_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 # can never end up persisted to audit_logs in plaintext, even if the
 # body-capture bug above gets "fixed" later.
 _SKIP_BODY_PATHS = {
-    "/auth/register",
-    "/auth/login",
-    "/auth/me",
-    "/auth/me/password",
-    "/auth/forgot-password",
-    "/auth/reset-password",
-    "/auth/reset-password-with-code",
-    "/auth/me/recovery-code",
-    "/bank-sync/connect",
-    "/bank-sync/plaid/exchange",
+    "/api/auth/register",
+    "/api/auth/login",
+    "/api/auth/me",
+    "/api/auth/me/password",
+    "/api/auth/forgot-password",
+    "/api/auth/reset-password",
+    "/api/auth/reset-password-with-code",
+    "/api/auth/me/recovery-code",
+    "/api/bank-sync/connect",
+    "/api/bank-sync/plaid/exchange",
 }
 
 

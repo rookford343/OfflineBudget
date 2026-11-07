@@ -4,12 +4,13 @@ from contextlib import asynccontextmanager
 from datetime import date
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
 from backend.database import create_tables, upgrade_schema, upgrade_categories, migrate_cushions, SessionLocal
 from backend.middleware import AuditMiddleware
+from backend.web import SecurityHeadersMiddleware, mount_frontend
 from backend.services.job_locks import _bank_sync_lock, _daily_summary_lock
 from backend.routers import (
     accounts, auth, budget, categories, credit_cards,
@@ -448,6 +449,7 @@ app = FastAPI(
 )
 
 app.add_middleware(AuditMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
@@ -456,38 +458,46 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(accounts.router)
-app.include_router(categories.router)
-app.include_router(recurring.router)
-app.include_router(forecast.router)
-app.include_router(history.router)
-app.include_router(transactions.router)
-app.include_router(budget.router)
-app.include_router(credit_cards.router)
-app.include_router(spending.router)
-app.include_router(admin_router_module.router)
-app.include_router(imports_router_module.router)
-app.include_router(goals_router_module.router)
-app.include_router(networth_router_module.router)
-app.include_router(scenarios_router_module.router)
-app.include_router(planned_expenses_router_module.router)
-app.include_router(reconciliation_router_module.router)
-app.include_router(day_checkpoints_router_module.router)
-app.include_router(rules_router_module.router)
-app.include_router(exports_router_module.router)
-app.include_router(data_router_module.router)
-app.include_router(bank_sync_router_module.router)
-app.include_router(planned_transfers_router_module.router)
-app.include_router(verification_flags_router_module.router)
-app.include_router(settings_router_module.router)
-app.include_router(merchants_router_module.router)
-app.include_router(bill_overrides_router_module.router)
-app.include_router(adventures_router_module.router)
-app.include_router(wish_list_router_module.router)
-app.include_router(bonus_plans_router_module.router)
+api_router = APIRouter(prefix="/api")
+api_router.include_router(auth.router)
+api_router.include_router(accounts.router)
+api_router.include_router(categories.router)
+api_router.include_router(recurring.router)
+api_router.include_router(forecast.router)
+api_router.include_router(history.router)
+api_router.include_router(transactions.router)
+api_router.include_router(budget.router)
+api_router.include_router(credit_cards.router)
+api_router.include_router(spending.router)
+api_router.include_router(admin_router_module.router)
+api_router.include_router(imports_router_module.router)
+api_router.include_router(goals_router_module.router)
+api_router.include_router(networth_router_module.router)
+api_router.include_router(scenarios_router_module.router)
+api_router.include_router(planned_expenses_router_module.router)
+api_router.include_router(reconciliation_router_module.router)
+api_router.include_router(day_checkpoints_router_module.router)
+api_router.include_router(rules_router_module.router)
+api_router.include_router(exports_router_module.router)
+api_router.include_router(data_router_module.router)
+api_router.include_router(bank_sync_router_module.router)
+api_router.include_router(planned_transfers_router_module.router)
+api_router.include_router(verification_flags_router_module.router)
+api_router.include_router(settings_router_module.router)
+api_router.include_router(merchants_router_module.router)
+api_router.include_router(bill_overrides_router_module.router)
+api_router.include_router(adventures_router_module.router)
+api_router.include_router(wish_list_router_module.router)
+api_router.include_router(bonus_plans_router_module.router)
 
 
-@app.get("/health", tags=["health"])
+@api_router.get("/health", tags=["health"])
 def health():
     return {"status": "ok", "version": "2.0.0"}
+
+
+app.include_router(api_router)
+
+# Last, so the SPA catch-all never shadows an API route.
+if settings.FRONTEND_DIST_DIR:
+    mount_frontend(app, settings.FRONTEND_DIST_DIR)

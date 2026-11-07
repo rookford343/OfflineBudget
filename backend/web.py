@@ -1,0 +1,53 @@
+"""Single-origin web serving: security headers and the built SPA.
+
+The API lives under /api; everything else is the React app's static files,
+with index.html as the fallback for client-side routes.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+# style-src allows 'unsafe-inline' because recharts and React set inline styles.
+SECURITY_HEADERS = {
+    "Strict-Transport-Security": "max-age=31536000",
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        for name, value in SECURITY_HEADERS.items():
+            response.headers[name] = value
+        return response
+
+
+def mount_frontend(app: FastAPI, dist_dir: str) -> None:
+    """Serve files under dist_dir, falling back to index.html for non-/api GETs."""
+    root = Path(dist_dir).resolve()
+    index = root / "index.html"
+
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+    def spa(full_path: str):
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        if full_path:
+            try:
+                candidate = (root / full_path).resolve()
+            except (OSError, ValueError):
+                raise HTTPException(status_code=404) from None
+            if candidate.is_relative_to(root) and candidate.is_file():
+                return FileResponse(candidate)
+        return FileResponse(index)

@@ -104,7 +104,7 @@ This deletes the user record. SQLite foreign-key cascades remove all associated 
 
 ```bash
 # Replace <ID> with the user's numeric ID
-curl -X DELETE http://localhost:8000/admin/users/<ID> \
+curl -X DELETE http://localhost:8000/api/admin/users/<ID> \
   -H "Authorization: Bearer <your-admin-token>"
 ```
 

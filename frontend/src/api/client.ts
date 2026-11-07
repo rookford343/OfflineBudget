@@ -1,7 +1,7 @@
 import axios from "axios";
 import { getToken, clearAuth } from "../store/auth";
 
-const DEFAULT_API = `${window.location.protocol}//${window.location.hostname}:8000`;
+const DEFAULT_API = "/api";
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? DEFAULT_API,
 });

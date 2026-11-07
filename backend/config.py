@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_DAYS: int = 7
-    ALLOWED_ORIGINS: str = "*"
+    ALLOWED_ORIGINS: str = "http://127.0.0.1:5173"
     FRONTEND_URL: str | None = None  # base URL for links in emails; falls back to first ALLOWED_ORIGINS entry
     # HOST/PORT removed 2026-08-15: nothing ever read them. Both the Docker
     # CMD and scripts/start.sh pass --host/--port to uvicorn directly, so
