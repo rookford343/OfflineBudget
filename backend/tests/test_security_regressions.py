@@ -25,6 +25,8 @@ now refuses or neutralizes it.
     captured into audit_logs.body_summary, even when body capture works.
   - daily email since-lines: a pending merchant named like markup is HTML-escaped
     in the email body, never emitted as a tag.
+  - delete account with change history: DELETE /auth/me for a user who has
+    stored snapshots and readings succeeds and leaves none of them behind.
 """
 import logging
 from decimal import Decimal
@@ -724,3 +726,32 @@ def test_since_line_escapes_a_markup_merchant_name(db_session, monkeypatch):
     html, _text = generate_daily_summary(db_session, user, since_lines=since)
     assert "&lt;b&gt;&amp;Co" in html
     assert "<b>&Co" not in html
+
+
+def test_delete_account_removes_the_users_change_history(db_session):
+    """DELETE /auth/me must not trip the metric_snapshots foreign key: the
+    user's snapshots and readings go with the account."""
+    from backend.auth import hash_password
+    from backend.dependencies import get_db, get_requester
+    from backend.routers import auth as auth_router
+
+    user = _history_user(db_session, "doomed")
+    user.hashed_password = hash_password("correct-password")
+    db_session.commit()
+    src = {"card_pending": [], "checking_pending": [], "max_txn_id": 0, "max_card_txn_id": 0}
+    _history_snapshot(db_session, user, "leftover", "100.00", src, 12)
+    _history_snapshot(db_session, user, "leftover", "130.00", src, 18)
+    keeper = _history_user(db_session, "keeper")
+    _history_snapshot(db_session, keeper, "leftover", "5.00", src, 12)
+    assert db_session.query(models.MetricReading).count() == 3
+
+    app = FastAPI()
+    app.include_router(auth_router.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_requester] = lambda: user
+    resp = TestClient(app).request("DELETE", "/auth/me", json={"password": "correct-password"})
+
+    assert 200 <= resp.status_code < 300
+    assert db_session.query(models.MetricSnapshot).filter_by(user_id=user.id).count() == 0
+    assert db_session.query(models.MetricSnapshot).count() == 1  # the other user's is untouched
+    assert db_session.query(models.MetricReading).count() == 1

@@ -211,6 +211,7 @@ class User(Base):
     forecast_scenarios: Mapped[list[ForecastScenario]] = relationship(back_populates="user", cascade="all, delete-orphan")
     planned_expenses: Mapped[list[PlannedExpense]] = relationship(back_populates="user", cascade="all, delete-orphan")
     monthly_forecast_snapshots: Mapped[list["MonthlyForecastSnapshot"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    metric_snapshots: Mapped[list["MetricSnapshot"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 # ── Accounts ─────────────────────────────────────────────────────────────────
@@ -1033,6 +1034,7 @@ class MetricSnapshot(Base):
     as_of: Mapped[date] = mapped_column(Date, nullable=False)
     sources_json: Mapped[str] = mapped_column(Text, nullable=False)
 
+    user: Mapped["User"] = relationship(back_populates="metric_snapshots")
     readings: Mapped[list["MetricReading"]] = relationship(
         back_populates="snapshot", cascade="all, delete-orphan", order_by="MetricReading.id",
     )
