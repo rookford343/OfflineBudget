@@ -1918,7 +1918,7 @@ class BudgetSnapshot(BaseModel):
     # or $1,000.00 when unset. Defaulted so existing callers/fixtures that
     # build a BudgetSnapshot without them keep working.
     lookahead_status: str = "ok"
-    safety_cushion: Decimal = Decimal("1000.00")
+    safety_cushion: Decimal = DEFAULT_CUSHION
     # The same floor, restricted to the calendar month after `as_of` -- the
     # daily email's "Lowest next month" line, read off the same forecast
     # walk as lookahead_minimum (see budget_snapshot._next_month_minimum).

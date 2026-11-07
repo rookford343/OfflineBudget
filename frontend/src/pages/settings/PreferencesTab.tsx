@@ -27,7 +27,7 @@ export default function PreferencesTab() {
   const { data: me } = useQuery({ queryKey: ["me"], queryFn: authApi.me });
   const [transferIncrement, setTransferIncrement] = useState("");
   useEffect(() => { if (me) setTransferIncrement(me.transfer_increment ?? "1000"); }, [me]);
-  // Null on the server means the $1,000 default, so the field shows that.
+  // Blank means the server's default; the placeholder shows the resolved value.
   const [safetyCushion, setSafetyCushion] = useState("");
   useEffect(() => { if (me) setSafetyCushion(me.safety_cushion ?? ""); }, [me]);
   const cushionMut = useMutation({
@@ -231,7 +231,7 @@ export default function PreferencesTab() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Safety Cushion</span>
-            <p className="text-xs text-gray-400">The Dashboard and daily email flag the 3-month lowest balance in amber when it dips below this (red below $0). Leave blank for $1,000. Separate from the Wish List cushion.</p>
+            <p className="text-xs text-gray-400">The Dashboard and daily email flag the 3-month lowest balance in amber when it dips below this (red below $0). The risk banner and Wish List use the same cushion. Leave blank to use the default shown in the field.</p>
           </div>
           <div className="flex items-center gap-2">
             <input

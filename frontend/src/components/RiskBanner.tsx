@@ -191,7 +191,7 @@ export function RiskBanner({
                   {parseFloat(risk.threshold) <= 0
                     ? `Projected to go negative on ${formatDate(risk.date!)}`
                     : risk.status === "danger"
-                    ? `Drops below your ${fmt(parseFloat(risk.threshold))} cushion on ${formatDate(risk.date!)} and goes negative later in the window`
+                    ? `Drops below your ${fmt(parseFloat(risk.threshold))} cushion on ${formatDate(risk.date!)} and goes negative within the window`
                     : `Projected to drop below your ${fmt(parseFloat(risk.threshold))} cushion on ${formatDate(risk.date!)}`}
                 </p>
                 <VerificationFlagButton
