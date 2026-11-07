@@ -12,15 +12,21 @@ DB_URL="${DATABASE_URL:-sqlite:///./data/dev.db}"
 DB_PATH="${DB_URL#sqlite:///}"
 case "$DB_PATH" in /*) ;; *) DB_PATH="$ROOT/$DB_PATH" ;; esac
 
-# Resolve to an absolute path (dir part must exist for symlinks/.. to resolve).
-DB_DIR="$(dirname "$DB_PATH")"
-if [ -d "$DB_DIR" ]; then
-  DB_DIR="$(cd "$DB_DIR" && pwd -P)"
-fi
-RESOLVED="$DB_DIR/$(basename "$DB_PATH")"
-LIVE="$(cd "$ROOT/data" && pwd -P)/budget.db"
+# Resolve to an absolute path without requiring directories to exist.
+resolve() {
+  local d b
+  d="$(dirname "$1")"; b="$(basename "$1")"
+  if [ -d "$d" ]; then d="$(cd "$d" && pwd -P)"; fi
+  echo "$d/$b"
+}
+RESOLVED="$(resolve "$DB_PATH")"
+LIVE="$(resolve "$ROOT/data/budget.db")"
 
-if [ "$RESOLVED" = "$LIVE" ]; then
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
+same_file=0
+if [ -e "$RESOLVED" ] && [ -e "$LIVE" ] && [ "$RESOLVED" -ef "$LIVE" ]; then same_file=1; fi
+# Case-insensitive compare (APFS), plus inode compare for symlinks and hard links.
+if [ "$(lower "$RESOLVED")" = "$(lower "$LIVE")" ] || [ $same_file -eq 1 ]; then
   echo "ERROR: refusing to run dev against the live database ($LIVE). Use data/dev.db." >&2
   exit 1
 fi
@@ -34,6 +40,7 @@ if [ "${1:-}" = "--check" ]; then
   exit 0
 fi
 
+mkdir -p data
 uv sync --locked
 
 if [ ! -f ".env" ]; then

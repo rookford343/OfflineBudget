@@ -26,10 +26,14 @@ fi
 CMD=(uv run --locked uvicorn backend.main:app --host 0.0.0.0 --port 443
      --ssl-certfile "$SSL_DIR/server.crt" --ssl-keyfile "$SSL_DIR/server.key" --no-proxy-headers)
 
+# Env must not be able to turn on --reload, other ports, etc.
+for v in $(compgen -e | grep '^UVICORN_' || true); do unset "$v"; done
+
 export SCHEDULER_ENABLED=true
 export FRONTEND_DIST_DIR="$DIST_DIR"
 
 if [ "${1:-}" = "--check" ]; then
+  echo "uvicorn_env_vars=$(env | grep -c '^UVICORN_' || true)"
   echo "SCHEDULER_ENABLED=true FRONTEND_DIST_DIR=$DIST_DIR ${CMD[*]}"
   exit 0
 fi

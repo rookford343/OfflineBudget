@@ -95,28 +95,13 @@ them unlinked and they get a budget of their own.
 
 ## 4. Access from Another Device on Your Home Network
 
-1. Find your machine's local IP address:
-   ```bash
-   ipconfig getifaddr en0      # macOS
-   hostname -I | awk '{print $1}'  # Linux
-   # e.g., 192.168.1.42
-   ```
-2. In your `.env`, update `ALLOWED_ORIGINS`:
-   ```
-   ALLOWED_ORIGINS=http://localhost:5173,http://192.168.1.42:5173
-   ```
-3. Restart the app (`./scripts/start.sh`)
-4. On another device, open `http://192.168.1.42:5173`
+The dev server (`./scripts/start.sh`) binds 127.0.0.1 only and is not reachable from other devices. To use the app from your phone on home Wi-Fi, set up the production HTTPS server: see [SETUP.md, Phone on home Wi-Fi](SETUP.md#phone-on-home-wi-fi).
 
 ---
 
-## 5. Enable HTTPS on LAN (Optional but Recommended)
+## 5. HTTPS on Your Home Network
 
-For encrypted connections when accessing from other devices:
-
-HTTPS now comes from a private CA and the production runner, not the dev script. See [SETUP.md](SETUP.md#phone-on-home-wi-fi). `scripts/start.sh` is dev-only: loopback, `data/dev.db`.
-
-> Browsers will show a security warning for self-signed certificates. To eliminate warnings, install `mkcert` and use CA-signed certs instead — see [SECURITY.md](../SECURITY.md).
+HTTPS comes from a private CA and the production runner, not the dev script. See [SETUP.md, Phone on home Wi-Fi](SETUP.md#phone-on-home-wi-fi).
 
 ---
 

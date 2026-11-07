@@ -2,8 +2,17 @@
 # Issue a server certificate (825 days) signed by the private CA.
 # Usage: scripts/tls/issue-cert.sh <ca_dir> <hostname> <out_dir>
 #   (defaults: ~/.offlinebudget-ca, required hostname, ssl)
-# Needs the CA passphrase (prompted, or OB_CA_PASSFILE). Refuses to overwrite.
+# Needs the CA passphrase (prompted, or OB_CA_PASSFILE). Refuses to overwrite,
+# unless --renew is given: then the existing pair is moved to
+# <out_dir>/server.<timestamp>.bak.{crt,key} first.
 set -euo pipefail
+
+renew=0
+args=()
+for a in "$@"; do
+  if [[ "$a" == "--renew" ]]; then renew=1; else args+=("$a"); fi
+done
+set -- ${args[@]+"${args[@]}"}
 
 ca_dir="${1:-$HOME/.offlinebudget-ca}"
 host="${2:-}"
@@ -20,6 +29,13 @@ fi
 if [[ ! -f "$ca_dir/ca.key" || ! -f "$ca_dir/ca.crt" ]]; then
   echo "no CA found in $ca_dir (run make-ca.sh first)" >&2
   exit 1
+fi
+if [[ $renew -eq 1 ]] && [[ -e "$out_dir/server.key" || -e "$out_dir/server.crt" ]]; then
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  for ext in crt key; do
+    [[ -e "$out_dir/server.$ext" ]] && mv "$out_dir/server.$ext" "$out_dir/server.$stamp.bak.$ext"
+  done
+  echo "Existing certificate moved to $out_dir/server.$stamp.bak.*"
 fi
 if [[ -e "$out_dir/server.key" || -e "$out_dir/server.crt" ]]; then
   echo "refusing to overwrite existing certificate in $out_dir" >&2
