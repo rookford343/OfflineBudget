@@ -53,6 +53,13 @@ forecasts, and your user record.
 
 **Wish List:** wishes, prices, trade-in values and payment options you enter. Stored only in the local database.
 
+**Change history:** at each bank sync and each emailed report, the app stores
+every headline figure (Left to Spend, Safety Margin, and the rest), the
+calculation steps behind it, and the names and amounts of the pending charges
+at that moment, so a later screen can explain why a figure moved. Snapshots
+older than 13 months are deleted automatically. It lives only in the local
+database and never leaves the machine.
+
 **Pending card charges:** if you connect a bank, the charges your card issuer
 currently lists as pending (date, merchant, amount). Each sync replaces the
 whole list, so a charge is deleted from it as soon as it posts; nothing about
@@ -164,6 +171,9 @@ when there isn't one.
 
 **Selectively, in the app:** Settings → Danger Zone can clear checking
 transactions, clear credit-card transactions, or delete your account.
+
+**Change history:** Settings → "Clear change history" removes every stored
+snapshot, or delete the database to remove it with everything else.
 
 **Raw bank payloads:** if you turned on "Capture Raw Bank Data" for
 debugging, those live in the `bank_sync_raw_snapshots` table. Turn the

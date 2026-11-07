@@ -9,8 +9,11 @@ and the newest row ids) so a later diff can say what changed underneath.
 """
 from __future__ import annotations
 
+import json
+import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from sqlalchemy import func
@@ -19,6 +22,7 @@ from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.available_to_spend import available_to_spend
 from backend.services.budget_snapshot import _cc_basis_note, compute_budget_snapshot
+from backend.services.calc_version import CALC_VERSION
 from backend.services.card_payment_model import card_payments
 from backend.services.explain import ExplainBuilder
 from backend.services.month_summary import build_month_summary
@@ -27,7 +31,13 @@ from backend.services.primary_account import primary_checking
 from backend.services.real_spend import active_cards
 from backend.schemas import ExplainChild
 
+logger = logging.getLogger(__name__)
+
 ZERO = Decimal("0")
+RETENTION_DAYS = 395  # about 13 months
+CENT = Decimal("0.01")
+# Triggers that are stored even when nothing changed since the last snapshot.
+ALWAYS_STORE_TRIGGERS = frozenset({"email"})
 CARD_WINDOW_DAYS = 75
 
 # Fixed headline keys, in recording order. Card payments follow as
@@ -173,3 +183,112 @@ def collect_sources(db: Session, user: models.User, as_of: date) -> dict:
         "max_txn_id": max_txn or 0,
         "max_card_txn_id": max_card_txn or 0,
     }
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def latest_snapshot(
+    db: Session, user_id: int, trigger: str | None = None,
+) -> models.MetricSnapshot | None:
+    q = db.query(models.MetricSnapshot).filter(models.MetricSnapshot.user_id == user_id)
+    if trigger is not None:
+        q = q.filter(models.MetricSnapshot.trigger == trigger)
+    return q.order_by(models.MetricSnapshot.taken_at.desc(), models.MetricSnapshot.id.desc()).first()
+
+
+def _reading_set(rows) -> set[tuple[str, Decimal, str]]:
+    return {(key, Decimal(str(value)).quantize(CENT), explain) for key, value, explain in rows}
+
+
+def _same_as_latest(
+    latest: models.MetricSnapshot, sources_json: str, readings: list[MetricReadingData],
+    explain_jsons: list[str],
+) -> bool:
+    if latest.calc_version != CALC_VERSION or latest.sources_json != sources_json:
+        return False
+    old = _reading_set((r.metric_key, r.value, r.explain_json) for r in latest.readings)
+    new = _reading_set(
+        (r.key, r.value, ex) for r, ex in zip(readings, explain_jsons)
+    )
+    return old == new
+
+
+def prune_history(db: Session, now: datetime) -> int:
+    """Delete snapshots older than the retention window, readings first."""
+    cutoff = now - timedelta(days=RETENTION_DAYS)
+    old_ids = [
+        row[0] for row in db.query(models.MetricSnapshot.id)
+        .filter(models.MetricSnapshot.taken_at < cutoff).all()
+    ]
+    if not old_ids:
+        return 0
+    db.query(models.MetricReading).filter(
+        models.MetricReading.snapshot_id.in_(old_ids),
+    ).delete(synchronize_session=False)
+    db.query(models.MetricSnapshot).filter(
+        models.MetricSnapshot.id.in_(old_ids),
+    ).delete(synchronize_session=False)
+    db.commit()
+    return len(old_ids)
+
+
+def record_snapshot(
+    db: Session, user: models.User, trigger: str, *,
+    as_of: date | None = None, now: datetime | None = None,
+    readings: list[MetricReadingData] | None = None,
+) -> models.MetricSnapshot | None:
+    """Store every headline figure as of now. Commits. Returns None when
+    nothing was stored: no primary checking, or (outside the always-store
+    triggers) the figures and their sources equal the latest snapshot's."""
+    as_of = as_of or date.today()
+    now = now or _utc_now()
+    if readings is None:
+        readings = collect_headline_metrics(db, user, as_of)
+    if not readings:
+        return None
+    sources_json = json.dumps(collect_sources(db, user, as_of), sort_keys=True)
+    explain_jsons = [r.explain.model_dump_json() for r in readings]
+    if trigger not in ALWAYS_STORE_TRIGGERS:
+        latest = latest_snapshot(db, user.id)
+        if latest is not None and _same_as_latest(latest, sources_json, readings, explain_jsons):
+            return None
+    snapshot = models.MetricSnapshot(
+        user_id=user.id, taken_at=now, trigger=trigger, calc_version=CALC_VERSION,
+        as_of=as_of, sources_json=sources_json,
+    )
+    snapshot.readings = [
+        models.MetricReading(metric_key=r.key, label=r.label, value=r.value, explain_json=ex)
+        for r, ex in zip(readings, explain_jsons)
+    ]
+    db.add(snapshot)
+    db.commit()
+    prune_history(db, now)
+    return snapshot
+
+
+def record_for_users(db: Session, user_ids: Iterable[int], trigger: str) -> None:
+    """Record for each user; never raises. A failure rolls back and moves on."""
+    for user_id in sorted(set(user_ids)):
+        try:
+            user = db.get(models.User, user_id)
+            if user is not None:
+                record_snapshot(db, user, trigger)
+        except Exception:  # noqa: BLE001 -- history must never fail the sync that triggered it
+            logger.exception("Change-history snapshot failed for user %s", user_id)
+            db.rollback()
+
+
+def record_if_calc_changed(db: Session) -> None:
+    """Record once per active user whose latest snapshot predates CALC_VERSION."""
+    users = db.query(models.User).filter(models.User.is_active == True).all()  # noqa: E712
+    for user in users:
+        latest = latest_snapshot(db, user.id)
+        if latest is None or latest.calc_version == CALC_VERSION:
+            continue
+        try:
+            record_snapshot(db, user, "calc_change")
+        except Exception:  # noqa: BLE001 -- one user's failure must not stop the others
+            logger.exception("Change-history calc_change snapshot failed for user %s", user.id)
+            db.rollback()

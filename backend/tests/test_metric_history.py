@@ -2,7 +2,7 @@
 
 Reuses test_parity_headline's invented fixture. "Today" is pinned to 2026-11-02.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from backend import models
@@ -14,7 +14,14 @@ from backend.services.metric_history import (
     METRIC_KEYS,
     collect_headline_metrics,
     collect_sources,
+    latest_snapshot,
+    prune_history,
+    record_for_users,
+    record_if_calc_changed,
+    record_snapshot,
 )
+from backend.services import metric_history
+from backend.services.calc_version import CALC_VERSION
 from backend.services.month_summary import build_month_summary
 from backend.services.pending import checking_balance_with_pending
 from backend.tests.test_parity_headline import TODAY, _headline_fixture, _pin_today
@@ -208,3 +215,115 @@ def test_checking_balance_with_live_pending_rows(db_session, monkeypatch):
         {"account_id": checking.id, "account": checking.name, "external_id": "d-1",
          "description": "Example Market", "amount": "-15.50"},
     ]
+
+
+NOW = datetime(2026, 11, 2, 12, 0)
+
+
+def _count(db):
+    return db.query(models.MetricSnapshot).count()
+
+
+def test_record_stores_every_reading(db_session, monkeypatch):
+    _pin_today(monkeypatch, TODAY)
+    user, _ = _headline_fixture(db_session)
+    snap = record_snapshot(db_session, user, "sync", as_of=TODAY, now=NOW)
+    assert snap is not None
+    assert snap.calc_version == CALC_VERSION
+    assert snap.trigger == "sync"
+    assert len(snap.readings) == len(collect_headline_metrics(db_session, user, TODAY))
+    assert _count(db_session) == 1
+
+
+def test_identical_sync_is_not_stored_twice(db_session, monkeypatch):
+    _pin_today(monkeypatch, TODAY)
+    user, _ = _headline_fixture(db_session)
+    assert record_snapshot(db_session, user, "sync", as_of=TODAY, now=NOW) is not None
+    assert record_snapshot(db_session, user, "sync", as_of=TODAY, now=NOW) is None
+    assert _count(db_session) == 1
+
+
+def test_email_is_always_stored(db_session, monkeypatch):
+    _pin_today(monkeypatch, TODAY)
+    user, _ = _headline_fixture(db_session)
+    record_snapshot(db_session, user, "sync", as_of=TODAY, now=NOW)
+    assert record_snapshot(db_session, user, "email", as_of=TODAY, now=NOW) is not None
+    assert _count(db_session) == 2
+
+
+def test_changed_pending_is_stored(db_session, monkeypatch):
+    _pin_today(monkeypatch, TODAY)
+    user, _ = _headline_fixture(db_session)
+    visa = db_session.query(models.CreditCard).order_by(models.CreditCard.id).first()
+    record_snapshot(db_session, user, "sync", as_of=TODAY, now=NOW)
+    db_session.add(models.CardPendingTransaction(
+        user_id=user.id, card_id=visa.id, external_id="p-9", date=TODAY,
+        amount=D("12.00"), merchant="Example Cafe", synced_at=datetime(2026, 11, 2, 8, 0),
+    ))
+    db_session.commit()
+    assert record_snapshot(db_session, user, "sync", as_of=TODAY, now=NOW) is not None
+    assert _count(db_session) == 2
+
+
+def test_prune_keeps_thirteen_months(db_session, monkeypatch):
+    _pin_today(monkeypatch, TODAY)
+    user, _ = _headline_fixture(db_session)
+    readings = collect_headline_metrics(db_session, user, TODAY)
+    record_snapshot(db_session, user, "email", as_of=TODAY, now=NOW - timedelta(days=397), readings=readings)
+    keep = record_snapshot(db_session, user, "email", as_of=TODAY, now=NOW - timedelta(days=395), readings=readings)
+    assert prune_history(db_session, NOW) == 1
+    rows = db_session.query(models.MetricSnapshot).all()
+    assert [r.id for r in rows] == [keep.id]
+    assert db_session.query(models.MetricReading).count() == len(readings)
+
+
+def test_record_for_users_never_raises(db_session, monkeypatch):
+    _pin_today(monkeypatch, TODAY)
+    user, _ = _headline_fixture(db_session)
+
+    def boom(*a, **k):
+        raise RuntimeError("collector down")
+
+    monkeypatch.setattr(metric_history, "collect_headline_metrics", boom)
+    record_for_users(db_session, [user.id], "sync")
+    assert _count(db_session) == 0
+
+
+def test_user_without_checking_records_nothing(db_session):
+    user = models.User(username="nochecking", hashed_password="x", display_name="NC")
+    db_session.add(user)
+    db_session.commit()
+    assert record_snapshot(db_session, user, "sync", as_of=TODAY, now=NOW) is None
+    assert _count(db_session) == 0
+
+
+def test_calc_change_records_once(db_session, monkeypatch):
+    _pin_today(monkeypatch, TODAY)
+    user, _ = _headline_fixture(db_session)
+    snap = record_snapshot(db_session, user, "sync", as_of=TODAY, now=NOW)
+    snap.calc_version = CALC_VERSION - 1
+    db_session.commit()
+    record_if_calc_changed(db_session)
+    assert latest_snapshot(db_session, user.id).trigger == "calc_change"
+    assert _count(db_session) == 2
+    record_if_calc_changed(db_session)
+    assert _count(db_session) == 2
+
+
+def test_calc_change_skips_user_without_snapshots(db_session, monkeypatch):
+    _pin_today(monkeypatch, TODAY)
+    _headline_fixture(db_session)
+    record_if_calc_changed(db_session)
+    assert _count(db_session) == 0
+
+
+def test_sync_all_records_after_settling(db_session, monkeypatch):
+    from backend.services import bank_sync_service
+    calls = []
+    monkeypatch.setattr(bank_sync_service, "settle_after_sync", lambda db, ids: calls.append("settle"))
+    monkeypatch.setattr(
+        bank_sync_service, "record_for_users",
+        lambda db, ids, trigger: calls.append(("record", trigger)),
+    )
+    bank_sync_service.sync_all(db_session)
+    assert calls == ["settle", ("record", "sync")]

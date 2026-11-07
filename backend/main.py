@@ -359,6 +359,13 @@ def _scheduler_sweep() -> None:
                     refresh_item_amounts(db, user, date.today())
         except Exception:
             logger.exception("Scheduler sweep: bonus plan refresh step failed")
+        # Record once when the calculation rules change, so history can say
+        # "the rules changed" rather than blame the data. Guarded like the rest.
+        try:
+            from backend.services.metric_history import record_if_calc_changed
+            record_if_calc_changed(db)
+        except Exception:
+            logger.exception("Scheduler sweep: calc-change history step failed")
     finally:
         db.close()
 

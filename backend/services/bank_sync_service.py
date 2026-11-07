@@ -12,6 +12,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.crypto import decrypt
+from backend.services.metric_history import record_for_users
 from backend.services.planned_auto_settle import settle_after_sync
 from backend.services.csv_parser import ParsedRow
 from backend.services.forecast_engine import AUTO_ANCHOR_NOTE, has_unsettled_projection
@@ -474,4 +475,6 @@ def sync_all(db: Session, *, cards_only: bool = False, providers: set[str] | Non
             db.rollback()
     # Once every provider is done, so a user with both a SimpleFIN and a
     # Plaid connection is matched against the full picture exactly once.
-    settle_after_sync(db, [c.user_id for c in connections])
+    user_ids = [c.user_id for c in connections]
+    settle_after_sync(db, user_ids)
+    record_for_users(db, user_ids, "sync")

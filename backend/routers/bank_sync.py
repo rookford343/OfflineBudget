@@ -15,6 +15,7 @@ from backend.services.plaid_client import (
     create_link_token, exchange_public_token, get_accounts as get_plaid_accounts, remove_item,
 )
 from backend.services.plaid_sync_service import sync_plaid_connection
+from backend.services.metric_history import record_for_users
 from backend.services.planned_auto_settle import settle_after_sync
 from backend.routers._shared import owned_or_404
 
@@ -341,6 +342,7 @@ def sync_now(
             if connection.last_error:
                 errors.append(connection.last_error)
         settle_after_sync(db, [user.id])
+        record_for_users(db, [user.id], "manual")
         return schemas.BankSyncNowResponse(
             synced_connections=len(connections), errors=errors,
             imported=total_imported, skipped_duplicates=total_skipped,
@@ -394,6 +396,7 @@ def plaid_first_import(
         except PlaidError as exc:
             raise _plaid_http_error(exc)
         settle_after_sync(db, [user.id])
+        record_for_users(db, [user.id], "manual")
     finally:
         _bank_sync_lock.release()
     return _first_import_response(report)
