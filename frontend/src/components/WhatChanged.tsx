@@ -3,9 +3,9 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { History, X, ChevronRight, ChevronDown } from "lucide-react";
 import { historyApi, type MetricChange } from "../api";
-import { fmt } from "../lib/utils";
+import { itemMoney, signedMoney } from "../lib/historyMoney";
 import { maskMoneyText } from "../lib/maskMoney";
-import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
+import { useBalancesHidden } from "../store/balanceVisibility";
 
 const TRIGGER_WORDS: Record<string, string> = {
   sync: "bank sync", email: "email", manual: "refresh", calc_change: "app update",
@@ -18,15 +18,6 @@ function localTime(iso: string): string {
   return new Date(utc).toLocaleString("en-US", {
     month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
   });
-}
-
-// Display only: the backend's signed decimal string picks the sign, fmt()
-// formats the magnitude. No arithmetic on the figure.
-function signedMoney(hidden: boolean, v: string | null, plus: boolean): string {
-  if (v == null) return "";
-  const neg = v.startsWith("-");
-  const body = maskIfHidden(hidden, fmt(neg ? v.slice(1) : v));
-  return `${neg ? "−" : plus ? "+" : ""}${body}`;
 }
 
 function MetricList({ metricKey, title, showTitle }: { metricKey: string; title: string; showTitle: boolean }) {
@@ -64,7 +55,7 @@ function MetricList({ metricKey, title, showTitle }: { metricKey: string; title:
                 </span>
                 <span className="flex items-center gap-1 text-gray-800 dark:text-gray-200">
                   {hasCauses && (isOpen ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />)}
-                  <span className="break-words">{maskMoneyText(hidden, c.summary)}</span>
+                  <span className="break-words min-w-0">{maskMoneyText(hidden, c.headline)}</span>
                 </span>
               </span>
               <span className="tabular-nums whitespace-nowrap font-medium text-gray-900 dark:text-gray-100">
@@ -72,16 +63,32 @@ function MetricList({ metricKey, title, showTitle }: { metricKey: string; title:
               </span>
             </button>
             {isOpen && (
-              <div className="ml-4 mt-1 space-y-0.5">
+              <ul className="ml-4 mt-1 space-y-1 list-disc pl-3 text-xs text-gray-500 dark:text-gray-400">
                 {c.causes.map((k, ki) => (
-                  <div key={ki} className="flex justify-between gap-2 text-xs text-gray-500 dark:text-gray-400">
-                    <span className="break-words min-w-0">{maskMoneyText(hidden, k.text)}</span>
-                    {k.amount != null && (
-                      <span className="tabular-nums whitespace-nowrap">{signedMoney(hidden, k.amount, true)}</span>
+                  <li key={ki}>
+                    {k.head ? (
+                      <>
+                        <span className="break-words">{maskMoneyText(hidden, k.head)}</span>
+                        <ul className="mt-0.5 space-y-0.5 list-none">
+                          {k.items.map((it, ii) => (
+                            <li key={ii} className="flex justify-between gap-2">
+                              <span className="min-w-0 truncate" title={hidden ? undefined : it.name}>{it.name}</span>
+                              <span className="tabular-nums whitespace-nowrap">{itemMoney(hidden, it.amount)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : (
+                      <span className="flex justify-between gap-2">
+                        <span className="break-words min-w-0">{maskMoneyText(hidden, k.text)}</span>
+                        {k.amount != null && (
+                          <span className="tabular-nums whitespace-nowrap">{signedMoney(hidden, k.amount, true)}</span>
+                        )}
+                      </span>
                     )}
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             )}
           </div>
         );

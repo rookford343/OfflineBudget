@@ -158,7 +158,7 @@ The daily summary is sent through whatever SMTP server you configure — your
 own, or a provider like Gmail. That provider sees the email, which contains
 your checking balances, upcoming bills, this month's spending by category and
 your top merchants, and credit-card balances. On digest days it adds the past
-week's spending. Password-reset emails go through the same server.
+week's spending. Under some figures it adds one line with the amount the figure changed since the last email (no merchant names or causes). Password-reset emails go through the same server.
 
 That is real financial detail leaving your machine. It goes only to the
 recipients you list, through the server you chose. Leave SMTP unconfigured

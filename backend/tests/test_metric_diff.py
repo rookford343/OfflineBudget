@@ -12,6 +12,7 @@ from backend.services.metric_diff import (
     LineChange,
     diff_explanations,
     explain_change,
+    headline,
     signed_money,
     summarize,
 )
@@ -470,3 +471,39 @@ def test_split_posting_on_checking_is_not_reported_twice(db_session):
     )
     assert [c.text for c in _causes(db_session, user, "checking_balance", prev, cur)] == [
         "inputs changed"]
+
+
+def test_grouped_cause_carries_head_and_items(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    items = [("p1", "Example Insurance Co.", "250.00"), ("p2", "Grocery Store", "100.00")]
+    prev, cur = _pair(
+        db_session, user, "safety_margin",
+        cur_kw={"sources": _sources(card_pending=[_pend(visa.id, "Visa", *i) for i in items])},
+    )
+    out = schemas_cause = __import__("backend.services.metric_diff", fromlist=["x"])._history_cause(
+        _causes(db_session, user, "safety_margin", prev, cur)[0])
+    assert out.head == "new pending Visa charges"
+    assert [(i.name, i.amount) for i in out.items] == [
+        ("Example Insurance Co.", D("250.00")), ("Grocery Store", D("100.00"))]
+    assert schemas_cause.text.startswith("new pending Visa charges: ")
+
+
+def test_headline_for_a_grouped_first_cause():
+    c = Cause("new pending Visa charges: A $1.00", None, head="new pending Visa charges",
+              items=("A $1.00",), rows=(("A", D("1.00")),))
+    assert headline([c]) == "New pending Visa charges"
+
+
+def test_headline_for_a_line_cause_and_more():
+    causes = [Cause("Paycheck +$5.00", D("5")), Cause("Rent −$2.00", D("-2")), Cause("new month (Dec)", None)]
+    assert headline(causes) == "Paycheck +$5.00 + 2 more"
+
+
+def test_headline_counts_causes_not_items():
+    g = Cause("g: a, b, c", None, head="g", items=("a", "b", "c"),
+              rows=(("a", D("1")), ("b", D("1")), ("c", D("1"))))
+    assert headline([g, Cause("x", None)]) == "G + 1 more"
+
+
+def test_headline_fallback():
+    assert headline([]) == "Inputs changed"

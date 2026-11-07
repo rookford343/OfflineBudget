@@ -2735,9 +2735,16 @@ class BonusAllocationOut(BaseModel):
 
 # ── Change history ────────────────────────────────────────────────────────────
 
+class HistoryCauseItem(BaseModel):
+    name: str
+    amount: Decimal
+
+
 class HistoryCause(BaseModel):
     text: str
     amount: Optional[Decimal] = None
+    head: Optional[str] = None
+    items: list[HistoryCauseItem] = []
 
 
 class MetricChangeOut(BaseModel):
@@ -2748,6 +2755,7 @@ class MetricChangeOut(BaseModel):
     new_value: Decimal
     delta: Decimal
     summary: str
+    headline: str
     causes: list[HistoryCause]
     calc_changed: bool
 

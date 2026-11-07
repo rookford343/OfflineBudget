@@ -57,8 +57,7 @@ def test_since_line_under_a_moved_figure(db_session, monkeypatch):
     _set_previous(db_session, user, "safety_margin_week", D("-400.00"))
     since = _since(db_session, user)
     line = since["safety_margin_week"]
-    assert line.startswith("+$400.00 since last email: new pending Test Visa charges: ") or \
-        line.startswith("−$400.00 since last email: new pending Test Visa charges: ")
+    assert line in ("+$400.00 since last email", "−$400.00 since last email")
     html, text = generate_daily_summary(db_session, user, since_lines=since)
     assert html.index("Safety Margin (this week)") < html.index(line) < html.index("Lowest")
     assert f"\n    {line}\n" in text
@@ -70,7 +69,15 @@ def test_the_documented_line_for_a_400_dollar_drop(db_session, monkeypatch):
     _add_pending(db_session, user, 2)
     _set_previous(db_session, user, "safety_margin_week", D("-400.00"))
     line = _since(db_session, user)["safety_margin_week"]
-    assert line.startswith("−$400.00 since last email: new pending Test Visa charges: ")
+    assert line == "−$400.00 since last email"
+
+
+def test_the_line_is_the_signed_amount_for_both_signs(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    _set_previous(db_session, user, "checking_balance", D("12.50"))
+    assert _since(db_session, user)["checking_balance"] == "+$12.50 since last email"
+    _set_previous(db_session, user, "checking_balance", D("-12.50"))
+    assert _since(db_session, user)["checking_balance"] == "−$12.50 since last email"
 
 
 def test_no_line_for_an_unmoved_figure(db_session, monkeypatch):
@@ -87,7 +94,7 @@ def test_a_cent_is_a_move_and_no_change_is_not(db_session, monkeypatch):
     user, _ = _world(db_session, monkeypatch)
     _add_pending(db_session, user, 1)
     _set_previous(db_session, user, "checking_balance", D("0.01"))
-    assert _since(db_session, user)["checking_balance"].startswith("+$0.01 since last email")
+    assert _since(db_session, user)["checking_balance"] == "+$0.01 since last email"
     _set_previous(db_session, user, "checking_balance", D("0.00"))
     assert "checking_balance" not in _since(db_session, user)
 
@@ -95,17 +102,16 @@ def test_a_cent_is_a_move_and_no_change_is_not(db_session, monkeypatch):
 def test_one_corrupt_reading_drops_only_its_own_line(db_session, monkeypatch):
     from backend.services import metric_diff
     user, _ = _world(db_session, monkeypatch)
-    _add_pending(db_session, user, 1)
     _set_previous(db_session, user, "safety_margin_week", D("-400.00"))
     _set_previous(db_session, user, "spendable_week", D("-25.00"))
-    real = metric_diff._causes_or_fallback
+    real = metric_diff.signed_money
 
-    def flaky(db, user_id, key, prev, cur):
-        if key == "safety_margin_week":
+    def flaky(amount):
+        if abs(amount) == D("400.00"):
             raise RuntimeError("corrupt reading")
-        return real(db, user_id, key, prev, cur)
+        return real(amount)
 
-    monkeypatch.setattr(metric_diff, "_causes_or_fallback", flaky)
+    monkeypatch.setattr(metric_diff, "signed_money", flaky)
     since = _since(db_session, user)
     assert "safety_margin_week" not in since
     assert "spendable_week" in since
@@ -120,28 +126,8 @@ def test_no_since_line_without_a_previous_email(db_session, monkeypatch):
     assert "since last email" not in html and "since last email" not in text
 
 
-def test_line_fits_a_phone(db_session, monkeypatch):
-    user, _ = _world(db_session, monkeypatch)
-    _add_pending(db_session, user, 6)
-    _set_previous(db_session, user, "safety_margin_week", D("-400.00"))
-    since = _since(db_session, user)
-    assert since
-    assert all(len(line) <= 120 for line in since.values()), since
-    assert any(line.endswith("…") or "and " in line for line in since.values())
 
 
-def test_a_unreadable_older_snapshot_degrades_to_inputs_changed(db_session, monkeypatch):
-    user, _ = _world(db_session, monkeypatch)
-    _add_pending(db_session, user, 1)
-    snap = metric_history.latest_snapshot(db_session, user.id, "email")
-    snap.sources_json = "not json"
-    for r in snap.readings:
-        r.explain_json = "garbage"
-        if r.metric_key == "safety_margin_week":
-            r.value = r.value + D("5.00")
-    db_session.commit()
-    line = _since(db_session, user)["safety_margin_week"]
-    assert line.endswith("inputs changed")
 
 
 def test_every_mapped_figure_is_a_real_key():
@@ -152,25 +138,10 @@ def test_every_mapped_figure_is_a_real_key():
     }
 
 
-def test_fit_cuts_at_a_word_boundary():
-    from backend.services.metric_diff import EMAIL_LINE_MAX, _fit
-    line = " ".join(["word"] * 40)
-    out = _fit(line)
-    assert len(out) <= EMAIL_LINE_MAX and out.endswith("…") and not out.endswith(" …")
-    assert line.startswith(out[:-1]) and out[:-1].endswith("word")
 
 
-def test_fit_cuts_a_line_with_no_spaces():
-    from backend.services.metric_diff import EMAIL_LINE_MAX, _fit
-    out = _fit("x" * 300)
-    assert len(out) == EMAIL_LINE_MAX and out.endswith("…")
 
 
-def test_fit_leaves_exactly_120_characters_alone():
-    from backend.services.metric_diff import _fit
-    line = ("ab " * 40)[:120]
-    assert len(line) == 120 and _fit(line) == line
-    assert _fit(line + "z") != line + "z"
 
 
 # ── Every place a line is printed ────────────────────────────────────────────

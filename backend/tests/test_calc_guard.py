@@ -76,6 +76,7 @@ PRESENTATIONAL_OR_WRITER = {
     "routers/spending.py:tax_summary": "total line of the tax export",
     "routers/spending.py:tax_estimate": "tax domain: sums the year's deductible transactions as an input to estimate_taxes",
     "routers/forecast.py:get_monthly_summary": "opening balance read off a forecast day (custom range)",
+    "services/metric_diff.py:_total": "matches a split pending charge to its posted rows; not a headline figure",
     "services/explain.py:children_consistent": "checks an explanation's own arithmetic",
     "services/explain.py:replay": "replays an explanation's own rows",
     "services/budget_snapshot.py:leftover_parts": "composes the month model's primitives",

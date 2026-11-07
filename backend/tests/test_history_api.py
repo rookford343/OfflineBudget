@@ -92,10 +92,14 @@ def test_history_lists_changes_newest_first(db_session):
     assert newest["previous_taken_at"].startswith("2026-11-02T18:30")
     assert newest["trigger"] == "sync"
     assert newest["calc_changed"] is False
+    assert newest["headline"] == "Base −$30.00" and older["headline"] == "Base +$50.00"
     # previous snapshot is a different local day -> weekday shown
     assert newest["summary"].startswith("Leftover −$30.00 since Mon 1:30 PM")
     # same local day -> time only (7:00 AM Eastern)
     assert older["summary"].startswith("Leftover +$50.00 since 7:00 AM")
+    for c in (newest, older):  # the collapsed-row label has no figure, amount or time
+        assert "Leftover" not in c["headline"] and "since" not in c["headline"]
+        assert all(k["head"] is None and k["items"] == [] for k in c["causes"])
 
 
 def test_limit_caps_changes(db_session):
@@ -181,6 +185,7 @@ def test_malformed_readings_degrade_to_inputs_changed(db_session):
         (D("50.00"), ["inputs changed"]),
     ]
     assert "inputs changed" in changes[0].summary
+    assert changes[0].headline == "Inputs changed"
     assert _client(db_session, user).get("/history/leftover").status_code == 200
 
 

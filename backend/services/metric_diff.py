@@ -11,19 +11,16 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from functools import reduce
 from itertools import combinations
-from operator import add
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
-from backend.services.calc_version import CALC_CHANGELOG, CALC_VERSION
+from backend.services.calc_version import CALC_CHANGELOG
 from backend.services.metric_history import (
     MetricReadingData,
-    collect_sources,
     latest_snapshot,
 )
 from backend.services.primary_account import primary_checking
@@ -53,6 +50,7 @@ class Cause:
     amount: Decimal | None
     head: str = ""
     items: tuple[str, ...] = ()
+    rows: tuple[tuple[str, Decimal], ...] = ()  # (name, amount) per item, for the app
 
 
 def money(amount: Decimal) -> str:
@@ -187,7 +185,7 @@ _SPLIT_MAX_ROWS = 12
 
 
 def _total(rows: list[_Item]) -> Decimal:
-    return reduce(add, (row.amount for row in rows), Decimal("0"))
+    return sum((row.amount for row in rows), Decimal("0"))
 
 
 def _take_split(posted: list[_Item], pending: _Item) -> bool:
@@ -219,7 +217,8 @@ def _group(kind_text: str, owner: str, items: list[_Item], *, plural: str, singu
     noun = singular if len(items) == 1 else plural
     head = kind_text.format(owner=owner, noun=noun)
     shown = tuple(f"{i.name} {money(i.amount)}" for i in items)
-    return Cause(f"{head}: {', '.join(shown)}", None, head=head, items=shown)
+    rows = tuple((i.name, i.amount) for i in items)
+    return Cause(f"{head}: {', '.join(shown)}", None, head=head, items=shown, rows=rows)
 
 
 def _by_owner(items: list[_Item]) -> list[tuple[int, str, list[_Item]]]:
@@ -359,6 +358,25 @@ def summarize(label: str, delta: Decimal, since_text: str, causes: list[Cause], 
     return f"{lead}{signed_money(delta)} {since_text}: {body}"
 
 
+def headline(causes: list[Cause]) -> str:
+    """Short label for a collapsed history row: the first cause (a group's head
+    or a line's text), capitalized, plus " + N more" for the other causes."""
+    if not causes:
+        return "Inputs changed"
+    first = causes[0]
+    text = first.head or first.text
+    text = text[:1].upper() + text[1:]
+    more = len(causes) - 1
+    return f"{text} + {more} more" if more else text
+
+
+def _history_cause(c: Cause) -> schemas.HistoryCause:
+    return schemas.HistoryCause(
+        text=c.text, amount=c.amount, head=c.head or None,
+        items=[schemas.HistoryCauseItem(name=n, amount=a) for n, a in c.rows],
+    )
+
+
 def _since_text(prev_taken: datetime, cur_taken: datetime) -> str:
     """"since 7:00 AM" on the same local day, else "since Mon 7:00 AM", in the
     server's local zone (stored times are naive UTC)."""
@@ -409,7 +427,8 @@ def changes_for(
             summary=summarize(
                 cur.label, delta, _since_text(prev_snap.taken_at, cur_snap.taken_at), causes, max_items=3,
             ),
-            causes=[schemas.HistoryCause(text=c.text, amount=c.amount) for c in causes],
+            headline=headline(causes),
+            causes=[_history_cause(c) for c in causes],
             calc_changed=prev_snap.calc_version != cur_snap.calc_version,
         ))
     return out
@@ -417,49 +436,16 @@ def changes_for(
 
 # ── The daily email's "since last email" lines ───────────────────────────────
 
-EMAIL_LINE_MAX = 120
-
-
-def _fit(line: str, limit: int = EMAIL_LINE_MAX) -> str:
-    """`line` cut at a word boundary to at most `limit` characters, ending in "…"."""
-    if len(line) <= limit:
-        return line
-    cut = line[: limit - 1]
-    space = cut.rfind(" ")
-    if space > 0:
-        cut = cut[:space]
-    return cut.rstrip(" ,;:") + "…"
-
-
-def _transient_reading(
-    user_id: int, reading: MetricReadingData, sources_json: str, as_of: date, taken_at: datetime,
-) -> models.MetricReading:
-    """The reading as it would be stored, without adding it to any session, so
-    `explain_change` can compare it with a stored one before the email goes."""
-    snapshot = models.MetricSnapshot(
-        user_id=user_id, taken_at=taken_at, trigger="email", calc_version=CALC_VERSION,
-        as_of=as_of, sources_json=sources_json,
-    )
-    row = models.MetricReading(
-        metric_key=reading.key, label=reading.label, value=reading.value,
-        explain_json=reading.explain.model_dump_json(),
-    )
-    row.snapshot = snapshot
-    return row
-
-
 def since_last_email(
     db: Session, user: models.User, readings: list[MetricReadingData], *, as_of: date | None = None,
 ) -> dict[str, str]:
-    """Metric key -> one short line for each figure that moved (by a cent or
-    more) since the last "email" snapshot; `{}` when there is none. The line
-    has no leading label: the email prints it under the figure's own."""
+    """Metric key -> "<signed amount> since last email" for each figure that
+    moved (by a cent or more) since the last "email" snapshot; `{}` when there
+    is none. The line has no leading label: the email prints it under the
+    figure's own, and names no cause."""
     previous = latest_snapshot(db, user.id, "email")
     if previous is None:
         return {}
-    as_of = as_of or date.today()
-    taken_at = datetime.now(timezone.utc).replace(tzinfo=None)
-    sources_json = json.dumps(collect_sources(db, user, as_of), sort_keys=True)
     before = {r.metric_key: r for r in previous.readings}
     out: dict[str, str] = {}
     for reading in readings:
@@ -470,9 +456,7 @@ def since_last_email(
             delta = reading.value - Decimal(str(prev.value))
             if abs(delta) < CENT:
                 continue
-            cur = _transient_reading(user.id, reading, sources_json, as_of, taken_at)
-            causes = _causes_or_fallback(db, user.id, reading.key, prev, cur)
-            out[reading.key] = _fit(summarize("", delta, "since last email", causes, max_items=2))
+            out[reading.key] = f"{signed_money(delta)} since last email"
         except Exception:  # noqa: BLE001 -- one bad stored reading drops only its own line
             logger.exception("Change history: no since-last-email line for %s", reading.key)
     return out

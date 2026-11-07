@@ -705,9 +705,9 @@ def test_history_causes_never_name_another_users_rows(db_session):
     assert [c.text for c in changes[0].causes] == ["Base −$100.00"]  # the receipt line only
 
 
-def test_since_line_escapes_a_markup_merchant_name(db_session, monkeypatch):
-    """A bank-supplied merchant name reaches the email through the since line;
-    it must be escaped, not rendered."""
+def test_since_line_carries_no_merchant_name(db_session, monkeypatch):
+    """A bank-supplied merchant name must not reach the email through the
+    since line: it is the signed amount only, so markup in a name cannot land."""
     from datetime import datetime
     from backend import models
     from backend.services.metric_diff import since_last_email
@@ -724,10 +724,9 @@ def test_since_line_escapes_a_markup_merchant_name(db_session, monkeypatch):
     db_session.commit()
     _set_previous(db_session, user, "safety_margin_week", Decimal("-400.00"))
     since = since_last_email(db_session, user, collect_headline_metrics(db_session, user, TODAY), as_of=TODAY)
-    assert "<b>&Co" in since["safety_margin_week"]
-    html, _text = generate_daily_summary(db_session, user, since_lines=since)
-    assert "&lt;b&gt;&amp;Co" in html
-    assert "<b>&Co" not in html
+    assert since["safety_margin_week"] == "−$400.00 since last email"
+    html, text = generate_daily_summary(db_session, user, since_lines=since)
+    assert "<b>&Co" not in html and "&Co" not in html and "&Co" not in text
 
 
 def test_delete_account_removes_the_users_change_history(db_session):

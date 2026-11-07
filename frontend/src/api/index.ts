@@ -456,11 +456,12 @@ export const checkingLevelApi = {
 };
 
 // ── Change history (what moved each headline figure) ────────────────────────
-export interface HistoryCause { text: string; amount: string | null }
+export interface HistoryCauseItem { name: string; amount: string }
+export interface HistoryCause { text: string; amount: string | null; head: string | null; items: HistoryCauseItem[] }
 export interface MetricChange {
   taken_at: string; previous_taken_at: string | null; trigger: string;
   old_value: string | null; new_value: string | null; delta: string | null;
-  summary: string; causes: HistoryCause[]; calc_changed: boolean;
+  summary: string; headline: string; causes: HistoryCause[]; calc_changed: boolean;
 }
 export interface MetricHistory { metric_key: string; label: string; current_value: string | null; changes: MetricChange[] }
 
