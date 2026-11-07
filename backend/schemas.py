@@ -1043,6 +1043,14 @@ class AccountBalanceOut(BaseModel):
     month_change_pct: Decimal | None  # percent change over the month; None when the start is ~0
 
 
+class RunningBalanceRow(BaseModel):
+    """The balance right after one row on the Transactions page's checking list."""
+    kind: Literal["pending", "posted"]
+    id: int  # AccountPendingTransaction.id or Transaction.id
+    date: date
+    balance_after: Decimal
+
+
 class AccountBalancesOut(BaseModel):
     accounts: list[AccountBalanceOut]  # every active account, in id order
     total_after_pending: Decimal  # sum of after_pending over the list

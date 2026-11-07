@@ -63,3 +63,36 @@ def account_balances(db: Session, user_id: int, today: date) -> schemas.AccountB
         accounts=out,
         total_after_pending=sum((a.after_pending for a in out), ZERO),
     )
+
+
+def running_balance(
+    db: Session, user_id: int, account_id: int, start: date, today: date,
+) -> list[schemas.RunningBalanceRow]:
+    """The Balance column on the Transactions page, for one account.
+
+    Pending rows walk forward from the posted balance, oldest first, so the
+    last one ends at `after_pending`. Posted rows walk backward from the posted
+    balance, newest first: a posted row's figure is the balance right after it
+    posted. Posted rows are every row from `start` to `today`, as the page's
+    list has always counted them.
+    """
+    account = db.query(models.Account).filter(
+        models.Account.id == account_id, models.Account.user_id == user_id,
+    ).one()
+    posted = Decimal(str(account.current_balance))
+    out: list[schemas.RunningBalanceRow] = []
+    run = posted
+    for p in sorted(checking_pending_rows(db, account, today), key=lambda r: (r.date, r.id)):
+        run += Decimal(str(p.amount))
+        out.append(schemas.RunningBalanceRow(kind="pending", id=p.id, date=p.date, balance_after=run))
+    run = posted
+    txns = db.query(models.Transaction).filter(
+        models.Transaction.user_id == user_id,
+        models.Transaction.account_id == account_id,
+        models.Transaction.date >= start,
+        models.Transaction.date <= today,
+    ).order_by(models.Transaction.date.desc(), models.Transaction.id.desc()).all()
+    for t in txns:
+        out.append(schemas.RunningBalanceRow(kind="posted", id=t.id, date=t.date, balance_after=run))
+        run -= Decimal(str(t.amount))
+    return out

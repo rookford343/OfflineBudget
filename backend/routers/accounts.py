@@ -6,7 +6,7 @@ from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.routers._shared import owned_or_404
-from backend.services.account_balances import account_balances
+from backend.services.account_balances import account_balances, running_balance
 from backend.services.pending import pending_snapshot_is_live
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -74,6 +74,20 @@ def list_pending_transactions(
         models.AccountPendingTransaction.user_id == user.id,
         models.AccountPendingTransaction.account_id == account.id,
     ).order_by(models.AccountPendingTransaction.date.desc(), models.AccountPendingTransaction.id).all()
+
+
+@router.get("/{account_id}/running-balance", response_model=list[schemas.RunningBalanceRow])
+def get_running_balance(
+    account_id: int,
+    start: date,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """The Transactions page's Balance column: each pending row's balance
+    (oldest first, ending at the after-pending balance) and each posted row's
+    balance right after it posted (newest first), from `start` to today."""
+    _get_or_404(db, user.id, account_id)
+    return running_balance(db, user.id, account_id, start, date.today())
 
 
 @router.patch("/{account_id}", response_model=schemas.AccountOut)

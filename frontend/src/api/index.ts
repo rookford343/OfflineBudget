@@ -36,6 +36,10 @@ export const accountsApi = {
   remove: (id: number) => api.delete(`/accounts/${id}`),
   // The bank's own pending (not yet posted) list for a Plaid-fed checking
   // account; empty for any other account.
+  // The Transactions page's Balance column: balance_after for each pending and
+  // posted row of one account, figured by the backend.
+  runningBalance: (id: number, start: string) =>
+    api.get(`/accounts/${id}/running-balance`, { params: { start } }).then((r) => r.data),
   pendingTransactions: (id: number) => api.get(`/accounts/${id}/pending-transactions`).then((r) => r.data),
 };
 

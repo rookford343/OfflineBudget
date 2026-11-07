@@ -106,6 +106,7 @@ const PENDING_LOOKBACK_DAYS = 7;
 // predictable point-in-time view except where the underlying bill itself is
 // genuinely variable -- credit card payments and utilities like Duke).
 interface PendingRow {
+  id?: number; // the bank-pending row's id; forecast projections have none
   date: string;
   name: string;
   amount: number;
@@ -344,39 +345,26 @@ export default function Transactions() {
       return {
         date: p.date, name: p.description, amount,
         type: amount >= 0 ? "income" : "expense", categoryName: null, isCcPayment: false,
-        source: "bank_pending" as const,
+        source: "bank_pending" as const, id: p.id as number,
       };
     }),
   ].sort((a, b) => a.date.localeCompare(b.date));
 
-  // Checking list's Balance column (primary checking only). Posted rows walk
-  // backwards from the account's current_balance through every posted row
-  // from `start` to today -- its own unfiltered query, so the search/amount
-  // filters and an `end` before today can't break the walk. The bank's
-  // pending rows sit on top, applied as if they had gone through; forecast
-  // projections aren't bank-pending, so they get no balance. A pending item
-  // that posts leaves the snapshot on the same sync that imports it, so it
-  // is never counted twice.
+  // Checking list's Balance column (primary checking only), figured by the
+  // backend: posted rows carry the balance right after they posted, the bank's
+  // pending rows the balance as if they had gone through. Forecast projections
+  // aren't bank-pending, so they get no balance.
   const balancesHidden = useBalancesHidden();
   const balanceAccount = primaryChecking(accounts as any[]);
-  const { data: balanceWalkTxns = [] } = useQuery<any[]>({
-    queryKey: ["transactions-balance-walk", balanceAccount?.id, start, today()],
-    queryFn: () => transactionsApi.list({ start, end: today(), account_id: balanceAccount!.id }),
+  const { data: runningBalance = [] } = useQuery<any[]>({
+    queryKey: ["transactions-running-balance", balanceAccount?.id, start, today()],
+    queryFn: () => accountsApi.runningBalance(balanceAccount!.id, start),
     enabled: txnTab === "checking" && !!balanceAccount,
   });
   const postedBalanceAfter = new Map<number, number>();
-  const pendingBalanceAfter = new Map<PendingRow, number>();
-  if (balanceAccount) {
-    let run = parseFloat(balanceAccount.current_balance);
-    for (const p of pendingRows.filter(p => p.source === "bank_pending")) { // oldest first
-      run += p.amount;
-      pendingBalanceAfter.set(p, run);
-    }
-    run = parseFloat(balanceAccount.current_balance);
-    for (const t of [...balanceWalkTxns].sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)) {
-      postedBalanceAfter.set(t.id, run);
-      run -= parseFloat(t.amount);
-    }
+  const pendingBalanceAfter = new Map<number, number>();
+  for (const r of runningBalance) {
+    (r.kind === "pending" ? pendingBalanceAfter : postedBalanceAfter).set(r.id, parseFloat(r.balance_after));
   }
   const balanceCell = (v: number | undefined) => (
     <td className="px-4 py-3 text-right tabular-nums text-gray-500 hidden sm:table-cell whitespace-nowrap">
@@ -832,7 +820,7 @@ export default function Transactions() {
                       <td className={`px-4 py-3 text-right font-semibold tabular-nums ${row.p.amount >= 0 ? "text-green-600" : "text-red-600"}`}>
                         {row.p.amount >= 0 ? "+" : ""}{fmt(row.p.amount)}
                       </td>
-                      {balanceCell(pendingBalanceAfter.get(row.p))}
+                      {balanceCell(pendingBalanceAfter.get(row.p.id!))}
                       <td className="px-4 py-3"></td>
                     </tr>
                   ))}
