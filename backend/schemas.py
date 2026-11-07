@@ -2308,6 +2308,16 @@ class ForecastBaselineOut(BaseModel):
     points: list[ForecastBaselinePoint]
 
 
+class BalanceFlowOut(BaseModel):
+    """The Dashboard Balance Flow card's two headline figures. Both are None
+    when the month has no forecast entries yet."""
+    # Last balance through today minus the month's first balance.
+    month_to_date_change: Optional[Decimal] = None
+    # Last balance through today minus the saved start-of-month forecast for
+    # today's day; None without a saved baseline.
+    drift_from_forecast: Optional[Decimal] = None
+
+
 # ── Adventures ───────────────────────────────────────────────────────────────
 
 class WalletRow(BaseModel):

@@ -170,6 +170,12 @@ export default function Dashboard() {
     enabled: !!primaryChecking,
     retry: false,
   });
+  // The card's headline figures (month-to-date change, drift from forecast).
+  const { data: flowFigures = null } = useQuery<any>({
+    queryKey: ["forecast-balance-flow", primaryChecking?.id, todayStr],
+    queryFn: () => forecastApi.balanceFlow(primaryChecking.id),
+    enabled: !!primaryChecking,
+  });
   const isDark = useIsDarkMode();
   const { data: snapshot } = useQuery<any>({
     queryKey: ["budget-snapshot", primaryChecking?.id],
@@ -462,7 +468,6 @@ export default function Dashboard() {
         }
         const chartData = [...byDay.values()].sort((a, b) => a.day - b.day);
 
-        const first = balanceFlow.length ? parseFloat(balanceFlow[0].projected_balance) : null;
         const last = balanceFlow.length ? parseFloat(balanceFlow[balanceFlow.length - 1].projected_balance) : null;
 
         const lastMonthName = new Date(lastMonthRange.start + "T12:00:00").toLocaleDateString("en-US", { month: "long" });
@@ -473,9 +478,8 @@ export default function Dashboard() {
 
         // Headline: drift from forecast when there's a baseline, otherwise
         // the month-to-date change it has always shown.
-        const delta = refIsForecast
-          ? (last != null && refToday != null ? last - refToday : null)
-          : (first != null && last != null ? last - first : null);
+        const rawDelta = refIsForecast ? flowFigures?.drift_from_forecast : flowFigures?.month_to_date_change;
+        const delta = rawDelta != null ? parseFloat(rawDelta) : null;
         const sameDayPct = refToday != null && last != null && refToday !== 0
           ? ((last - refToday) / Math.abs(refToday)) * 100
           : null;

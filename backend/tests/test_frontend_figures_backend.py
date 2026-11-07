@@ -335,3 +335,60 @@ def test_quarter_checkpoint_delta_and_conflict(db_session, monkeypatch):
     far = quarters()[2]
     assert D(str(far["checkpoint_delta"])) == D("40.50")
     assert far["checkpoint_conflict"] is True
+
+
+# ── Balance Flow headline (Plan 2, Task 7 fix round 2) ────────────────────────
+
+def _flow_setup(db, monkeypatch, *, baseline_today):
+    """Walk through Nov 5 climbing 10 a day from 1000 (Nov 1) to 1040; a saved
+    baseline (when given) says the balance for Nov 5 was `baseline_today`."""
+    import json
+    from backend.schemas import ForecastEntry
+
+    def fake(db_, user_id, account_id, start, end, **kw):
+        return [ForecastEntry(date=start + timedelta(days=i),
+                              projected_balance=D("1000.00") + 10 * i, transactions=[])
+                for i in range((end - start).days + 1)]
+
+    monkeypatch.setattr("backend.services.forecast_engine.build_forecast", fake)
+    monkeypatch.setattr("backend.routers.forecast._today", lambda: date(2026, 11, 5))
+    user, acct = _spend_user(db)
+    if baseline_today is not None:
+        points = [{"date": f"2026-11-0{d}", "projected_balance": f"{900 + 5 * d:.2f}"} for d in range(1, 6)]
+        points[-1]["projected_balance"] = baseline_today
+        db.add(models.MonthlyForecastSnapshot(
+            user_id=user.id, account_id=acct.id, year=2026, month=11, forecasted_open=D("900"),
+            forecasted_close=D("900"), taken_on=date(2026, 11, 1), daily_points=json.dumps(points)))
+    db.commit()
+    return user, acct
+
+
+def test_balance_flow_month_to_date_and_drift(db_session, monkeypatch):
+    from backend.routers import forecast as forecast_router_module
+    user, acct = _flow_setup(db_session, monkeypatch, baseline_today="1015.50")
+    body = _client(db_session, user, forecast_router_module).get(
+        "/forecast/balance-flow", params={"account_id": acct.id}).json()
+    assert D(str(body["month_to_date_change"])) == D("40.00")   # 1040 - 1000
+    assert D(str(body["drift_from_forecast"])) == D("24.50")    # 1040 - 1015.50
+
+
+def test_balance_flow_drift_is_negative_and_absent_without_baseline(db_session, monkeypatch):
+    from backend.routers import forecast as forecast_router_module
+    user, acct = _flow_setup(db_session, monkeypatch, baseline_today="1100.00")
+    c = _client(db_session, user, forecast_router_module)
+    assert D(str(c.get("/forecast/balance-flow", params={"account_id": acct.id}).json()["drift_from_forecast"])) == D("-60.00")
+    db_session.query(models.MonthlyForecastSnapshot).delete()
+    db_session.commit()
+    body = c.get("/forecast/balance-flow", params={"account_id": acct.id}).json()
+    assert body["drift_from_forecast"] is None and D(str(body["month_to_date_change"])) == D("40.00")
+
+
+def test_balance_flow_404_for_another_users_account(db_session, monkeypatch):
+    from backend.routers import forecast as forecast_router_module
+    user, acct = _flow_setup(db_session, monkeypatch, baseline_today=None)
+    other = models.User(username="other", hashed_password="x", display_name="O")
+    db_session.add(other)
+    db_session.commit()
+    resp = _client(db_session, other, forecast_router_module).get(
+        "/forecast/balance-flow", params={"account_id": acct.id})
+    assert resp.status_code == 404

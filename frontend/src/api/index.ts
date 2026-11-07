@@ -149,6 +149,8 @@ export const forecastApi = {
     api.get("/forecast/monthly-summary", { params: { account_id: accountId, year, month } }).then((r) => r.data),
   risk: (accountId: number, days?: number) =>
     api.get("/forecast/risk", { params: { account_id: accountId, days } }).then((r) => r.data),
+  balanceFlow: (accountId: number) =>
+    api.get("/forecast/balance-flow", { params: { account_id: accountId } }).then((r) => r.data),
   // null when the month has no saved start-of-month forecast (404).
   baseline: (accountId: number, year: number, month: number) =>
     api.get("/forecast/baseline", { params: { account_id: accountId, year, month } })

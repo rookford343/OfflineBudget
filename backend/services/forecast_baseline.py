@@ -10,9 +10,10 @@ import calendar
 import json
 import logging
 from datetime import date
+from decimal import Decimal
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from backend import models
+from backend import models, schemas
 from backend.services import scheduler_state
 from backend.services.forecast_walk import standard_walk
 
@@ -88,6 +89,22 @@ def baseline_points(row) -> list[dict] | None:
     except (TypeError, ValueError):
         return None
     return points if isinstance(points, list) and points else None
+
+
+def balance_flow_figures(db: Session, user_id: int, account_id: int, today: date) -> schemas.BalanceFlowOut:
+    """Balance Flow's headline: this month's walk through `today` against its
+    own start and against the saved baseline's balance for the same day."""
+    from backend.services.forecast_engine import build_forecast
+    days = build_forecast(db, user_id, account_id, date(today.year, today.month, 1), today)
+    if not days:
+        return schemas.BalanceFlowOut()
+    last = days[-1].projected_balance
+    drift = None
+    for point in baseline_points(get_month_baseline(db, user_id, account_id, today.year, today.month)) or []:
+        if date.fromisoformat(point["date"]) == today:
+            drift = last - Decimal(str(point["projected_balance"]))
+            break
+    return schemas.BalanceFlowOut(month_to_date_change=last - days[0].projected_balance, drift_from_forecast=drift)
 
 
 def ensure_baselines_for_all(db: Session, as_of: date) -> int:

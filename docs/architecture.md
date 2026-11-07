@@ -83,6 +83,7 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Discretionary left | Discretionary budget minus discretionary spend (negative = over) | `discretionary_left` on `SpendingOverview` (`spending_by_category`, routers/spending.py) | Spending page, Discretionary card |
 | Bill variance | An override's actual amount minus the item's projected amount | `variance` on `BillAmountOverrideOut` (`_to_out`, routers/bill_overrides.py) | Recurring page |
 | Quarter checkpoint conflict | Saved quarter-end balance minus the forecast close, and whether they differ by more than $1 | `checkpoint_delta`, `checkpoint_conflict` on `QuarterSummary` (`_attach_quarter_checkpoints`, routers/forecast.py) | Forecast page |
+| Balance Flow headline | Month-to-date change (last balance through today minus the month's first) and drift from forecast (last balance minus the saved start-of-month forecast for today); drift is blank without a baseline | `balance_flow_figures` (services/forecast_baseline.py) over `build_forecast` and the saved `MonthlyForecastSnapshot`; `GET /forecast/balance-flow` (routers/forecast.py) | Dashboard Balance Flow card |
 | Calculation version | Hand-bumped integer naming the current calculation meaning | `CALC_VERSION` (services/calc_version.py) | Explain panels, changelog below |
 
 ## Shared primitives

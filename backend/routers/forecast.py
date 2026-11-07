@@ -73,6 +73,18 @@ def get_forecast_baseline(
     return schemas.ForecastBaselineOut(year=row.year, month=row.month, taken_on=row.taken_on, points=points)
 
 
+@router.get("/balance-flow", response_model=schemas.BalanceFlowOut)
+def get_balance_flow(
+    account_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Month-to-date change and drift from the saved forecast (Dashboard Balance Flow)."""
+    from backend.services.forecast_baseline import balance_flow_figures
+    _owned_account(db, user, account_id, must_be_active=False)
+    return balance_flow_figures(db, user.id, account_id, _today())
+
+
 @router.get("/risk", response_model=schemas.ForecastRisk)
 def get_forecast_risk(
     account_id: int,
