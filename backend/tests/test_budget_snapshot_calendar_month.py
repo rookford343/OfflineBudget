@@ -49,7 +49,7 @@ def _txn(db, card, d, amount, merchant="SOME STORE", source=models.CardTransacti
 
 def _snap(db, user, checking, as_of):
     db.commit()
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("3000.00")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("3000.00")):
         return compute_budget_snapshot(db, user, checking.id, as_of=as_of)
 
 

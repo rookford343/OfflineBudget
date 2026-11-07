@@ -50,11 +50,11 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Lookahead status (amber/red) | Amber below the cushion, red below $0 | `lookahead_status` (services/budget_snapshot.py) | Dashboard, email |
 | Cushion | `user.safety_cushion` (default $1,000) for the lookahead status. Separately: Wish List cushion (`WishSettings.cushion`, then account `low_balance_threshold`) and the risk banner threshold (`low_balance_threshold`, default $0) -> Task 6 (one cushion) | `compute_budget_snapshot` (services/budget_snapshot.py), `effective_cushion` (services/wish_plan.py), `find_balance_risk` callers (routers/forecast.py, services/summary_generator.py) | Dashboard, Wish List, risk banner, email |
 | Forecast balances | Day-by-day projected checking balance | `build_forecast` (services/forecast_engine.py) | Forecast tab, lows, risk banner, Wish List, upcoming bills, baselines |
-| Forecast walk start/flags | Callers choose their own start date and `include_unbilled_card_bills`; bridge walks inside `build_forecast` drop the flag -> Task 4 (standard walk) | `build_forecast` call sites: routers/forecast.py, services/budget_snapshot.py, services/summary_generator.py, services/upcoming_bills.py, services/wish_plan.py, services/forecast_baseline.py, services/forecast_engine.py (bridges, quarters) | Forecast tab, lows, digest, Wish List, baselines |
+| Forecast walk start/flags | The standard walk: starts 45 days before today; purpose `display` (unbilled card bills in) or `safety` (out). Every start gives the same balances from that horizon on | `standard_walk` (services/forecast_walk.py), horizon and bridges in `build_forecast` (services/forecast_engine.py). Custom ranges, with a comment: GET /forecast, /multi-year, /monthly-summary (routers/forecast.py), `build_quarters` | Forecast tab, lows, risk banner, digest, upcoming bills, Wish List, baselines |
 | Card payment amount (payoff) | Locked statement payoff, cycle estimate (pending + spent since statement + subscriptions before close + one-offs), second-hop rule, flat estimate, subscription fallback; basis kept on `ForecastTransaction.basis` | inline in `build_forecast`, helpers `_card_payoff_date_for_charge`, `_card_subscription_charges`, `_cc_actual_nearby` (services/forecast_engine.py) -> Task 5 (card payment model) | Forecast tab, Safety Margin, explain notes (`_cc_basis_note`) |
 | Pending charges (fresh) | Hand-typed or synced pending total, ignored when older than 7 days | `card_pending` (services/pending.py), read by the forecast, Left to Spend, available-to-spend, the email and statement checks. The frontend still reads the raw field -> Plan 2 | Forecast, Left to Spend, Credit Cards page, email |
 | Social Security boost | Extra take-home per paycheck once the wage base is met | `ss_paycheck_boosts`, `SSWageBaseTracker`, `pay_year_dates` (services/forecast_engine.py); month model calls them | Forecast, Recurring, Leftover |
-| Weekend shift | Posting day moves off a weekend; override keyed by natural due date | `_adjust_for_weekend`, `_matches_schedule` (services/forecast_engine.py); month model and upcoming bills have their own date handling -> Task 4 | Forecast, Recurring, Upcoming bills |
+| Weekend shift | Posting day moves off a weekend; override keyed by natural due date everywhere | `_adjust_for_weekend`, `_matches_schedule`, the override lookup in `build_forecast` (services/forecast_engine.py); `build_month_base` (services/month_base.py) and `upcoming_bills` (services/upcoming_bills.py) key by the natural date | Forecast, Recurring, Upcoming bills |
 | Card bill in month | Whether a card-paid recurring bill belongs to a month (quarterly lands whole in its due month) | `is_card_bill_in_month` (services/forecast_engine.py) | Month model, forecast |
 | Upcoming bills | Next occurrence per bill with override amounts | `upcoming_bills` (services/upcoming_bills.py), `_next_fire_date` (services/summary_generator.py) | Dashboard card, daily email |
 | Real spending (rule) | Whether a row is spend, income, a transfer or a card payment, and its signed amount: card payments and own-account transfers are neither, savings-category rows are transfers, refunds net as negative spend, an income-category debit reduces income | `classify_checking`, `classify_card`, `classified_rows`, `spend_totals` (services/real_spend.py); description checks `is_card_payment`, `looks_like_internal_transfer` (services/spending_helpers.py), `card_matches_description`, `looks_like_card_autopay` (services/card_matching.py) | everything below |
@@ -148,7 +148,36 @@ all pending debits; the sidebar adopts it in Plan 2.
 One cushion is not yet adopted (Task 6).
 
 ### Forecast walk policy
-No standard walk function yet (Task 4).
+`standard_walk(db, user_id, account_id, as_of, end, purpose="display", **extra)` in
+`backend/services/forecast_walk.py` is the walk every consumer reads: Safety Margin and the displayed
+lows (`_lookahead_window`), the risk banner (`/forecast/risk`), the weekly digest risk, upcoming bills
+(paycheck amounts and dates), the Wish List and the start-of-month baselines. It starts at
+`as_of - WALK_LOOKBACK_DAYS` (45). `purpose` picks the flag: `display` keeps this month's not yet
+charged card bills in the next card payment (`include_unbilled_card_bills=True`, the Forecast tab);
+`safety` leaves them out because Safety Margin subtracts them itself. `extra` passes `overrides` and
+`proposal` through. Callers that only want today onward slice with `walk_from`.
+
+The horizon (today - 45 days) lives in `build_forecast`, so every start agrees with the standard walk
+from the horizon on:
+- A start after the horizon (a calendar month, today, a future month) opens on a bridge walked from
+  the horizon, with the caller's flags. A recurring item due since the horizon and still unmatched
+  counts as not yet posted.
+- A start at or before it (the year views, `/monthly-summary`) walks its history as before, then
+  re-seeds at the horizon to the bank balance less the actuals since. An old unmatched projection or an
+  old checkpoint stays in the history and stops there.
+- A walk that reaches today reverses today's actuals from the bank balance too (it re-applies them).
+- The card cycle after a locked payoff is anchored to today, not to the window's start.
+
+The engine reads `date.today()`, so the horizon is today's; pass `as_of` = today.
+
+Callers that keep a custom range say so in a comment: GET /forecast (any client range), `/multi-year`,
+`/monthly-summary`, `build_quarters`. `has_unsettled_projection` probes a single day.
+
+**Weekend rule.** A `BillAmountOverride` (statement amount) is keyed by the item's natural due date.
+The weekend shift moves only the posting day: a bill due Saturday posts Friday at the override amount.
+The forecast looks the override up on the natural date; the month model and upcoming bills key by it
+too. For a paycheck the override replaces the base amount and the Social Security boost still applies,
+so upcoming bills shows the forecast's paycheck amount as it is.
 
 ## Decisions log
 
@@ -201,3 +230,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 - v1: baseline after 2026-11-06 fixes.
 - v2: one real-spending rule; refunds net everywhere
 - v3: one pending freshness rule
+- v4: one walk policy; weekend overrides

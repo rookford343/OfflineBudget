@@ -7,7 +7,7 @@ from backend.services.forecast_baseline import (
     ensure_month_baseline, get_month_baseline, baseline_points, ensure_baselines_for_all,
 )
 
-ENGINE = "backend.services.forecast_baseline.build_forecast"
+ENGINE = "backend.services.forecast_walk.build_forecast"
 SUCCEEDED_TODAY = "backend.services.forecast_baseline.scheduler_state.succeeded_today"
 
 
@@ -27,10 +27,12 @@ def _seed(db, username="fb"):
 
 
 def _fake(start: date, end: date, base="1000.00"):
-    out, d, n = [], start, 0
+    """One point per day; the balance falls by one a day from the 1st of
+    each month, so a month's points don't depend on where the walk began."""
+    out, d = [], start
     while d <= end:
-        out.append(ForecastEntry(date=d, projected_balance=Decimal(base) - n, transactions=[]))
-        d += timedelta(days=1); n += 1
+        out.append(ForecastEntry(date=d, projected_balance=Decimal(base) - (d.day - 1), transactions=[]))
+        d += timedelta(days=1)
     return out
 
 
@@ -38,7 +40,8 @@ def test_saves_one_point_per_day_of_the_month(db_session):
     user, acct = _seed(db_session)
     with patch(ENGINE, side_effect=lambda db, u, a, s, e, **kw: _fake(s, e)) as eng:
         row = ensure_month_baseline(db_session, user.id, acct.id, date(2026, 10, 1))
-    assert eng.call_args.args[3:5] == (date(2026, 10, 1), date(2026, 10, 31))
+    # The standard walk (it starts 45 days back), cut to the month.
+    assert eng.call_args.args[3:5] == (date(2026, 8, 17), date(2026, 10, 31))
     pts = baseline_points(row)
     assert len(pts) == 31
     assert pts[0] == {"date": "2026-10-01", "projected_balance": "1000.00"}

@@ -48,7 +48,7 @@ def test_emergency_fund_is_held_out_of_available_savings(db_session):
     db_session.add_all([checking, savings, mm]); db_session.commit()
 
     entry = type("E", (), {"date": date(2026, 8, 7), "projected_balance": Decimal("5120.66"), "transactions": []})()
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=[entry]):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=[entry]):
         snap = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert snap.savings_balance == Decimal("23790.50")

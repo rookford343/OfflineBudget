@@ -11,6 +11,7 @@ from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services import scenario_service
 from backend.services.forecast_engine import build_forecast, build_quarters, find_balance_risk, find_transfer_signal, suggest_transfer
+from backend.services.forecast_walk import standard_walk, walk_from
 from backend.services.reconciliation_helper import compute_reconciliation
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,9 @@ def get_forecast(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    # Custom walk: the client asks for any range (a calendar month, last
+    # month). build_forecast gives the standard walk's balances from its
+    # horizon on, whatever the start.
     return build_forecast(db, user.id, account_id, start, end)
 
 
@@ -80,9 +84,9 @@ def get_forecast_risk(
         models.Account.user_id == user.id,
     ).first()
     threshold = account.low_balance_threshold if account and account.low_balance_threshold is not None else Decimal("0")
-    start = date.today()
+    start = _today()
     end = start + timedelta(days=days)
-    entries = build_forecast(db, user.id, account_id, start, end)
+    entries = walk_from(standard_walk(db, user.id, account_id, start, end), start)
     risk = find_balance_risk(entries, threshold)
     transfer = find_transfer_signal(entries)
     suggestion = suggest_transfer(db, user, account_id, risk, entries)
@@ -234,6 +238,8 @@ def get_multi_year(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    # Custom walk: starts Jan 1 for the year views' history; from the walk
+    # horizon on it matches the standard walk.
     # One walk across the whole span, sliced per year. Building each year
     # independently re-derived its opening balance and produced a step between
     # December and January; a shared walk cannot disagree with itself.
@@ -258,6 +264,8 @@ def get_monthly_summary(
     end_day = monthrange(year, month)[1]
     end = date(year, month, end_day)
 
+    # Custom walk: starts Jan 1 for the month's history; from the walk
+    # horizon on it matches the standard walk.
     # Always recompute from Jan 1 so monthly balances chain correctly.
     # Snapshots were removed to avoid serving stale forecasts after engine or data changes.
     year_start = date(year, 1, 1)

@@ -17,7 +17,7 @@ FIELD = {
 
 def _snapshot(db, as_of):
     user, checking, _card = _seed_spreadsheet_scenario(db)
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         return compute_budget_snapshot(db, user, checking.id, as_of=as_of)
 
 

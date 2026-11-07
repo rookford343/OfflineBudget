@@ -83,11 +83,17 @@ def upcoming_bills(
     forecast_income: dict[int, tuple[date, Decimal]] = {}
     if any(item.type == models.RecurringType.income for item, _ in due):
         forecast_income = _forecast_income(db, user_id, today, today + timedelta(days=days))
-    due_with_amount: list[tuple[models.RecurringItem, date, Decimal | None]] = [
-        (item, *forecast_income[item.id]) if item.id in forecast_income else (item, d, None)
+    # (item, natural due date, date shown, forecast amount or None)
+    due_with_amount: list[tuple[models.RecurringItem, date, date, Decimal | None]] = [
+        (item, d, *forecast_income[item.id]) if item.id in forecast_income else (item, d, d, None)
         for item, d in due
     ]
 
+    # Keyed by the NATURAL due date (the weekend rule): the forecast places a
+    # Saturday payday on Friday, but its override is still Saturday's. A
+    # paycheck's forecast amount already has its override in it, plus the
+    # Social Security boost on top, so it is used as it is; substituting the
+    # override for it dropped the boost.
     overrides: dict[tuple[int, date], Decimal] = {
         (o.recurring_item_id, o.due_date): o.actual_amount
         for o in db.query(models.BillAmountOverride).filter(
@@ -101,14 +107,14 @@ def upcoming_bills(
         UpcomingBill(
             recurring_item_id=item.id,
             name=item.name,
-            due_date=d,
-            amount=overrides.get((item.id, d), projected if projected is not None else item.amount),
+            due_date=shown,
+            amount=projected if projected is not None else overrides.get((item.id, natural), item.amount),
             estimated_amount=item.amount,
-            is_actual=(item.id, d) in overrides,
+            is_actual=(item.id, natural) in overrides,
             card_id=item.card_id,
             type=item.type,
         )
-        for item, d, projected in due_with_amount
+        for item, natural, shown, projected in due_with_amount
     ]
 
 
@@ -116,14 +122,14 @@ def _forecast_income(db: Session, user_id: int, start: date, end: date) -> dict[
     """First projected occurrence of each income item in [start, end], as the
     primary checking account's forecast places it. Income that doesn't land
     in that account isn't here, and callers fall back to its own schedule."""
-    from backend.services.forecast_engine import build_forecast
+    from backend.services.forecast_walk import standard_walk, walk_from
     from backend.services.primary_account import primary_checking
 
     account = primary_checking(db, user_id)
     if account is None:
         return {}
     found: dict[int, tuple[date, Decimal]] = {}
-    for entry in build_forecast(db, user_id, account.id, start, end):
+    for entry in walk_from(standard_walk(db, user_id, account.id, start, end), start):
         for t in entry.transactions:
             if t.type == "income" and not t.is_actual and t.recurring_item_id is not None:
                 found.setdefault(t.recurring_item_id, (entry.date, t.amount))

@@ -6,7 +6,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import BankConnectionStatusOut, MonthlySummary, WeeklyDigest, ForecastRisk
-from backend.services.forecast_engine import build_forecast, find_balance_risk, _next_occurrence_on_or_after
+from backend.services.forecast_engine import find_balance_risk, _next_occurrence_on_or_after
+from backend.services.forecast_walk import standard_walk, walk_from
 from backend.services.budget_snapshot import compute_budget_snapshot, spending_breakdown
 from backend.services.pending import card_pending
 from backend.services.upcoming_bills import upcoming_bills
@@ -821,7 +822,9 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
         models.Account.id == account_id, models.Account.user_id == user.id,
     ).first()
     threshold = account.low_balance_threshold if account and account.low_balance_threshold is not None else Decimal("0")
-    forecast_entries = build_forecast(db, user.id, account_id, today, today + timedelta(days=90))
+    forecast_entries = walk_from(
+        standard_walk(db, user.id, account_id, today, today + timedelta(days=90)), today,
+    )
     risk_dict = find_balance_risk(forecast_entries, threshold)
     risk = ForecastRisk(**risk_dict)
 

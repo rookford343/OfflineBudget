@@ -31,6 +31,11 @@ from backend.services.pending import card_pending, checking_pending_debits
 # PENDING_LOOKBACK_DAYS) for the same reason: a card issuer's balance feed
 # lagged up to ~6 days earlier this same session.
 _UNCONFIRMED_LOOKBACK_DAYS = 7
+# The walk horizon: every walk projects from today - WALK_LOOKBACK_DAYS,
+# whatever its start (see "Walk horizon" in build_forecast). A recurring item
+# due inside it and still unmatched counts as not yet posted; an older one no
+# longer reaches today's balance. forecast_walk.standard_walk starts here.
+WALK_LOOKBACK_DAYS = 45
 # How far either side of a card payoff's date a posted payment still settles
 # it (_cc_actual_nearby's window).
 _CC_NEARBY_DAYS = 7
@@ -852,13 +857,15 @@ def build_forecast(
     ss = SSWageBaseTracker.for_user(user, recurring_items, set(bonus_plans), start_date)
 
     # Known statement amounts for specific upcoming occurrences, keyed by
-    # (recurring_item_id, due_date) so a lookup during the day walk is exact.
+    # (recurring_item_id, natural due_date) so a lookup during the day walk is
+    # exact. Two days past end_date: a Saturday or Sunday due date posts on
+    # the Friday before it, which may be the window's last day.
     bill_actuals: dict[tuple[int, date], Decimal] = {
         (o.recurring_item_id, o.due_date): o.actual_amount
         for o in db.query(models.BillAmountOverride).filter(
             models.BillAmountOverride.user_id == user_id,
             models.BillAmountOverride.due_date >= start_date,
-            models.BillAmountOverride.due_date <= end_date,
+            models.BillAmountOverride.due_date <= end_date + timedelta(days=2),
         ).all()
     }
 
@@ -1062,7 +1069,7 @@ def build_forecast(
             and not (card.balance_due and card.balance_due > 0)
         )
         if payment_is_stale:
-            next_payment = _next_occurrence_on_or_after(card.due_day, max(today, start_date))
+            next_payment = _next_occurrence_on_or_after(card.due_day, today)
 
         # The cycle right after a locked payoff is not a guess -- most of it is
         # already sitting on the card. the user derives it exactly this way
@@ -1142,7 +1149,11 @@ def build_forecast(
             # asked on the 14th with a 28th statement_day) still finds the
             # 28th of THAT month either way, because 17 days separate the
             # 14th from July's close -- outside the lookback regardless.
-            anchor = max(today, start_date)
+            # Today, not the window's start: the cycle after a locked payoff
+            # is one fact about the card, so a window opening next month must
+            # place it where a window opening today does (it fell a month late
+            # in a future window, and that month got a flat estimate instead).
+            anchor = today
             if not (card.balance_due and card.balance_due > 0):
                 recent_close = _most_recent_occurrence_on_or_before(card.statement_day, anchor)
                 if (anchor - recent_close).days <= _UNCONFIRMED_LOOKBACK_DAYS:
@@ -1163,7 +1174,7 @@ def build_forecast(
             # subscriptions (found live 2026-10-30). The Forecast page keeps
             # every bill in the payoff.
             subscriptions_before_close = Decimal("0")
-            cursor = max(today, start_date) + timedelta(days=1)
+            cursor = today + timedelta(days=1)
             while cursor <= next_close:
                 for item in card_items_by_card.get(card.id, []):
                     if not _fires_on(item, cursor):
@@ -1490,78 +1501,61 @@ def build_forecast(
                     is_pending=True,
                     is_cc_payment=True,
                 ))
-    if start_date < today:
-        past_sum = sum(
-            Decimal(str(t.amount)) for t in all_actuals if t.date < today
-        )
-        balance = current_balance - past_sum
-    elif start_date > today:
-        # A window that begins in the future has to carry in everything that
-        # happens between now and then. Without this it opened at TODAY's
-        # balance, so asking for next year silently discarded the remainder of
-        # this one -- next January started richer or poorer than December
-        # ended, and the two years did not join up.
-        #
-        # The bridge starts at the beginning of the CURRENT year, not at
-        # today, so it walks exactly the same path a same-year request walks.
-        # Starting it at today instead made the two disagree on day one: a
-        # window opening in the past re-projects bills whose due date has
-        # passed but which have not posted yet, while a window opening today
-        # anchors to the real bank balance and never sees them. That
-        # difference showed up as a seam between December and January.
-        #
-        # The bridge always starts in the past, so it takes the first branch
-        # above and cannot recurse further.
-        bridge_start = date(today.year, 1, 1)
+    # Walk horizon. Every walk projects from `horizon` on, whatever its
+    # start, so every start gives the same balance from the horizon on (and
+    # so from today on). The standard walk (forecast_walk.standard_walk)
+    # starts exactly here.
+    #
+    # - A walk starting AFTER the horizon (a calendar month, today, a future
+    #   month) opens on a bridge walked from the horizon. That carries in the
+    #   recurring items due since the horizon and still unmatched -- the
+    #   user's rule, 2026-09-01: "keep forecasting as if transactions are
+    #   happening as when they say they are happening", not waiting on sync
+    #   -- and, for a future window, everything between now and its start.
+    #   The bridge always starts at the horizon, so it takes the other branch
+    #   and cannot recurse further. It keeps every flag, so a Safety Margin
+    #   walk's bridge is a Safety Margin walk too.
+    # - A walk starting AT or BEFORE the horizon (the Forecast tab's year
+    #   views) seeds from the bank balance and walks its history as before,
+    #   then re-seeds at the horizon to the balance a horizon walk opens
+    #   with. Whatever that history drew -- a January paycheck that never
+    #   matched an actual, an old checkpoint the ledger disagrees with --
+    #   stays in the history and stops there.
+    #
+    # Until 2026-11 the bridges started at Jan 1 (future windows) or 7 days
+    # back (start=today), and a past start projected from its own first day.
+    # The same day then drew different balances by start: a January
+    # paycheck that never matched an actual still sat in the Forecast tab's
+    # today balance, and /risk (start=today) missed a bill unmatched for
+    # three weeks that the Dashboard's lows counted.
+    #
+    # current_balance is the live bank balance and already reflects
+    # anything dated today, so a walk that reaches today reverses today's
+    # actuals as well as earlier ones -- the walk re-applies them below.
+    # Reproduced live: $500.00 - $7,500.00 landed at -$7,000.00 when a
+    # same-day actual was counted twice.
+    horizon = today - timedelta(days=WALK_LOOKBACK_DAYS)
+    walked_actuals_sum = sum(
+        (Decimal(str(t.amount)) for t in all_actuals if t.date <= today), Decimal("0"),
+    )
+    horizon_seed: Decimal | None = None
+    if start_date > horizon:
         bridge = build_forecast(
-            db, user_id, account_id, bridge_start, start_date - timedelta(days=1),
+            db, user_id, account_id, horizon, start_date - timedelta(days=1),
             overrides=overrides, apply_buffer_transfers=apply_buffer_transfers,
             proposal=proposal,
+            include_unbilled_card_bills=include_unbilled_card_bills,
+            replan_overdue_card_payoffs=replan_overdue_card_payoffs,
         )
-        balance = bridge[-1].projected_balance if bridge else current_balance
+        opening = bridge[-1].projected_balance if bridge else current_balance
+        balance = opening - walked_actuals_sum
     else:
-        # start_date == today exactly. current_balance is the live bank
-        # balance -- it already reflects anything dated today (a same-day
-        # bank-synced or manually-recorded transaction, e.g. the user's Chase
-        # payoff, 2026-08-27). The walk's first day re-applies `actuals_today`
-        # below, so without this reversal a same-day actual gets counted
-        # twice: once already baked into current_balance, once again in the
-        # walk. The `start_date < today` branch above already reverses
-        # actuals strictly before today for the same reason -- this mirrors
-        # it for the one day that branch doesn't cover. Reproduced live:
-        # $500.00 - $7,500.00 landed at -$7,000.00 without this.
-        today_actuals_sum = sum(
-            (Decimal(str(t.amount)) for t in all_actuals if t.date == today),
-            Decimal("0"),
-        )
-
-        # current_balance only knows what the bank has actually posted. A
-        # recurring item due in the last _UNCONFIRMED_LOOKBACK_DAYS is
-        # invisible here otherwise: the day-walk below never visits a date
-        # before start_date (today), so a paycheck or bill that's scheduled
-        # but still unconfirmed by bank sync just silently vanishes from the
-        # forecast instead of landing on the date it's supposed to -- the user's
-        # correction, 2026-09-01: "keep forecasting as if transactions are
-        # happening as when they say they are happening", not waiting on
-        # sync. Bridging through a short recent window (same established
-        # pattern as the start_date > today branch above, just with a bounded
-        # lookback instead of back to January -- this runs on every
-        # start=today call, the common case, so it has to stay cheap) lets
-        # the existing day-walk's own actual-vs-projected suppression do the
-        # work: when everything in the window is already confirmed, the
-        # bridge's ending balance reduces to exactly current_balance (each
-        # actual gets reversed out of the seed then re-applied walking
-        # forward, net zero); when something recent is still unconfirmed, its
-        # projected amount gets added in instead, exactly once, without
-        # touching how any OTHER start_date behaves.
-        lookback_start = today - timedelta(days=_UNCONFIRMED_LOOKBACK_DAYS)
-        bridge = build_forecast(
-            db, user_id, account_id, lookback_start, today - timedelta(days=1),
-            overrides=overrides, apply_buffer_transfers=apply_buffer_transfers,
-            proposal=proposal,
-        )
-        bridged_balance = bridge[-1].projected_balance if bridge else current_balance
-        balance = bridged_balance - today_actuals_sum
+        balance = current_balance - walked_actuals_sum
+        if start_date < horizon <= end_date:
+            horizon_seed = current_balance - sum(
+                (Decimal(str(t.amount)) for t in all_actuals if horizon <= t.date <= today),
+                Decimal("0"),
+            )
 
     # Lookup for CC suppression — keyed by the name stored in cc_payments / cc_estimates_by_date
     card_by_name: dict[str, models.CreditCard] = {(c.name or ""): c for c in all_active_cards}
@@ -1676,6 +1670,8 @@ def build_forecast(
     current = start_date
 
     while current <= end_date:
+        if current == horizon and horizon_seed is not None:
+            balance = horizon_seed
         if ss is not None:
             ss.roll_year(current)
         day_transactions: list[ForecastTransaction] = []
@@ -1753,7 +1749,11 @@ def build_forecast(
             # while the bill due 2026-09-08 is $250.00; editing the item would
             # rewrite every future month to a September-only number and lose
             # the estimate the forecast needs for October onward.
-            actual_override = bill_actuals.get((item.id, current))
+            #
+            # Keyed by the NATURAL due date: the weekend shift moves only the
+            # day it posts. Looked up on `current`, a statement due Saturday
+            # missed on the Friday it posts and the modelled amount went in.
+            actual_override = bill_actuals.get((item.id, natural_fire_date))
             bonus_plan = bonus_plans.get(item.id)
             # Year of the NATURAL fire date, not `current` -- see
             # natural_fire_date above. Counting the gross against the SS
@@ -2198,6 +2198,8 @@ def build_quarters(
     step between December and January. Sharing a single walk removes the
     seam by construction rather than by reconciling two paths.
     """
+    # Custom walk: a year view needs its history from Jan 1. From the walk
+    # horizon on, build_forecast gives the standard walk's balances.
     # Build the full year in one pass so Q2+ open balances chain from Q1 close.
     full_start = date(year, 1, 1)
     full_end = date(year, 12, 31)

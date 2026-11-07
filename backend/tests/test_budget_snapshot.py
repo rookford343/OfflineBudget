@@ -112,7 +112,7 @@ def _fake_quarter_min(amount: str):
 def test_left_to_spend_and_safety_margin_match_spreadsheet_exactly(db_session):
     user, checking, card = _seed_spreadsheet_scenario(db_session)
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     # Golden value. Was 966.01 under the spreadsheet's "new spending since
@@ -149,7 +149,7 @@ def test_no_active_cards_gives_zero_card_balance(db_session):
     db_session.add(checking)
     db_session.commit()
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("500.00")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("500.00")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert snapshot.cards == []
@@ -248,7 +248,7 @@ def test_left_to_spend_ignores_already_statemented_balance(db_session):
     fresh_user, fresh_checking = _seed("freshstmt", "0.00", "500.00")
     heavy_user, heavy_checking = _seed("heavystmt", "7342.90", "7842.90")
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5000.00")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5000.00")):
         fresh = compute_budget_snapshot(db_session, fresh_user, fresh_checking.id, as_of=date(2026, 8, 12))
         heavy = compute_budget_snapshot(db_session, heavy_user, heavy_checking.id, as_of=date(2026, 8, 12))
 
@@ -320,7 +320,7 @@ def test_weekly_figures_are_the_monthly_ones_prorated(db_session):
     """
     user, checking, card = _seed_spreadsheet_scenario(db_session)
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     # Aug 7: 25 days remain -> 25/7 weeks, so one week is 7/25 of the month.
@@ -353,7 +353,7 @@ def test_over_budget_names_the_savings_transfer_to_skip(db_session):
     card.pending_charges = Decimal("40000.00")
     card.pending_charges_updated_at = datetime.utcnow()
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert snapshot.on_pace is False
@@ -368,7 +368,7 @@ def test_pull_from_savings_rounds_up_to_whole_transfer_increments(db_session):
     user.transfer_increment = Decimal("1000.00")
 
     # Drive safety_margin negative via the quarter minimum it derives from.
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("-5000.00")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("-5000.00")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert snapshot.safety_margin < 0
@@ -380,7 +380,7 @@ def test_pull_from_savings_rounds_up_to_whole_transfer_increments(db_session):
 def test_healthy_month_asks_for_neither_action(db_session):
     user, checking, card = _seed_spreadsheet_scenario(db_session)
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert snapshot.safety_margin > 0
@@ -398,7 +398,7 @@ def test_groceries_budget_is_removed_from_the_spendable_pool(db_session):
     """
     user, checking, card = _seed_spreadsheet_scenario(db_session)
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         base = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     groceries = db_session.query(models.Category).filter(
@@ -413,7 +413,7 @@ def test_groceries_budget_is_removed_from_the_spendable_pool(db_session):
     alloc.budgeted_amount = alloc.budgeted_amount + Decimal("100.00")
     db_session.commit()
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         after = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert after.left_to_spend == base.left_to_spend - Decimal("100.00")
@@ -426,7 +426,7 @@ def test_reserve_sizes_the_savings_needed_to_cover_the_shortfall(db_session):
     card.pending_charges = Decimal("40000.00")  # force a shortfall
     card.pending_charges_updated_at = datetime.utcnow()
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert snapshot.shortfall_this_month == -snapshot.left_to_spend
@@ -438,7 +438,7 @@ def test_reserve_sizes_the_savings_needed_to_cover_the_shortfall(db_session):
 def test_no_shortfall_means_no_reserve_requirement(db_session):
     user, checking, card = _seed_spreadsheet_scenario(db_session)
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert snapshot.left_to_spend > 0
@@ -455,12 +455,12 @@ def test_pull_from_savings_strategy_keeps_the_savings_budget_spendable(db_sessio
     """
     user, checking, card = _seed_spreadsheet_scenario(db_session)
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         saving = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     user.savings_strategy = "pull_from_savings"
     db_session.commit()
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         pulling = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert pulling.left_to_spend == saving.left_to_spend + saving.savings_budget
@@ -499,7 +499,7 @@ def test_left_to_spend_card_notes_never_leak_a_balance(db_session):
 
 def _snapshot_for_notes_test(db_session):
     user, checking, card = _seed_spreadsheet_scenario(db_session)
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         return compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
 
@@ -510,7 +510,7 @@ def test_safety_margin_today_is_the_weekly_figure_prorated_by_days_left(db_sessi
     shape as spendable_today, just dividing safety_margin_weekly instead of
     left_to_spend_weekly by the same days_left_in_week."""
     user, checking, card = _seed_spreadsheet_scenario(db_session)
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         snap = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 7))
 
     assert snap.safety_margin_today == (
@@ -525,7 +525,7 @@ def test_safety_margin_today_last_week_of_month_and_negative(db_session):
     negative -- the per-day figure must stay negative and still match the
     same prorated formula exactly."""
     user, checking, card = _seed_spreadsheet_scenario(db_session)
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("-50000.00")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("-50000.00")):
         snap = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 8, 27))  # 5 days remain
 
     assert snap.days_remaining_in_month <= 7

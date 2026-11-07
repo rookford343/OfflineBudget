@@ -628,17 +628,18 @@ def test_safety_floor_leaves_unbilled_card_bills_out_of_the_carried_cycle(db_ses
 
     # And the snapshot's floor is the caller that opts out.
     seen = {}
-    real = budget_snapshot.build_forecast
+    from backend.services import forecast_walk
+    real = forecast_walk.build_forecast
 
     def spy(*args, **kwargs):
         seen.update(kwargs)
         return real(*args, **kwargs)
 
-    budget_snapshot.build_forecast = spy
+    forecast_walk.build_forecast = spy
     try:
         budget_snapshot._lookahead_minimum(db_session, user.id, account.id, today)
     finally:
-        budget_snapshot.build_forecast = real
+        forecast_walk.build_forecast = real
     assert seen.get("include_unbilled_card_bills") is False
 
 

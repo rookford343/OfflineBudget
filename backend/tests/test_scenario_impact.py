@@ -22,7 +22,7 @@ apart. Nothing caught it because this file's fixture held only a proposal, so
 no test ever put an override through `/impact`. It now holds both, and the
 override path has its own tests below.
 """
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -36,6 +36,7 @@ from backend.routers import scenarios as scenarios_router
 from backend.services import scenario_service
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.forecast_engine import build_quarters
+from backend.services.forecast_walk import WALK_LOOKBACK_DAYS
 
 # The tweak the override-only scenario applies, and the item it lands on.
 # Large enough that a dropped override cannot hide inside rounding.
@@ -238,12 +239,18 @@ def test_the_strip_and_the_comparison_chart_agree_about_a_tweak(tweak_only):
     balances and their raw balances are not the same numbers. What IS
     comparable is the SIZE of the change each attributes to the scenario: a
     monthly bill raised by D costs D more every month, so a year's chart must
-    end twelve times D lower while the strip's monthly commitments rise by
+    end D lower per occurrence while the strip's monthly commitments rise by
     exactly D. That is the arithmetic that was silently violated -- the chart
     moved by a year's worth and the strip did not move at all.
+
+    Only the occurrences from the walk horizon (today - WALK_LOOKBACK_DAYS)
+    on carry into the year-end balance: there the year view re-seeds to the
+    standard walk's balance, so a tweak to a month long past stays in that
+    month's history (calc v4, one walk policy).
     """
     db, user, account, scenario, _item = tweak_only
     year = date.today().year
+    horizon = date.today() - timedelta(days=WALK_LOOKBACK_DAYS)
     overrides, proposal = scenario_service.resolve_scenario(db, user.id, scenario.id)
     assert overrides, "fixture must actually carry a tweak for this to mean anything"
 
@@ -266,12 +273,14 @@ def test_the_strip_and_the_comparison_chart_agree_about_a_tweak(tweak_only):
     # One D per occurrence in the year's walk. Usually twelve, but a 1st that
     # falls on a weekend moves to the business day before it, so a year can
     # hold thirteen (2027 picks up 2028-01-01, a Saturday) or eleven.
-    occurrences = sum(
-        1 for q in scenario_chart for day in q.days for t in day.transactions
+    housing_days = [
+        day.date for q in scenario_chart for day in q.days for t in day.transactions
         if t.name == "Housing" and not t.is_actual
-    )
-    assert 11 <= occurrences <= 13
-    assert chart_year_end_delta == strip_monthly_delta * occurrences
+    ]
+    assert 11 <= len(housing_days) <= 13
+    since_horizon = sum(1 for d in housing_days if d >= horizon)
+    assert since_horizon >= 1
+    assert chart_year_end_delta == strip_monthly_delta * since_horizon
 
 
 def test_a_tweak_changes_the_snapshots_lookahead_floor(tweak_only):

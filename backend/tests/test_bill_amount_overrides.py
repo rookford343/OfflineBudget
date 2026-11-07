@@ -42,13 +42,16 @@ def _next_due(day: int = 8) -> date:
     appears in it, and GET /bill-overrides's default upcoming_only filter
     drops it too.
 
-    Also run through _adjust_for_weekend: build_forecast pulls a recurring
-    item's occurrence forward to the preceding Friday when the raw
-    day-of-month lands on a Saturday/Sunday, so an override/lookup date that
-    skipped this would silently miss the day the projection actually posts
-    on -- caught the same day as the first fix, one raw day-of-8 candidate
-    later happening to land on a Sunday."""
-    return _adjust_for_weekend(_next_occurrence_on_or_after(day, date.today() + timedelta(days=1)))
+    The NATURAL due date, the one an override is keyed by (the weekend
+    rule): the Recurring page and the bill prompts store it, and the
+    forecast moves only the day it posts. See _posts_on."""
+    return _next_occurrence_on_or_after(day, date.today() + timedelta(days=1))
+
+
+def _posts_on(due: date) -> date:
+    """The day the forecast posts a bill due on `due`: a Saturday or Sunday
+    due date moves to the Friday before it."""
+    return _adjust_for_weekend(due)
 
 
 def _amount_on(db, user, acct, target: date, name: str):
@@ -72,7 +75,7 @@ def test_override_replaces_the_projected_amount_on_its_own_date(db_session):
         due_date=due, actual_amount=Decimal("214.07")))
     db_session.commit()
 
-    assert _amount_on(db_session, user, acct, due, "Duke Electric") == Decimal("-214.07")
+    assert _amount_on(db_session, user, acct, _posts_on(due), "Duke Electric") == Decimal("-214.07")
 
 
 def test_other_months_keep_the_modelled_amount(db_session):
@@ -84,7 +87,7 @@ def test_other_months_keep_the_modelled_amount(db_session):
     # the search from its adjusted date could still land inside the same
     # month instead of rolling over to the next one.
     raw_due = _next_occurrence_on_or_after(8, date.today() + timedelta(days=1))
-    due = _adjust_for_weekend(raw_due)
+    due = raw_due
     next_month = _adjust_for_weekend(_next_occurrence_on_or_after(8, raw_due + timedelta(days=1)))
     db_session.add(models.BillAmountOverride(
         user_id=user.id, recurring_item_id=item.id,
@@ -131,10 +134,10 @@ def test_deleting_an_override_restores_the_projection(db_session):
     due = _next_due()
     created = c.post("/bill-overrides", json={
         "recurring_item_id": item.id, "due_date": due.isoformat(), "actual_amount": "214.07"}).json()
-    assert _amount_on(db_session, user, acct, due, "Duke Electric") == Decimal("-214.07")
+    assert _amount_on(db_session, user, acct, _posts_on(due), "Duke Electric") == Decimal("-214.07")
 
     assert c.delete(f"/bill-overrides/{created['id']}").status_code == 204
-    assert _amount_on(db_session, user, acct, due, "Duke Electric") == Decimal("-180.00")
+    assert _amount_on(db_session, user, acct, _posts_on(due), "Duke Electric") == Decimal("-180.00")
 
 
 def test_cannot_override_another_users_bill(db_session):

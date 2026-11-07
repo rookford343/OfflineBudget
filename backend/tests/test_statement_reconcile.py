@@ -287,7 +287,7 @@ def test_stale_card_still_flagged_but_left_to_spend_note_no_longer_warns(db_sess
     db_session.commit()
 
     with patch(
-        "backend.services.budget_snapshot.build_forecast",
+        "backend.services.forecast_walk.build_forecast",
         return_value=_fake_quarter_min("1000.00", date(2026, 9, 25)),
     ):
         snap = compute_budget_snapshot(db_session, user, checking.id, as_of=date(2026, 9, 20))

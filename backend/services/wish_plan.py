@@ -74,7 +74,7 @@ def earliest_safe_date(dates, base, mask, prior: list[Decimal], flows_for: Calla
 
 from backend import models
 from backend.services.budget_snapshot import floor_mask
-from backend.services.forecast_engine import build_forecast
+from backend.services.forecast_walk import standard_walk, walk_from
 from backend.services.scenario_service import resolve_scenario
 from backend.services.wish_math import CardMissing, FinancedMonthsInvalid, option_flows, total_cost, monthly_payment
 
@@ -98,9 +98,9 @@ def _series(db, user_id, account_id, today, end, proposal=None, overrides=None):
     # Margin's walk (False) leaves them out because Safety Margin subtracts
     # them itself; the Wish List never did, so walking that series made its
     # safe dates and lows optimistic by this month's remaining card bills.
-    days = build_forecast(db, user_id, account_id, today - timedelta(days=45), end,
-                          overrides=overrides, proposal=proposal, include_unbilled_card_bills=True)
-    return [d for d in days if d.date >= today]
+    days = standard_walk(db, user_id, account_id, today, end, purpose="display",
+                         overrides=overrides, proposal=proposal)
+    return walk_from(days, today)
 
 
 # What the client may see about an option that can't be priced: fixed text

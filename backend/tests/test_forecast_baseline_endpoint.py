@@ -9,7 +9,7 @@ from backend.dependencies import get_db, get_current_user
 from backend.routers import forecast as forecast_router_module
 from backend.schemas import ForecastEntry
 
-ENGINE = "backend.services.forecast_baseline.build_forecast"
+ENGINE = "backend.services.forecast_walk.build_forecast"
 TODAY = "backend.routers.forecast._today"
 
 

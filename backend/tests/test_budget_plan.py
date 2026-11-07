@@ -354,7 +354,7 @@ def test_guard_dashboard_leftover_unchanged_by_classification_and_setting(db_ses
     from backend.tests.test_budget_snapshot import _seed_spreadsheet_scenario, _fake_quarter_min
     user, checking, _card = _seed_spreadsheet_scenario(db_session)
     as_of = date(2026, 8, 7)
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         before = compute_budget_snapshot(db_session, user, checking.id, as_of=as_of)
 
     home = models.Category(user_id=user.id, name="Home", type=E)
@@ -365,7 +365,7 @@ def test_guard_dashboard_leftover_unchanged_by_classification_and_setting(db_ses
     db_session.commit()
     compute_budget_plan(db_session, user, 2026, 8)
 
-    with patch("backend.services.budget_snapshot.build_forecast", return_value=_fake_quarter_min("5120.66")):
+    with patch("backend.services.forecast_walk.build_forecast", return_value=_fake_quarter_min("5120.66")):
         after = compute_budget_snapshot(db_session, user, checking.id, as_of=as_of)
     assert after.leftover == before.leftover
     assert after.left_to_spend == before.left_to_spend

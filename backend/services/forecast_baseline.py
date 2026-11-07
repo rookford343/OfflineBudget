@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from backend import models
 from backend.services import scheduler_state
-from backend.services.forecast_engine import build_forecast
+from backend.services.forecast_walk import standard_walk
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,9 @@ def ensure_month_baseline(db: Session, user_id: int, account_id: int, as_of: dat
 
     start = date(as_of.year, as_of.month, 1)
     end = date(as_of.year, as_of.month, calendar.monthrange(as_of.year, as_of.month)[1])
-    entries = build_forecast(db, user_id, account_id, start, end)
+    # The standard walk, cut to the month (its days from the 1st on all
+    # lie inside the walk: the baseline is saved in the month's first week).
+    entries = [e for e in standard_walk(db, user_id, account_id, as_of, end) if e.date >= start]
     points = [
         {"date": e.date.isoformat(), "projected_balance": f"{e.projected_balance:.2f}"}
         for e in entries

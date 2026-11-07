@@ -13,8 +13,9 @@ from sqlalchemy.orm import Session, joinedload
 from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
 from backend.services.explain import ExplainBuilder
+from backend.services.forecast_walk import standard_walk
 from backend.services.forecast_engine import (
-    build_forecast, ScenarioProposal,
+    ScenarioProposal,
     _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
 )
 from backend.services.card_matching import card_matches_description
@@ -311,13 +312,13 @@ def _lookahead_window(
     # Started early so the skip state below is already settled by `as_of` --
     # asking on the 27th, three days into a payoff dip, must give the same
     # answer as asking on the 14th.
-    days = build_forecast(
-        db, user_id, account_id, as_of - timedelta(days=45), end,
-        overrides=overrides, proposal=proposal,
+    days = standard_walk(
+        db, user_id, account_id, as_of, end,
         # Safety Margin subtracts this month's card bills itself, so its
-        # walk (False) must not also fold them into the carried cycle's
-        # payoff. The displayed lows pass True, like the Forecast tab.
-        include_unbilled_card_bills=include_unbilled_card_bills,
+        # walk ("safety") must not also fold them into the carried cycle's
+        # payoff. The displayed lows read "display", like the Forecast tab.
+        purpose="display" if include_unbilled_card_bills else "safety",
+        overrides=overrides, proposal=proposal,
     )
     if not days:
         return LookaheadWindow(Decimal("0"), None, [], [])

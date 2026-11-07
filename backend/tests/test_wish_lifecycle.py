@@ -265,7 +265,7 @@ def test_uncommit_wish_rolls_back_its_own_deletes_when_scenario_uncommit_refuses
     ("full_checking_with_later_trade_in", models.WishMethod.full_checking, "1500.00",
      {"trade_value": "400.00", "trade_offset": 40}),
 ])
-def test_plan_predicted_low_point_equals_the_committed_forecasts_low_point(db_session, label, method, price, kw):
+def test_plan_predicted_low_point_equals_the_committed_forecasts_low_point(db_session, monkeypatch, label, method, price, kw):
     """Minor 3: build_plan's explain receipt predicts a low point for an
     option's placement date entirely from an in-memory overlay (the
     baseline forecast plus cumulative cash-flow deltas) -- it never actually
@@ -281,6 +281,15 @@ def test_plan_predicted_low_point_equals_the_committed_forecasts_low_point(db_se
     and every date arithmetic step stay identical on every run."""
     db = db_session
     today = date(2026, 3, 2)
+
+    # The engine's own "today" too: its walk horizon (today - 45 days) is
+    # where every walk re-seeds to the bank balance, so a walk for a pinned
+    # date must see the same today.
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return today
+    monkeypatch.setattr("backend.services.forecast_engine.date", _FixedDate)
     u = models.User(username=f"equiv_{label}", hashed_password="x", display_name="Equiv")
     db.add(u)
     db.flush()
