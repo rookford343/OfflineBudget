@@ -61,6 +61,16 @@ class Settings(BaseSettings):
     # rather than silently hitting the wrong Plaid environment.
     PLAID_ENV: str = "production"
 
+    # Run mode. Only the production instance sets SCHEDULER_ENABLED, so dev and
+    # test copies never run bank sync or send emails against the same accounts.
+    SCHEDULER_ENABLED: bool = False
+    # Built frontend directory served by the backend (None = API only).
+    FRONTEND_DIST_DIR: str | None = None
+    # Interactive API docs at /api/docs and /api/redoc; off unless asked for.
+    API_DOCS_ENABLED: bool = False
+    # The live database file, which dev/test instances must never open.
+    LIVE_DATABASE_PATH: str = "data/budget.db"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     @field_validator("JWT_SECRET")

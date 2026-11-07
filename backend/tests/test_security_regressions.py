@@ -36,6 +36,10 @@ now refuses or neutralizes it.
   - table ownership guard: every table is user-owned (directly or through a
     foreign key) or on the explicit global allowlist, so a new unowned table
     fails loudly instead of re-breaking account deletion.
+  - scheduler gate: with SCHEDULER_ENABLED off (the default) the app never starts the
+    in-process scheduler, so only the production instance runs bank sync and emails.
+  - api docs off: /api/docs, /api/redoc and the OpenAPI schema (and the old /docs paths)
+    are 404 unless API_DOCS_ENABLED is set.
 """
 import logging
 from decimal import Decimal
@@ -885,3 +889,47 @@ def test_every_table_is_owned_or_explicitly_global():
     allowed = {"app_settings", "scheduler_runs", "users"}
     unowned = [t.name for t in Base.metadata.sorted_tables if not is_owned_table(t) and t.name not in allowed]
     assert unowned == []
+
+
+def test_scheduler__default_settings__does_not_start(monkeypatch):
+    import backend.main as main
+
+    assert Settings(_env_file=None).SCHEDULER_ENABLED is False
+    monkeypatch.setattr(main.settings, "SCHEDULER_ENABLED", False)
+    # The lifespan must not touch the real database file; only the scheduler gate is under test.
+    monkeypatch.setattr(main, "create_tables", lambda: None)
+    monkeypatch.setattr(main, "upgrade_schema", lambda: None)
+    monkeypatch.setattr(main, "upgrade_categories", lambda: None)
+    monkeypatch.setattr(main.os, "makedirs", lambda *a, **k: None)
+    with TestClient(main.app):
+        assert main._scheduler.running is False
+    assert main._scheduler.running is False
+
+
+def test_scheduler__enabled__starts_and_stops_with_the_app(monkeypatch):
+    import backend.main as main
+
+    started, stopped = [], []
+    monkeypatch.setattr(main.settings, "SCHEDULER_ENABLED", True)
+    monkeypatch.setattr(main, "create_tables", lambda: None)
+    monkeypatch.setattr(main, "upgrade_schema", lambda: None)
+    monkeypatch.setattr(main, "upgrade_categories", lambda: None)
+    monkeypatch.setattr(main.os, "makedirs", lambda *a, **k: None)
+    # Stub the scheduler so no real job can ever fire.
+    fake = type("FakeScheduler", (), {
+        "start": lambda self: started.append(1),
+        "shutdown": lambda self, wait=True: stopped.append(1),
+    })()
+    monkeypatch.setattr(main, "_scheduler", fake)
+    with TestClient(main.app):
+        assert started == [1]
+    assert stopped == [1]
+
+
+def test_api_docs__default__not_served():
+    import backend.main as main
+
+    assert Settings(_env_file=None).API_DOCS_ENABLED is False
+    client = TestClient(main.app)
+    for path in ("/api/docs", "/api/redoc", "/docs", "/redoc", "/openapi.json", "/api/openapi.json"):
+        assert client.get(path).status_code == 404, path

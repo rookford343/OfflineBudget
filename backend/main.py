@@ -429,17 +429,21 @@ async def _lifespan(app: FastAPI):
         with SessionLocal() as _db:
             for line in migrate_cushions(_db, apply=True):
                 logger.info("cushion migration: %s", line)
-    _scheduler.start()
+    scheduler_on = settings.SCHEDULER_ENABLED
+    if scheduler_on:
+        _scheduler.start()
     yield
-    _scheduler.shutdown(wait=False)
+    if scheduler_on:
+        _scheduler.shutdown(wait=False)
 
 
 app = FastAPI(
     title="OfflineBudget",
     description="Forecasting-first personal budget tracker",
     version="2.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url="/api/docs" if settings.API_DOCS_ENABLED else None,
+    redoc_url="/api/redoc" if settings.API_DOCS_ENABLED else None,
+    openapi_url="/api/openapi.json" if settings.API_DOCS_ENABLED else None,
     lifespan=_lifespan,
 )
 
