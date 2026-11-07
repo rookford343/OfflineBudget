@@ -471,9 +471,10 @@ outside `pending.py`; its allowlist carries a reason per entry, and adding a
 module to it needs a line in architecture.md. The parity file also checks
 Available to Spend's walk to Left to Spend, Net Position, and live vs stored
 net worth. On the browser side, `frontend/tests/moneyGuard.test.ts` (run with
-`cd frontend && bun test`) fails when a page adds or subtracts money figures
-with `.reduce(` or `parseFloat(...) - parseFloat(...)`: add the figure to the
-backend response and display it instead of computing it in React.
+`cd frontend && bun test`) fails when a page adds or subtracts money figures:
+a `.reduce(`, `parseFloat(...) - parseFloat(...)`, subtraction between
+"money locals" (`const left = budget - spent`) or a loop `+=`. Add the figure
+to the backend response and display it instead of computing it in React.
 
 ## Shared Helpers (one place to fix)
 

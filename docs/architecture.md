@@ -280,11 +280,13 @@ Three tests keep the layer from eroding; all run in the normal suite.
   rows, not a headline figure). The scan also covers SQL `func.sum(...)`.
 
 - `frontend/tests/moneyGuard.test.ts` (`bun test`) scans `frontend/src/**/*.{ts,tsx}` for a
-  `.reduce(` that adds or subtracts, and for `+` / `-` between `parseFloat(...)` / `Number(...)`
-  results, when the statement names a money identifier (`amount`, `balance`, `pending`, `actual`,
-  `budget`, `available`, ...). Sort comparators are ignored. Fix a hit by moving the figure to the
+  `.reduce(` that adds or subtracts, for `+` / `-` between `parseFloat(...)` / `Number(...)` results,
+  between "money locals" (a `const`/`let` whose name or initializer names a money identifier, so
+  `left = discBudget - disc` is caught), and for `+=` / `-=` loops over them. Money identifiers:
+  `amount`, `balance`, `pending`, `actual`, `budget`, `available`, `total`, ... Sort comparators
+  are ignored. Fix a hit by moving the figure to the
   backend. Its allowlist (path plus snippet, with a reason, stale entries fail) holds only
-  presentational code and unsaved-form previews. Percent-of-total ratios are not caught and may stay
+  presentational code and unsaved-form previews. Percent ratios over backend figures may stay (allowlisted by entry)
   (decision (c)).
 
 ## Decisions log

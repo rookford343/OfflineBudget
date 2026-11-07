@@ -240,9 +240,9 @@ def test_net_position_is_checking_posted_less_cards_due(db_session, monkeypatch)
     out = resp.json()
     posted = sum((a.current_balance for a in db_session.query(models.Account).filter(
         models.Account.user_id == user.id, models.Account.type == models.AccountType.checking,
-        models.Account.is_active == True)), D("0"))  # noqa: E712
+        models.Account.is_active == True)), D("0"))  # noqa: E712 (SQLAlchemy column comparison, not a Python truth test)
     due = sum((c.balance_due for c in db_session.query(models.CreditCard).filter(
-        models.CreditCard.user_id == user.id, models.CreditCard.is_active == True)), D("0"))  # noqa: E712
+        models.CreditCard.user_id == user.id, models.CreditCard.is_active == True)), D("0"))  # noqa: E712 (SQLAlchemy column comparison, not a Python truth test)
     assert posted == D("3000.00") and due == D("650.00")
     assert D(str(out["checking_total"])) == posted
     assert D(str(out["cards_due_total"])) == due
