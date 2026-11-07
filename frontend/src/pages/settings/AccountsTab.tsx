@@ -9,7 +9,7 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { byName } from "../../lib/selectOptions";
 import PlaidFirstImportPreview from "./PlaidFirstImportPreview";
 
-const emptyAccount = { name: "", type: "checking", current_balance: "0", low_balance_threshold: "", interest_rate: "", notes: "", is_emergency_fund: false };
+const emptyAccount = { name: "", type: "checking", current_balance: "0", interest_rate: "", notes: "", is_emergency_fund: false };
 
 // Names the connection that already syncs an account, from the /link 409's
 // `existing_provider`. Unknown or missing falls back to a neutral phrase.
@@ -181,7 +181,6 @@ export default function AccountsTab() {
     const data = {
       ...accForm,
       current_balance: parseFloat(accForm.current_balance),
-      low_balance_threshold: accForm.low_balance_threshold ? parseFloat(accForm.low_balance_threshold) : null,
       interest_rate: accForm.interest_rate ? parseFloat(accForm.interest_rate) : null,
       is_emergency_fund: accForm.is_emergency_fund,
     };
@@ -191,7 +190,7 @@ export default function AccountsTab() {
   function openNewAcc() { setAccForm({ ...emptyAccount }); setEditAcc(null); setShowAccForm(true); }
   function openEditAcc(a: any) {
     setEditAcc(a);
-    setAccForm({ name: a.name, type: a.type, current_balance: a.current_balance, low_balance_threshold: a.low_balance_threshold ?? "", interest_rate: a.interest_rate ?? "", notes: a.notes ?? "", is_emergency_fund: a.is_emergency_fund ?? false });
+    setAccForm({ name: a.name, type: a.type, current_balance: a.current_balance, interest_rate: a.interest_rate ?? "", notes: a.notes ?? "", is_emergency_fund: a.is_emergency_fund ?? false });
     setShowAccForm(true);
   }
 
@@ -209,14 +208,8 @@ export default function AccountsTab() {
               <div>
                 <div className="flex items-center gap-2">
                   <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{a.name}</p>
-                  {a.low_balance_threshold && parseFloat(a.current_balance) < parseFloat(a.low_balance_threshold) && (
-                    <AlertTriangle size={14} className="text-amber-500" />
-                  )}
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">{a.type.replace("_", " ")}</p>
-                {a.low_balance_threshold && (
-                  <p className="text-xs text-amber-600 dark:text-amber-400">Alert below {fmt(a.low_balance_threshold)}</p>
-                )}
               </div>
               <div className="flex items-center gap-3">
                 {editBalId === a.id ? (
@@ -425,7 +418,7 @@ export default function AccountsTab() {
                 </select>
               </div>
               <div><label className="label">Current Balance</label><input type="number" step="0.01" className="input" value={accForm.current_balance} onChange={e => setAccForm({ ...accForm, current_balance: e.target.value })} /></div>
-              <div><label className="label">Warn When Balance Drops Below (optional)</label><input type="number" step="0.01" className="input" placeholder="e.g. 1000" value={accForm.low_balance_threshold} onChange={e => setAccForm({ ...accForm, low_balance_threshold: e.target.value })} /></div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">The low-balance warning is one cushion for everything. Set it in Settings, Preferences.</p>
               <div><label className="label">Annual Interest Rate % (optional, for savings/HYSA)</label><input type="number" step="0.01" className="input" placeholder="e.g. 4.5" value={accForm.interest_rate} onChange={e => setAccForm({ ...accForm, interest_rate: e.target.value })} /></div>
               {/* Intent, not product type: a money market can be either an
                   emergency fund or ordinary savings, and only the owner knows

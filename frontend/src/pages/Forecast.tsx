@@ -110,9 +110,6 @@ export default function Forecast() {
 
   const activeAccountId = accountId ?? checkingAccounts[0]?.id;
   const activeAccount = checkingAccounts.find((a: any) => a.id === activeAccountId);
-  const lowBalanceThreshold = activeAccount?.low_balance_threshold != null
-    ? parseFloat(activeAccount.low_balance_threshold)
-    : null;
 
   const { data: singleYearQuarters = [], isLoading: singleLoading } = useQuery({
     queryKey: ["forecast-quarters", activeAccountId, year],
@@ -213,6 +210,8 @@ export default function Forecast() {
     queryFn: () => forecastApi.risk(activeAccountId),
     enabled: !!activeAccountId,
   });
+  // The one cushion: /risk's threshold is the user's resolved safety cushion.
+  const lowBalanceThreshold = risk ? parseFloat(risk.threshold) : null;
 
   const { data: categories = [] } = useQuery<any[]>({
     queryKey: ["categories"],
@@ -755,7 +754,7 @@ export default function Forecast() {
                     stroke={isDarkMode() ? "#fbbf24" : "#b45309"}
                     strokeWidth={2}
                     strokeDasharray="6 3"
-                    label={{ value: "Low balance threshold", position: "insideBottomRight", fontSize: 11, fontWeight: 600, fill: isDarkMode() ? "#fbbf24" : "#b45309" }}
+                    label={{ value: "Cushion", position: "insideBottomRight", fontSize: 11, fontWeight: 600, fill: isDarkMode() ? "#fbbf24" : "#b45309" }}
                   />
                 )}
                 {showThreshold && risk?.action_threshold != null && (

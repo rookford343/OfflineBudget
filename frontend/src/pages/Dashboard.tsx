@@ -182,9 +182,11 @@ export default function Dashboard() {
   const budgetByCategory = new Map(budgetOverview.map((r: any) => [r.category_id, r]));
 
   const totalChecking = checkingAccounts.reduce((s: number, a: any) => s + parseFloat(a.current_balance), 0);
-  const anyBelowThreshold = checkingAccounts.some((a: any) =>
-    a.low_balance_threshold != null && parseFloat(a.current_balance) < parseFloat(a.low_balance_threshold)
-  );
+  // One cushion (snapshot.safety_cushion is the resolved value): amber below
+  // it, red below $0.
+  const cushion = snapshot?.safety_cushion != null ? parseFloat(snapshot.safety_cushion) : null;
+  const anyBelowThreshold = cushion != null && checkingAccounts.some((a: any) => parseFloat(a.current_balance) < cushion);
+  const anyBelowZero = checkingAccounts.some((a: any) => parseFloat(a.current_balance) < 0);
   const totalCardsDue = cards.reduce((s: number, c: any) => s + parseFloat(c.balance_due), 0);
 
   // Net Position's receipt, built client-side from data the Dashboard
@@ -430,7 +432,7 @@ export default function Dashboard() {
           <HowCalculated title="Net Position" explanations={[netPositionExplain]} helpText={NET_POSITION_HELP} />
         </span>
         <span className={`stat-value ${totalChecking - totalCardsDue >= 0 ? "text-green-600" : "text-red-600"}`}>
-          {anyBelowThreshold && <AlertTriangle size={18} className="text-amber-500 inline mr-1" />}
+          {anyBelowThreshold && <AlertTriangle size={18} className={`${anyBelowZero ? "text-red-500" : "text-amber-500"} inline mr-1`} />}
           {maskIfHidden(balancesHidden, fmt(totalChecking - totalCardsDue))}
         </span>
         <span className="text-xs text-gray-500">checking minus due</span>

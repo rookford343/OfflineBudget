@@ -134,7 +134,13 @@ export default function WishList() {
   useEffect(() => { setCushionInput(plan?.cushion ?? ""); }, [plan?.cushion]);
   const setCushionMut = useMutation({
     mutationFn: (cushion: string | null) => wishApi.setCushion(cushion),
-    onSuccess: invalidatePlan,
+    // One cushion: the Dashboard, banner and Preferences read it too.
+    onSuccess: () => {
+      invalidatePlan();
+      qc.invalidateQueries({ queryKey: ["me"] });
+      qc.invalidateQueries({ queryKey: ["budget-snapshot"] });
+      qc.invalidateQueries({ queryKey: ["forecast-risk"] });
+    },
   });
   const saveCushion = () => {
     const trimmed = cushionInput.trim();

@@ -188,9 +188,11 @@ export function RiskBanner({
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between gap-2">
                 <p className={`font-semibold ${amber ? "text-amber-900 dark:text-amber-200" : "text-red-900 dark:text-red-200"} text-sm`}>
-                  {parseFloat(risk.threshold) > 0
-                    ? `Projected to drop below ${fmt(parseFloat(risk.threshold))} on ${formatDate(risk.date!)}`
-                    : `Projected to go negative on ${formatDate(risk.date!)}`}
+                  {parseFloat(risk.threshold) <= 0
+                    ? `Projected to go negative on ${formatDate(risk.date!)}`
+                    : risk.status === "danger"
+                    ? `Projected to go negative (first below your ${fmt(parseFloat(risk.threshold))} cushion on ${formatDate(risk.date!)})`
+                    : `Projected to drop below your ${fmt(parseFloat(risk.threshold))} cushion on ${formatDate(risk.date!)}`}
                 </p>
                 <VerificationFlagButton
                   feature="forecast"

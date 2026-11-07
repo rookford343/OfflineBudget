@@ -35,6 +35,8 @@ export default function PreferencesTab() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["me"] });
       qc.invalidateQueries({ queryKey: ["budget-snapshot"] });
+      qc.invalidateQueries({ queryKey: ["wish-plan"] });
+      qc.invalidateQueries({ queryKey: ["forecast-risk"] });
     },
   });
   const [savingsStrategy, setSavingsStrategy] = useState("save_monthly");
