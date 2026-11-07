@@ -138,6 +138,14 @@
   .tap-44 :is(.input, .btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger) {
     min-height: 44px;
   }
+  /* Icon-only buttons (a lone svg child) */
+  .tap-44 button:has(> svg:only-child) {
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
   .tap-44 .btn-ghost.p-1 {
     min-width: 44px;
   }

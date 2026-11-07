@@ -1069,6 +1069,7 @@ function SankeyChart({ data }: { data: any }) {
   return (
     <div className="card">
       <h3 className="font-semibold text-gray-900 mb-4">Income → Expense Flow</h3>
+      <p className="sm:hidden text-xs text-gray-400 mb-1">Scroll sideways to see the full flow →</p>
       <ScrollX>
       <svg width="100%" viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="min-w-[520px] max-sm:min-w-[640px]">
         {graph.links.map((l: any, i: number) => (
