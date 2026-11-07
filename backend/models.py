@@ -3,7 +3,7 @@ from datetime import datetime, date
 from decimal import Decimal
 from enum import Enum as PyEnum
 from sqlalchemy import (
-    Boolean, Date, DateTime, Enum, ForeignKey, Integer,
+    Boolean, Date, DateTime, Enum, ForeignKey, Index, Integer,
     Numeric, String, Text, UniqueConstraint, func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -1016,6 +1016,43 @@ class MonthlyForecastSnapshot(Base):
 
     user: Mapped["User"] = relationship(back_populates="monthly_forecast_snapshots")
     account: Mapped["Account"] = relationship()
+
+
+class MetricSnapshot(Base):
+    """One recording of every headline figure (services/metric_history.py).
+    `trigger` is why it was taken: sync, email, manual or calc_change.
+    `sources_json` holds the pending rows and newest row ids it was computed from."""
+    __tablename__ = "metric_snapshots"
+    __table_args__ = (Index("ix_metric_snapshots_user_taken", "user_id", "taken_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    taken_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)  # naive UTC
+    trigger: Mapped[str] = mapped_column(String(16), nullable=False)
+    calc_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    sources_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    readings: Mapped[list["MetricReading"]] = relationship(
+        back_populates="snapshot", cascade="all, delete-orphan", order_by="MetricReading.id",
+    )
+
+
+class MetricReading(Base):
+    """One headline figure inside a snapshot, with its explain tree
+    (`Explanation.model_dump_json()`) so the "why" survives later code changes."""
+    __tablename__ = "metric_readings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    snapshot_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("metric_snapshots.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+    metric_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(String(128), nullable=False)
+    value: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    explain_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+    snapshot: Mapped["MetricSnapshot"] = relationship(back_populates="readings")
 
 
 # ── Bank Sync (SimpleFIN + Plaid) ───────────────────────────────────────────

@@ -837,6 +837,14 @@ def compute_budget_snapshot(
             .start("Lowest projected checking balance", display_min, note=_low_note(display_min_date),
                    informational_children=lookahead_informational_children)
             .build(display_min),
+        "next_month_minimum": ExplainBuilder(f"Lowest point in {next_month_label}")
+            .start("Lowest projected checking balance", next_month_min,
+                   note="Lowest projected checking balance next month"
+                        + (f", on {next_month_min_date:%b %-d}" if next_month_min_date else "")
+                        + ". Excludes the already-scheduled card payoff.",
+                   informational_children=_cc_line_children(
+                       display_window.days, as_of, next_month_min_date))
+            .build(next_month_min),
     }
 
     return BudgetSnapshot(

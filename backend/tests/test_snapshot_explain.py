@@ -12,6 +12,7 @@ FIELD = {
     "safety_margin_week": "safety_margin_weekly",
     "safety_margin_today": "safety_margin_today",
     "lookahead_minimum": "lookahead_minimum",
+    "next_month_minimum": "next_month_minimum",
 }
 
 
