@@ -76,7 +76,7 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Cycle spend | Current balance minus balance due plus pending (`card_pending`, never the raw hand-typed field), floored at 0; "after pending" is the balance plus pending | `card_cycle_figures` (services/net_position.py), exposed as `spent_this_cycle`/`after_pending`/`pending_effective` on `CreditCardOut` | Dashboard, Credit Cards |
 | Budget track totals | Committed, flexible, budgeted and spent totals | frontend/src/pages/Budget.tsx, frontend/src/lib/budgetPlan.ts -> Plan 2 | Budget page |
 | Spending average | Average of the monthly bars | frontend/src/pages/Spending.tsx (`avg`) -> Plan 2 | Spending page |
-| Net worth | Manual assets plus account balances minus card balances and manual liabilities; no shared primitive yet (allowlisted in the guard test) -> Plan 2 | `get_totals`, `capture_snapshot` (routers/networth.py) | Net Worth page |
+| Net worth | Assets = manual assets plus active account balances; liabilities = manual liabilities plus active card current balances; net worth = assets minus liabilities (decision b). An overdrawn account lowers assets. One recipe for the live view and the stored daily snapshots | `net_worth_totals` (services/net_worth.py), called by `get_totals` and `capture_snapshot` (routers/networth.py) | Net Worth page, Net Worth history |
 | Checking balance with pending | Posted balance plus every live pending row, credits and debits alike, only while an active Plaid link keeps the snapshot live; otherwise the posted balance. The same service gives each account's month start and percent change (start = posted balance before this month's actual flow) | `account_balances` (services/account_balances.py) over `checking_balance_with_pending`, `checking_pending_rows`, `pending_snapshot_is_live` (services/pending.py); `GET /accounts/balances` (routers/accounts.py) | Sidebar list, total and % badge, Dashboard Checking card |
 | Transactions running balance | Each pending row's balance walking forward from posted (oldest first; the last equals the after-pending balance); each posted row's balance right after it posted, walking backward from posted (newest first) | `running_balance` (services/account_balances.py) over `checking_pending_rows`; `GET /accounts/{id}/running-balance` (routers/accounts.py) | Transactions page Balance column (checking tab) |
 | Calculation version | Hand-bumped integer naming the current calculation meaning | `CALC_VERSION` (services/calc_version.py) | Explain panels, changelog below |
@@ -269,7 +269,7 @@ Two tests keep the layer from eroding; both run in the normal suite.
   function-by-function list of presentational code and writers, each with a reason; an entry that no
   longer matches a violation fails the test. Adding a module to the allowlist needs a line in this
   document: the shared-layer modules are `month_base`, `real_spend`, `pending`, `forecast_walk`,
-  `forecast_engine`, `card_payment_model`, `cushion`, `account_balances` (pending-adjusted balances), `net_position` (Net Position and card cycle figures), `calc_version`, `tax_service` (tax estimates),
+  `forecast_engine`, `card_payment_model`, `cushion`, `account_balances` (pending-adjusted balances), `net_worth` (assets, liabilities and net worth), `net_position` (Net Position and card cycle figures), `calc_version`, `tax_service` (tax estimates),
   and the writers `bank_sync_service`, `plaid_sync_service`, `import_service` and
   `planned_auto_settle`, plus `statement_reconcile` (matches a statement's credits to synced card
   rows, not a headline figure). The scan also covers SQL `func.sum(...)`.
@@ -294,6 +294,7 @@ Settled by the principal. Record any behavior change here.
 - **Overrides are keyed by the item's natural due date.** The weekend shift moves only the posting day.
 - **Budget export = Budget page.** `/export/budget-report` emits `compute_overview` rows: actuals are positive real spend including cards, budgeted uses the overview's month fallback, savings lines show money moved to savings, income lines show 0. Child rows are named "Parent / Child" and parents carry "Includes subcategories" = yes, because a parent's actual already includes its children. To total the file, sum the top-level rows (no ' / ' in Category); a flagged parent row already includes its subcategories and any spend filed directly on the parent (calculation v7).
 - **A pending-adjusted checking balance (decision (a))** is the posted balance plus every live pending row, credits and debits alike, and only while the pending snapshot is live; otherwise it is the posted balance. The sidebar's month percent change is measured from the posted balance before this month's actual (non-planned) transactions, over the absolute start, and is blank when the start is under one cent. The forecast keeps its own card-payment-only pending debits (`checking_pending_debits`).
+- **Net worth (decision (b))** uses one definition everywhere, the one stored history already used: assets = manual assets plus active account balances; liabilities = manual liabilities plus active card current balances. Net worth itself is unchanged; only the Assets and Liabilities subtotals moved.
 - **Workflow:** build in the live working tree. Take a `backup_database()` copy before schema changes, and run a before/after on a database copy for any step that moves a visible number.
 
 ## Tracing a mismatch
@@ -335,3 +336,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 - v7: budget export reads the Budget page's actuals
 - v8: subscription-fallback cards no longer double-count in Safety Margin; refunds match by lookback, not query window
 - v9: risk banner skips locked statement-payment dips, like the 3-month low
+- v10: net worth has one recipe; assets include account balances

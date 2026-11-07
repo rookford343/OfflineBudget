@@ -8,6 +8,7 @@ import {
 } from "recharts";
 import { PlusCircle, Pencil, Trash2, Camera, HelpCircle, Loader2 } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import HowCalculated from "../components/HowCalculated";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
 type Asset = { id: number; name: string; asset_type: string; current_value: string; as_of_date: string };
@@ -146,24 +147,30 @@ export default function NetWorth() {
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Summary Cards: every figure and sub-line comes from the backend. */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="card text-center">
-          <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Manual Assets</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Assets</p>
           <p className="text-lg font-bold text-emerald-600">{totals ? maskIfHidden(balancesHidden, fmt(parseFloat(totals.total_assets))) : "—"}</p>
-        </div>
-        <div className="card text-center">
-          <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Account Balances</p>
-          <p className="text-lg font-bold text-emerald-600">{totals ? maskIfHidden(balancesHidden, fmt(parseFloat(totals.account_balances))) : "—"}</p>
+          {totals && (
+            <p className="text-xs text-gray-500 mt-1">
+              Manual {maskIfHidden(balancesHidden, fmt(parseFloat(totals.manual_assets)))} · Accounts {maskIfHidden(balancesHidden, fmt(parseFloat(totals.account_balances)))}
+            </p>
+          )}
         </div>
         <div className="card text-center">
           <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Liabilities</p>
           <p className="text-lg font-bold text-red-500">
-            {totals ? maskIfHidden(balancesHidden, fmt(parseFloat(totals.card_balances) + parseFloat(totals.total_liabilities))) : "—"}
+            {totals ? maskIfHidden(balancesHidden, fmt(parseFloat(totals.total_liabilities))) : "—"}
           </p>
+          {totals && (
+            <p className="text-xs text-gray-500 mt-1">
+              Manual {maskIfHidden(balancesHidden, fmt(parseFloat(totals.manual_liabilities)))} · Cards {maskIfHidden(balancesHidden, fmt(parseFloat(totals.card_balances)))}
+            </p>
+          )}
         </div>
         <div className="card text-center">
-          <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Net Worth</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Net Worth {totals?.explain && <HowCalculated title="Net Worth" explanations={[totals.explain]} />}</p>
           <p className={`text-2xl font-bold ${nw != null && nw >= 0 ? "text-emerald-600" : "text-red-500"}`}>
             {nw != null ? maskIfHidden(balancesHidden, fmt(nw)) : "—"}
           </p>
@@ -380,7 +387,7 @@ export default function NetWorth() {
           ))}
         </div>
       </div>
-      {showHelp && <HelpPanel title="Net Worth" body={"Your net worth = assets + account balances − credit card balances − liabilities.\n\nAdd manual assets (investments, real estate, vehicles) and liabilities (mortgage, loans). Those figures are what the app knows right now — editing them changes the current total but not any past snapshot.\n\nA snapshot freezes today's total so the chart has a point to plot. Nothing is recorded automatically, so the trend line only has the dates you captured.\n\nCapturing twice on the same day replaces that day rather than adding a second point, and any snapshot can be deleted from Snapshot History if it was taken with wrong figures."} onClose={() => setShowHelp(false)} />}
+      {showHelp && <HelpPanel title="Net Worth" body={"Your net worth = assets − liabilities. Assets are your manual assets plus your account balances; liabilities are your manual liabilities plus your credit card balances. An overdrawn account lowers assets.\n\nAdd manual assets (investments, real estate, vehicles) and liabilities (mortgage, loans). Those figures are what the app knows right now — editing them changes the current total but not any past snapshot.\n\nA snapshot freezes today's total so the chart has a point to plot. Nothing is recorded automatically, so the trend line only has the dates you captured.\n\nCapturing twice on the same day replaces that day rather than adding a second point, and any snapshot can be deleted from Snapshot History if it was taken with wrong figures."} onClose={() => setShowHelp(false)} />}
       <ConfirmDialog
         open={!!deleteAsset}
         onOpenChange={(open) => !open && setDeleteAsset(null)}

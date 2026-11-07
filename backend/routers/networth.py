@@ -1,9 +1,9 @@
 from datetime import date
-from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
+from backend.services.net_worth import net_worth_totals
 
 router = APIRouter(prefix="/net-worth", tags=["net-worth"])
 
@@ -82,36 +82,15 @@ def delete_liability(liability_id: int, db: Session = Depends(get_db), user: mod
 
 @router.get("", response_model=schemas.NetWorthTotals)
 def get_totals(db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    assets = db.query(models.ManualAsset).filter(models.ManualAsset.user_id == user.id).all()
-    liabilities = db.query(models.ManualLiability).filter(models.ManualLiability.user_id == user.id).all()
-    accounts = db.query(models.Account).filter(models.Account.user_id == user.id, models.Account.is_active == True).all()
-    cards = db.query(models.CreditCard).filter(models.CreditCard.user_id == user.id, models.CreditCard.is_active == True).all()
-
-    total_assets = sum((a.current_value for a in assets), Decimal("0"))
-    total_liabilities = sum((l.current_balance for l in liabilities), Decimal("0"))
-    account_balances = sum((a.current_balance for a in accounts), Decimal("0"))
-    card_balances = sum((c.current_balance for c in cards), Decimal("0"))
-    net_worth = total_assets + account_balances - card_balances - total_liabilities
-
-    return schemas.NetWorthTotals(
-        total_assets=total_assets,
-        account_balances=account_balances,
-        card_balances=card_balances,
-        total_liabilities=total_liabilities,
-        net_worth=net_worth,
-    )
+    return net_worth_totals(db, user.id)
 
 
 @router.post("/snapshot", response_model=schemas.NetWorthSnapshotOut)
 def capture_snapshot(db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    assets = db.query(models.ManualAsset).filter(models.ManualAsset.user_id == user.id).all()
-    liabilities = db.query(models.ManualLiability).filter(models.ManualLiability.user_id == user.id).all()
-    accounts = db.query(models.Account).filter(models.Account.user_id == user.id, models.Account.is_active == True).all()
-    cards = db.query(models.CreditCard).filter(models.CreditCard.user_id == user.id, models.CreditCard.is_active == True).all()
-
-    total_assets = sum((a.current_value for a in assets), Decimal("0")) + sum((a.current_balance for a in accounts), Decimal("0"))
-    total_liabilities = sum((l.current_balance for l in liabilities), Decimal("0")) + sum((c.current_balance for c in cards), Decimal("0"))
-    net_worth = total_assets - total_liabilities
+    totals = net_worth_totals(db, user.id)
+    total_assets = totals.total_assets
+    total_liabilities = totals.total_liabilities
+    net_worth = totals.net_worth
 
     # Re-capturing on a day that already has a snapshot REPLACES it rather than
     # appending a second one. A snapshot is "what I was worth on this date", so

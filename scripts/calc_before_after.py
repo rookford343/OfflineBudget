@@ -94,6 +94,16 @@ try:
         if strict:
             raise
         out["last full month spend"] = "n/a (%s)" % type(exc).__name__
+
+    try:
+        from backend.routers.networth import get_totals
+        nw = get_totals(db=db, user=user)
+        for f in ("total_assets", "total_liabilities", "net_worth"):
+            out["net worth: " + f] = str(getattr(nw, f))
+    except Exception as exc:
+        if strict:
+            raise
+        out["net worth"] = "n/a (%s)" % type(exc).__name__
 finally:
     db.close()
 print("@@METRICS@@" + json.dumps(out))

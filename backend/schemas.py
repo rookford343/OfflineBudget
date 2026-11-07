@@ -1542,11 +1542,14 @@ class ManualLiabilityOut(BaseModel):
 
 
 class NetWorthTotals(BaseModel):
-    total_assets: Decimal
+    manual_assets: Decimal
     account_balances: Decimal
+    total_assets: Decimal  # manual_assets + account_balances
+    manual_liabilities: Decimal
     card_balances: Decimal
-    total_liabilities: Decimal
-    net_worth: Decimal
+    total_liabilities: Decimal  # manual_liabilities + card_balances
+    net_worth: Decimal  # total_assets - total_liabilities
+    explain: Explanation
 
 
 class NetWorthSnapshotOut(BaseModel):
