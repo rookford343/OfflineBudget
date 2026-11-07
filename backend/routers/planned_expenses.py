@@ -12,19 +12,24 @@ router = APIRouter(prefix="/planned-expenses", tags=["planned-expenses"])
 def _require_owned(
     db: Session, user: models.User, *,
     account_id: int | None = None, card_id: int | None = None,
-    funding_account_id: int | None = None,
+    funding_account_id: int | None = None, category_id: int | None = None,
+    also_account_ids: tuple[int | None, ...] = (),
 ) -> None:
     """404 "Not found" for any non-null id the caller doesn't own.
 
     One message for every case, so a caller can't tell another user's row
     from a missing one."""
-    for aid in (account_id, funding_account_id):
+    for aid in (account_id, funding_account_id, *also_account_ids):
         if aid is not None and not db.query(models.Account.id).filter(
             models.Account.id == aid, models.Account.user_id == user.id,
         ).first():
             raise HTTPException(status_code=404, detail="Not found")
     if card_id is not None and not db.query(models.CreditCard.id).filter(
         models.CreditCard.id == card_id, models.CreditCard.user_id == user.id,
+    ).first():
+        raise HTTPException(status_code=404, detail="Not found")
+    if category_id is not None and not db.query(models.Category.id).filter(
+        models.Category.id == category_id, models.Category.user_id == user.id,
     ).first():
         raise HTTPException(status_code=404, detail="Not found")
 
@@ -57,9 +62,9 @@ def preview_planned_expense(
     """Safety Margin before and after a draft one-off. Writes nothing."""
     _require_owned(
         db, user, account_id=account_id, card_id=body.card_id,
-        funding_account_id=body.funding_account_id,
+        funding_account_id=body.funding_account_id, category_id=body.category_id,
+        also_account_ids=(body.account_id,),
     )
-    _require_owned(db, user, account_id=body.account_id)
     return preview_one_off(db, user, account_id, body)
 
 
@@ -71,7 +76,7 @@ def create_planned_expense(
 ):
     _require_owned(
         db, user, account_id=body.account_id, card_id=body.card_id,
-        funding_account_id=body.funding_account_id,
+        funding_account_id=body.funding_account_id, category_id=body.category_id,
     )
     expense = models.PlannedExpense(
         user_id=user.id,
@@ -110,6 +115,7 @@ def update_planned_expense(
     _require_owned(
         db, user, account_id=changes.get("account_id"), card_id=changes.get("card_id"),
         funding_account_id=changes.get("funding_account_id"),
+        category_id=changes.get("category_id"),
     )
     for field, value in changes.items():
         setattr(expense, field, value)

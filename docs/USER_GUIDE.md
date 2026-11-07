@@ -11,17 +11,17 @@ Below 1024px wide the Dashboard switches to a phone layout: the Safety Margin fo
 Use this before a purchase to see what it does to your Safety Margin, then keep it in the plan.
 
 1. On the Dashboard, tap **+ Plan a one-off** (on a computer it sits in the Household Snapshot header).
-2. Fill in **What**, **Amount** and **When**. **Pay with** starts on your first card; switch it to a checking account if that is how you will pay.
+2. Fill in **What**, **Amount** and **When**. **Pay with** starts on your first card; switch it to a checking account if that is how you will pay (the preview then uses that account's Safety Margin; for a card it uses your primary checking).
 3. Once an amount and a date are in, the sheet shows the effect a moment after you stop typing:
    - **Safety Margin (this week)**, before and after. It turns red if the result is below zero.
    - **This month**, before and after.
-   - For a card, the card's payment date and how much the payment grows.
+   - For a card, how much it adds to the card payment, and the date that payment is due.
 4. Tap **Add to plan** to keep it (the Dashboard, Forecast and planned one-offs update), or **Cancel** to leave without saving anything. Previewing never saves anything.
 
 Notes:
 
 - The preview uses the same calculation as the Dashboard, so after you add the one-off the Dashboard shows the "after" figure.
-- Spendable this week is not previewed. It is a monthly figure that does not move for a single future one-off.
-- A card purchase does not touch checking until the card's statement is paid, so the Safety Margin may not move at all even though the card payment line shows the extra amount.
+- Spendable this week isn't previewed; it updates after you add the one-off.
+- A card purchase does not touch checking until the card's statement is paid, so the Safety Margin may not move at all even though the card line shows the extra amount.
 - With balances hidden, every figure in the sheet is hidden too.
 - To remove a one-off later, delete it from the planned one-offs list.

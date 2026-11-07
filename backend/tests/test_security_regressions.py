@@ -37,8 +37,8 @@ now refuses or neutralizes it.
     foreign key) or on the explicit global allowlist, so a new unowned table
     fails loudly instead of re-breaking account deletion.
   - planned expense ownership: preview, create and patch with another user's
-    card_id, account_id or funding_account_id (and the preview's account_id
-    query param) are 404 and write nothing.
+    card_id, account_id, funding_account_id or category_id (and the preview's
+    account_id query param) are 404 and write nothing.
   - spa static traversal: encoded and raw ../ paths never read files outside the
     frontend dist directory (.env, the database, source, pyproject), nor
     through a symlink inside it that points outside.
@@ -1003,9 +1003,10 @@ def _planned_expense_fixture(db_session):
                           current_balance=Decimal("100"))
     theirs = models.Account(user_id=other.id, name="Theirs", type=models.AccountType.savings,
                             current_balance=Decimal("100"))
+    their_category = models.Category(user_id=other.id, name="Theirs", type=models.CategoryType.expense)
     their_card = models.CreditCard(user_id=other.id, name="Theirs", credit_limit=Decimal("1000"),
                                    statement_day=28, due_day=25)
-    db_session.add_all([mine, theirs, their_card])
+    db_session.add_all([mine, theirs, their_card, their_category])
     db_session.flush()
     own_expense = models.PlannedExpense(user_id=owner.id, name="Own", amount=Decimal("5"),
                                         expected_date=date.today() + timedelta(days=5))
@@ -1018,7 +1019,7 @@ def _planned_expense_fixture(db_session):
     app.dependency_overrides[get_current_user] = lambda: owner
     body = {"name": "Trip", "amount": "10.00",
             "expected_date": (date.today() + timedelta(days=9)).isoformat()}
-    return TestClient(app), mine, theirs, their_card, own_expense, body, models
+    return TestClient(app), mine, theirs, their_card, own_expense, body, models, their_category
 
 
 def _assert_planned_expense_404(db_session, client, mine, own_expense, body, models, field, value):
@@ -1036,15 +1037,21 @@ def _assert_planned_expense_404(db_session, client, mine, own_expense, body, mod
 
 def test_planned_expense__other_users_card__is_404(db_session):
     """Preview, create and patch with another user's card_id are 404 and write nothing."""
-    client, mine, _theirs, their_card, own, body, models = _planned_expense_fixture(db_session)
+    client, mine, _theirs, their_card, own, body, models, _cat = _planned_expense_fixture(db_session)
     _assert_planned_expense_404(db_session, client, mine, own, body, models, "card_id", their_card.id)
 
 
 def test_planned_expense__other_users_account__is_404(db_session):
     """Preview, create and patch with another user's account_id or funding_account_id
     are 404 and write nothing; the preview's own account_id query param too."""
-    client, mine, theirs, _card, own, body, models = _planned_expense_fixture(db_session)
+    client, mine, theirs, _card, own, body, models, _cat = _planned_expense_fixture(db_session)
     _assert_planned_expense_404(db_session, client, mine, own, body, models, "account_id", theirs.id)
     _assert_planned_expense_404(db_session, client, mine, own, body, models, "funding_account_id", theirs.id)
     assert client.post(f"/planned-expenses/preview?account_id={theirs.id}",
                        json={**body, "account_id": mine.id}).status_code == 404
+
+
+def test_planned_expense__other_users_category__is_404(db_session):
+    """Preview, create and patch with another user's category_id are 404 and write nothing."""
+    client, mine, _theirs, _card, own, body, models, their_category = _planned_expense_fixture(db_session)
+    _assert_planned_expense_404(db_session, client, mine, own, body, models, "category_id", their_category.id)

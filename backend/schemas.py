@@ -1795,20 +1795,20 @@ class BeforeAfter(BaseModel):
     after: Decimal
 
 
-class CardPaymentBeforeAfter(BaseModel):
+class CardPaymentImpact(BaseModel):
+    """A card-routed one-off reaches checking on the card's payoff date, as its
+    own "(via card)" line. `due` is that date, from the forecast engine's own
+    routing; `amount` is the draft's amount."""
     card_id: int
     due: date
-    before: Decimal
-    after: Decimal
-    # after - before, computed server-side so the browser never does money math.
-    delta: Decimal
+    amount: Decimal
 
 
 class OneOffPreviewOut(BaseModel):
     """What a draft one-off would do to the Safety Margin, without saving it."""
     safety_margin_weekly: BeforeAfter
     safety_margin: BeforeAfter
-    card_payment: Optional[CardPaymentBeforeAfter] = None
+    card_payment: Optional[CardPaymentImpact] = None
 
 
 class PlannedExpenseSettle(BaseModel):

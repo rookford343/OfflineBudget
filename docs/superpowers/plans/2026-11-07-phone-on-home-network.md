@@ -354,9 +354,9 @@ CORS: `allow_origins` = `settings.allowed_origins_list`. Production sets this to
 - `schemas.OneOffPreviewOut`:
   - `safety_margin_weekly: BeforeAfter`
   - `safety_margin: BeforeAfter`
-  - `card_payment: CardPaymentBeforeAfter | None`
+  - `card_payment: CardPaymentImpact | None`
   - `BeforeAfter = {before: Decimal, after: Decimal}`
-  - `CardPaymentBeforeAfter = {card_id: int, due: date, before: Decimal, after: Decimal}`
+  - `CardPaymentImpact = {card_id: int, due: date, amount: Decimal}` (`due` from the forecast engine's `_card_payoff_date_for_charge`; the forecast shows a card-routed one-off as its own line on that date)
 - `POST /api/planned-expenses/preview?account_id=<int>`: body `PlannedExpenseCreate`, returns `OneOffPreviewOut`.
 - Ownership helper `_require_owned(db, user, *, account_id, card_id, funding_account_id) -> None` raises `HTTPException(404, "Not found")` for any non-null id the user doesn't own. It's used by preview, create and patch.
 

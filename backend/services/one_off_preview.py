@@ -8,13 +8,10 @@ keeps proposals out of its flat monthly aggregates, so it would not move here
 but would after commit.
 """
 import logging
-from datetime import date, timedelta
-
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
 from backend.services.budget_snapshot import compute_budget_snapshot
-from backend.services.card_payment_model import card_payoff_on
 from backend.services.forecast_engine import ScenarioProposal, _card_payoff_date_for_charge
 
 logger = logging.getLogger(__name__)
@@ -38,21 +35,16 @@ def preview_one_off(
 
     card_payment = None
     if draft.card_id is not None:
-        account = db.query(models.Account).filter(
-            models.Account.id == account_id, models.Account.user_id == user.id,
-        ).first()
         card = db.query(models.CreditCard).filter(
             models.CreditCard.id == draft.card_id, models.CreditCard.user_id == user.id,
             models.CreditCard.is_active == True,
         ).first()
-        if account is not None and card is not None:
-            today = date.today()
-            due = _card_payoff_date_for_charge(card, draft.expected_date)
-            end = max(draft.expected_date, due) + timedelta(days=1)
-            before = card_payoff_on(db, user, account, card, due, today, end, None)
-            after = card_payoff_on(db, user, account, card, due, today, end, proposal)
-            card_payment = schemas.CardPaymentBeforeAfter(
-                card_id=card.id, due=due, before=before, after=after, delta=after - before)
+        if card is not None:
+            card_payment = schemas.CardPaymentImpact(
+                card_id=card.id,
+                due=_card_payoff_date_for_charge(card, draft.expected_date),
+                amount=draft.amount,
+            )
 
     if db.new or db.dirty:
         logger.warning("one-off preview left pending session changes; rolling back")

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { accountsApi, cardsApi, plannedExpensesApi } from "../../api";
 import { fmt, fmtDate } from "../../lib/utils";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -62,25 +62,35 @@ export default function PlanOneOffSheet({ open, onOpenChange, accountId, hidden 
   const debounced = useDebouncedValue(draft, 300);
   const ready = parseFloat(debounced.amount) > 0 && !!debounced.expected_date && !!effectivePay;
 
-  const { data: preview, isFetching, isError } = useQuery<any>({
-    queryKey: ["one-off-preview", accountId, debounced],
-    queryFn: () => plannedExpensesApi.preview(accountId, debounced),
+  // The Safety Margin that matters is the account the money leaves: the chosen
+  // checking account, or (for a card) the primary checking the card is paid from.
+  const previewAccountId = kind === "acct" ? Number(id) : accountId;
+
+  const { data: preview, isFetching, isError, isPlaceholderData } = useQuery<any>({
+    queryKey: ["one-off-preview", previewAccountId, debounced],
+    queryFn: () => plannedExpensesApi.preview(previewAccountId, debounced),
     enabled: open && ready,
     staleTime: 0,
     gcTime: 0,
+    placeholderData: keepPreviousData,
   });
 
   const add = useMutation({
-    mutationFn: () => plannedExpensesApi.create(draft),
+    // Exactly what was previewed, never the live (possibly newer) form values.
+    mutationFn: (body: object) => plannedExpensesApi.create(body),
     onSuccess: () => {
-      for (const key of ["budget-snapshot", "planned-expenses", "forecast-quarters", "forecast-multi-year", "forecast-risk", "forecast-balance-flow", "forecast-baseline", "available-to-spend"]) {
+      for (const key of ["budget-snapshot", "planned-expenses", "weekly-digest", "cards-upcoming-due", "monthly-summary", "available-to-spend", "recurring-upcoming", "dashboard-balance-flow", "dashboard-balance-flow-prior", "accounts"]) {
         qc.invalidateQueries({ queryKey: [key] });
       }
+      // Every forecast view (quarters, multi-year, risk, scenario, baseline, balance flow).
+      qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0]).startsWith("forecast") });
       close();
     },
   });
 
-  const canAdd = parseFloat(amount) > 0 && !!date && !!effectivePay && !add.isPending;
+  // Add only once the preview on screen is for exactly what the form holds now.
+  const previewMatchesForm = JSON.stringify(draft) === JSON.stringify(debounced);
+  const canAdd = ready && previewMatchesForm && !!preview && !isFetching && !isPlaceholderData && !isError && !add.isPending;
   const weekly = preview?.safety_margin_weekly;
   const tone = weekly && parseFloat(weekly.after) < 0 ? "text-red-600 dark:text-red-400" : "text-gray-900 dark:text-gray-100";
 
@@ -135,7 +145,7 @@ export default function PlanOneOffSheet({ open, onOpenChange, accountId, hidden 
                 </p>
                 {preview.card_payment && (
                   <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
-                    {activeCards.find((c) => c.id === preview.card_payment.card_id)?.name ?? "Card"} payment due {fmtDate(preview.card_payment.due)}: +{maskIfHidden(hidden, fmt(preview.card_payment.delta))}
+                    Adds {maskIfHidden(hidden, fmt(preview.card_payment.amount))} to {activeCards.find((c) => c.id === preview.card_payment.card_id)?.name ?? "the card"} payment due {fmtDate(preview.card_payment.due)}
                   </p>
                 )}
               </div>
@@ -144,7 +154,7 @@ export default function PlanOneOffSheet({ open, onOpenChange, accountId, hidden 
 
           {add.isError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">Couldn't add it. Try again.</p>}
           <div className="mt-4 flex gap-3">
-            <button type="button" className="btn-primary flex-1 min-h-[44px]" disabled={!canAdd} onClick={() => add.mutate()}>
+            <button type="button" className="btn-primary flex-1 min-h-[44px]" disabled={!canAdd} onClick={() => add.mutate(debounced)}>
               {add.isPending ? "Adding…" : "Add to plan"}
             </button>
             <button type="button" className="btn-secondary flex-1 min-h-[44px]" onClick={close}>Cancel</button>
