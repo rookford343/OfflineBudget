@@ -640,6 +640,9 @@ class ForecastRisk(BaseModel):
     date: Optional[date]
     amount: Optional[Decimal]
     threshold: Decimal
+    # The one cushion's split (services/cushion.py): "warning" below the cushion,
+    # "danger" below $0. at_risk stays true for both.
+    status: Literal["ok", "warning", "danger"] = "ok"
     transfer_triggered: bool = False
     transfer_date: Optional[date] = None
     transfer_amount: Optional[Decimal] = None

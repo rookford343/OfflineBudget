@@ -135,7 +135,7 @@ def test_standard_walk_starts_at_the_horizon_and_counts_recent_unmatched(db_sess
 
 def test_risk_and_display_lows_agree(db_session, monkeypatch):
     user, account = _parity_scenario(db_session, monkeypatch)
-    account.low_balance_threshold = Decimal("4950.00")
+    user.safety_cushion = Decimal("4950.00")
     db_session.commit()
 
     risk = forecast_router.get_forecast_risk(account_id=account.id, days=90, db=db_session, user=user)

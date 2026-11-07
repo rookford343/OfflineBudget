@@ -14,6 +14,7 @@ from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
 from backend.services.explain import ExplainBuilder
 from backend.services.forecast_walk import standard_walk
+from backend.services.cushion import DEFAULT_CUSHION, cushion_for, cushion_status
 from backend.services.forecast_engine import (
     ScenarioProposal,
     _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
@@ -396,20 +397,13 @@ def _next_month_minimum(
     return minimum, minimum_date, start, label
 
 
-DEFAULT_SAFETY_CUSHION = Decimal("1000.00")
+DEFAULT_SAFETY_CUSHION = DEFAULT_CUSHION
 
 
 def lookahead_status(minimum: Decimal, cushion: Decimal) -> str:
-    """How the 3-month low reads against the user's safety cushion:
-    "danger" strictly below $0, "warning" strictly below the cushion, else
-    "ok". Exactly AT the cushion is ok -- the cushion is the balance to stay
-    at or above, so landing on it is not a breach. Checked in that order, so
-    a $0 cushion leaves only the below-$0 signal."""
-    if minimum < 0:
-        return "danger"
-    if minimum < cushion:
-        return "warning"
-    return "ok"
+    """How the 3-month low reads against the one cushion; see
+    services/cushion.py cushion_status."""
+    return cushion_status(minimum, cushion)
 
 
 def _weekly_allowance(amount: Decimal, as_of: date) -> tuple[Decimal, int]:
@@ -693,7 +687,7 @@ def compute_budget_snapshot(
         display_window, as_of,
     )
     safety_cushion = (
-        user.safety_cushion if user.safety_cushion is not None else DEFAULT_SAFETY_CUSHION
+        cushion_for(user)
     )
     display_status = lookahead_status(display_min, safety_cushion)
     # Safety Margin does NOT subtract card spending -- unlike Left to

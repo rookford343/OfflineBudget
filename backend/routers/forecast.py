@@ -10,7 +10,8 @@ from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services import scenario_service
-from backend.services.forecast_engine import build_forecast, build_quarters, find_balance_risk, find_transfer_signal, suggest_transfer
+from backend.services.forecast_engine import build_forecast, build_quarters, find_balance_risk, find_transfer_signal, risk_status, suggest_transfer
+from backend.services.cushion import cushion_for
 from backend.services.forecast_walk import standard_walk, walk_from
 from backend.services.reconciliation_helper import compute_reconciliation
 
@@ -79,15 +80,12 @@ def get_forecast_risk(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    account = db.query(models.Account).filter(
-        models.Account.id == account_id,
-        models.Account.user_id == user.id,
-    ).first()
-    threshold = account.low_balance_threshold if account and account.low_balance_threshold is not None else Decimal("0")
+    threshold = cushion_for(user)
     start = _today()
     end = start + timedelta(days=days)
     entries = walk_from(standard_walk(db, user.id, account_id, start, end), start)
     risk = find_balance_risk(entries, threshold)
+    status = risk_status(entries, threshold)
     transfer = find_transfer_signal(entries)
     suggestion = suggest_transfer(db, user, account_id, risk, entries)
     active_rule = db.query(models.BufferTransferRule).filter(
@@ -100,6 +98,7 @@ def get_forecast_risk(
         date=risk["date"],
         amount=risk["amount"],
         threshold=risk["threshold"],
+        status=status,
         transfer_triggered=transfer["triggered"],
         transfer_date=transfer["date"],
         transfer_amount=transfer["amount"],

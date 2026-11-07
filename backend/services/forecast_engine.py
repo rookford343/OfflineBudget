@@ -18,6 +18,7 @@ from backend import models
 from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
 from backend.services.tax_service import ss_wage_base_for
 from backend.services.card_matching import card_matches_description
+from backend.services.cushion import cushion_status
 
 # How many days before "today" a scheduled recurring item can still be
 # missing its actual and get folded into today's opening balance anyway,
@@ -1599,6 +1600,14 @@ def find_balance_risk(entries: list[ForecastEntry], threshold: Decimal) -> dict:
                 "threshold": threshold,
             }
     return {"at_risk": False, "date": None, "amount": None, "threshold": threshold}
+
+
+def risk_status(entries: list[ForecastEntry], cushion: Decimal) -> str:
+    """The window's lowest balance read against the one cushion: "danger" below
+    $0, "warning" below the cushion, else "ok" (no entries -> "ok")."""
+    if not entries:
+        return "ok"
+    return cushion_status(min(e.projected_balance for e in entries), cushion)
 
 
 def suggest_transfer(

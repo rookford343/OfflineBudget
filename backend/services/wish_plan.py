@@ -74,6 +74,7 @@ def earliest_safe_date(dates, base, mask, prior: list[Decimal], flows_for: Calla
 
 from backend import models
 from backend.services.budget_snapshot import floor_mask
+from backend.services.cushion import cushion_for
 from backend.services.forecast_walk import standard_walk, walk_from
 from backend.services.scenario_service import resolve_scenario
 from backend.services.wish_math import CardMissing, FinancedMonthsInvalid, option_flows, total_cost, monthly_payment
@@ -83,13 +84,10 @@ LAST_BUY_OFFSET = 30
 
 
 def effective_cushion(db, user, account_id) -> Decimal:
-    row = db.query(models.WishSettings).filter(models.WishSettings.user_id == user.id).first()
-    if row is not None and row.cushion is not None:
-        return Decimal(row.cushion)
-    acct = db.get(models.Account, account_id)
-    if acct is not None and acct.low_balance_threshold is not None:
-        return Decimal(acct.low_balance_threshold)
-    return Decimal("1000")
+    """The one cushion (services/cushion.py). db and account_id stay in the
+    signature for callers; the per-account threshold and wish setting are no
+    longer read."""
+    return cushion_for(user)
 
 
 def _series(db, user_id, account_id, today, end, proposal=None, overrides=None):

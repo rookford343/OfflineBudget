@@ -13,6 +13,7 @@ interface Risk {
   date: string | null;
   amount: string | null;
   threshold: string;
+  status?: "ok" | "warning" | "danger";
   transfer_triggered?: boolean;
   transfer_date?: string | null;
   transfer_amount?: string | null;
@@ -73,6 +74,8 @@ export function RiskBanner({
 
   if (!risk) return null;
 
+  // One cushion: amber below it, red below $0 (status from /risk).
+  const amber = risk.status === "warning";
   const showAlert = risk.at_risk && risk.date && risk.amount != null;
   const showTransfer = risk.transfer_triggered && risk.transfer_date && risk.transfer_amount != null;
   // already_planned no longer suppresses: the backend's amount is already net
@@ -179,12 +182,12 @@ export function RiskBanner({
         </div>
       )}
       {showAlert && (
-        <div className="card border-red-200 dark:border-red-700 bg-red-50/60 dark:bg-red-900/20">
+        <div className={`card ${amber ? "border-amber-200 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-900/20" : "border-red-200 dark:border-red-700 bg-red-50/60 dark:bg-red-900/20"}`}>
           <div className="flex items-start gap-3">
-            <AlertTriangle size={18} className="text-red-500 mt-0.5 shrink-0" />
+            <AlertTriangle size={18} className={`${amber ? "text-amber-500" : "text-red-500"} mt-0.5 shrink-0`} />
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between gap-2">
-                <p className="font-semibold text-red-900 dark:text-red-200 text-sm">
+                <p className={`font-semibold ${amber ? "text-amber-900 dark:text-amber-200" : "text-red-900 dark:text-red-200"} text-sm`}>
                   {parseFloat(risk.threshold) > 0
                     ? `Projected to drop below ${fmt(parseFloat(risk.threshold))} on ${formatDate(risk.date!)}`
                     : `Projected to go negative on ${formatDate(risk.date!)}`}
@@ -197,7 +200,7 @@ export function RiskBanner({
                   expectedFields={[{ key: "projected_balance", label: "Projected Balance" }]}
                 />
               </div>
-              <p className="text-xs text-red-700 dark:text-red-400 mt-0.5">
+              <p className={`text-xs ${amber ? "text-amber-700 dark:text-amber-400" : "text-red-700 dark:text-red-400"} mt-0.5`}>
                 Projected balance: <strong>{fmt(parseFloat(risk.amount!))}</strong>
               </p>
             </div>

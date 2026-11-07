@@ -91,11 +91,8 @@ def get_cushion(account_id: int | None = Query(None), db: Session = Depends(get_
 def put_cushion(body: schemas.CushionIn, account_id: int | None = Query(None),
                 db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
     account_id = _resolve_account_id(db, user, account_id)
-    row = db.query(models.WishSettings).filter(models.WishSettings.user_id == user.id).first()
-    if row is None:
-        db.add(models.WishSettings(user_id=user.id, cushion=body.cushion))
-    else:
-        row.cushion = body.cushion
+    # One cushion: the Wish List's setting is the user's single safety cushion.
+    user.safety_cushion = body.cushion
     db.commit()
     return {"cushion": wish_plan.effective_cushion(db, user, account_id)}
 

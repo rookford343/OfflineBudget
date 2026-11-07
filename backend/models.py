@@ -122,7 +122,8 @@ class User(Base):
     transfer_increment: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=Decimal("1000.00"))
     # The balance the 3-month projected low should stay above. Below it the
     # Dashboard and daily email show the low in amber; below $0, red. Null
-    # means budget_snapshot.DEFAULT_SAFETY_CUSHION ($1,000.00).
+    # means services/cushion.DEFAULT_CUSHION ($1,000). This is THE cushion: the
+    # risk banner and the Wish List read it too.
     safety_cushion: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     # How the month is meant to balance, which changes whether the Savings
     # budget is a commitment. "save_monthly": the transfer is money you intend
@@ -223,6 +224,8 @@ class Account(Base):
     type: Mapped[AccountType] = mapped_column(Enum(AccountType), nullable=False)
     current_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     currency: Mapped[str] = mapped_column(String(3), default="USD")
+    # Retired (calc v6): no longer read; folded into users.safety_cushion by
+    # database.migrate_cushions.
     low_balance_threshold: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     interest_rate: Mapped[Decimal | None] = mapped_column(Numeric(14, 4))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -1438,4 +1441,5 @@ class WishSettings(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, unique=True)
+    # Retired (calc v6): no longer read; see users.safety_cushion.
     cushion: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))

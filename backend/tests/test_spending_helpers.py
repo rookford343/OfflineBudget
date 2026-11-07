@@ -198,6 +198,8 @@ def test_generate_weekly_digest_smoke(db_session):
         user_id=user.id, account_id=account.id, date=date.today() - timedelta(days=1),
         amount=Decimal("-42.00"), description="Kroger", category_id=groceries.id,
     ))
+    # Above the one cushion ($1,000 default), so the digest reads no risk.
+    account.current_balance = Decimal("5000.00")
     db_session.commit()
 
     digest = generate_weekly_digest(db_session, user, account.id)

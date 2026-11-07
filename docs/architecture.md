@@ -47,8 +47,8 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Safety Margin | Lowest balance from today through end of next month (walk without unbilled card bills) minus unbilled card bills plus bills charged so far | `_lookahead_window`, `compute_budget_snapshot` (services/budget_snapshot.py) | Dashboard, email |
 | Displayed lowest point (3-month low) | Lowest forecast balance over the lookahead window, walk including unbilled card bills, ignoring locked statement-payoff dips | `_lookahead_window`, `_lookahead_minimum`, `floor_mask` (services/budget_snapshot.py) | Dashboard, email |
 | Next-month minimum | Lowest forecast balance in the next calendar month | `_next_month_minimum`, `_next_calendar_month_bounds` (services/budget_snapshot.py) | Dashboard, email |
-| Lookahead status (amber/red) | Amber below the cushion, red below $0 | `lookahead_status` (services/budget_snapshot.py) | Dashboard, email |
-| Cushion | `user.safety_cushion` (default $1,000) for the lookahead status. Separately: Wish List cushion (`WishSettings.cushion`, then account `low_balance_threshold`) and the risk banner threshold (`low_balance_threshold`, default $0) -> Task 6 (one cushion) | `compute_budget_snapshot` (services/budget_snapshot.py), `effective_cushion` (services/wish_plan.py), `find_balance_risk` callers (routers/forecast.py, services/summary_generator.py) | Dashboard, Wish List, risk banner, email |
+| Cushion status (amber/red) | Amber below the cushion, red below $0 | `cushion_status` (services/cushion.py); `lookahead_status` and `risk_status` call it | Dashboard, risk banner, email |
+| Cushion | `user.safety_cushion` (default $1,000), the one cushion for the 3-month low, the risk banner and the Wish List | `cushion_for` (services/cushion.py); read by `compute_budget_snapshot`, `effective_cushion` (services/wish_plan.py), `/risk` (routers/forecast.py), the weekly digest | Dashboard, Wish List, risk banner, email |
 | Forecast balances | Day-by-day projected checking balance | `build_forecast` (services/forecast_engine.py) | Forecast tab, lows, risk banner, Wish List, upcoming bills, baselines |
 | Forecast walk start/flags | The standard walk: starts 45 days before today; purpose `display` (unbilled card bills in) or `safety` (out). Every start gives the same balances from that horizon on | `standard_walk` (services/forecast_walk.py), horizon and bridges in `build_forecast` (services/forecast_engine.py). Custom ranges, with a comment: GET /forecast, /multi-year, /monthly-summary (routers/forecast.py), `build_quarters` | Forecast tab, lows, risk banner, digest, upcoming bills, Wish List, baselines |
 | Card payment amount (payoff) | Locked statement payoff, cycle estimate (pending + spent since statement + subscriptions before close + one-offs), second-hop rule, flat estimate, subscription fallback; basis kept on `ForecastTransaction.basis` | `card_payments`, `card_payment_plan` (services/card_payment_model.py); helpers `_card_payoff_date_for_charge`, `_card_subscription_charges`, `_cc_actual_nearby` (services/forecast_engine.py) | Forecast tab, Safety Margin, explain notes (`_cc_basis_note`) |
@@ -178,7 +178,13 @@ Plaid `AccountPendingTransaction` debits, only while an active Plaid link keeps 
 to one active card (the forecast's rule). `checking_balance_with_pending` is posted balance minus
 all pending debits; the sidebar adopts it in Plan 2.
 
-One cushion is not yet adopted (Task 6).
+One cushion: `cushion_for(user)` (`services/cushion.py`) is read by the 3-month low, `/risk`
+(`threshold` is the cushion; `status` is `cushion_status` of the window's lowest balance, so `at_risk`
+stays true for both amber and red) and the Wish List. `PUT /wish-list/cushion` writes
+`users.safety_cushion`. `accounts.low_balance_threshold` and `wish_settings.cushion` stay in the schema
+but nothing reads them. `database.migrate_cushions(db, apply)` folds an old non-default value into
+`safety_cushion` (wish setting first, then the primary checking threshold); startup runs it only with
+`CUSHION_MIGRATION_APPLY=1`.
 
 ### Forecast walk policy
 `standard_walk(db, user_id, account_id, as_of, end, purpose="display", **extra)` in
@@ -265,3 +271,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 - v3: one pending freshness rule
 - v4: one walk policy; weekend overrides
 - v5: card-payment model shared by forecast and snapshot; scenario card bills in Safety Margin
+- v6: one cushion for safety, risk and wish list

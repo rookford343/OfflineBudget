@@ -333,3 +333,37 @@ def upgrade_schema():
                 conn.commit()
             except Exception:
                 conn.rollback()  # column already exists — skip
+
+
+def migrate_cushions(db, apply: bool) -> list[str]:
+    """Fold the retired cushions into the single `users.safety_cushion`.
+
+    For each user with no safety_cushion, take the first non-null, non-zero of
+    `wish_settings.cushion`, then the primary checking account's
+    `low_balance_threshold`. Returns one log line per change (applied or, with
+    apply=False, only reported -- nothing is written). The two old columns stay
+    in the schema but are no longer read. Startup runs this with apply=True only
+    when CUSHION_MIGRATION_APPLY=1 (see main._lifespan)."""
+    from backend import models
+    from backend.services.primary_account import primary_checking
+
+    log: list[str] = []
+    users = db.query(models.User).filter(models.User.safety_cushion.is_(None)).all()
+    for user in users:
+        source, value = None, None
+        wish = db.query(models.WishSettings).filter(models.WishSettings.user_id == user.id).first()
+        if wish is not None and wish.cushion:
+            source, value = "wish_settings", wish.cushion
+        else:
+            acct = primary_checking(db, user.id)
+            if acct is not None and acct.low_balance_threshold:
+                source, value = "account low_balance_threshold", acct.low_balance_threshold
+        if value is None:
+            continue
+        log.append(f"user {user.id}: safety_cushion <- {value} (from {source})"
+                   + ("" if apply else " [dry run]"))
+        if apply:
+            user.safety_cushion = value
+    if apply and log:
+        db.commit()
+    return log

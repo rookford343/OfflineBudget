@@ -5,4 +5,4 @@ means (not refactors that keep every figure identical), and add a matching
 `- vN:` line to the "Calculation changelog" in docs/architecture.md.
 """
 
-CALC_VERSION: int = 5
+CALC_VERSION: int = 6

@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
-from backend.database import create_tables, upgrade_schema, upgrade_categories
+from backend.database import create_tables, upgrade_schema, upgrade_categories, migrate_cushions, SessionLocal
 from backend.middleware import AuditMiddleware
 from backend.services.job_locks import _bank_sync_lock, _daily_summary_lock
 from backend.routers import (
@@ -387,6 +387,12 @@ async def _lifespan(app: FastAPI):
     create_tables()
     upgrade_schema()
     upgrade_categories()
+    # Data migration, held until Dan approves: folds the retired cushions into
+    # users.safety_cushion. Without the flag nothing is written.
+    if os.environ.get("CUSHION_MIGRATION_APPLY") == "1":
+        with SessionLocal() as _db:
+            for line in migrate_cushions(_db, apply=True):
+                logger.info("cushion migration: %s", line)
     _scheduler.start()
     yield
     _scheduler.shutdown(wait=False)
