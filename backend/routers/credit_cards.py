@@ -10,6 +10,7 @@ from backend.dependencies import get_db, get_current_user
 # so both this router's hand-edit paths and the auto-clear service share one
 # copy -- see that module's docstring on the function.
 from backend.routers._shared import owned_or_404
+from backend.services.net_position import card_cycle_figures
 from backend.services.statement_reconcile import (
     _clear_pending_if_balance_due_changed,
     statement_stale_reason,
@@ -320,5 +321,7 @@ def _enrich(card: models.CreditCard) -> schemas.CreditCardOut:
     out = schemas.CreditCardOut.model_validate(card)
     if card.credit_limit and card.credit_limit > 0:
         out.utilization_pct = round(float(card.current_balance) / float(card.credit_limit) * 100, 1)
-    out.statement_stale_reason = statement_stale_reason(card, date.today())
+    today = date.today()
+    out.statement_stale_reason = statement_stale_reason(card, today)
+    out.pending_effective, out.spent_this_cycle, out.after_pending = card_cycle_figures(card, today)
     return out

@@ -30,6 +30,8 @@ export const accountsApi = {
   // Every active account's balance with pending, the sidebar total and the
   // month's change, all figured by the backend.
   balances: () => api.get("/accounts/balances").then((r) => r.data),
+  // Checking minus card statements due, with its receipt.
+  netPosition: () => api.get("/accounts/net-position").then((r) => r.data),
   get: (id: number) => api.get(`/accounts/${id}`).then((r) => r.data),
   create: (data: object) => api.post("/accounts", data).then((r) => r.data),
   update: (id: number, data: object) => api.patch(`/accounts/${id}`, data).then((r) => r.data),

@@ -72,8 +72,8 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Wish List plan | Earliest safe date to afford a wish, using forecast plus cushion | `build_plan`, `earliest_safe_date`, `effective_cushion` (services/wish_plan.py); `wish_math.py` | Wish List page |
 | Planned expense settlement | A planned one-off settles when a matching real charge appears | `auto_settle_planned_expenses`, `settle_after_sync` (services/planned_auto_settle.py) | Month model, forecast, Recurring |
 | Tax estimate | Federal, state and FICA estimate from the tax profile | `estimate_taxes` (services/tax_service.py), `tax_estimate`, `tax_summary` (routers/spending.py) | Tax export page |
-| Net Position | Checking balances minus card balances due | Dashboard.tsx (client-side `netPosition`) -> Plan 2 (move to backend) | Dashboard |
-| Cycle spend | Current balance minus balance due plus pending | Dashboard.tsx (`cycleSpend`) -> Plan 2 | Dashboard, Credit Cards |
+| Net Position | Active checking accounts' posted balances minus active cards' statement balances due, with its receipt | `net_position` (services/net_position.py); `GET /accounts/net-position` (routers/accounts.py) | Dashboard |
+| Cycle spend | Current balance minus balance due plus pending (`card_pending`, never the raw hand-typed field), floored at 0; "after pending" is the balance plus pending | `card_cycle_figures` (services/net_position.py), exposed as `spent_this_cycle`/`after_pending`/`pending_effective` on `CreditCardOut` | Dashboard, Credit Cards |
 | Budget track totals | Committed, flexible, budgeted and spent totals | frontend/src/pages/Budget.tsx, frontend/src/lib/budgetPlan.ts -> Plan 2 | Budget page |
 | Spending average | Average of the monthly bars | frontend/src/pages/Spending.tsx (`avg`) -> Plan 2 | Spending page |
 | Net worth | Manual assets plus account balances minus card balances and manual liabilities; no shared primitive yet (allowlisted in the guard test) -> Plan 2 | `get_totals`, `capture_snapshot` (routers/networth.py) | Net Worth page |
@@ -269,7 +269,7 @@ Two tests keep the layer from eroding; both run in the normal suite.
   function-by-function list of presentational code and writers, each with a reason; an entry that no
   longer matches a violation fails the test. Adding a module to the allowlist needs a line in this
   document: the shared-layer modules are `month_base`, `real_spend`, `pending`, `forecast_walk`,
-  `forecast_engine`, `card_payment_model`, `cushion`, `account_balances` (pending-adjusted balances), `calc_version`, `tax_service` (tax estimates),
+  `forecast_engine`, `card_payment_model`, `cushion`, `account_balances` (pending-adjusted balances), `net_position` (Net Position and card cycle figures), `calc_version`, `tax_service` (tax estimates),
   and the writers `bank_sync_service`, `plaid_sync_service`, `import_service` and
   `planned_auto_settle`, plus `statement_reconcile` (matches a statement's credits to synced card
   rows, not a headline figure). The scan also covers SQL `func.sum(...)`.

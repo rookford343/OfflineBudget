@@ -966,6 +966,11 @@ class CreditCardOut(BaseModel):
     # statement_stale_reason) -- None when nothing looks off. Computed with
     # date.today() at response time, not persisted.
     statement_stale_reason: Optional[str] = None
+    # Computed on the backend at response time (services/net_position.py);
+    # pending_charges above is the raw hand-typed field, for the edit form only.
+    pending_effective: Decimal = Decimal("0")
+    spent_this_cycle: Decimal = Decimal("0")
+    after_pending: Decimal = Decimal("0")
 
 
 class CreditCardPaymentCreate(BaseModel):
@@ -1054,6 +1059,13 @@ class RunningBalanceRow(BaseModel):
 class AccountBalancesOut(BaseModel):
     accounts: list[AccountBalanceOut]  # every active account, in id order
     total_after_pending: Decimal  # sum of after_pending over the list
+
+
+class NetPositionOut(BaseModel):
+    checking_total: Decimal  # active checking accounts' posted balances
+    cards_due_total: Decimal  # active cards' statement balances due
+    net_position: Decimal  # checking_total - cards_due_total
+    explain: Explanation
 
 
 class CardTransactionOut(BaseModel):

@@ -36,6 +36,7 @@ SHARED_LAYER = {
     "services/real_spend.py": "the real-spending rule",
     "services/pending.py": "the pending and freshness rule",
     "services/account_balances.py": "pending-adjusted account balances and the month's change on them",
+    "services/net_position.py": "Net Position and each card's cycle figures",
     "services/forecast_walk.py": "the standard forecast walk",
     "services/forecast_engine.py": "the day-by-day forecast",
     "services/card_payment_model.py": "the card-payment model",

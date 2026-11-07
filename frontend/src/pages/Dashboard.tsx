@@ -9,7 +9,6 @@ import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, Hel
 import { AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import HelpPanel from "../components/HelpPanel";
 import HowCalculated from "../components/HowCalculated";
-import type { Explanation } from "../components/HowCalculated";
 import { TrendBadge } from "../components/TrendBadge";
 import { SparkLine } from "../components/SparkLine";
 import { RiskBanner } from "../components/RiskBanner";
@@ -181,38 +180,14 @@ export default function Dashboard() {
   });
   const budgetByCategory = new Map(budgetOverview.map((r: any) => [r.category_id, r]));
 
-  const totalChecking = checkingAccounts.reduce((s: number, a: any) => s + parseFloat(a.current_balance), 0);
   // One cushion (snapshot.safety_cushion is the resolved value): amber below
   // it, red below $0.
   const cushion = snapshot?.safety_cushion != null ? parseFloat(snapshot.safety_cushion) : null;
   const anyBelowThreshold = cushion != null && checkingAccounts.some((a: any) => parseFloat(a.current_balance) < cushion);
   const anyBelowZero = checkingAccounts.some((a: any) => parseFloat(a.current_balance) < 0);
-  const totalCardsDue = cards.reduce((s: number, c: any) => s + parseFloat(c.balance_due), 0);
-
-  // Net Position's receipt, built client-side from data the Dashboard
-  // already fetched (unlike the backend-built explains above, which replay
-  // from the same variables the server used) -- there's no server endpoint
-  // for this card's own arithmetic to source from.
-  const netPosition = totalChecking - totalCardsDue;
-  const netPositionExplain: Explanation = {
-    title: "Net Position",
-    result: String(netPosition),
-    rows: [
-      {
-        op: "start",
-        label: "Checking",
-        amount: String(totalChecking),
-        children: checkingAccounts.map((a: any) => ({ label: a.name, amount: String(parseFloat(a.current_balance)) })),
-      },
-      {
-        op: "subtract",
-        label: "Card statements due",
-        amount: String(totalCardsDue),
-        children: cards.map((c: any) => ({ label: c.name, amount: String(parseFloat(c.balance_due)) })),
-      },
-      { op: "result", label: "Net Position", amount: String(netPosition) },
-    ],
-  };
+  // Net Position, its parts and its receipt all come from the backend.
+  const { data: netPos } = useQuery<any>({ queryKey: ["accounts", "net-position"], queryFn: accountsApi.netPosition });
+  const netPosition = netPos ? parseFloat(netPos.net_position) : 0;
 
   const todayDate = new Date();
 
@@ -426,21 +401,21 @@ export default function Dashboard() {
           overflowing off-screen. Net Position is the one figure not shown
           as a single number anywhere else, so it stays -- as the narrow
           bookend on the far right of this row rather than its own. */}
-      <div className={`stat-card animate-fade-slide-up animate-delay-100 ${totalChecking - totalCardsDue >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
+      <div className={`stat-card animate-fade-slide-up animate-delay-100 ${netPosition >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
         <span className="stat-label flex items-center gap-1">
           Net Position
-          <HowCalculated title="Net Position" explanations={[netPositionExplain]} helpText={NET_POSITION_HELP} />
+          <HowCalculated title="Net Position" explanations={netPos ? [netPos.explain] : []} helpText={NET_POSITION_HELP} />
         </span>
-        <span className={`stat-value ${totalChecking - totalCardsDue >= 0 ? "text-green-600" : "text-red-600"}`}>
+        <span className={`stat-value ${netPosition >= 0 ? "text-green-600" : "text-red-600"}`}>
           {anyBelowThreshold && <AlertTriangle size={18} className={`${anyBelowZero ? "text-red-500" : "text-amber-500"} inline mr-1`} />}
-          {maskIfHidden(balancesHidden, fmt(totalChecking - totalCardsDue))}
+          {maskIfHidden(balancesHidden, fmt(netPosition))}
         </span>
         <span className="text-xs text-gray-500">checking minus due</span>
         <div className="flex items-center justify-between mt-1">
           <span className="text-[10px] text-gray-400">spending vs last month</span>
           <div className="flex items-center gap-2">
             <TrendBadge pct={momPct} inverse />
-            <SparkLine data={sparkData} color={totalChecking - totalCardsDue >= 0 ? "#22c55e" : "#ef4444"} />
+            <SparkLine data={sparkData} color={netPosition >= 0 ? "#22c55e" : "#ef4444"} />
           </div>
         </div>
       </div>
@@ -642,10 +617,11 @@ export default function Dashboard() {
                 const dueDateLabel = due.date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
                 const currentBalance = parseFloat(String(c.current_balance));
                 const balanceDue = parseFloat(String(c.balance_due));
-                const pendingCharges = parseFloat(String(c.pending_charges ?? 0)) || 0;
-                const cycleSpend = Math.max(0, currentBalance - balanceDue + pendingCharges);
-                // Display-only: the balance as if pending charges go through.
-                const afterPending = currentBalance + pendingCharges;
+                // Backend figures: pending through card_pending (stale hand-typed
+                // pending ignored), cycle spend floored at 0, balance after pending.
+                const pendingEffective = parseFloat(String(c.pending_effective));
+                const cycleSpend = parseFloat(String(c.spent_this_cycle));
+                const afterPending = parseFloat(String(c.after_pending));
                 const pendingCount = cardPendingCount.get(c.id) ?? 0;
                 return (
                   <div key={c.id} className="flex items-center justify-between">
@@ -686,16 +662,16 @@ export default function Dashboard() {
                         ) : (
                           <button
                             className="hover:underline"
-                            onClick={() => { setEditingPending(c.id); setPendingValue(c.pending_charges || "0"); }}
+                            onClick={() => { setEditingPending(c.id); setPendingValue(String(pendingEffective)); }}
                           >
-                            Pending: {maskIfHidden(balancesHidden, fmt(c.pending_charges || 0))} ✎
+                            Pending: {maskIfHidden(balancesHidden, fmt(pendingEffective))} ✎
                           </button>
                         )}
                       </div>
                     </div>
                     <div className="text-right shrink-0 ml-4">
                       <p className={`text-sm font-bold tabular-nums ${utilColor(c.utilization_pct)}`}>{maskIfHidden(balancesHidden, fmt(afterPending))}</p>
-                      {pendingCharges !== 0 && (
+                      {pendingEffective !== 0 && (
                         <p className="text-xs text-gray-400">
                           Posted {maskIfHidden(balancesHidden, fmt(currentBalance))}
                           {" · "}{pendingCount > 0 ? `${pendingCount} pending` : "incl. pending"}
