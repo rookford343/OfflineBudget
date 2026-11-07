@@ -13,13 +13,16 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+# cdn.plaid.com / *.plaid.com are allowed only for Plaid Link, which
+# frontend/src/lib/plaidLink.ts loads as a script plus an iframe and which
+# talks to Plaid's API.
 # style-src allows 'unsafe-inline' because recharts and React set inline styles.
 SECURITY_HEADERS = {
     "Strict-Transport-Security": "max-age=31536000",
     "Content-Security-Policy": (
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; "
-        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        "default-src 'self'; script-src 'self' https://cdn.plaid.com; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self' https://*.plaid.com; manifest-src 'self'; worker-src 'self'; "
+        "frame-src https://cdn.plaid.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
     ),
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",

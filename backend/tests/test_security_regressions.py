@@ -37,7 +37,8 @@ now refuses or neutralizes it.
     foreign key) or on the explicit global allowlist, so a new unowned table
     fails loudly instead of re-breaking account deletion.
   - spa static traversal: encoded and raw ../ paths never read files outside the
-    frontend dist directory (.env, the database, source, pyproject).
+    frontend dist directory (.env, the database, source, pyproject), nor
+    through a symlink inside it that points outside.
   - cors foreign origin: a preflight from an origin not in ALLOWED_ORIGINS gets no
     Access-Control-Allow-Origin header.
   - scheduler gate: with SCHEDULER_ENABLED off (the default) the app never starts the
@@ -939,21 +940,37 @@ def test_api_docs__default__not_served():
         assert client.get(path).status_code == 404, path
 
 
-@pytest.mark.parametrize("path", [
-    "/../.env",
-    "/%2e%2e/%2e%2e/data/budget.db",
-    "/assets/../../backend/config.py",
-    "/..%2fpyproject.toml",
-])
-def test_spa_static__path_traversal__is_404(tmp_path, path):
+def _traversal_site(tmp_path):
+    """dist/ with real secrets planted where the traversal paths below would reach."""
     from backend.web import mount_frontend
-    dist = tmp_path / "site" / "dist"
-    dist.mkdir(parents=True)
+    site = tmp_path / "site"
+    dist = site / "dist"
+    (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text("SPA")
-    (tmp_path / "site" / ".env").write_text("JWT_SECRET=x")
+    (site / ".env").write_text("JWT_SECRET=hunter2")
+    (site / "pyproject.toml").write_text("[project]\nname = 'x'")
+    (site / "backend").mkdir()
+    (site / "backend" / "config.py").write_text("class Settings: pass")
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "budget.db").write_bytes(b"SQLite format 3\x00secret rows")
+    (site / "outside.txt").write_text("JWT_SECRET=via-symlink")
+    (dist / "link.txt").symlink_to("../outside.txt")
     app = FastAPI()
     mount_frontend(app, str(dist))
-    resp = TestClient(app).get(path)
+    return TestClient(app)
+
+
+@pytest.mark.parametrize("path", [
+    "/%2e%2e/.env",
+    "/..%2f.env",
+    "/assets/..%2f..%2f.env",
+    "/%2e%2e/%2e%2e/data/budget.db",
+    "/..%2fpyproject.toml",
+    "/%2e%2e/backend/config.py",
+    "/link.txt",
+])
+def test_spa_static__path_traversal__is_404(tmp_path, path):
+    resp = _traversal_site(tmp_path).get(path)
     assert resp.status_code == 404 or resp.text == "SPA"
     for leaked in ("JWT_SECRET", "SQLite format", "class Settings", "[project]"):
         assert leaked not in resp.text

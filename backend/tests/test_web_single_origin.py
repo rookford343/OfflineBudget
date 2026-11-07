@@ -9,9 +9,9 @@ from backend.web import SecurityHeadersMiddleware, mount_frontend
 HEADERS = {
     "strict-transport-security": "max-age=31536000",
     "content-security-policy": (
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; "
-        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        "default-src 'self'; script-src 'self' https://cdn.plaid.com; style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; connect-src 'self' https://*.plaid.com; manifest-src 'self'; worker-src 'self'; "
+        "frame-src https://cdn.plaid.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
     ),
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
