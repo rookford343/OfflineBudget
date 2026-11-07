@@ -44,6 +44,7 @@ export default function QuickStartWizard({ onComplete, onDismiss }: Props) {
     mutationFn: cardsApi.create,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["credit-cards"] });
+      qc.invalidateQueries({ queryKey: ["accounts", "net-position"] });
       setError(null);
       setStep(4);
     },

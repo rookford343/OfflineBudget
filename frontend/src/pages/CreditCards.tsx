@@ -86,7 +86,7 @@ export default function CreditCards() {
   // (the backend stamps freshness on any PATCH that includes balance_due).
   const confirmStatementMut = useMutation({
     mutationFn: (c: Card) => cardsApi.update(c.id, { balance_due: parseFloat(c.balance_due) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["credit-cards"] }); qc.invalidateQueries({ queryKey: ["accounts", "net-position"] }); },
   });
 
   function openNew() { setForm({ ...emptyCard }); setEditCard(null); setShowForm(true); }
