@@ -67,7 +67,7 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Monthly summary / Month in Review | Category totals, debits, credits, month-over-month change, net cashflow | `_month_spending_by_category` (= `spend_totals`), `generate_summary` (services/summary_generator.py) | Monthly email, Month in Review, `/spending/monthly-summary` |
 | Weekly digest | Trailing 7 days of spending plus forward balance risk | `generate_weekly_digest` (services/summary_generator.py) | Weekly email, `/spending/weekly-digest` |
 | Daily email | Headline figures, cards, upcoming, stale-connection notes | `generate_daily_summary` (services/summary_generator.py) | Daily email |
-| Available to Spend | Monthly-frequency income minus bills for the calendar month (no boost, no overrides, refunds dropped) -> Plan 2 rebuild (legacy; allowlisted in the guard test as "rebuilt in Plan 2") | `available_to_spend`, `_committed_card_bills_fired` (routers/spending.py) | Dashboard card |
+| Available to Spend | This month's income (all frequencies, Social Security boost) - bills (overrides, quarterly in its due month) - one-offs (funded netting) - real spending so far not already in bills or one-offs, refunds netted, plus fresh card pending. No budgets. Its info panel walks to Left to Spend | `available_to_spend` (services/available_to_spend.py) | Dashboard card |
 | Pacer add-backs / discretionary spend | Real spending in a range for the weekly pacer, with recurring card charges added back | `discretionary_spend_checking`, `discretionary_spend_card` (spend verdicts from `classified_rows`, minus recurring bills, Groceries/Savings lines and verified planned transfers), `discretionary_spend_in_range`, `compute_weekly_spendable` (services/spendable_pacer.py) | Dashboard weekly allowance |
 | Wish List plan | Earliest safe date to afford a wish, using forecast plus cushion | `build_plan`, `earliest_safe_date`, `effective_cushion` (services/wish_plan.py); `wish_math.py` | Wish List page |
 | Planned expense settlement | A planned one-off settles when a matching real charge appears | `auto_settle_planned_expenses`, `settle_after_sync` (services/planned_auto_settle.py) | Month model, forecast, Recurring |
@@ -182,8 +182,7 @@ filters; `spend_totals` for `by_category`, `spend` and `income`. A balance-only 
 transaction feed) has no rows and contributes nothing. Callers layer their own exclusions on
 spend verdicts, never a second rule: the pacer drops recurring bills, the Groceries/Savings
 lines and verified planned transfers. `filter_real_spend` (spending_helpers) keeps spend and
-income rows for list views; `/spending/available-to-spend` keeps its own recipe until its
-rebuild (Plan 2).
+income rows for list views; `/spending/available-to-spend` reads it through `services/available_to_spend.py`.
 
 Savings-type budget lines: their actual is money moved into savings, not spending.
 `savings_moved` / `savings_moved_rows` (real_spend.py) sum the transfer verdicts on checking
@@ -269,7 +268,7 @@ Two tests keep the layer from eroding; both run in the normal suite.
   function-by-function list of presentational code and writers, each with a reason; an entry that no
   longer matches a violation fails the test. Adding a module to the allowlist needs a line in this
   document: the shared-layer modules are `month_base`, `real_spend`, `pending`, `forecast_walk`,
-  `forecast_engine`, `card_payment_model`, `cushion`, `account_balances` (pending-adjusted balances), `net_worth` (assets, liabilities and net worth), `net_position` (Net Position and card cycle figures), `calc_version`, `tax_service` (tax estimates),
+  `forecast_engine`, `card_payment_model`, `cushion`, `account_balances` (pending-adjusted balances), `net_worth` (assets, liabilities and net worth), `net_position` (Net Position and card cycle figures), `available_to_spend` (Available to Spend and its walk to Left to Spend), `calc_version`, `tax_service` (tax estimates),
   and the writers `bank_sync_service`, `plaid_sync_service`, `import_service` and
   `planned_auto_settle`, plus `statement_reconcile` (matches a statement's credits to synced card
   rows, not a headline figure). The scan also covers SQL `func.sum(...)`.
@@ -288,7 +287,7 @@ Settled by the principal. Record any behavior change here.
 - **Available to Spend is rebuilt, not retired.** Streamline where numbers are calculated.
 - **History is recorded** at each bank sync and each email. The "why" view is available everywhere in the app; the dashboard is the primary place.
 - **Architecture documentation** for new people and AI is required.
-- **Available to Spend (rebuilt)** is figured "before budgets": this month's income minus bills minus one-offs minus real spending so far, without the groceries/savings budgets, for the whole calendar month. Its info panel walks to Left to Spend (subtract budgets, then card and pending adjustments).
+- **Available to Spend (rebuilt)** (calculation v11) is figured "before budgets": this month's income minus bills minus one-offs minus real spending so far, without the groceries/savings budgets, for the whole calendar month. Its info panel walks to Left to Spend (subtract budgets, then card and pending adjustments).
 - **Real-spending verdicts, applied to every total:** refunds net against spending; transfers to savings or between your own accounts are not spending; a debit filed under an income category reduces income (for example a paycheck reversal).
 - **One cushion everywhere.** The risk banner, the 3-month low and the Wish List all use the single cushion (default $1,000): amber below it, red below $0. The per-account `low_balance_threshold` and the Wish List cushion are retired; any existing non-default value migrates into the single setting.
 - **Overrides are keyed by the item's natural due date.** The weekend shift moves only the posting day.
@@ -337,3 +336,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 - v8: subscription-fallback cards no longer double-count in Safety Margin; refunds match by lookback, not query window
 - v9: risk banner skips locked statement-payment dips, like the 3-month low
 - v10: net worth has one recipe; assets include account balances
+- v11: Available to Spend rebuilt before budgets on the shared layer

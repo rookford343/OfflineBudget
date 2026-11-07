@@ -104,6 +104,22 @@ try:
         if strict:
             raise
         out["net worth"] = "n/a (%s)" % type(exc).__name__
+
+    # Available to Spend: the current tree's service, or the legacy route
+    # function in a ref from before the rebuild.
+    try:
+        try:
+            from backend.services.available_to_spend import available_to_spend as ats_fn
+            ats = ats_fn(db, user, today)
+        except ImportError:
+            from backend.routers.spending import available_to_spend as ats_route
+            ats = ats_route(db=db, user=user)
+        out["available to spend"] = str(ats.available)
+        out["available: spent so far"] = str(ats.spent_this_month)
+    except Exception as exc:
+        if strict:
+            raise
+        out["available to spend"] = "n/a (%s)" % type(exc).__name__
 finally:
     db.close()
 print("@@METRICS@@" + json.dumps(out))

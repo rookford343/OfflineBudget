@@ -1,5 +1,5 @@
 import calendar
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
-from backend.services.spending_helpers import filter_real_spend, is_card_payment, NOT_SAVINGS, merchant_totals
+from backend.services.spending_helpers import merchant_totals
 from backend.services.real_spend import ClassifiedRow, classified_rows
 from backend.services.summary_generator import generate_weekly_digest
 from backend.services.budget_snapshot import compute_budget_snapshot
@@ -339,146 +339,13 @@ def spending_by_card(
     return result
 
 
-def _committed_card_bills_fired(db: Session, user_id: int, start: date, end: date) -> Decimal:
-    """Card-linked bills in committed_expenses below (monthly items, and
-    yearly items in their month, at item.amount) whose due day falls in
-    [start, end]. Kept to this endpoint's own committed recipe so the
-    add-back removes exactly what it subtracted: the weekly pacer moved to
-    the month base's card-bill list (2026-11), which also holds weekly,
-    biweekly and quarterly bills and entered statement amounts that this
-    card's committed figure doesn't, so sharing it here would drop those
-    bills from both sides. Goes away when Available to Spend is rebuilt on
-    the month base (docs/superpowers/specs/2026-11-06-calculation-consistency-design.md)."""
-    items = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == user_id,
-        models.RecurringItem.type == models.RecurringType.expense,
-        models.RecurringItem.is_active == True,
-        models.RecurringItem.card_id.isnot(None),
-    ).all()
-    total = Decimal("0")
-    day = start
-    while day <= end:
-        last_day_of_month = calendar.monthrange(day.year, day.month)[1]
-        for item in items:
-            if item.start_date > day or (item.end_date and item.end_date < day):
-                continue
-            if item.frequency == models.RecurringFrequency.monthly:
-                fires = True
-            elif item.frequency == models.RecurringFrequency.yearly:
-                fires = item.month_of_year == day.month
-            else:
-                fires = False
-            if not fires:
-                continue
-            due_day = item.day_of_month if item.day_of_month > 0 else last_day_of_month
-            if min(due_day, last_day_of_month) == day.day:
-                total += item.amount
-        day += timedelta(days=1)
-    return total
-
-
 @router.get("/available-to-spend", response_model=schemas.AvailableToSpend)
 def available_to_spend(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    today = date.today()
-    first = today.replace(day=1)
-    last = today.replace(day=calendar.monthrange(today.year, today.month)[1])
-
-    income_items = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == user.id,
-        models.RecurringItem.type == models.RecurringType.income,
-        models.RecurringItem.is_active == True,
-        models.RecurringItem.frequency == models.RecurringFrequency.monthly,
-    ).all()
-    monthly_income = sum((item.amount for item in income_items), Decimal("0"))
-
-    expense_items = db.query(models.RecurringItem).filter(
-        models.RecurringItem.user_id == user.id,
-        models.RecurringItem.type == models.RecurringType.expense,
-        models.RecurringItem.is_active == True,
-    ).all()
-    committed_expenses = Decimal("0")
-    for item in expense_items:
-        if item.frequency == models.RecurringFrequency.monthly:
-            committed_expenses += item.amount
-        elif item.frequency == models.RecurringFrequency.yearly and item.month_of_year == today.month:
-            committed_expenses += item.amount
-
-    # "Spent So Far" means spending NOT already represented in Committed Bills,
-    # because the two are subtracted from the same income. Two bugs followed
-    # from ignoring that:
-    #
-    #   1. Rows tied to a recurring item were counted here AND in committed
-    #      expenses above, so every posted bill was deducted twice.
-    #   2. Card charges were not counted at all, only checking. For anyone who
-    #      puts most spending on a card that is the larger half, and it made a
-    #      single week's digest exceed the whole month's figure on this card.
-    txns = (
-        db.query(models.Transaction)
-        .outerjoin(models.Category, models.Transaction.category_id == models.Category.id)
-        .filter(
-            models.Transaction.user_id == user.id,
-            models.Transaction.is_actual == True,
-            models.Transaction.date >= first,
-            models.Transaction.date <= last,
-            models.Transaction.amount < 0,
-            # Already committed above; counting the posted transaction too is
-            # the double-deduction described in (1).
-            models.Transaction.recurring_item_id.is_(None),
-            NOT_SAVINGS,
-        )
-    ).all()
-    # Transfers and card payoffs are not this month's discretionary spend --
-    # a payoff settles charges already counted on the card side.
-    txns = filter_real_spend(db, user.id, txns)
-    spent_this_month = sum((abs(t.amount) for t in txns), Decimal("0"))
-
-    card_rows = db.query(models.CreditCardTransaction).filter(
-        models.CreditCardTransaction.user_id == user.id,
-        models.CreditCardTransaction.date >= first,
-        models.CreditCardTransaction.date <= last,
-        models.CreditCardTransaction.amount > 0,
-    ).all()
-    card_spend = sum(
-        (t.amount for t in card_rows if not is_card_payment(t.merchant)), Decimal("0"),
-    )
-    # Card-linked recurring items are inside committed_expenses too, so remove
-    # the ones that have actually fired so far this month -- not the whole
-    # month's worth, or an early-month view would over-credit charges that
-    # haven't happened yet.
-    card_committed_so_far = _committed_card_bills_fired(db, user.id, first, today)
-    spent_this_month += max(card_spend - card_committed_so_far, Decimal("0"))
-
-    # pending_charges is the user's own hand-tracked read of real, already-made
-    # card spend that hasn't itemized into credit_card_transactions yet --
-    # bank sync (and CSV import) only produce itemized rows once a charge
-    # actually posts, which can lag the real purchase by days. Every OTHER
-    # place in this app that answers "how much has really been spent"
-    # (budget_snapshot.py's Left to Spend, forecast_engine.py's carried
-    # balance) already folds this in; this endpoint didn't, so a real,
-    # already-confirmed charge the user knows about (2026-09-02: $500.00 on
-    # Chase, current_balance already reflects it) stayed invisible here,
-    # showing "Spent So Far: $0.00" the same day it happened. Not double-
-    # counted against card_spend above: pending_charges is specifically the
-    # portion NOT YET itemized, by the same convention card_pending
-    # and the carried-balance formula already rely on elsewhere. Freshness-
-    # checked the same way (stale or unstamped reads as zero), so a forgotten
-    # figure doesn't silently linger here either.
-    from backend.services.pending import card_pending
-    active_cards = db.query(models.CreditCard).filter(
-        models.CreditCard.user_id == user.id,
-        models.CreditCard.is_active == True,
-    ).all()
-    spent_this_month += sum((card_pending(c, today) for c in active_cards), Decimal("0"))
-
-    return schemas.AvailableToSpend(
-        monthly_income=monthly_income,
-        committed_expenses=committed_expenses,
-        spent_this_month=spent_this_month,
-        available=monthly_income - committed_expenses - spent_this_month,
-    )
+    from backend.services.available_to_spend import available_to_spend as compute
+    return compute(db, user, date.today())
 
 
 @router.get("/budget-snapshot", response_model=schemas.BudgetSnapshot)

@@ -1438,10 +1438,15 @@ class AuditLogPage(BaseModel):
 # ── Analytics ─────────────────────────────────────────────────────────────────
 
 class AvailableToSpend(BaseModel):
-    monthly_income: Decimal
-    committed_expenses: Decimal
-    spent_this_month: Decimal
-    available: Decimal
+    monthly_income: Decimal        # month_base income_total (SS boost, include_in_forecast filter)
+    committed_expenses: Decimal    # month_base expense_total
+    one_offs_net: Decimal          # one-offs out less in (funded netting applied)
+    spent_this_month: Decimal      # real spending so far not in bills/one-offs, plus card pending
+    available: Decimal             # income - committed - one-offs - spent
+    explain: Explanation
+    # Starts at `available`, ends at the snapshot's Left to Spend. None only
+    # when the user has no active checking account (the snapshot needs one).
+    to_left_to_spend: Optional[Explanation] = None
 
 
 class YearlyTrendEntry(BaseModel):

@@ -38,6 +38,7 @@ SHARED_LAYER = {
     "services/account_balances.py": "pending-adjusted account balances and the month's change on them",
     "services/net_worth.py": "net worth: assets, liabilities and the one recipe behind the live view and snapshots",
     "services/net_position.py": "Net Position and each card's cycle figures",
+    "services/available_to_spend.py": "Available to Spend, before budgets, and its walk to Left to Spend",
     "services/forecast_walk.py": "the standard forecast walk",
     "services/forecast_engine.py": "the day-by-day forecast",
     "services/card_payment_model.py": "the card-payment model",
@@ -77,8 +78,6 @@ PRESENTATIONAL_OR_WRITER = {
     "services/budget_plan.py:compute_budget_plan": "totals month-model occurrences for the plan page",
     "services/reconciliation_helper.py:compute_reconciliation": "totals matched card autopays to compare with the estimate",
     # No shared primitive yet.
-    "routers/spending.py:available_to_spend": "rebuilt in Plan 2",
-    "routers/spending.py:_committed_card_bills_fired": "rebuilt in Plan 2",
 }
 
 # Check 2 only: reads of `.pending_charges` that are not the model column or that stamp it.

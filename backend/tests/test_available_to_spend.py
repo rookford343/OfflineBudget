@@ -1,151 +1,253 @@
-import pytest
-import calendar
-from datetime import date
+"""Available to Spend, "before budgets", on the shared layer.
+
+This month's income - bills - one-offs - real spending so far, with no
+Groceries or Savings budget; its second explanation walks to Left to Spend.
+Dates are pinned (forecast_engine reads date.today()). All figures invented.
+"""
+from datetime import date, datetime, timedelta
 from decimal import Decimal
+
+import pytest
+
 from backend import models
-from backend.routers.spending import available_to_spend
+from backend.routers.spending import available_to_spend as available_route
+from backend.services.available_to_spend import available_to_spend
+from backend.services.budget_snapshot import compute_budget_snapshot
+from backend.services.explain import children_consistent, replay
+from backend.tests.test_month_leftover_parity import BOOST, NET, _budget, _seed as _ss_seed
+from backend.tests.test_parity_headline import _headline_fixture, _pin_today
+
+D = Decimal
+TODAY = date(2026, 11, 12)
+
+
+@pytest.fixture(autouse=True)
+def _pinned(monkeypatch):
+    _pin_today(monkeypatch, TODAY)
 
 
 def _seed(db):
     user = models.User(username="a", hashed_password="x", display_name="A")
-    db.add(user); db.flush()
-    acct = models.Account(user_id=user.id, name="Chk", type=models.AccountType.checking)
-    card = models.CreditCard(user_id=user.id, name="Visa", credit_limit=Decimal("5000"),
+    db.add(user)
+    db.flush()
+    acct = models.Account(user_id=user.id, name="Chk", type=models.AccountType.checking,
+                          current_balance=D("2000.00"))
+    card = models.CreditCard(user_id=user.id, name="Visa", credit_limit=D("5000"),
                              statement_day=28, due_day=15)
-    db.add_all([acct, card]); db.flush()
+    db.add_all([acct, card])
+    db.flush()
     db.add(models.RecurringItem(
-        user_id=user.id, account_id=acct.id, name="Rent", amount=Decimal("1000.00"),
-        type=models.RecurringType.income if False else models.RecurringType.expense,
-        frequency=models.RecurringFrequency.monthly, day_of_month=1,
-        start_date=date(2026, 1, 1), is_active=True))
+        user_id=user.id, account_id=acct.id, name="Rent", amount=D("1000.00"),
+        type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
+        day_of_month=1, start_date=date(2026, 1, 1), is_active=True))
     db.add(models.RecurringItem(
-        user_id=user.id, account_id=acct.id, name="Pay", amount=Decimal("5000.00"),
+        user_id=user.id, account_id=acct.id, name="Pay", amount=D("5000.00"),
         type=models.RecurringType.income, frequency=models.RecurringFrequency.monthly,
         day_of_month=1, start_date=date(2026, 1, 1), is_active=True))
     db.commit()
     return user, acct, card
 
 
-def _mid_month():
-    t = date.today()
-    return t.replace(day=min(15, calendar.monthrange(t.year, t.month)[1]))
+def _debit(db, user, acct, description, amount, day=10, **kw):
+    db.add(models.Transaction(
+        user_id=user.id, account_id=acct.id, date=date(2026, 11, day),
+        amount=-D(amount), description=description, is_actual=True, **kw))
+    db.commit()
 
 
-def test_a_posted_recurring_bill_is_not_deducted_twice(db_session):
-    """It is already inside Committed Bills; counting the posted transaction
-    too subtracts the same money from the same income twice."""
+def _card_row(db, user, card, merchant, amount, day=10):
+    db.add(models.CreditCardTransaction(
+        card_id=card.id, user_id=user.id, date=date(2026, 11, day),
+        amount=D(amount), merchant=merchant))
+    db.commit()
+
+
+def _ats(db, user, as_of=TODAY):
+    return available_to_spend(db, user, as_of)
+
+
+def test_first_of_month_nothing_spent(db_session):
     user, acct, card = _seed(db_session)
-    item = db_session.query(models.RecurringItem).filter_by(name="Rent").first()
+    db_session.add(models.PlannedExpense(
+        user_id=user.id, account_id=acct.id, name="Tires", amount=D("300.00"),
+        expected_date=date(2026, 11, 20)))
+    db_session.commit()
+
+    r = _ats(db_session, user, as_of=date(2026, 11, 1))
+    assert r.spent_this_month == D("0")
+    assert r.monthly_income == D("5000.00")
+    assert r.committed_expenses == D("1000.00")
+    assert r.one_offs_net == D("300.00")
+    assert r.available == D("5000.00") - D("1000.00") - D("300.00")
+
+
+def test_refund_lowers_spent_not_income(db_session):
+    user, acct, card = _seed(db_session)
+    _debit(db_session, user, acct, "COFFEE SHOP", "63.00", day=3)
     db_session.add(models.Transaction(
-        user_id=user.id, account_id=acct.id, date=_mid_month(),
-        amount=Decimal("-1000.00"), description="RENT ACH", is_actual=True,
-        recurring_item_id=item.id))
+        user_id=user.id, account_id=acct.id, date=date(2026, 11, 5), amount=D("20.00"),
+        description="COFFEE SHOP", is_actual=True))
     db_session.commit()
 
-    r = available_to_spend(db=db_session, user=user)
-    assert r.spent_this_month == Decimal("0")
-    assert r.available == Decimal("4000.00")   # 5000 income - 1000 committed
+    r = _ats(db_session, user)
+    assert r.spent_this_month == D("43.00")
+    assert r.monthly_income == D("5000.00")
+    assert r.available == D("4000.00") - D("43.00")
 
 
-@pytest.mark.parametrize("merchant,amount,expected", [
-    # Card charges used to be excluded entirely, so a card-first household's
-    # figure omitted the larger half and one week could exceed the month.
-    pytest.param("Some Shop", "250.00", "250.00", id="card_spending_counts"),
-    # A payoff settles charges already counted individually.
-    pytest.param("AUTOMATIC PAYMENT - THANK YOU", "900.00", "0", id="card_payoff_is_not_spending"),
-])
-def test_card_rows_toward_the_month(db_session, merchant, amount, expected):
+def test_recurring_linked_spend_not_double_counted(db_session):
     user, acct, card = _seed(db_session)
-    db_session.add(models.CreditCardTransaction(
-        card_id=card.id, user_id=user.id, date=_mid_month(),
-        amount=Decimal(amount), merchant=merchant))
-    db_session.commit()
+    rent = db_session.query(models.RecurringItem).filter_by(name="Rent").one()
+    _debit(db_session, user, acct, "RENT ACH", "1000.00", day=1, recurring_item_id=rent.id)
 
-    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal(expected)
+    r = _ats(db_session, user)
+    assert r.spent_this_month == D("0")
+    assert r.available == D("4000.00")
 
 
-def test_card_linked_recurring_charges_are_not_double_counted(db_session):
-    """A subscription billed to a card sits in Committed Bills as well."""
+def test_card_linked_bill_is_not_double_counted_but_other_card_spend_is(db_session):
     user, acct, card = _seed(db_session)
-    today = date.today()
     db_session.add(models.RecurringItem(
         user_id=user.id, account_id=acct.id, card_id=card.id, name="Streaming",
-        amount=Decimal("20.00"), type=models.RecurringType.expense,
+        amount=D("20.00"), type=models.RecurringType.expense,
         frequency=models.RecurringFrequency.monthly, day_of_month=1,
         start_date=date(2026, 1, 1), is_active=True))
-    db_session.add(models.CreditCardTransaction(
-        card_id=card.id, user_id=user.id, date=today.replace(day=1),
-        amount=Decimal("20.00"), merchant="Streaming"))
     db_session.commit()
+    _card_row(db_session, user, card, "Streaming", "20.00", day=1)
+    assert _ats(db_session, user).spent_this_month == D("0")
 
-    # The charge is cancelled by the committed subscription that predicted it.
-    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("0")
+    _card_row(db_session, user, card, "Some Shop", "250.00")
+    assert _ats(db_session, user).spent_this_month == D("250.00")
 
 
-def test_discretionary_checking_still_counts(db_session):
-    """The fix must not suppress ordinary unplanned spending."""
+def test_settled_one_off_not_double_counted(db_session):
     user, acct, card = _seed(db_session)
-    db_session.add(models.Transaction(
-        user_id=user.id, account_id=acct.id, date=_mid_month(),
-        amount=Decimal("-63.00"), description="COFFEE", is_actual=True))
+    db_session.add(models.PlannedExpense(
+        user_id=user.id, account_id=acct.id, name="Tires", amount=D("280.00"),
+        expected_date=date(2026, 11, 4), settled_on=date(2026, 11, 4), actual_amount=D("300.00")))
     db_session.commit()
+    _debit(db_session, user, acct, "TIRE SHOP", "300.00", day=4)   # the one-off's own charge
+    _debit(db_session, user, acct, "HARDWARE", "45.00", day=6)      # ordinary spending
 
-    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("63.00")
+    r = _ats(db_session, user)
+    assert r.one_offs_net == D("300.00")
+    assert r.spent_this_month == D("45.00")
+    assert r.available == D("5000.00") - D("1000.00") - D("300.00") - D("45.00")
 
 
-# --- pending_charges: real spend that hasn't itemized yet (2026-09-02) ----
-
-def test_fresh_pending_charges_count_toward_spent_this_month(db_session):
-    """Real case, 2026-09-02: Chase showed $0.00 Spent So Far the same day
-    the user confirmed $470.90 of real new spend, because that spend hadn't
-    itemized into credit_card_transactions yet -- every other place in the
-    app answering "how much has really been spent" (budget_snapshot.py's
-    Left to Spend, forecast_engine.py's carried balance) already reads
-    pending_charges; this endpoint didn't."""
-    from datetime import datetime
+def test_a_second_equal_charge_still_counts_after_a_one_off_claims_one(db_session):
     user, acct, card = _seed(db_session)
-    card.pending_charges = Decimal("470.90")
-    card.pending_charges_updated_at = datetime.utcnow()
+    db_session.add(models.PlannedExpense(
+        user_id=user.id, card_id=card.id, name="Tires", amount=D("300.00"),
+        expected_date=date(2026, 11, 4), settled_on=date(2026, 11, 4), actual_amount=D("300.00")))
     db_session.commit()
+    _card_row(db_session, user, card, "TIRE SHOP", "300.00", day=4)
+    _card_row(db_session, user, card, "TIRE SHOP 2", "300.00", day=5)
 
-    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("470.90")
+    assert _ats(db_session, user).spent_this_month == D("300.00")
 
 
-def test_pending_charges_add_on_top_of_itemized_card_spend(db_session):
-    """The two are additive, not overlapping -- pending_charges is
-    specifically the NOT-yet-itemized portion, by the same convention
-    _fresh_pending_charges relies on elsewhere."""
-    from datetime import datetime
+def test_card_pending_counted_and_stale_ignored(db_session):
     user, acct, card = _seed(db_session)
-    db_session.add(models.CreditCardTransaction(
-        card_id=card.id, user_id=user.id, date=_mid_month(),
-        amount=Decimal("250.00"), merchant="Some Shop"))
-    card.pending_charges = Decimal("100.00")
-    card.pending_charges_updated_at = datetime.utcnow()
+    card.pending_charges = D("470.90")
+    card.pending_charges_updated_at = datetime(2026, 11, 11, 9, 0)
     db_session.commit()
+    assert _ats(db_session, user).spent_this_month == D("470.90")
 
-    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("350.00")
+    card.pending_charges_updated_at = datetime(2026, 11, 12) - timedelta(days=10)
+    db_session.commit()
+    assert _ats(db_session, user).spent_this_month == D("0")
 
 
-def test_stale_pending_charges_do_not_count(db_session):
-    """Not trusted once too old to still reflect reality -- same 7-day
-    freshness window _fresh_pending_charges already enforces elsewhere."""
-    from datetime import datetime, timedelta
+def test_pending_adds_on_top_of_posted_card_spend(db_session):
     user, acct, card = _seed(db_session)
-    card.pending_charges = Decimal("470.90")
-    card.pending_charges_updated_at = datetime.utcnow() - timedelta(days=10)
+    _card_row(db_session, user, card, "Some Shop", "250.00")
+    card.pending_charges = D("100.00")
+    card.pending_charges_updated_at = datetime(2026, 11, 11, 9, 0)
     db_session.commit()
+    assert _ats(db_session, user).spent_this_month == D("350.00")
 
-    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("0")
 
-
-def test_pending_charges_with_no_timestamp_do_not_count(db_session):
-    """A nonzero value with no recorded timestamp is treated as already
-    stale rather than silently trusted -- matches _fresh_pending_charges'
-    own behavior for this exact case."""
+@pytest.mark.parametrize("merchant,expected", [
+    ("Some Shop", "250.00"),
+    ("AUTOMATIC PAYMENT - THANK YOU", "0"),
+])
+def test_card_rows_and_payoffs(db_session, merchant, expected):
     user, acct, card = _seed(db_session)
-    card.pending_charges = Decimal("470.90")
-    card.pending_charges_updated_at = None
+    _card_row(db_session, user, card, merchant, "250.00")
+    assert _ats(db_session, user).spent_this_month == D(expected)
+
+
+def test_discretionary_checking_counts(db_session):
+    user, acct, card = _seed(db_session)
+    _debit(db_session, user, acct, "COFFEE", "63.00")
+    assert _ats(db_session, user).spent_this_month == D("63.00")
+
+
+def test_ss_boost_in_income(db_session):
+    user, checking = _ss_seed(db_session, "ssboost", remaining=D("0"))
+    db_session.commit()
+    r = _ats(db_session, user, as_of=date(2026, 11, 2))
+    assert r.monthly_income == 2 * (NET + BOOST)
+
+
+def test_explain_replays_to_available(db_session):
+    user, acct, card = _seed(db_session)
+    _debit(db_session, user, acct, "COFFEE", "63.00")
+    _card_row(db_session, user, card, "Some Shop", "250.00")
+    db_session.add(models.PlannedExpense(
+        user_id=user.id, account_id=acct.id, name="Tires", amount=D("300.00"),
+        expected_date=date(2026, 11, 20)))
     db_session.commit()
 
-    assert available_to_spend(db=db_session, user=user).spent_this_month == Decimal("0")
+    r = _ats(db_session, user)
+    assert [row.label for row in r.explain.rows][:4] == [
+        "Income this month", "Recurring bills this month", "One-offs this month", "Spent so far"]
+    assert replay(r.explain) == r.available == r.explain.result
+    assert children_consistent(r.explain)
+
+
+def test_walk_to_left_to_spend_ends_at_snapshot_value(db_session):
+    user, checking = _headline_fixture(db_session)
+    visa = db_session.query(models.CreditCard).filter_by(name="Test Visa").one()
+    _budget(db_session, user, "Savings", "250.00")
+    _card_row(db_session, user, visa, "Lawn", "25.00", day=2)       # the weekly card bill, posted
+    _card_row(db_session, user, visa, "Some Shop", "60.00", day=2)
+    _debit(db_session, user, checking, "COFFEE", "12.00", day=2)
+    db_session.commit()
+    as_of = date(2026, 11, 2)
+
+    r = _ats(db_session, user, as_of=as_of)
+    snapshot = compute_budget_snapshot(db_session, user, checking.id, as_of=as_of)
+
+    assert r.to_left_to_spend is not None
+    assert replay(r.to_left_to_spend) == r.to_left_to_spend.result == snapshot.left_to_spend
+    assert children_consistent(r.to_left_to_spend)
+    assert r.to_left_to_spend.rows[0].amount == r.available
+    labels = [row.label for row in r.to_left_to_spend.rows]
+    assert "Groceries budget" in labels and "Savings set aside" in labels
+    # Spending so far: the coffee, the shop, and the 75 pending; the posted
+    # lawn charge is the bill already in bills.
+    assert r.spent_this_month == D("12.00") + D("60.00") + D("75.00")
+
+
+def test_no_checking_account_means_no_walk(db_session):
+    user = models.User(username="nochk", hashed_password="x", display_name="N")
+    db_session.add(user)
+    db_session.commit()
+    r = _ats(db_session, user)
+    assert r.available == D("0") and r.to_left_to_spend is None
+
+
+def test_route_returns_the_service_figures(db_session, monkeypatch):
+    user, acct, card = _seed(db_session)
+    _debit(db_session, user, acct, "COFFEE", "63.00")
+
+    class _Today(date):
+        @classmethod
+        def today(cls):
+            return TODAY
+    monkeypatch.setattr("backend.routers.spending.date", _Today)
+    r = available_route(db=db_session, user=user)
+    assert r.available == D("3937.00")
+    assert r.explain.result == r.available

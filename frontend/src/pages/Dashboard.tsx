@@ -58,6 +58,8 @@ const SPENDABLE_HELP = "How much you can spend on everyday things (groceries, ea
 
 const MARGIN_HELP = "The lowest your checking account is projected to go over the next 3 months, after also setting aside the credit card bills still coming due this month.\n\nPositive means that's how much room you have above $0 before you'd need to pull from savings. Negative means the plan already dips into savings, even before anything unexpected happens — worth a closer look before a big purchase.";
 
+const AVAILABLE_HELP = "This month's income, less bills, one-offs and what you've actually spent so far, before the groceries and savings budgets are set aside.\n\nThe second panel walks from this figure down to Left to Spend, which is the same money after those budgets and counting card spending only.";
+
 const NET_POSITION_HELP = "What's left in checking right now after this month's credit card statements leave. Positive means checking covers everything already billed on your cards; negative means the cards owe more than checking currently holds.";
 
 export default function Dashboard() {
@@ -236,6 +238,9 @@ export default function Dashboard() {
                   Available to Spend —{" "}
                   {new Date().toLocaleDateString("en-US", { month: "long" })}
                 </h3>
+                <HowCalculated title="Available to Spend"
+                  explanations={[ats.explain, ats.to_left_to_spend]}
+                  helpText={AVAILABLE_HELP} />
               </div>
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
@@ -245,6 +250,13 @@ export default function Dashboard() {
                 <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
                   <span>Committed Bills</span>
                   <span className="tabular-nums text-red-500 dark:text-red-400 font-medium">−{fmt(parseFloat(ats.committed_expenses))}</span>
+                </div>
+                <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
+                  <span>One-offs</span>
+                  {/* Net of one-off inflows, so it can be a credit. */}
+                  <span className="tabular-nums text-red-500 dark:text-red-400 font-medium">
+                    {parseFloat(ats.one_offs_net) < 0 ? "+" : "−"}{fmt(Math.abs(parseFloat(ats.one_offs_net)))}
+                  </span>
                 </div>
                 <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
                   <span>Spent So Far</span>
