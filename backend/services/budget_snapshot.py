@@ -20,6 +20,7 @@ from backend.services.forecast_engine import (
 )
 from backend.services.card_matching import card_matches_description
 from backend.services.pending import card_pending
+from backend.services.card_payment_model import CardPayment
 from backend.services.month_base import build_month_base, card_bill_occurrences
 from backend.services.spendable_pacer import compute_weekly_spendable
 from backend.services.spending_helpers import category_totals_for_range, merchant_totals
@@ -70,8 +71,13 @@ def leftover_parts(
         Decimal("0"),
     )
     card_bills = card_bill_occurrences(base)
+    # The total also holds a scenario's proposed card bills: the safety walk
+    # leaves every card bill still to charge this month out of the card
+    # payment, so this total is the only place a proposal's bill is
+    # subtracted. They are not in posted card spending, so not in `charged`.
+    card_bills_total = sum((o.amount for o in card_bill_occurrences(base, include_proposed=True)), Decimal("0"))
     return LeftoverParts(
-        card_bills_total=sum((o.amount for o in card_bills), Decimal("0")),
+        card_bills_total=card_bills_total,
         card_bills_charged=sum((o.amount for o in card_bills if o.date <= as_of), Decimal("0")),
         income=base.income_total, expenses=base.expense_total,
         savings_budget=base.savings_budget, committed_savings=base.committed_savings,
@@ -456,13 +462,15 @@ def _money(amount: Decimal) -> str:
     return f"${amount:,.2f}"
 
 
-def _cc_basis_note(basis: dict | None) -> str | None:
-    """The receipt behind one CC Payment/CC Estimate line, from the `basis`
-    build_forecast attached to its ForecastTransaction -- see
-    schemas.ForecastTransaction.basis for the shape. Unlike the card_children
+def _cc_basis_note(payment: CardPayment | dict | None) -> str | None:
+    """The receipt behind one CC Payment/CC Estimate line, from the card-payment
+    model's `CardPayment.basis` -- the same dict build_forecast copies onto the
+    line's ForecastTransaction (see schemas.ForecastTransaction.basis for the
+    shape), so the explain panel passes either the payment or that dict. Unlike the card_children
     notes above, these deliberately DO carry figures: the user asked to see
     exactly what a cycle estimate is built from (2026-10-29), because that's
     the number that jumped when his Chase statement closed."""
+    basis = payment.basis if isinstance(payment, CardPayment) else payment
     if not basis:
         return None
     kind = basis.get("kind")

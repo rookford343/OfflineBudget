@@ -51,7 +51,7 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Cushion | `user.safety_cushion` (default $1,000) for the lookahead status. Separately: Wish List cushion (`WishSettings.cushion`, then account `low_balance_threshold`) and the risk banner threshold (`low_balance_threshold`, default $0) -> Task 6 (one cushion) | `compute_budget_snapshot` (services/budget_snapshot.py), `effective_cushion` (services/wish_plan.py), `find_balance_risk` callers (routers/forecast.py, services/summary_generator.py) | Dashboard, Wish List, risk banner, email |
 | Forecast balances | Day-by-day projected checking balance | `build_forecast` (services/forecast_engine.py) | Forecast tab, lows, risk banner, Wish List, upcoming bills, baselines |
 | Forecast walk start/flags | The standard walk: starts 45 days before today; purpose `display` (unbilled card bills in) or `safety` (out). Every start gives the same balances from that horizon on | `standard_walk` (services/forecast_walk.py), horizon and bridges in `build_forecast` (services/forecast_engine.py). Custom ranges, with a comment: GET /forecast, /multi-year, /monthly-summary (routers/forecast.py), `build_quarters` | Forecast tab, lows, risk banner, digest, upcoming bills, Wish List, baselines |
-| Card payment amount (payoff) | Locked statement payoff, cycle estimate (pending + spent since statement + subscriptions before close + one-offs), second-hop rule, flat estimate, subscription fallback; basis kept on `ForecastTransaction.basis` | inline in `build_forecast`, helpers `_card_payoff_date_for_charge`, `_card_subscription_charges`, `_cc_actual_nearby` (services/forecast_engine.py) -> Task 5 (card payment model) | Forecast tab, Safety Margin, explain notes (`_cc_basis_note`) |
+| Card payment amount (payoff) | Locked statement payoff, cycle estimate (pending + spent since statement + subscriptions before close + one-offs), second-hop rule, flat estimate, subscription fallback; basis kept on `ForecastTransaction.basis` | `card_payments`, `card_payment_plan` (services/card_payment_model.py); helpers `_card_payoff_date_for_charge`, `_card_subscription_charges`, `_cc_actual_nearby` (services/forecast_engine.py) | Forecast tab, Safety Margin, explain notes (`_cc_basis_note`) |
 | Pending charges (fresh) | Hand-typed or synced pending total, ignored when older than 7 days | `card_pending` (services/pending.py), read by the forecast, Left to Spend, available-to-spend, the email and statement checks. The frontend still reads the raw field -> Plan 2 | Forecast, Left to Spend, Credit Cards page, email |
 | Social Security boost | Extra take-home per paycheck once the wage base is met | `ss_paycheck_boosts`, `SSWageBaseTracker`, `pay_year_dates` (services/forecast_engine.py); month model calls them | Forecast, Recurring, Leftover |
 | Weekend shift | Posting day moves off a weekend; override keyed by natural due date everywhere | `_adjust_for_weekend`, `_matches_schedule`, the override lookup in `build_forecast` (services/forecast_engine.py); `build_month_base` (services/month_base.py) and `upcoming_bills` (services/upcoming_bills.py) key by the natural date | Forecast, Recurring, Upcoming bills |
@@ -82,8 +82,41 @@ Filled in as each primitive lands. Until then the provenance table above is the 
 Exists: `backend/services/month_base.py`. Edge cases and rules to document when finished:
 weekends, quarterly bills, Social Security boost, funded one-offs.
 
-### 2. Card payment model
-Not yet extracted from `build_forecast` (Task 5).
+### 2. Card-payment model
+`backend/services/card_payment_model.py`. `card_payments(db, user, account, start, end, *,
+include_unbilled_card_bills, proposal=None, today=None)` returns the `CardPayment`s (card, due date,
+amount, `locked`, `basis`) a checking account pays in the window, card by card;
+`card_payment_plan` adds the overdue payoffs. `build_forecast` injects them ("CC Payment" when
+locked, "CC Estimate" otherwise) and the snapshot's explain notes read their `basis`
+(`_cc_basis_note`). A savings account draws none. Per card, in this order:
+
+- **Locked payoff:** `balance_due` on `next_payment_date`, less any payment already pending at the
+  bank. A due date inside the last week still unpaid is *overdue*: still a payoff, re-planned onto
+  today after the auto anchor. A due date older than that rolls forward to the next real one. A due
+  date reached with nothing due is a paid statement: that month gets no payoff and no flat estimate.
+- **Cycle estimate:** the cycle after the payoff. `carried` (running balance + `card_pending` -
+  `balance_due`, never below 0) + subscriptions that post before the statement closes - any excess
+  of pending payments over the statement. Anchored to today, not the window start. When a stale due
+  date lands on the same date, the two merge into one locked line.
+- **Second hop:** one more cycle, only for cards with a `monthly_spend_estimate`, from fresh
+  pending alone (zero when the pending came from the bank feed: it is already in the carried
+  figure).
+- **Flat estimate:** `monthly_spend_estimate` on each due date no real payment covers. Without one,
+  the card's own subscriptions, routed to the due date of the statement that carries them
+  (`subscription_flat`).
+- A card with a recurring `credit_card_payment` item, or a payment marked sent and awaiting sync, is
+  skipped: something else already pays it.
+
+Pending is always `card_pending(card, today)`; the model never reads `pending_charges`. A balance-only
+card (no transaction feed) has no spend rows, so the payments come from its balance.
+
+`include_unbilled_card_bills=False` (Safety Margin's walk) leaves this month's not yet charged card
+bills out of the cycle estimate because Safety Margin subtracts them itself
+(`cc_budget_total`). That total includes a scenario's proposed card bills (negative ids,
+`card_bill_occurrences(base, include_proposed=True)`), which the safety walk drops from the payment
+too; before v5 nothing subtracted them. Proposals are not in posted card spending, so they stay out
+of `charged_so_far` and the pacer's card-bill take-out. Tests: `tests/test_card_payment_model.py`
+(the golden test pins every line the forecast draws for each path).
 
 ### 3. Real-spending rule
 `backend/services/real_spend.py`. One verdict per row; every spending and income total
@@ -231,3 +264,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 - v2: one real-spending rule; refunds net everywhere
 - v3: one pending freshness rule
 - v4: one walk policy; weekend overrides
+- v5: card-payment model shared by forecast and snapshot; scenario card bills in Safety Margin

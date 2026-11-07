@@ -139,7 +139,7 @@ def _funding_inflow(pe: models.PlannedExpense, year: int, month: int) -> schemas
     )
 
 
-def card_bill_occurrences(base: MonthBase) -> list:
+def card_bill_occurrences(base: MonthBase, *, include_proposed: bool = False) -> list:
     """Card-linked bill occurrences in the month base -- every weekly,
     biweekly, monthly, quarterly and yearly charge to a card landing this
     month, at this month's amount (an entered statement amount wins). The
@@ -155,12 +155,16 @@ def card_bill_occurrences(base: MonthBase) -> list:
     difference behind. Before that, yearly items counted in all twelve
     months ($500.00/yr of annual card subscriptions treated as monthly).
 
-    A scenario's proposed items (negative ids) are left out: they are not
-    charged to the card, so nothing in card spending needs adding back.
+    A scenario's proposed items (negative ids) are left out by default: they
+    are not charged to the card, so nothing in card spending needs adding
+    back, and the weekly pacer's card-bill take-out must not count them. The
+    Safety Margin's card-bills total passes `include_proposed=True`: the
+    safety walk drops this month's card bills from the card payment on the
+    assumption that total subtracts them, proposals included.
     """
     return [
         o for o in (*base.monthly_bills, *base.periodic_due)
-        if o.card_id is not None and (o.recurring_item_id or 0) > 0
+        if o.card_id is not None and (include_proposed or (o.recurring_item_id or 0) > 0)
     ]
 
 
