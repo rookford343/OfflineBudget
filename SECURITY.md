@@ -29,9 +29,8 @@ OfflineBudget is designed for **offline / home LAN use**. The threat model is:
 - The `.gitignore` excludes `data/` so your financial data is never committed to git
 
 ### Data in Transit
-- **Default (local dev / LAN):** HTTP — unencrypted on the local network
-- **Acceptable for home LAN use** where you trust the network
-- For HTTPS, see [Enabling HTTPS on LAN](#enabling-https-on-lan) below
+- **Production (home network):** HTTPS only, private CA, see [HTTPS on the home network](#https-on-the-home-network)
+- **Local development:** plain HTTP on `127.0.0.1` only, never reachable from the LAN
 
 ### Password Reset Tokens and Recovery Codes
 - **Reset tokens** — generated when you request a password reset via email; are **bcrypt-hashed at rest** (never stored in plaintext); expire after **15 minutes**; protected by **256-bit random entropy** (generated via `secrets.token_urlsafe`)
@@ -78,7 +77,7 @@ OfflineBudget is designed for **offline / home LAN use**. The threat model is:
 
 | Risk | Status | Mitigation |
 |------|--------|-----------|
-| HTTP (no TLS) on LAN | Unencrypted | Home LAN is trusted; use HTTPS if concerned (see below) |
+| Wi-Fi password shared with guests | Anyone on the LAN can reach the HTTPS port | Traffic is encrypted; login is still required (see "HTTPS on the home network") |
 | JWT in localStorage | Accessible to JS | No XSS vectors in a Vite build served locally |
 | Single `JWT_SECRET` | Shared | Fine for single-machine use; rotate if secret is ever exposed |
 | No rate limiting | Unlimited login attempts | Behind home router — no public exposure |
@@ -86,35 +85,9 @@ OfflineBudget is designed for **offline / home LAN use**. The threat model is:
 
 ---
 
-## Enabling HTTPS on LAN
+## HTTPS on the home network
 
-For encrypted LAN connections (recommended if other devices on your LAN access the app):
-
-```bash
-# Install mkcert
-brew install mkcert
-mkcert -install
-
-# Generate a cert for your local IP
-mkcert localhost 192.168.1.42   # replace with your actual LAN IP
-
-# You'll get: localhost+1.pem and localhost+1-key.pem
-```
-
-Then update `scripts/start.sh` to pass the cert to uvicorn:
-```bash
-uvicorn backend.main:app --host 0.0.0.0 --port 8000 \
-  --ssl-keyfile localhost+1-key.pem \
-  --ssl-certfile localhost+1.pem
-```
-
-And update Vite's `server.https` in `frontend/vite.config.ts`:
-```ts
-server: {
-  https: { key: '../localhost+1-key.pem', cert: '../localhost+1.pem' },
-  host: true,
-}
-```
+The production server is one HTTPS-only uvicorn process (port 443, LaunchAgent) that serves the app and `/api`. It uses a certificate signed by a private CA that you create with `scripts/tls/make-ca.sh` and trust on your own devices. The CA is limited to `pathlen:0` and name-constrained to `df-macbookpro16.local` (and the fallback host name), so even a leaked CA key cannot sign a certificate for any other site. The CA key is passphrase-encrypted and lives in `~/.offlinebudget-ca`, outside the repo. Development servers (`scripts/start.sh`) bind `127.0.0.1` only, and refuse to open the live database. Full steps: `docs/SETUP.md`.
 
 ---
 

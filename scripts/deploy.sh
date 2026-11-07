@@ -10,13 +10,31 @@ if [ ! -f data/budget.db ]; then
   exit 1
 fi
 
-(cd frontend && bun install --frozen-lockfile && bunx vite build)
+if [ -n "$(git status --porcelain)" ]; then
+  echo "ERROR: working tree has uncommitted changes; commit or stash before deploying (the deployed commit must be reproducible)." >&2
+  exit 1
+fi
+
+# Build into a temp dir, then swap into frontend/dist with mv, so the running
+# server never serves a half-written dist.
+(cd frontend && bun install --frozen-lockfile)
+BUILD_DIR="$(mktemp -d "$PWD/frontend/.dist-build.XXXXXX")"
+trap 'rm -rf "$BUILD_DIR"' EXIT
+(cd frontend && bunx vite build --outDir "$BUILD_DIR" --emptyOutDir)
+[ -f "$BUILD_DIR/index.html" ] || { echo "ERROR: build produced no index.html" >&2; exit 1; }
+chmod 755 "$BUILD_DIR"
+rm -rf frontend/dist.old
+if [ -d frontend/dist ]; then mv frontend/dist frontend/dist.old; fi
+mv "$BUILD_DIR" frontend/dist
+rm -rf frontend/dist.old
 
 mkdir -p data/backups data/logs
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP="data/backups/pre-deploy-$STAMP.db"
 uv run --locked python -c "from backend.services.db_backup import backup_database; backup_database('data/budget.db', '$BACKUP')"
 echo "Backed up DB to $BACKUP"
+git rev-parse HEAD > data/logs/deployed-commit
+echo "Deployed commit $(cat data/logs/deployed-commit)"
 
 launchctl kickstart -k "gui/$(id -u)/com.offlinebudget.server"
 

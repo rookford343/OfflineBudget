@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { recurringApi } from "../api";
 import { fmt } from "../lib/utils";
 import { TrendingUp } from "lucide-react";
+import { maskIfHidden, useBalancesHidden } from "../store/balanceVisibility";
 
 /** "Mon D" from an ISO date, parsed at noon so a UTC-negative timezone can't
  *  shift the date back a day. */
@@ -21,6 +22,8 @@ type Action = "update" | "keep" | "varies";
  */
 export default function AmountDrift() {
   const qc = useQueryClient();
+  const hidden = useBalancesHidden();
+  const money = (v: string | number) => maskIfHidden(hidden, fmt(v));
   const { data: items = [] } = useQuery<any[]>({
     queryKey: ["amount-drift"],
     queryFn: recurringApi.amountDrift,
@@ -67,8 +70,8 @@ export default function AmountDrift() {
                 <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{d.name}</p>
                 <p className="text-xs text-gray-400">
                   {d.varies
-                    ? `recent payments ${d.recent_amounts.map((a: string) => fmt(a)).join(", ")} · planned ${fmt(d.planned_amount)}`
-                    : `paid ${fmt(d.latest_amount)} on ${shortDate(d.latest_date)} · planned ${fmt(d.planned_amount)}`}
+                    ? `recent payments ${d.recent_amounts.map((a: string) => money(a)).join(", ")} · planned ${money(d.planned_amount)}`
+                    : `paid ${money(d.latest_amount)} on ${shortDate(d.latest_date)} · planned ${money(d.planned_amount)}`}
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -79,13 +82,13 @@ export default function AmountDrift() {
                   </button>
                 ) : (
                   <button className="btn-primary py-1 px-2 text-xs disabled:opacity-50" disabled={busy}
-                    onClick={() => answer("update")} title={`Use ${fmt(d.latest_amount)} from now on`}>
-                    Update to {fmt(d.latest_amount)}
+                    onClick={() => answer("update")} title={`Use ${money(d.latest_amount)} from now on`}>
+                    Update to {money(d.latest_amount)}
                   </button>
                 )}
                 <button className="btn-secondary py-1 px-2 text-xs disabled:opacity-50" disabled={busy}
                   onClick={() => answer("keep")} title="Keep the planned amount until another payment posts">
-                  Keep {fmt(d.planned_amount)}
+                  Keep {money(d.planned_amount)}
                 </button>
               </div>
             </div>

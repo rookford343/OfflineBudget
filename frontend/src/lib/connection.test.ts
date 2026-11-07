@@ -11,3 +11,7 @@ test("any HTTP status means reachable", () => {
 test("non-axios errors are not unreachable", () => {
   expect(isUnreachable(new Error("boom"))).toBe(false);
 });
+test("an axios timeout with no response is unreachable", () => {
+  expect(isUnreachable({ isAxiosError: true, code: "ECONNABORTED", response: undefined })).toBe(true);
+  expect(isUnreachable({ isAxiosError: true, code: "ETIMEDOUT", response: undefined })).toBe(true);
+});

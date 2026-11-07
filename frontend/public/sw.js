@@ -7,6 +7,9 @@
 importScripts("/sw-policy.js");
 
 const CACHE_VERSION = "1";
+// A navigation that hasn't answered by then falls back to the cached shell, so
+// a phone off the home network opens the app (and its banner) instead of hanging.
+const NAV_TIMEOUT_MS = self.OB_NAV_TIMEOUT_MS || 8000;
 const CACHE = "ob-shell-v" + CACHE_VERSION;
 const PRECACHE = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon-192.png"];
 
@@ -65,7 +68,14 @@ self.addEventListener("fetch", (event) => {
   // The page itself then shows the "can't reach your Mac" banner.
   if (req.mode === "navigate" && !url.pathname.startsWith("/api/")) {
     event.respondWith(
-      fetch(req).catch(async () => (await caches.match("/index.html")) || Response.error()),
+      (async () => {
+        const network = fetch(req).catch(() => undefined);
+        const timer = new Promise((resolve) => setTimeout(() => resolve(undefined), NAV_TIMEOUT_MS));
+        const res = await Promise.race([network, timer]);
+        if (res) return res;
+        // Offline or too slow: the cached shell, else keep waiting on the network.
+        return (await caches.match("/index.html")) || (await network) || Response.error();
+      })(),
     );
   }
   // Everything else (including /api): not intercepted, so never stored.

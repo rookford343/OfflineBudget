@@ -5,6 +5,9 @@ import { isUnreachable, setUnreachable } from "../lib/connection";
 const DEFAULT_API = "/api";
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL ?? DEFAULT_API,
+  // A phone that wandered off the home Wi-Fi must fail fast into the
+  // "can't reach your Mac" banner instead of hanging on a dead connection.
+  timeout: 12000,
 });
 
 api.interceptors.request.use((config) => {

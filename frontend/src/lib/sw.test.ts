@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 
 const ORIGIN = "https://mac.local";
+(globalThis as any).OB_NAV_TIMEOUT_MS = 50;
 const g = globalThis as any;
 const handlers: Record<string, (e: any) => void> = {};
 const store = new Map<string, any>();
@@ -77,4 +78,22 @@ test("a changed index.html clears stale cached assets", async () => {
   network = async () => reply("new", "text/html");
   await dispatch("/", "navigate");
   expect([...store.keys()]).toEqual([ORIGIN + "/"]);
+});
+
+test("a hanging navigation falls back to cached index.html after the timeout", async () => {
+  store.clear();
+  store.set(ORIGIN + "/index.html", reply("<html>shell</html>", "text/html"));
+  network = () => new Promise(() => {});
+  const started = Date.now();
+  const res = await dispatch("/dashboard", "navigate");
+  expect(await res.text()).toBe("<html>shell</html>");
+  expect(Date.now() - started).toBeLessThan(2000);
+});
+
+test("a slow but answering navigation under the timeout is served from the network", async () => {
+  store.clear();
+  store.set(ORIGIN + "/index.html", reply("<html>shell</html>", "text/html"));
+  network = async () => reply("<html>fresh</html>", "text/html");
+  const res = await dispatch("/dashboard", "navigate");
+  expect(await res.text()).toBe("<html>fresh</html>");
 });

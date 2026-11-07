@@ -4,12 +4,40 @@
 
 OfflineBudget runs as one HTTPS uvicorn process on port 443 under a macOS LaunchAgent. It serves the built app and `/api`, and it is the only process with the scheduler on. Host name: `df-macbookpro16.local`.
 
+### 0. Before you start (do these first, in order)
+
+Starting the LaunchAgent runs database migrations immediately, and a second running backend would double-run bank sync and emails. So:
+
+1. Back up the live database (never `cp`; the WAL file makes a plain copy stale):
+
+   ```bash
+   mkdir -p data/backups
+   uv run --locked python -c "from backend.services.db_backup import backup_database; backup_database('data/budget.db', 'data/backups/pre-setup.db')"
+   ```
+
+2. Stop every other backend and dev server (the old frozen backend, `scripts/start.sh`, Vite), then confirm nothing is listening. This must print nothing:
+
+   ```bash
+   lsof -nP -iTCP:8000 -iTCP:5173 -iTCP:443 -sTCP:LISTEN
+   ```
+
+3. Set the production origin in `.env`:
+
+   ```
+   ALLOWED_ORIGINS=https://df-macbookpro16.local
+   FRONTEND_URL=https://df-macbookpro16.local
+   ```
+
+Only then continue with steps 1 to 6 below (certificate, build, LaunchAgent, firewall, deploy).
+
 ### 1. Private CA and server certificate
 
 ```bash
 scripts/tls/make-ca.sh                                  # writes ~/.offlinebudget-ca/ca.crt
 scripts/tls/issue-cert.sh ~/.offlinebudget-ca df-macbookpro16.local ssl
 ```
+
+The CA is limited to `pathlen:0` and name-constrained to `df-macbookpro16.local` and `budget.thedigitaltrailhead.com`: a certificate it signs for any other domain is rejected by clients. If you created a CA before this constraint existed, it is not constrained. Delete `~/.offlinebudget-ca` and remove the old profile from the phone (Settings, General, VPN & Device Management), then recreate the CA, reissue the certificate and reinstall the profile (step 2).
 
 `issue-cert.sh` prints the expiry date (825 days). To renew before then, reissue with the same CA (the old pair moves to `ssl/server.<timestamp>.bak.*`) and redeploy:
 
@@ -59,7 +87,15 @@ PY="$(uv run --locked python -c "import sys,os;print(os.path.realpath(sys.execut
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PY" --unblockapp "$PY"
 ```
 
-`PY` is the real path of the uv-managed venv Python that serves the app.
+`PY` is the real path of the uv-managed venv Python that serves the app. Re-run these two commands whenever uv's Python version changes (the path changes with it, and the firewall would block the new binary).
+
+Also turn off automatic exceptions for signed software, so only the binary you added is allowed in:
+
+```bash
+sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setallowsigned off --setallowsignedapp off
+```
+
+(UI: System Settings, Network, Firewall, Options, turn off "Automatically allow built-in software" and "Automatically allow downloaded signed software".)
 
 ### 6. Deploy
 
@@ -67,7 +103,7 @@ sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PY" --unblockapp "$
 scripts/deploy.sh
 ```
 
-Builds the frontend, backs up the database to `data/backups/pre-deploy-<timestamp>.db` (it refuses if `data/budget.db` is missing), restarts the LaunchAgent, and waits up to 30 seconds for `https://df-macbookpro16.local/api/health` to return 200.
+Refuses to run with uncommitted changes. Builds the frontend into a temporary directory and swaps it into `frontend/dist`, backs up the database to `data/backups/pre-deploy-<timestamp>.db` (it refuses if `data/budget.db` is missing), records the deployed commit in `data/logs/deployed-commit`, restarts the LaunchAgent, and waits up to 30 seconds for `https://df-macbookpro16.local/api/health` to return 200.
 
 ### Development
 

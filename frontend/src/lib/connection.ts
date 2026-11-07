@@ -1,6 +1,8 @@
 import { useSyncExternalStore } from "react";
 
-/** True when a request never got an HTTP response (network failure or timeout). */
+/** True when a request never got an HTTP response: a network failure, or an
+ *  axios timeout (ECONNABORTED / ETIMEDOUT). Any status, even 5xx, means the
+ *  server answered and is not unreachable. */
 export function isUnreachable(error: unknown): boolean {
   const e = error as { isAxiosError?: boolean; response?: unknown } | null;
   return !!e && e.isAxiosError === true && !e.response;

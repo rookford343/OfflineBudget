@@ -540,7 +540,6 @@ crontab -e
 | `JWT_SECRET` | *(required)* | JWT signing key — generate with `secrets.token_hex(32)` |
 | `JWT_EXPIRE_DAYS` | `7` | Token lifetime in days |
 | `ALLOWED_ORIGINS` | `http://localhost:5173,...` | CORS allowed origins (comma-separated) |
-| `HOST` | `0.0.0.0` | Bind address |
 | `PORT` | `8000` | API port |
 | `SMTP_HOST` | *(unset)* | SMTP server — email disabled if unset |
 | `SMTP_PORT` | `587` | SMTP port |
