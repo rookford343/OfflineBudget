@@ -5,6 +5,7 @@ import { fmt, utilColor, utilBg, today } from "../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { Plus, Pencil, Trash2, CreditCard as CardIcon, DollarSign, X, HelpCircle, Clock, Send, AlertTriangle } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
+import WhatChanged from "../components/WhatChanged";
 
 // balance_due is manual-entry-only -- bank sync never touches it (see
 // backend/services/bank_sync_service.py) -- so it has no freshness signal
@@ -246,8 +247,9 @@ export default function CreditCards() {
               <span>Due: day {c.due_day}</span>
             </div>
             {c.next_payment_date && parseFloat(c.balance_due) > 0 && (
-              <div className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+              <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
                 Pay {maskIfHidden(balancesHidden, fmt(c.balance_due))} by {new Date(c.next_payment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                <WhatChanged metrics={[{ key: `card_payment:${c.id}`, title: `${c.name} payment` }]} />
               </div>
             )}
           </div>

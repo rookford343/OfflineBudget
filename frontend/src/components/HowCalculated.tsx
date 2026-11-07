@@ -2,6 +2,7 @@ import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Info, X, ChevronRight, ChevronDown } from "lucide-react";
 import { fmt } from "../lib/utils";
+import { maskMoneyText } from "../lib/maskMoney";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 
 export interface ExplainChild { label: string; amount: string; note?: string | null }
@@ -60,7 +61,7 @@ export default function HowCalculated(
   // hide-balances has to mask those substrings directly rather than
   // relying on a field that was never wrapped. Matches the email/app's own
   // "$1,234.56" / "−$1,234.56" money shapes.
-  const maskNote = (note: string) => hidden ? note.replace(/[−-]?\$[\d,]+(?:\.\d{1,2})?/g, "••••") : note;
+  const maskNote = (note: string) => maskMoneyText(hidden, note);
 
   return (
     <Dialog.Root open={open} onOpenChange={setOpen}>

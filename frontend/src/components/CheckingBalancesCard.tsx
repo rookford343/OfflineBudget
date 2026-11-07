@@ -3,6 +3,7 @@ import { Landmark } from "lucide-react";
 import { usePendingBalances } from "../lib/usePendingBalances";
 import { fmt } from "../lib/utils";
 import { maskIfHidden } from "../store/balanceVisibility";
+import WhatChanged from "./WhatChanged";
 
 export function PendingBadge() {
   return (
@@ -30,7 +31,7 @@ export default function CheckingBalancesCard({ accounts, hidden }: { accounts: a
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Landmark size={16} /> Checking</h3>
+        <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Landmark size={16} /> Checking <WhatChanged metrics={[{ key: "checking_balance", title: "Checking" }]} /></h3>
         <button onClick={() => navigate("/transactions")} className="text-xs text-indigo-600 hover:underline">Transactions →</button>
       </div>
       <div className="space-y-3">

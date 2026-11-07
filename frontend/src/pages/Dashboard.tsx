@@ -9,6 +9,7 @@ import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, Hel
 import { AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import HelpPanel from "../components/HelpPanel";
 import HowCalculated from "../components/HowCalculated";
+import WhatChanged from "../components/WhatChanged";
 import { TrendBadge } from "../components/TrendBadge";
 import { SparkLine } from "../components/SparkLine";
 import { RiskBanner } from "../components/RiskBanner";
@@ -247,6 +248,7 @@ export default function Dashboard() {
                 <HowCalculated title="Available to Spend"
                   explanations={[ats.explain, ats.to_left_to_spend]}
                   helpText={AVAILABLE_HELP} />
+                <WhatChanged metrics={[{ key: "available_to_spend", title: "Available to Spend" }]} />
               </div>
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
@@ -285,6 +287,9 @@ export default function Dashboard() {
               <div className="flex items-center gap-2 mb-3">
                 <Wallet size={16} className="text-emerald-600" />
                 <h3 className="font-semibold text-gray-900 dark:text-white">Household Snapshot</h3>
+                {/* The snapshot shows no separate Leftover line, so its history
+                    sits here beside the other figures it feeds. */}
+                <WhatChanged metrics={[{ key: "leftover", title: "Leftover" }]} />
                 <VerificationFlagButton
                   feature="household_snapshot"
                   referenceType="account"
@@ -309,6 +314,11 @@ export default function Dashboard() {
                     <HowCalculated title="Spendable this week"
                       explanations={[snapshot.explain?.left_to_spend, snapshot.explain?.spendable_week, snapshot.explain?.spendable_today]}
                       helpText={SPENDABLE_HELP} />
+                    <WhatChanged metrics={[
+                      { key: "left_to_spend", title: "Spendable this month" },
+                      { key: "spendable_week", title: "Spendable this week" },
+                      { key: "spendable_today", title: "Spendable today" },
+                    ]} />
                   </p>
                   <p className={`text-xl font-bold tabular-nums ${snapshot.on_pace ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>{fmt(parseFloat(snapshot.left_to_spend_weekly))}</p>
                   <p className={`text-xs mt-1 ${snapshot.on_pace ? "text-emerald-500 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
@@ -330,6 +340,14 @@ export default function Dashboard() {
                     <HowCalculated title="Safety Margin"
                       explanations={[snapshot.explain?.safety_margin, snapshot.explain?.safety_margin_week, snapshot.explain?.safety_margin_today]}
                       helpText={MARGIN_HELP} />
+                    {/* Safety Margin is next month's low point less the cushion,
+                        so that low's history lives in the same control. */}
+                    <WhatChanged metrics={[
+                      { key: "safety_margin", title: "Safety Margin (month)" },
+                      { key: "safety_margin_week", title: "Safety Margin (week)" },
+                      { key: "safety_margin_today", title: "Safety Margin (day)" },
+                      { key: "next_month_minimum", title: "Next month's lowest point" },
+                    ]} />
                   </p>
                   <p className={`text-xl font-bold tabular-nums ${parseFloat(snapshot.safety_margin_weekly) < 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>{fmt(parseFloat(snapshot.safety_margin_weekly))}</p>
                   <p className={`text-xs mt-1 ${parseFloat(snapshot.safety_margin_today) < 0 ? "text-red-500 dark:text-red-400" : "text-amber-500 dark:text-amber-400"}`}>
@@ -368,6 +386,7 @@ export default function Dashboard() {
                     on {new Date(snapshot.lookahead_minimum_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
                     <span className="inline-flex align-middle">
                       <HowCalculated title="3-month lowest point" explanations={[snapshot.explain?.lookahead_minimum]} />
+                      <WhatChanged metrics={[{ key: "lookahead_minimum", title: "3-month lowest point" }]} />
                     </span>
                     {status !== "ok" && (
                       <span className={`block mt-0.5 font-medium ${figureClass}`}>

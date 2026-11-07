@@ -454,3 +454,19 @@ export const checkingLevelApi = {
     api.get("/forecast/checking-level", { params: { account_id: accountId } }).then((r) => r.data),
   put: (data: object) => api.put("/forecast/checking-level", data).then((r) => r.data),
 };
+
+// ── Change history (what moved each headline figure) ────────────────────────
+export interface HistoryCause { text: string; amount: string | null }
+export interface MetricChange {
+  taken_at: string; previous_taken_at: string | null; trigger: string;
+  old_value: string | null; new_value: string | null; delta: string | null;
+  summary: string; causes: HistoryCause[]; calc_changed: boolean;
+}
+export interface MetricHistory { metric_key: string; label: string; current_value: string | null; changes: MetricChange[] }
+
+export const historyApi = {
+  changes: (key: string, limit = 30): Promise<MetricHistory> =>
+    api.get(`/history/${encodeURIComponent(key)}`, { params: { limit } }).then((r) => r.data),
+  snapshot: (): Promise<{ recorded: boolean }> => api.post("/history/snapshot").then((r) => r.data),
+  clear: (): Promise<{ deleted: number }> => api.delete("/history").then((r) => r.data),
+};

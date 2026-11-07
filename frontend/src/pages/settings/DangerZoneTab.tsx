@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { authApi, dataApi } from "../../api";
+import { authApi, dataApi, historyApi } from "../../api";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { clearAuth } from "../../store/auth";
 
 export default function DangerZoneTab() {
@@ -34,10 +35,37 @@ export default function DangerZoneTab() {
     },
   });
 
+  const [showClearHistory, setShowClearHistory] = useState(false);
+  const clearHistoryMut = useMutation({
+    mutationFn: historyApi.clear,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["history"] });
+      setShowClearHistory(false);
+    },
+  });
+
   return (
     <div className="card border-red-100 dark:border-red-900/30">
       <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-3">Danger Zone</h3>
       <div className="space-y-4">
+
+        {/* Clear change history */}
+        <div className="border border-red-100 dark:border-red-900/30 rounded-lg p-3 space-y-2">
+          <button onClick={() => setShowClearHistory(true)} className="text-sm text-red-600 hover:underline">
+            Clear change history…
+          </button>
+          <p className="text-xs text-gray-400">Deletes the recorded readings behind the "what changed" views. Your figures are not affected; history starts again at the next refresh.</p>
+          <ConfirmDialog
+            open={showClearHistory}
+            onOpenChange={setShowClearHistory}
+            title="Clear change history?"
+            description="This deletes every recorded reading. The what-changed views will be empty until new readings are taken."
+            confirmLabel="Clear history"
+            confirmingLabel="Clearing…"
+            onConfirm={() => clearHistoryMut.mutate()}
+            isPending={clearHistoryMut.isPending}
+          />
+        </div>
 
         {/* Clear checking transactions */}
         <div className="border border-red-100 dark:border-red-900/30 rounded-lg p-3 space-y-2">

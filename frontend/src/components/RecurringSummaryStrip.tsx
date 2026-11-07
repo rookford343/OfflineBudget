@@ -4,6 +4,7 @@ import { Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { recurringApi } from "../api";
 import { fmt } from "../lib/utils";
 import HowCalculated from "./HowCalculated";
+import WhatChanged from "./WhatChanged";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -173,6 +174,10 @@ export default function RecurringSummaryStrip({
           <span className="stat-label flex items-center gap-1.5">
             Left over
             <HowCalculated title="Left over" explanations={[summary?.explain?.left_over]} />
+            {/* Snapshots only record the current month's figure. */}
+            {year === now.getFullYear() && month === now.getMonth() + 1 && (
+              <WhatChanged metrics={[{ key: "leftover", title: "Left over" }]} />
+            )}
           </span>
           <span className={`stat-value ${leftOver >= 0 ? "text-green-600" : "text-red-600"}`}>
             {leftOver >= 0 ? "+" : ""}{fmt(leftOver)}
