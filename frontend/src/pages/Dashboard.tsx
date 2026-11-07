@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { accountsApi, cardsApi, recurringApi, analyticsApi, budgetApi, forecastApi } from "../api";
 import { fmt, utilColor, utilBg, firstOfMonth, today } from "../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
+import { maskMoneyText } from "../lib/maskMoney";
 import { useIsDarkMode } from "../store/theme";
 import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle, TrendingUp } from "lucide-react";
 import { AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -253,11 +254,11 @@ export default function Dashboard() {
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
                   <span>Monthly Income</span>
-                  <span className="tabular-nums text-green-600 dark:text-green-400 font-medium">{fmt(parseFloat(ats.monthly_income))}</span>
+                  <span className="tabular-nums text-green-600 dark:text-green-400 font-medium">{maskIfHidden(balancesHidden, fmt(parseFloat(ats.monthly_income)))}</span>
                 </div>
                 <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
                   <span>Committed Bills</span>
-                  <span className="tabular-nums text-red-500 dark:text-red-400 font-medium">−{fmt(parseFloat(ats.committed_expenses))}</span>
+                  <span className="tabular-nums text-red-500 dark:text-red-400 font-medium">−{maskIfHidden(balancesHidden, fmt(parseFloat(ats.committed_expenses)))}</span>
                 </div>
                 <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
                   <span>One-offs</span>
@@ -265,17 +266,17 @@ export default function Dashboard() {
                   <span className={`tabular-nums font-medium ${parseFloat(ats.one_offs_net) < 0
                     ? "text-green-600 dark:text-green-400"
                     : "text-red-500 dark:text-red-400"}`}>
-                    {parseFloat(ats.one_offs_net) < 0 ? "+" : "−"}{fmt(Math.abs(parseFloat(ats.one_offs_net)))}
+                    {parseFloat(ats.one_offs_net) < 0 ? "+" : "−"}{maskIfHidden(balancesHidden, fmt(Math.abs(parseFloat(ats.one_offs_net))))}
                   </span>
                 </div>
                 <div className="flex justify-between gap-4 text-gray-600 dark:text-gray-400">
                   <span>Spent So Far</span>
-                  <span className="tabular-nums text-amber-600 dark:text-amber-400 font-medium">−{fmt(parseFloat(ats.spent_this_month))}</span>
+                  <span className="tabular-nums text-amber-600 dark:text-amber-400 font-medium">−{maskIfHidden(balancesHidden, fmt(parseFloat(ats.spent_this_month)))}</span>
                 </div>
                 <div className="border-t border-gray-200 dark:border-gray-700 mt-2 pt-2 flex justify-between gap-4">
                   <span className="font-semibold text-gray-900 dark:text-white">Available</span>
                   <span className={`tabular-nums text-lg font-bold ${parseFloat(ats.available) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                    {fmt(parseFloat(ats.available))}
+                    {maskIfHidden(balancesHidden, fmt(parseFloat(ats.available)))}
                   </span>
                 </div>
               </div>
@@ -320,19 +321,19 @@ export default function Dashboard() {
                       { key: "spendable_today", title: "Spendable today" },
                     ]} />
                   </p>
-                  <p className={`text-xl font-bold tabular-nums ${snapshot.on_pace ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>{fmt(parseFloat(snapshot.left_to_spend_weekly))}</p>
+                  <p className={`text-xl font-bold tabular-nums ${snapshot.on_pace ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>{maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.left_to_spend_weekly)))}</p>
                   <p className={`text-xs mt-1 ${snapshot.on_pace ? "text-emerald-500 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
                     {/* Signed, not Math.abs(). When the week is overspent this
                         figure is how much a day must come BACK, and stripping
                         the minus rendered an over-pace deficit as a positive
                         daily allowance -- the opposite of what it means, on the
                         one number the household reads before spending. */}
-                    {parseFloat(snapshot.spendable_today) < 0 ? "−" : ""}{fmt(Math.abs(parseFloat(snapshot.spendable_today)))}/day · {snapshot.on_pace ? "on pace" : "over pace"}
+                    {parseFloat(snapshot.spendable_today) < 0 ? "−" : ""}{maskIfHidden(balancesHidden, fmt(Math.abs(parseFloat(snapshot.spendable_today))))}/day · {snapshot.on_pace ? "on pace" : "over pace"}
                   </p>
                   {/* Weekly is this figure prorated by the share of the month
                       remaining -- same method the spreadsheet uses, so the two
                       lines are one calculation at two scales. */}
-                  <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.left_to_spend))} this month</p>
+                  <p className="text-xs text-gray-400 mt-1">{maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.left_to_spend)))} this month</p>
                 </div>
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center justify-center gap-1">
@@ -349,14 +350,14 @@ export default function Dashboard() {
                       { key: "next_month_minimum", title: "Next month's lowest point" },
                     ]} />
                   </p>
-                  <p className={`text-xl font-bold tabular-nums ${parseFloat(snapshot.safety_margin_weekly) < 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>{fmt(parseFloat(snapshot.safety_margin_weekly))}</p>
+                  <p className={`text-xl font-bold tabular-nums ${parseFloat(snapshot.safety_margin_weekly) < 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>{maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.safety_margin_weekly)))}</p>
                   <p className={`text-xs mt-1 ${parseFloat(snapshot.safety_margin_today) < 0 ? "text-red-500 dark:text-red-400" : "text-amber-500 dark:text-amber-400"}`}>
                     {/* Safety Margin's own per-day figure, same shape as
                         Spendable's $/day line above -- safety_margin_weekly
                         prorated across the days left this week. */}
-                    {parseFloat(snapshot.safety_margin_today) < 0 ? "−" : ""}{fmt(Math.abs(parseFloat(snapshot.safety_margin_today)))}/day
+                    {parseFloat(snapshot.safety_margin_today) < 0 ? "−" : ""}{maskIfHidden(balancesHidden, fmt(Math.abs(parseFloat(snapshot.safety_margin_today))))}/day
                   </p>
-                  <p className="text-xs text-gray-400 mt-1">{fmt(parseFloat(snapshot.safety_margin))} this month</p>
+                  <p className="text-xs text-gray-400 mt-1">{maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.safety_margin)))} this month</p>
                   {/* The other decision boundary: below zero the plan already
                       runs into savings, so money has to come back out. */}
                   {parseFloat(snapshot.savings_pull_needed) > 0 && (
@@ -381,7 +382,7 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 text-center">
                     Lowest projected balance in the next 3 months:{" "}
                     <span className={`font-semibold tabular-nums ${figureClass}`}>
-                      {fmt(parseFloat(snapshot.lookahead_minimum))}
+                      {maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.lookahead_minimum)))}
                     </span>{" "}
                     on {new Date(snapshot.lookahead_minimum_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
                     <span className="inline-flex align-middle">
@@ -411,7 +412,7 @@ export default function Dashboard() {
               {new Date(summaryYear, summaryMonth - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
             </h3>
           </div>
-          <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">{summary.text}</p>
+          <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed">{maskMoneyText(balancesHidden, summary.text)}</p>
           {summary.top_category && (
             <div className="mt-3 flex flex-wrap gap-4 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-700 pt-3">
               <span>Top category: <span className="font-medium text-gray-700 dark:text-gray-300">{summary.top_category}</span></span>
@@ -426,7 +427,7 @@ export default function Dashboard() {
               <span>
                 Net cash flow:{" "}
                 <span className={`font-medium ${parseFloat(summary.net_cashflow) >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                  {fmt(Math.abs(parseFloat(summary.net_cashflow)))} {parseFloat(summary.net_cashflow) >= 0 ? "surplus" : "deficit"}
+                  {maskIfHidden(balancesHidden, fmt(Math.abs(parseFloat(summary.net_cashflow))))} {parseFloat(summary.net_cashflow) >= 0 ? "surplus" : "deficit"}
                 </span>
               </span>
             </div>
@@ -567,7 +568,7 @@ export default function Dashboard() {
             {" – "}
             {new Date(weeklyDigest.week_end + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
           </h3>
-          <p className="text-sm text-gray-500 mb-3">Total spent: <span className="font-semibold text-gray-900 dark:text-gray-100">{fmt(parseFloat(weeklyDigest.total_spent))}</span></p>
+          <p className="text-sm text-gray-500 mb-3">Total spent: <span className="font-semibold text-gray-900 dark:text-gray-100">{maskIfHidden(balancesHidden, fmt(parseFloat(weeklyDigest.total_spent)))}</span></p>
 
           <div className="grid md:grid-cols-2 gap-6">
             {weeklyDigest.categories.length > 0 && (
@@ -604,7 +605,7 @@ export default function Dashboard() {
                             {overBudget && <AlertTriangle size={11} className="text-red-500 shrink-0" />}
                             {c.category_name}
                           </span>
-                          <span className="tabular-nums shrink-0">{fmt(parseFloat(c.total))}</span>
+                          <span className="tabular-nums shrink-0">{maskIfHidden(balancesHidden, fmt(parseFloat(c.total)))}</span>
                         </div>
                       </div>
                     );
@@ -620,7 +621,7 @@ export default function Dashboard() {
                   {weeklyDigest.top_merchants.slice(0, 5).map((m: any) => (
                     <div key={m.name} className="flex justify-between gap-4 px-1.5 py-1 text-gray-600 dark:text-gray-400">
                       <span className="truncate">{m.name}</span>
-                      <span className="tabular-nums shrink-0">{fmt(parseFloat(m.total))}</span>
+                      <span className="tabular-nums shrink-0">{maskIfHidden(balancesHidden, fmt(parseFloat(m.total)))}</span>
                     </div>
                   ))}
                 </div>
@@ -762,7 +763,7 @@ export default function Dashboard() {
                       </p>
                     </div>
                     <span className="text-sm font-semibold text-red-600 tabular-nums">
-                      {fmt(r.amount)}
+                      {maskIfHidden(balancesHidden, fmt(r.amount))}
                       {r.is_actual && <span className="ml-1 text-[10px] font-normal text-gray-400 align-middle">actual</span>}
                     </span>
                   </div>
