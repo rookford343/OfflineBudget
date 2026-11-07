@@ -23,6 +23,9 @@
 # `tsc -b` -- 35 pre-existing TypeScript errors in unrelated files are known
 # debt tracked separately, and gating the build on them would block
 # unrelated pushes.
+#
+# It also runs the frontend unit tests (`bun test`: service-worker cache policy,
+# connection detection) right after the frozen install.
 repo_root=$(git rev-parse --show-toplevel) || exit 1
 cd "$repo_root" || exit 1
 
@@ -74,6 +77,12 @@ fi
 echo "Frontend dependency audit (known vulnerabilities)..."
 if ! bun audit --audit-level=high; then
   echo "BLOCKED: a locked frontend dependency has a known high/critical vulnerability. Upgrade or override it." >&2
+  exit 1
+fi
+
+echo "Frontend unit tests..."
+if ! bun test; then
+  echo "BLOCKED: frontend unit tests failed." >&2
   exit 1
 fi
 

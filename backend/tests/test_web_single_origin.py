@@ -70,3 +70,20 @@ def test_main_app_sends_security_headers():
     resp = TestClient(main.app).get("/api/health")
     assert resp.status_code == 200
     assert resp.headers["x-content-type-options"] == "nosniff"
+
+
+def test_sw_and_manifest_not_cached(tmp_path):
+    """The service worker and manifest must always be revalidated so updates reach the phone."""
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("SPA")
+    (dist / "sw.js").write_text("//sw")
+    (dist / "manifest.webmanifest").write_text("{}")
+    (dist / "sw-policy.js").write_text("//p")
+    app = FastAPI()
+    mount_frontend(app, str(dist))
+    c = TestClient(app)
+    for path in ("/sw.js", "/sw-policy.js", "/manifest.webmanifest"):
+        resp = c.get(path)
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "no-cache", path

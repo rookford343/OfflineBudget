@@ -91,6 +91,13 @@ your finances. Treat it like the sensitive file it is; see Backups below.
 **Session tokens:** a JWT in browser `localStorage`, valid 7 days by default
 (`JWT_EXPIRE_DAYS`).
 
+**On your phone:** installing the app to the home screen stores only the app
+code (HTML, scripts, styles, icons, in the service worker's cache) and the
+login token above. No balances, transactions or other API responses are
+cached or saved on the phone; when the Mac can't be reached the app shows a
+banner instead of old figures. Remove the home-screen app (or clear Safari
+website data) to delete it all.
+
 ---
 
 ## If you connect a bank

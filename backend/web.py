@@ -29,6 +29,11 @@ SECURITY_HEADERS = {
 }
 
 
+# The service worker, its policy script and the manifest must be revalidated on
+# every load, or a phone could keep running an old worker indefinitely.
+REVALIDATE_ALWAYS = {"sw.js", "sw-policy.js", "manifest.webmanifest"}
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
@@ -52,5 +57,6 @@ def mount_frontend(app: FastAPI, dist_dir: str) -> None:
             except (OSError, ValueError):
                 raise HTTPException(status_code=404) from None
             if candidate.is_relative_to(root) and candidate.is_file():
-                return FileResponse(candidate)
+                headers = {"Cache-Control": "no-cache"} if full_path in REVALIDATE_ALWAYS else None
+                return FileResponse(candidate, headers=headers)
         return FileResponse(index)

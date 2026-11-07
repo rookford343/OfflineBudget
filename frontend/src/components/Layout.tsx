@@ -3,6 +3,7 @@ import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { clearAuth, getUser } from "../store/auth";
 import { authApi, accountsApi, recurringApi } from "../api";
+import ConnectionBanner from "./ConnectionBanner";
 import QuickStartWizard from "./QuickStartWizard";
 import { TrendBadge } from "./TrendBadge";
 import { LogOut, Eye, EyeOff, Moon, Sun, ChevronDown, ChevronsUpDown, KeyRound, Settings as SettingsIcon } from "lucide-react";
@@ -271,6 +272,7 @@ export default function Layout() {
 
       {/* Main content */}
       <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+        <ConnectionBanner />
         {/* Fluid up to a readable ceiling. max-w-6xl (72rem) left most of a
             wide monitor empty, but an unbounded width stretches table rows and
             two-column cards until the eye has to travel across the whole

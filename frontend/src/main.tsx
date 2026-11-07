@@ -6,8 +6,10 @@ import App from './App.tsx'
 import { initTheme } from './store/theme.ts'
 import { publishAppError, describeError } from './lib/errorBus.ts'
 import ErrorToaster from './components/ErrorToaster.tsx'
+import { registerServiceWorker } from "./lib/registerServiceWorker.ts"
 
 initTheme()
+registerServiceWorker()
 
 // Global error surfacing, wired at the cache level rather than per call site.
 // The app has ~99 useMutation calls and only a handful ever defined onError,
