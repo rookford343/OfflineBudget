@@ -2731,3 +2731,29 @@ class BonusAllocationOut(BaseModel):
     steps: list[BonusAllocationStepIn]
     shortfall_account_id: Optional[int]
     shortfall_round_to: Optional[Decimal]
+
+
+# ── Change history ────────────────────────────────────────────────────────────
+
+class HistoryCause(BaseModel):
+    text: str
+    amount: Optional[Decimal] = None
+
+
+class MetricChangeOut(BaseModel):
+    taken_at: datetime
+    previous_taken_at: datetime
+    trigger: str
+    old_value: Decimal
+    new_value: Decimal
+    delta: Decimal
+    summary: str
+    causes: list[HistoryCause]
+    calc_changed: bool
+
+
+class MetricHistoryOut(BaseModel):
+    metric_key: str
+    label: str
+    current_value: Decimal
+    changes: list[MetricChangeOut]

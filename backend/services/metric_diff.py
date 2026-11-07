@@ -9,7 +9,9 @@ few posted rows between them; it never recomputes a figure.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
@@ -17,6 +19,8 @@ from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.calc_version import CALC_CHANGELOG
 from backend.services.primary_account import primary_checking
+
+logger = logging.getLogger(__name__)
 
 CENT = Decimal("0.01")
 MINUS = "−"
@@ -304,3 +308,59 @@ def summarize(label: str, delta: Decimal, since_text: str, causes: list[Cause], 
         body += f" and {extra} more"
     lead = f"{label} " if label else ""
     return f"{lead}{signed_money(delta)} {since_text}: {body}"
+
+
+def _since_text(prev_taken: datetime, cur_taken: datetime) -> str:
+    """"since 7:00 AM" on the same local day, else "since Mon 7:00 AM", in the
+    server's local zone (stored times are naive UTC)."""
+    def local(t: datetime) -> datetime:
+        return t.replace(tzinfo=timezone.utc).astimezone()
+    prev_local, cur_local = local(prev_taken), local(cur_taken)
+    fmt = "%-I:%M %p" if prev_local.date() == cur_local.date() else "%a %-I:%M %p"
+    return "since " + prev_local.strftime(fmt)
+
+
+def _causes_or_fallback(
+    db: Session, user_id: int, metric_key: str, prev: models.MetricReading, cur: models.MetricReading,
+) -> list[Cause]:
+    """`explain_change`, degrading to "inputs changed" when a stored receipt or
+    sources record is malformed or from an older shape."""
+    try:
+        return explain_change(db, user_id, metric_key, prev, cur)
+    except (ValueError, KeyError, TypeError, AttributeError, ArithmeticError):
+        logger.warning("Change history: unreadable reading for %s, listing without causes", metric_key)
+        return [Cause("inputs changed", None)]
+
+
+def changes_for(
+    db: Session, user_id: int, metric_key: str, limit: int,
+) -> list[schemas.MetricChangeOut]:
+    """Consecutive readings of one figure, newest change first, only where the
+    value moved by at least a cent."""
+    readings = (
+        db.query(models.MetricReading)
+        .join(models.MetricSnapshot, models.MetricReading.snapshot_id == models.MetricSnapshot.id)
+        .filter(models.MetricSnapshot.user_id == user_id, models.MetricReading.metric_key == metric_key)
+        .order_by(models.MetricSnapshot.taken_at.desc(), models.MetricSnapshot.id.desc())
+        .all()
+    )
+    out: list[schemas.MetricChangeOut] = []
+    for cur, prev in zip(readings, readings[1:]):
+        if len(out) >= limit:
+            break
+        old_value, new_value = Decimal(str(prev.value)), Decimal(str(cur.value))
+        delta = new_value - old_value
+        if abs(delta) < CENT:
+            continue
+        causes = _causes_or_fallback(db, user_id, metric_key, prev, cur)
+        prev_snap, cur_snap = prev.snapshot, cur.snapshot
+        out.append(schemas.MetricChangeOut(
+            taken_at=cur_snap.taken_at, previous_taken_at=prev_snap.taken_at,
+            trigger=cur_snap.trigger, old_value=old_value, new_value=new_value, delta=delta,
+            summary=summarize(
+                cur.label, delta, _since_text(prev_snap.taken_at, cur_snap.taken_at), causes, max_items=3,
+            ),
+            causes=[schemas.HistoryCause(text=c.text, amount=c.amount) for c in causes],
+            calc_changed=prev_snap.calc_version != cur_snap.calc_version,
+        ))
+    return out

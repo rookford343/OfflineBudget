@@ -13,7 +13,7 @@ from backend.middleware import AuditMiddleware
 from backend.services.job_locks import _bank_sync_lock, _daily_summary_lock
 from backend.routers import (
     accounts, auth, budget, categories, credit_cards,
-    forecast, recurring, transactions, spending,
+    forecast, history, recurring, transactions, spending,
 )
 from backend.routers import admin as admin_router_module
 from backend.routers import imports as imports_router_module
@@ -428,6 +428,7 @@ app.include_router(accounts.router)
 app.include_router(categories.router)
 app.include_router(recurring.router)
 app.include_router(forecast.router)
+app.include_router(history.router)
 app.include_router(transactions.router)
 app.include_router(budget.router)
 app.include_router(credit_cards.router)

@@ -58,6 +58,7 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Social Security boost | Extra take-home per paycheck once the wage base is met | `ss_paycheck_boosts`, `SSWageBaseTracker`, `pay_year_dates` (services/forecast_engine.py); month model calls them | Forecast, Recurring, Leftover |
 | Weekend shift | Posting day moves off a weekend; override keyed by natural due date everywhere | `_adjust_for_weekend`, `_matches_schedule`, the override lookup in `build_forecast` (services/forecast_engine.py); `build_month_base` (services/month_base.py) and `upcoming_bills` (services/upcoming_bills.py) key by the natural date | Forecast, Recurring, Upcoming bills |
 | Card bill in month | Whether a card-paid recurring bill belongs to a month (quarterly lands whole in its due month) | `is_card_bill_in_month` (services/forecast_engine.py) | Month model, forecast |
+| Change history | Every headline figure (the ten snapshot figures, Available to Spend, checking balance, each card's next payment) stored with its explain tree, and what moved between two readings | `record_snapshot`, `collect_headline_metrics` (services/metric_history.py); `changes_for`, `explain_change` (services/metric_diff.py); `/history` (routers/history.py) | What-changed view on each figure |
 | Upcoming bills | Next occurrence per bill with override amounts | `upcoming_bills` (services/upcoming_bills.py), `_next_fire_date` (services/summary_generator.py) | Dashboard card, daily email |
 | Real spending (rule) | Whether a row is spend, income, a transfer or a card payment, and its signed amount: card payments and own-account transfers are neither, savings-category rows are transfers, refunds net as negative spend, an income-category debit reduces income | `classify_checking`, `classify_card`, `classified_rows`, `spend_totals` (services/real_spend.py); description checks `is_card_payment`, `looks_like_internal_transfer` (services/spending_helpers.py), `card_matches_description`, `looks_like_card_autopay` (services/card_matching.py) | everything below |
 | Category / merchant totals | Real spending per category or merchant over a range | `category_totals_for_range` (= `spend_totals().by_category`), `merchant_totals` (services/spending_helpers.py, both over services/real_spend.py); `spending_breakdown` (services/budget_snapshot.py) | Weekly digest, Budget overview, snapshot explain |
@@ -316,10 +317,23 @@ Settled by the principal. Record any behavior change here.
 - **Percent and share ratios (decision (c))** over figures the backend already sent (a progress bar's percent of budget, a pie slice's share of the total) are presentational and may be computed in the frontend. Anything that adds or subtracts money is not.
 - **Workflow:** build in the live working tree. Take a `backup_database()` copy before schema changes, and run a before/after on a database copy for any step that moves a visible number.
 
+## How the change history works
+
+Change history answers "why did this number move?" It stores each headline figure as the surfaces showed it, then explains the difference between two readings in plain language. It never recomputes a past figure.
+
+**What is recorded and when.** `record_snapshot` (services/metric_history.py) stores one `MetricSnapshot` (when, why, `CALC_VERSION`, the as-of date, and a `sources_json` record of the pending rows and newest row ids the figures were computed from) with one `MetricReading` per figure (key, label, value, and the figure's explain tree as JSON). Four triggers: `sync` (every bank sync, including Sync Now), `email` (the daily email), `manual` (`POST /history/snapshot`) and `calc_change` (on startup, once per user whose latest snapshot predates the current `CALC_VERSION`). Outside `email`, a snapshot is skipped when the figures, receipts, sources and calc version equal the latest one. Snapshots older than 13 months (`RETENTION_DAYS`, 396 days) are deleted after each recording. `DELETE /history` clears the caller's own history only.
+
+**The two tables.** `metric_snapshots` (one row per recording, times in naive UTC) and `metric_readings` (one row per figure per snapshot). Card payments are keyed `card_payment:<card id>`; every other figure has a fixed key.
+
+**How a change is explained.** `changes_for` pairs consecutive readings of one figure and keeps pairs that moved by a cent or more. `explain_change` names the causes in this order: a calculation change (quoting `CALC_CHANGELOG`), source events (pending or posted rows that arrived or went away, matched so a pending row that posted is not counted twice), a new month, then the receipt lines whose amounts differ, largest first. If nothing nameable differs, or a stored receipt or sources record cannot be read, the cause is "inputs changed". Every query is scoped to the caller's user id.
+
+**Keeping it honest.** `CALC_CHANGELOG` (services/calc_version.py) must gain a line with every `CALC_VERSION` bump, because change history quotes it when a figure moved because the rules did.
+
 ## Tracing a mismatch
 
 When two places show different numbers for the same concept:
 
+0. Open the figure's what-changed view (`GET /history/<figure key>`). If the figure moved between two recorded readings, it names the pending or posted rows, the receipt lines or the calculation change behind it; you may not need the steps below.
 1. Name the figure and find its row in the provenance table. Note every surface listed.
 2. Read the function in the "Function" column for each surface. If two surfaces use different functions, that is the bug; fix it by routing both through the shared primitive.
 3. Take a WAL-safe copy of the live database. Never copy `data/budget.db` with `cp`, and never run the tool on the live file:

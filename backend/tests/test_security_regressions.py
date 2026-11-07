@@ -596,3 +596,104 @@ def test_audit_middleware__bank_sync_credential_body__never_captured(db_session,
     for row in db_session.query(models.AuditLog).all():
         assert token not in (row.body_summary or "")
         assert token not in (row.username or "")
+
+
+# ── Change history: per-user scoping ─────────────────────────────────────────
+
+def _history_user(db, name):
+    user = models.User(username=name, hashed_password="x", display_name=name)
+    db.add(user)
+    db.commit()
+    return user
+
+
+def _history_snapshot(db, user, key, value, sources, hour):
+    import json as _json
+    from datetime import datetime
+    from backend import schemas
+    row = schemas.ExplainRow(op="start", label="Base", amount=Decimal(value), children=[], informational_children=[])
+    explain = schemas.Explanation(title="T", result=Decimal(value), rows=[row]).model_dump_json()
+    snap = models.MetricSnapshot(
+        user_id=user.id, taken_at=datetime(2026, 11, 2, hour, 0), trigger="sync", calc_version=12,
+        as_of=date(2026, 11, 2), sources_json=_json.dumps(sources, sort_keys=True),
+    )
+    snap.readings = [models.MetricReading(metric_key=key, label=key, value=Decimal(value), explain_json=explain)]
+    db.add(snap)
+    db.commit()
+    return snap
+
+
+def test_history_is_scoped_to_the_caller(db_session):
+    """Another user's card key is 404 (never revealing it exists), and their
+    DELETE /history removes only their own snapshots."""
+    from backend.dependencies import get_current_user, get_db
+    from backend.routers import history as history_router
+
+    def client(user):
+        app = FastAPI()
+        app.include_router(history_router.router)
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[get_current_user] = lambda: user
+        return TestClient(app)
+
+    owner, other = _history_user(db_session, "hist-owner"), _history_user(db_session, "hist-other")
+    card = models.CreditCard(user_id=owner.id, name="Visa", credit_limit=Decimal("5000"), statement_day=20,
+                             due_day=10, is_active=True, current_balance=Decimal("0"), balance_due=Decimal("0"))
+    db_session.add(card)
+    db_session.commit()
+    key = f"card_payment:{card.id}"
+    src = {"card_pending": [], "checking_pending": [], "max_txn_id": 0, "max_card_txn_id": 0}
+    _history_snapshot(db_session, owner, key, "100.00", src, 12)
+    _history_snapshot(db_session, owner, key, "130.00", src, 18)
+    assert client(owner).get(f"/history/{key}").status_code == 200
+    assert client(other).get(f"/history/{key}").status_code == 404
+    assert client(other).delete("/history").json() == {"deleted": 0}
+    assert db_session.query(models.MetricSnapshot).filter_by(user_id=owner.id).count() == 2
+    assert client(owner).get(f"/history/{key}").status_code == 200
+
+
+def test_history_causes_never_name_another_users_rows(db_session):
+    """A second user's card transactions, checking transactions and pending rows
+    (ids inside the first user's (prev.max, cur.max] range) never appear in the
+    first user's causes."""
+    from datetime import datetime
+    from backend.services.metric_diff import changes_for
+
+    owner, other = _history_user(db_session, "cause-owner"), _history_user(db_session, "cause-other")
+    owner_checking = models.Account(user_id=owner.id, name="Owner Checking", type=models.AccountType.checking,
+                                    current_balance=Decimal("1000"))
+    other_checking = models.Account(user_id=other.id, name="Other Checking", type=models.AccountType.checking,
+                                    current_balance=Decimal("1000"))
+    db_session.add_all([owner_checking, other_checking])
+    other_card = models.CreditCard(user_id=other.id, name="Other Card", credit_limit=Decimal("5000"),
+                                   statement_day=20, due_day=10, is_active=True,
+                                   current_balance=Decimal("0"), balance_due=Decimal("0"))
+    db_session.add(other_card)
+    db_session.commit()
+    secret = "OtherUserSecretMerchant"
+    db_session.add_all([
+        models.CreditCardTransaction(card_id=other_card.id, user_id=other.id, date=date(2026, 11, 2),
+                                     amount=Decimal("77.00"), merchant=secret),
+        models.Transaction(user_id=other.id, account_id=other_checking.id, date=date(2026, 11, 2),
+                           amount=Decimal("-88.00"), description=secret, is_actual=True),
+        # Even a row of theirs pointing at the owner's account must stay out.
+        models.Transaction(user_id=other.id, account_id=owner_checking.id, date=date(2026, 11, 2),
+                           amount=Decimal("-99.00"), description=secret, is_actual=True),
+        models.CardPendingTransaction(user_id=other.id, card_id=other_card.id, external_id="x1", date=date(2026, 11, 2),
+                                      synced_at=datetime(2026, 11, 2, 12, 0),
+                                      merchant=secret, amount=Decimal("55.00")),
+    ])
+    db_session.commit()
+    base = {"card_pending": [], "checking_pending": [], "max_txn_id": 0, "max_card_txn_id": 0}
+    later = {
+        "card_pending": [], "checking_pending": [],
+        "max_txn_id": db_session.query(models.Transaction).count() + 100,
+        "max_card_txn_id": db_session.query(models.CreditCardTransaction).count() + 100,
+    }
+    _history_snapshot(db_session, owner, "available_to_spend", "1000.00", base, 12)
+    _history_snapshot(db_session, owner, "available_to_spend", "900.00", later, 18)
+    changes = changes_for(db_session, owner.id, "available_to_spend", 30)
+    assert len(changes) == 1
+    assert secret not in changes[0].summary
+    assert all(secret not in c.text for c in changes[0].causes)
+    assert [c.text for c in changes[0].causes] == ["Base −$100.00"]  # the receipt line only
