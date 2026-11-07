@@ -87,3 +87,14 @@ def test_sw_and_manifest_not_cached(tmp_path):
         resp = c.get(path)
         assert resp.status_code == 200
         assert resp.headers["cache-control"] == "no-cache", path
+
+
+def test_index_and_spa_fallback_always_revalidated(client):
+    for path in ("/", "/dashboard", "/index.html"):
+        assert client.get(path).headers["cache-control"] == "no-cache", path
+
+
+def test_missing_assets_are_404_not_index(client):
+    for path in ("/assets/missing.js", "/icons/missing.png", "/nope.css"):
+        resp = client.get(path)
+        assert resp.status_code == 404 and resp.text != "SPA", path

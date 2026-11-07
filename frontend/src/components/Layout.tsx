@@ -85,6 +85,7 @@ export default function Layout() {
 
   function logout() {
     clearAuth();
+    qc.clear(); // no financial data left in memory after logout
     navigate("/login");
   }
 

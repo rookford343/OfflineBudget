@@ -6,6 +6,7 @@ import App from './App.tsx'
 import { initTheme } from './store/theme.ts'
 import { publishAppError, describeError } from './lib/errorBus.ts'
 import ErrorToaster from './components/ErrorToaster.tsx'
+import { isUnreachable } from "./lib/connection.ts"
 import { registerServiceWorker } from "./lib/registerServiceWorker.ts"
 
 initTheme()
@@ -37,6 +38,8 @@ const queryCache = new QueryCache({
     // outright failure to load (nothing cached to fall back on) is worth
     // interrupting for.
     if (query.state.data !== undefined) return
+    // The "Can't reach your Mac" banner already says this.
+    if (isUnreachable(error)) return
     publishAppError(describeError(error))
   },
 })

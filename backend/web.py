@@ -57,6 +57,10 @@ def mount_frontend(app: FastAPI, dist_dir: str) -> None:
             except (OSError, ValueError):
                 raise HTTPException(status_code=404) from None
             if candidate.is_relative_to(root) and candidate.is_file():
-                headers = {"Cache-Control": "no-cache"} if full_path in REVALIDATE_ALWAYS else None
+                headers = {"Cache-Control": "no-cache"} if full_path in REVALIDATE_ALWAYS or full_path == "index.html" else None
                 return FileResponse(candidate, headers=headers)
-        return FileResponse(index)
+        # A missing file (assets, icons, anything with an extension) is a real 404,
+        # never index.html: the service worker would cache that HTML under a script URL.
+        if full_path.startswith(("assets/", "icons/")) or "." in full_path.rsplit("/", 1)[-1]:
+            raise HTTPException(status_code=404)
+        return FileResponse(index, headers={"Cache-Control": "no-cache"})

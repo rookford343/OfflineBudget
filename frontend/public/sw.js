@@ -1,8 +1,9 @@
 // Hand-written service worker: caches the app shell only, never API data.
-// CACHE_VERSION: bump by hand when this file's behaviour changes. Cached
-// shell files need no bump per release: they are stale-while-revalidate, and
-// Vite's hashed /assets/* names change with every build, so a new build
-// brings new files (and the new index.html on the next load).
+// CACHE_VERSION: bump by hand when this file's behaviour changes. Per-release
+// freshness needs no bump: the shell is stale-while-revalidate (always
+// re-fetched with cache:"no-cache"), Vite's hashed /assets/* names change with
+// every build, and when index.html changes the whole shell cache is cleared so
+// old hashed files don't pile up.
 importScripts("/sw-policy.js");
 
 const CACHE_VERSION = "1";
@@ -22,6 +23,27 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+function isIndex(url) {
+  return url.pathname === "/" || url.pathname === "/index.html";
+}
+
+async function refreshShell(cache, req, url, cached) {
+  const res = await fetch(req, { cache: "no-cache" }).catch(() => undefined);
+  if (!res || !res.ok) return res;
+  const type = (res.headers && res.headers.get("content-type")) || "";
+  // A missing asset can come back as the SPA's index.html; never store that
+  // under a script/style/icon URL.
+  if (type.includes("text/html") && req.mode !== "navigate" && !isIndex(url)) return res;
+  if (isIndex(url) && cached) {
+    const [oldText, newText] = await Promise.all([cached.clone().text(), res.clone().text()]);
+    if (oldText !== newText) {
+      for (const key of await cache.keys()) await cache.delete(key);
+    }
+  }
+  await cache.put(req, res.clone());
+  return res;
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
@@ -31,12 +53,8 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       caches.open(CACHE).then(async (cache) => {
         const cached = await cache.match(req);
-        const refresh = fetch(req)
-          .then((res) => {
-            if (res.ok) cache.put(req, res.clone());
-            return res;
-          })
-          .catch(() => undefined);
+        const refresh = refreshShell(cache, req, url, cached);
+        event.waitUntil(refresh.catch(() => undefined));
         return cached || (await refresh) || Response.error();
       }),
     );
