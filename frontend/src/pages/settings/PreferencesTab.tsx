@@ -29,7 +29,7 @@ export default function PreferencesTab() {
   useEffect(() => { if (me) setTransferIncrement(me.transfer_increment ?? "1000"); }, [me]);
   // Null on the server means the $1,000 default, so the field shows that.
   const [safetyCushion, setSafetyCushion] = useState("");
-  useEffect(() => { if (me) setSafetyCushion(me.safety_cushion ?? "1000"); }, [me]);
+  useEffect(() => { if (me) setSafetyCushion(me.safety_cushion ?? ""); }, [me]);
   const cushionMut = useMutation({
     mutationFn: authApi.updateMe,
     onSuccess: () => {
@@ -240,6 +240,7 @@ export default function PreferencesTab() {
               min="0"
               aria-label="Safety cushion"
               className="input w-28 text-sm text-right"
+              placeholder={me?.safety_cushion_effective ?? ""}
               value={safetyCushion}
               onChange={(e) => setSafetyCushion(e.target.value)}
             />

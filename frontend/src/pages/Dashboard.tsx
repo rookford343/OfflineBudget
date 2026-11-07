@@ -378,7 +378,7 @@ export default function Dashboard() {
                       <span className={`block mt-0.5 font-medium ${figureClass}`}>
                         {status === "danger"
                           ? "below $0"
-                          : `below your ${maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.safety_cushion ?? "1000")))} cushion`}
+                          : `below your ${maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.safety_cushion)))} cushion`}
                       </span>
                     )}
                   </p>

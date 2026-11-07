@@ -148,3 +148,23 @@ def test_migration_apply_copies_wish_then_account_value(db_session):
     assert u2.safety_cushion == Decimal("2000.00")
     assert u3.safety_cushion is None
     assert u4.safety_cushion == Decimal("300.00")
+
+
+def test_user_out_exposes_resolved_cushion_and_raw_setting(db_session):
+    from backend.schemas import UserOut
+    u = _user(db_session, "res")
+    out = UserOut.model_validate(u).model_dump()
+    assert out["safety_cushion"] is None                      # raw setting stays nullable
+    assert out["safety_cushion_effective"] == Decimal("1000")  # server-resolved default
+    u.safety_cushion = Decimal("250.00")
+    out = UserOut.model_validate(u).model_dump()
+    assert out["safety_cushion"] == Decimal("250.00")
+    assert out["safety_cushion_effective"] == Decimal("250.00")
+
+
+def test_snapshot_cushion_is_always_resolved(db_session):
+    from backend.services.budget_snapshot import compute_budget_snapshot
+    u = _user(db_session, "snapres")
+    acct = _checking(db_session, u)
+    db_session.commit()
+    assert compute_budget_snapshot(db_session, u, acct.id).safety_cushion == Decimal("1000")

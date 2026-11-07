@@ -218,7 +218,7 @@ export default function WishList() {
           <div>
             <label className="label">Cushion</label>
             <input
-              type="number" step="0.01" min="0" className="input w-28" placeholder="1000"
+              type="number" step="0.01" min="0" className="input w-28" placeholder={plan?.cushion ?? ""}
               value={cushionInput}
               onChange={(e) => setCushionInput(e.target.value)}
               onBlur={saveCushion}

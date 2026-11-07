@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 from backend import models
+from backend.services.cushion import DEFAULT_CUSHION
 from backend.models import AccountType, CategoryType, RecurringType, ImportFormat, UserRole, RecurringFrequency, RuleField, RulePatternType, RuleAction, BankConnectionStatus, PlannedTransferStatus, VerificationFeature, VerificationFlagStatus, PlannedDirection
 
 
@@ -79,6 +80,14 @@ class UserOut(BaseModel):
     safety_cushion: Optional[Decimal] = None
     savings_strategy: Optional[str] = None
     budget_carry_forward: Optional[bool] = None
+
+    # The cushion actually in force (the raw setting, else the default), so
+    # the frontend never re-implements the default. `safety_cushion` above
+    # stays the raw nullable setting for the Preferences input.
+    @computed_field
+    @property
+    def safety_cushion_effective(self) -> Decimal:
+        return self.safety_cushion if self.safety_cushion is not None else DEFAULT_CUSHION
 
 
 
