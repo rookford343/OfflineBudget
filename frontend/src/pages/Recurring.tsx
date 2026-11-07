@@ -189,10 +189,10 @@ export default function Recurring() {
 
     return (
       <div className="py-2.5 border-b border-gray-50 last:border-0">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
           <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name}</p>
-          <div className="flex items-center gap-1.5 mt-0.5">
+          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
             {isCcPayment
               ? <span className="badge-blue">CC payment</span>
               : <span className={isYearly || isQuarterly ? "badge-amber" : "badge-blue"}>{item.frequency}</span>
@@ -208,7 +208,7 @@ export default function Recurring() {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 max-lg:gap-1 shrink-0">
           <div className="text-right">
             <span className={`text-sm font-bold tabular-nums ${item.type === "income" ? "text-green-600" : "text-red-600"}`}>
               {item.type === "income" ? "+" : "-"}{fmt(item.amount)}
@@ -290,7 +290,7 @@ export default function Recurring() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 tap-44">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Recurring Items <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
