@@ -5,8 +5,10 @@ screen or in an email to the function that computes it, and the checklist for
 consolidating those functions into one shared layer.
 
 Design background: `docs/superpowers/specs/2026-11-06-calculation-consistency-design.md`.
-Status today: the shared layer is partly built. Rows marked `-> Task N` are scheduled
-to move; until they do, the "function" column is where the math really lives.
+Status: the backend shared layer is built (calculation version 6). Rows marked `-> Plan 2` are
+the frontend figures and the Available to Spend rebuild still to move; until they do, the
+"function" column is where that math really lives. Everything else points at a function in
+`backend/services`.
 
 ## System overview
 
@@ -40,8 +42,8 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 |---|---|---|---|
 | Month income / bills / one-offs | Every income and bill occurrence in a calendar month, with override amounts, Social Security boost, `include_in_forecast` filter, planned one-offs | `build_month_base` (services/month_base.py) | Recurring strip, Leftover, card bill split |
 | Card-linked bills this month | Recurring bills charged to a card rather than checking | `card_bill_occurrences` (services/month_base.py) | Leftover, Left to Spend, Safety Margin |
-| Leftover | Income minus bills minus planned one-offs minus budget allocations for the month | `leftover_parts` (services/budget_snapshot.py) | Dashboard Household Snapshot, daily email |
-| Recurring "Left over" | Month model income minus expenses | `build_month_summary` (services/month_summary.py) | Recurring page strip |
+| Leftover | Income minus bills minus planned one-offs plus planned inflows minus committed savings and the Groceries budget for the month: `MonthBase.left_over` | `build_month_base` (services/month_base.py); `leftover_parts` (services/budget_snapshot.py) only reads it | Dashboard Household Snapshot, daily email, Recurring strip |
+| Recurring "Left over" | The same `MonthBase.left_over`, with its explain panel | `build_month_summary` (services/month_summary.py) over `build_month_base` | Recurring page strip |
 | Left to Spend | Leftover minus card spending this month and pending charges, plus card bills already counted, plus card one-offs | `compute_budget_snapshot` (services/budget_snapshot.py), helpers `_card_spending_this_month`, `_transaction_fed_card_ids` | Dashboard, daily email, /spending/snapshot |
 | Weekly / today allowance | Left to Spend or Safety Margin spread over weeks or days left | `_weekly_allowance`, `compute_budget_snapshot` (services/budget_snapshot.py) | Dashboard, email |
 | Safety Margin | Lowest balance from today through end of next month (walk without unbilled card bills) minus unbilled card bills plus bills charged so far | `_lookahead_window`, `compute_budget_snapshot` (services/budget_snapshot.py) | Dashboard, email |
@@ -64,23 +66,47 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Monthly summary / Month in Review | Category totals, debits, credits, month-over-month change, net cashflow | `_month_spending_by_category` (= `spend_totals`), `generate_summary` (services/summary_generator.py) | Monthly email, Month in Review, `/spending/monthly-summary` |
 | Weekly digest | Trailing 7 days of spending plus forward balance risk | `generate_weekly_digest` (services/summary_generator.py) | Weekly email, `/spending/weekly-digest` |
 | Daily email | Headline figures, cards, upcoming, stale-connection notes | `generate_daily_summary` (services/summary_generator.py) | Daily email |
-| Available to Spend | Monthly-frequency income minus bills for the calendar month (no boost, no overrides, refunds dropped) -> Task 7 rebuild | `available_to_spend`, `_committed_card_bills_fired` (routers/spending.py) | Dashboard card |
+| Available to Spend | Monthly-frequency income minus bills for the calendar month (no boost, no overrides, refunds dropped) -> Plan 2 rebuild (legacy; allowlisted in the guard test as "rebuilt in Plan 2") | `available_to_spend`, `_committed_card_bills_fired` (routers/spending.py) | Dashboard card |
 | Pacer add-backs / discretionary spend | Real spending in a range for the weekly pacer, with recurring card charges added back | `discretionary_spend_checking`, `discretionary_spend_card` (spend verdicts from `classified_rows`, minus recurring bills, Groceries/Savings lines and verified planned transfers), `discretionary_spend_in_range`, `compute_weekly_spendable` (services/spendable_pacer.py) | Dashboard weekly allowance |
 | Wish List plan | Earliest safe date to afford a wish, using forecast plus cushion | `build_plan`, `earliest_safe_date`, `effective_cushion` (services/wish_plan.py); `wish_math.py` | Wish List page |
 | Planned expense settlement | A planned one-off settles when a matching real charge appears | `auto_settle_planned_expenses`, `settle_after_sync` (services/planned_auto_settle.py) | Month model, forecast, Recurring |
 | Tax estimate | Federal, state and FICA estimate from the tax profile | `estimate_taxes` (services/tax_service.py), `tax_estimate`, `tax_summary` (routers/spending.py) | Tax export page |
-| Net Position | Checking balances minus card balances due | Dashboard.tsx (client-side `netPosition`) -> Task 8 (move to backend) | Dashboard |
-| Cycle spend / pending-adjusted balance | Current balance minus balance due plus pending; checking balance after pending | Dashboard.tsx (`cycleSpend`), frontend/src/lib/usePendingBalances.ts -> Task 8 | Dashboard, Credit Cards |
-| Budget track totals | Committed, flexible, budgeted and spent totals | frontend/src/pages/Budget.tsx, frontend/src/lib/budgetPlan.ts -> Task 8 | Budget page |
-| Spending average | Average of the monthly bars | frontend/src/pages/Spending.tsx (`avg`) -> Task 8 | Spending page |
+| Net Position | Checking balances minus card balances due | Dashboard.tsx (client-side `netPosition`) -> Plan 2 (move to backend) | Dashboard |
+| Cycle spend / pending-adjusted balance | Current balance minus balance due plus pending; checking balance after pending | Dashboard.tsx (`cycleSpend`), frontend/src/lib/usePendingBalances.ts -> Plan 2 | Dashboard, Credit Cards |
+| Budget track totals | Committed, flexible, budgeted and spent totals | frontend/src/pages/Budget.tsx, frontend/src/lib/budgetPlan.ts -> Plan 2 | Budget page |
+| Spending average | Average of the monthly bars | frontend/src/pages/Spending.tsx (`avg`) -> Plan 2 | Spending page |
+| Net worth | Manual assets plus account balances minus card balances and manual liabilities; no shared primitive yet (allowlisted in the guard test) -> Plan 2 | `get_totals`, `capture_snapshot` (routers/networth.py) | Net Worth page |
+| Checking balance with pending | Posted balance minus every pending debit, only while an active Plaid link keeps the snapshot live | `checking_balance_with_pending`, `checking_pending_debits`, `pending_snapshot_is_live` (services/pending.py); the sidebar adopts it in Plan 2 | Sidebar (Plan 2) |
+| Calculation version | Hand-bumped integer naming the current calculation meaning | `CALC_VERSION` (services/calc_version.py) | Explain panels, changelog below |
 
 ## Shared primitives
 
-Filled in as each primitive lands. Until then the provenance table above is the truth.
+The provenance table above names the function for every figure; the sections below give each
+primitive's rules.
 
 ### 1. Month model
-Exists: `backend/services/month_base.py`. Edge cases and rules to document when finished:
-weekends, quarterly bills, Social Security boost, funded one-offs.
+`backend/services/month_base.py`. `build_month_base(db, user, year, month, extra_items=None)` returns
+a `MonthBase`: every income, bill and one-off occurrence in the calendar month, their totals, and
+`left_over`. The Recurring strip (`build_month_summary`), the Dashboard's Leftover
+(`leftover_parts`) and the pacer all read it. `card_bill_occurrences(base)` picks the card-linked
+bills out of it. Rules:
+
+- **Occurrences:** every active recurring item that fires on a day of the month, except
+  `credit_card_payment` items and items excluded from the forecast (`include_in_forecast` false,
+  so excluded income is out of Leftover too). `extra_items` are a scenario's never-saved proposals.
+- **Overrides** (`BillAmountOverride`) replace the item's amount on its natural due date.
+- **Weekends:** the month model lists a bill on its natural due date. The forecast shifts only the
+  posting day (see the weekend rule below); the override is keyed by the natural date either way.
+- **Quarterly and yearly bills** land whole in their due month (`periodic_due`), never divided.
+- **Social Security boost:** `ss_paycheck_boosts` (forecast_engine) adds the extra take-home to each
+  paycheck once the wage base is met, so a month with two boosted paychecks counts two boosts.
+- **One-offs:** a planned one-off counts on its expected date, or its settled date and actual amount
+  once settled. A one-off funded from savings (`funding_account_id`) also adds an equal inflow, so it
+  nets to zero. A planned inflow (a refund) adds to Leftover.
+- **Leftover:** income - bills - one-off outflows + one-off inflows - committed savings - the
+  Groceries budget. Under `pull_from_savings` nothing is set aside for savings.
+
+Parity: `tests/test_month_leftover_parity.py` and `tests/test_parity_headline.py`.
 
 ### 2. Card-payment model
 `backend/services/card_payment_model.py`. `card_payments(db, user, account, start, end, *,
@@ -153,7 +179,7 @@ transaction feed) has no rows and contributes nothing. Callers layer their own e
 spend verdicts, never a second rule: the pacer drops recurring bills, the Groceries/Savings
 lines and verified planned transfers. `filter_real_spend` (spending_helpers) keeps spend and
 income rows for list views; `/spending/available-to-spend` keeps its own recipe until its
-rebuild (Task 7).
+rebuild (Plan 2).
 
 Savings-type budget lines: their actual is money moved into savings, not spending.
 `savings_moved` / `savings_moved_rows` (real_spend.py) sum the transfer verdicts on checking
@@ -161,7 +187,9 @@ debits and card charges filed under a savings-type category (a credit pulled bac
 subtracted). `compute_overview` uses it for those lines only, so the Track Budgets "spent"
 figure and `apply_rollover` see it; every spending total still excludes it.
 
-Parity: `backend/tests/test_real_spend.py::test_all_spend_surfaces_agree`.
+Parity: `backend/tests/test_real_spend.py::test_all_spend_surfaces_agree` and
+`backend/tests/test_parity_headline.py` (last month's spend across Month in Review, the Sankey, the
+Budget overview and the weekly digest).
 
 ### 4. Pending and thresholds
 Pending charges: `card_pending(card, today)` in `services/pending.py` is the only reader of
@@ -218,6 +246,27 @@ The forecast looks the override up on the natural date; the month model and upco
 too. For a paycheck the override replaces the base amount and the Social Security boost still applies,
 so upcoming bills shows the forecast's paycheck amount as it is.
 
+### Guards and parity tests
+
+Two tests keep the layer from eroding; both run in the normal suite.
+
+- `backend/tests/test_parity_headline.py` builds one fixture (a paycheck past the Social Security
+  base, a weekly card bill, a quarterly bill, a savings-funded one-off, a refund, a pending charge)
+  and requires the same value from every surface: Leftover (`build_month_base`,
+  `/recurring/month-summary`, the snapshot), the lowest point (snapshot vs the `/forecast` endpoint
+  with the floor mask), each card's next payment (forecast line, snapshot explain, `card_payments`)
+  and last month's spend (Month in Review, Sankey, Budget overview, weekly digest).
+- `backend/tests/test_calc_guard.py` is an AST scan of `routers/` and `services/`. It fails on
+  `sum(...)` or `+=` / `-=` over `amount`, `pending_charges`, `balance_due` or `current_balance`
+  outside the shared-layer modules, and on any read of `.pending_charges` outside `pending.py` and
+  the code that writes it. Its allowlist is a module list for the shared layer plus a
+  function-by-function list of presentational code and writers, each with a reason; an entry that no
+  longer matches a violation fails the test. Adding a module to the allowlist needs a line in this
+  document: the shared-layer modules are `month_base`, `real_spend`, `pending`, `forecast_walk`,
+  `forecast_engine`, `card_payment_model`, `cushion`, `calc_version`, `tax_service` (tax estimates),
+  and the writers `bank_sync_service`, `plaid_sync_service`, `import_service` and
+  `planned_auto_settle`.
+
 ## Decisions log
 
 Settled by the principal. Record any behavior change here.
@@ -257,6 +306,8 @@ When two places show different numbers for the same concept:
 
 - Never compute a money figure outside the shared layer (`backend/services`). Routers and the frontend display figures; they do not sum them.
 - Before adding a figure, find its primitive in the provenance table. If it has none, add a row.
+- `tests/test_calc_guard.py` fails on new money sums in routers and services; route the figure
+  through the shared layer instead of widening its allowlist.
 - Add a parity test for any new surface that shows an existing headline concept: it must return the identical value as every other surface, from one fixture.
 - Record behavior changes in the decisions log and the calculation changelog; bump `CALC_VERSION` (`backend/services/calc_version.py`).
 - Any change that moves a visible number runs `scripts/calc_before_after.py` on a `backup_database()` copy first, and the diff goes in the task or PR notes (synthetic figures only in public text).

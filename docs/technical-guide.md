@@ -431,15 +431,41 @@ locked card payoff can't be the low until the next income day):
 - **The display walk** (the Forecast tab's, bills included) gives
   `next_month_minimum` and `lookahead_minimum` (the 3-month low).
   `lookahead_status` rates the 3-month low against `User.safety_cushion`
-  (nullable, `DEFAULT_SAFETY_CUSHION` = $1,000.00 when null):
+  (nullable, `cushion.DEFAULT_CUSHION` = $1,000.00 when null; read through
+  `cushion_for(user)`):
   `"danger"` strictly below $0, `"warning"` strictly below the cushion,
   otherwise `"ok"` (exactly at the cushion is ok). The Dashboard and the
   daily email color that line amber/red with a short phrase; `"ok"` shows it
   as plain info.
 
-`User.safety_cushion` is its own setting, not the Wish List's cushion
-(`wish_plan.effective_cushion`, which falls back to the checking account's
-low-balance threshold).
+`User.safety_cushion` is the one cushion: the 3-month low, the risk banner
+and the Wish List (`wish_plan.effective_cushion`) all read it through
+`cushion_for` (calculation v6). The per-account `low_balance_threshold` and the
+Wish List's own cushion setting are retired.
+
+## The shared calculation layer
+
+Every money figure has one recipe in `backend/services`; routers and the
+frontend display it. The map from a figure to its function is the provenance
+table in [architecture.md](architecture.md). The layer:
+
+| Module | Owns |
+|--------|------|
+| `month_base.py` | The month model: income, bills, one-offs, Leftover, card bills |
+| `real_spend.py` | The real-spending rule: spend, income, transfer or card payment, per row |
+| `pending.py` | Fresh pending charges (`card_pending`), checking pending debits |
+| `forecast_walk.py` | The standard forecast walk (`display` or `safety` purpose) |
+| `card_payment_model.py` | What each card will pay out of checking, and when |
+| `cushion.py` | The one cushion and its amber/red status |
+| `calc_version.py` | `CALC_VERSION`, bumped by hand when a calculation's meaning changes |
+
+Two test files hold the line. `tests/test_parity_headline.py` reads each
+headline figure (Leftover, the lowest point, each card's next payment, last
+month's spend) off every surface that shows it, from one fixture, and requires
+the same value. `tests/test_calc_guard.py` scans `routers/` and `services/` for
+new `sum(...)` or `+=` over money attributes and for reads of `.pending_charges`
+outside `pending.py`; its allowlist carries a reason per entry, and adding a
+module to it needs a line in architecture.md.
 
 ## Shared Helpers (one place to fix)
 
@@ -450,6 +476,11 @@ low-balance threshold).
 | `services/primary_account.primary_checking()` | "The" checking account (frontend: `lib/accounts.primaryChecking`) |
 | `services/card_matching.card_matches_description()` | Does a description name this card (word-bounded) |
 | `services/card_matching.looks_like_card_autopay()` | Is a checking debit a card payoff |
+| `services/month_base.build_month_base()` | Income, bills, one-offs and Leftover for a month |
+| `services/real_spend.spend_totals()` / `classified_rows()` | Any spending or income total over a date range |
+| `services/pending.card_pending()` | A card's pending charges (never read `CreditCard.pending_charges`) |
+| `services/forecast_walk.standard_walk()` | A forecast walk that agrees with every other consumer |
+| `services/cushion.cushion_for()` | The user's cushion |
 | `services/budget_snapshot.spending_breakdown()` | Total, categories and merchants for any date range |
 | `services/email_service.send_email_via()` / `deliver()` | Every email; never read SMTP settings yourself |
 | `auth.check_new_password()` | Every place a password is set |
