@@ -27,6 +27,15 @@ now refuses or neutralizes it.
     in the email body, never emitted as a tag.
   - delete account with change history: DELETE /auth/me for a user who has
     stored snapshots and readings succeeds and leaves none of them behind.
+  - delete account with rows in every owned table: DELETE /auth/me succeeds for
+    a user with a bank connection and link, card pending charge and import,
+    rule, scenario with override and proposed item, trip with item, wish item
+    with a wish option cycle, planned transfer and history; none of their rows
+    remain, and a second user's rows are untouched.
+  - delete account with a linked login: the linked user survives, unlinked.
+  - table ownership guard: every table is user-owned (directly or through a
+    foreign key) or on the explicit global allowlist, so a new unowned table
+    fails loudly instead of re-breaking account deletion.
 """
 import logging
 from decimal import Decimal
@@ -756,3 +765,123 @@ def test_delete_account_removes_the_users_change_history(db_session):
     assert db_session.query(models.MetricSnapshot).filter_by(user_id=user.id).count() == 0
     assert db_session.query(models.MetricSnapshot).count() == 1  # the other user's is untouched
     assert db_session.query(models.MetricReading).count() == 1
+
+
+def _populate_owned_rows(db, user):
+    """One row (or chain) in each of the awkward uncascaded tables."""
+    from datetime import datetime
+    acct = models.Account(user_id=user.id, name="Checking", type="checking")
+    card = models.CreditCard(user_id=user.id, name="Card", credit_limit=Decimal("1000"), statement_day=1, due_day=20)
+    db.add_all([acct, card])
+    db.commit()
+    conn = models.BankConnection(user_id=user.id, access_url_encrypted="x")
+    db.add(conn)
+    db.commit()
+    item = models.RecurringItem(
+        user_id=user.id, account_id=acct.id, name="Rent", amount=Decimal("10"), type="expense",
+        day_of_month=1, start_date=date(2026, 1, 1),
+    )
+    scen = models.ForecastScenario(user_id=user.id, name="What if")
+    trip = models.Trip(user_id=user.id, name="Trip", start_date=date(2026, 6, 1), end_date=date(2026, 6, 5))
+    db.add_all([item, scen, trip])
+    db.commit()
+    db.add_all([
+        models.BankConnectionAccountLink(
+            connection_id=conn.id, simplefin_account_id="s1", simplefin_account_name="n", local_account_id=acct.id,
+        ),
+        models.CardPendingTransaction(
+            user_id=user.id, card_id=card.id, external_id="p1", date=date(2026, 1, 2),
+            amount=Decimal("5"), merchant="Shop", synced_at=datetime(2026, 1, 2),
+        ),
+        models.CreditCardImport(card_id=card.id, filename="f.csv"),
+        models.TransactionRule(
+            user_id=user.id, name="r", field="merchant", pattern_type="contains", pattern="x", action="skip",
+        ),
+        models.ScenarioOverride(scenario_id=scen.id, recurring_item_id=item.id, amount_delta=Decimal("1")),
+        models.ScenarioProposedItem(
+            scenario_id=scen.id, name="p", amount=Decimal("2"), type="expense",
+            start_date=date(2026, 2, 1), account_id=acct.id,
+        ),
+        models.TripItem(trip_id=trip.id, user_id=user.id, category="food", name="Meals"),
+        models.PlannedTransfer(
+            user_id=user.id, to_account_id=acct.id, amount=Decimal("3"), target_date=date(2026, 3, 1),
+        ),
+    ])
+    wish = models.WishItem(user_id=user.id, scenario_id=scen.id)
+    db.add(wish)
+    db.commit()
+    opt = models.WishOption(user_id=user.id, wish_item_id=wish.id, label="Pay in full", method=models.WishMethod.full_checking)
+    db.add(opt)
+    db.commit()
+    wish.plan_option_id = opt.id
+    db.commit()
+    _history_snapshot(db, user, "leftover", "1.00", {"card_pending": [], "checking_pending": [], "max_txn_id": 0, "max_card_txn_id": 0}, 12)
+
+
+def _row_counts(db):
+    from backend.database import Base
+    from sqlalchemy import func, select
+    return {t.name: db.execute(select(func.count()).select_from(t)).scalar() for t in Base.metadata.sorted_tables}
+
+
+def _delete_me(db, user, password="correct-password"):
+    from backend.dependencies import get_db, get_requester
+    from backend.routers import auth as auth_router
+    app = FastAPI()
+    app.include_router(auth_router.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_requester] = lambda: user
+    return TestClient(app).request("DELETE", "/auth/me", json={"password": password})
+
+
+def test_delete_account_removes_rows_in_every_owned_table(db_session):
+    from backend.auth import hash_password
+    from backend.database import Base
+    from backend.services.account_deletion import is_owned_table
+
+    doomed = _history_user(db_session, "doomed")
+    doomed.hashed_password = hash_password("correct-password")
+    db_session.commit()
+    keeper = _history_user(db_session, "keeper")
+    _populate_owned_rows(db_session, doomed)
+    after_doomed_only = _row_counts(db_session)
+    _populate_owned_rows(db_session, keeper)
+    both = _row_counts(db_session)
+
+    resp = _delete_me(db_session, doomed)
+
+    assert 200 <= resp.status_code < 300
+    remaining = _row_counts(db_session)
+    for t in Base.metadata.sorted_tables:
+        if is_owned_table(t):
+            # exactly the keeper's share is left
+            assert remaining[t.name] == both[t.name] - after_doomed_only[t.name], t.name
+    assert db_session.query(models.User).filter_by(username="doomed").count() == 0
+    assert db_session.query(models.User).filter_by(username="keeper").count() == 1
+    assert remaining["wish_items"] == 1 and remaining["bank_connection_account_links"] == 1
+
+
+def test_delete_account_unlinks_other_logins(db_session):
+    from backend.auth import hash_password
+    owner = _history_user(db_session, "owner")
+    owner.hashed_password = hash_password("correct-password")
+    member = _history_user(db_session, "member")
+    member.linked_to_user_id = owner.id
+    db_session.commit()
+    member_id = member.id
+
+    resp = _delete_me(db_session, owner)
+
+    assert 200 <= resp.status_code < 300
+    survivor = db_session.get(models.User, member_id)
+    assert survivor is not None and survivor.linked_to_user_id is None
+
+
+def test_every_table_is_owned_or_explicitly_global():
+    """A new table with no user_id and no FK path to one fails here, before it
+    can make account deletion leave rows behind."""
+    from backend.database import Base
+    from backend.services.account_deletion import is_owned_table
+    allowed = {"app_settings", "scheduler_runs", "users"}
+    unowned = [t.name for t in Base.metadata.sorted_tables if not is_owned_table(t) and t.name not in allowed]
+    assert unowned == []

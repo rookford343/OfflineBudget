@@ -176,6 +176,13 @@ when there isn't one.
 **Selectively, in the app:** Settings → Danger Zone can clear checking
 transactions, clear credit-card transactions, or delete your account.
 
+**Deleting your account** removes everything you own: accounts, transactions,
+cards, bank connections and their stored credentials, rules, scenarios, trips,
+wish items, change history, and every other row tied to you. Logins that were
+linked to yours are unlinked, not deleted: they become standalone logins with
+their own data intact. Settings that belong to the whole app (not to any user)
+are left alone.
+
 **Change history:** Settings → "Clear change history" removes every stored
 snapshot, or delete the database to remove it with everything else.
 

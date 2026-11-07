@@ -5,6 +5,7 @@ from backend import schemas
 from backend.auth import check_new_password, hash_password, verify_password, create_access_token
 from backend.dependencies import get_db, get_requester
 from backend.seed import seed_default_categories
+from backend.services.account_deletion import delete_user_data
 from backend.config import settings
 from backend.services.email_service import deliver, parse_recipients, send_email_via, smtp_config
 from backend.services.password_reset import (
@@ -175,15 +176,7 @@ def delete_account(
 ):
     if not verify_password(body.password, current_user.hashed_password):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect password")
-    # Belt-and-suspenders for users.bonus_shortfall_account_id: the column's
-    # ON DELETE SET NULL (models.py) only protects a DB whose fk was created
-    # (or rebuilt) with that clause. A live SQLite db that got the column via
-    # the pre-fix ALTER TABLE still has ON DELETE NO ACTION, and
-    # upgrade_schema() can't retrofit that -- it swallows "duplicate column"
-    # and never reissues the ALTER. Nulling it here first works on any
-    # schema, old or new, so the cascade into deleting this user's own
-    # accounts below never hits a dangling reference.
-    current_user.bonus_shortfall_account_id = None
-    db.flush()
-    db.delete(current_user)
-    db.commit()
+    # Removes every row the user owns (generically, from the table metadata),
+    # clears users.bonus_shortfall_account_id first (works on old and new
+    # schemas), and unlinks other logins that were linked to this one.
+    delete_user_data(db, current_user)
