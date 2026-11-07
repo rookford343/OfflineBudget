@@ -7,8 +7,8 @@ from sqlalchemy.orm import Session
 from backend import models
 from backend.schemas import BankConnectionStatusOut, MonthlySummary, WeeklyDigest, ForecastRisk
 from backend.services.cushion import cushion_for
-from backend.services.forecast_engine import find_balance_risk, risk_status, _next_occurrence_on_or_after
-from backend.services.forecast_walk import standard_walk, walk_from
+from backend.services.forecast_engine import _next_occurrence_on_or_after
+from backend.services.forecast_walk import standard_walk, walk_risk
 from backend.services.budget_snapshot import compute_budget_snapshot, spending_breakdown
 from backend.services.pending import card_pending
 from backend.services.upcoming_bills import upcoming_bills
@@ -820,11 +820,9 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
 
 
     threshold = cushion_for(user)
-    forecast_entries = walk_from(
-        standard_walk(db, user.id, account_id, today, today + timedelta(days=90)), today,
-    )
-    risk_dict = find_balance_risk(forecast_entries, threshold)
-    risk = ForecastRisk(**risk_dict, status=risk_status(forecast_entries, threshold))
+    walk = standard_walk(db, user.id, account_id, today, today + timedelta(days=90))
+    risk_dict, status = walk_risk(db, user.id, walk, today, threshold)
+    risk = ForecastRisk(**risk_dict, status=status)
 
     # The snapshot already carries the trailing-7-day spending_breakdown;
     # its category totals sum to the week's total.

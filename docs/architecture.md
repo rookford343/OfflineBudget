@@ -47,8 +47,9 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Left to Spend | Leftover minus card spending this month and pending charges, plus card bills already counted, plus card one-offs | `compute_budget_snapshot` (services/budget_snapshot.py), helpers `_card_spending_this_month`, `_transaction_fed_card_ids` | Dashboard, daily email, /spending/snapshot |
 | Weekly / today allowance | Left to Spend or Safety Margin spread over weeks or days left | `_weekly_allowance`, `compute_budget_snapshot` (services/budget_snapshot.py) | Dashboard, email |
 | Safety Margin | Lowest balance from today through end of next month (walk without unbilled card bills) minus unbilled card bills plus bills charged so far | `_lookahead_window`, `compute_budget_snapshot` (services/budget_snapshot.py) | Dashboard, email |
-| Displayed lowest point (3-month low) | Lowest forecast balance over the lookahead window, walk including unbilled card bills, ignoring locked statement-payoff dips | `_lookahead_window`, `_lookahead_minimum`, `floor_mask` (services/budget_snapshot.py) | Dashboard, email |
+| Displayed lowest point (3-month low) | Lowest forecast balance over the lookahead window, walk including unbilled card bills, ignoring locked statement-payoff dips | `_lookahead_window`, `_lookahead_minimum` (services/budget_snapshot.py), `floor_mask` (services/forecast_walk.py) | Dashboard, email |
 | Next-month minimum | Lowest forecast balance in the next calendar month | `_next_month_minimum`, `_next_calendar_month_bounds` (services/budget_snapshot.py) | Dashboard, email |
+| Risk banner (first breach, amount, status) | First day below the cushion and the window's lowest balance over the standard walk, ignoring locked statement-payoff dips (`floor_mask` computed over the full walk, then cut to today onward, same as the 3-month low). An actual overdraft is never skipped: if only a locked payoff day goes below $0, status is red (`danger`) with that first negative day. Transfer signal reads the whole walk; the suggested top-up is sized from the unmasked window minimum | `walk_risk`, `floor_entries`, `floor_mask` (services/forecast_walk.py), `find_balance_risk`, `risk_status` (services/forecast_engine.py); `/forecast/risk` (routers/forecast.py), `generate_weekly_digest` (services/summary_generator.py) | Risk banner, weekly digest |
 | Cushion status (amber/red) | Amber below the cushion, red below $0 | `cushion_status` (services/cushion.py); `lookahead_status` and `risk_status` call it | Dashboard, risk banner, email |
 | Cushion | `user.safety_cushion` (default $1,000), the one cushion for the 3-month low, the risk banner and the Wish List | `cushion_for` (services/cushion.py); read by `compute_budget_snapshot`, `effective_cushion` (services/wish_plan.py), `/risk` (routers/forecast.py), the weekly digest | Dashboard, Wish List, risk banner, email |
 | Forecast balances | Day-by-day projected checking balance | `build_forecast` (services/forecast_engine.py) | Forecast tab, lows, risk banner, Wish List, upcoming bills, baselines |
@@ -209,7 +210,7 @@ to one active card (the forecast's rule). `checking_balance_with_pending` is pos
 all pending debits; the sidebar adopts it in Plan 2.
 
 One cushion: `cushion_for(user)` (`services/cushion.py`) is read by the 3-month low, `/risk`
-(`threshold` is the cushion; `status` is `cushion_status` of the window's lowest balance, so `at_risk`
+(`threshold` is the cushion; `status` is `cushion_status` of the window's lowest balance, skipping locked payoff dips (but not a below-$0 day) via `walk_risk`, so `at_risk`
 stays true for both amber and red) and the Wish List. `PUT /wish-list/cushion` writes
 `users.safety_cushion`. `accounts.low_balance_threshold` and `wish_settings.cushion` stay in the schema
 but nothing reads them. `database.migrate_cushions(db, apply)` folds an old non-default value into
@@ -329,3 +330,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 - v6: one cushion for safety, risk and wish list
 - v7: budget export reads the Budget page's actuals
 - v8: subscription-fallback cards no longer double-count in Safety Margin; refunds match by lookback, not query window
+- v9: risk banner skips locked statement-payment dips, like the 3-month low

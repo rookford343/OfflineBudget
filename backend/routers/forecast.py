@@ -10,9 +10,9 @@ from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services import scenario_service
-from backend.services.forecast_engine import build_forecast, build_quarters, find_balance_risk, find_transfer_signal, risk_status, suggest_transfer
+from backend.services.forecast_engine import build_forecast, build_quarters, find_transfer_signal, suggest_transfer
 from backend.services.cushion import cushion_for
-from backend.services.forecast_walk import standard_walk, walk_from
+from backend.services.forecast_walk import standard_walk, walk_from, walk_risk
 from backend.services.reconciliation_helper import compute_reconciliation
 
 logger = logging.getLogger(__name__)
@@ -83,9 +83,9 @@ def get_forecast_risk(
     threshold = cushion_for(user)
     start = _today()
     end = start + timedelta(days=days)
-    entries = walk_from(standard_walk(db, user.id, account_id, start, end), start)
-    risk = find_balance_risk(entries, threshold)
-    status = risk_status(entries, threshold)
+    walk = standard_walk(db, user.id, account_id, start, end)
+    entries = walk_from(walk, start)
+    risk, status = walk_risk(db, user.id, walk, start, threshold)
     transfer = find_transfer_signal(entries)
     suggestion = suggest_transfer(db, user, account_id, risk, entries)
     active_rule = db.query(models.BufferTransferRule).filter(

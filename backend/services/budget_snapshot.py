@@ -13,13 +13,12 @@ from sqlalchemy.orm import Session, joinedload
 from backend import models
 from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
 from backend.services.explain import ExplainBuilder
-from backend.services.forecast_walk import standard_walk
+from backend.services.forecast_walk import floor_mask, standard_walk
 from backend.services.cushion import DEFAULT_CUSHION, cushion_for, cushion_status
 from backend.services.forecast_engine import (
     ScenarioProposal,
     _most_recent_occurrence_on_or_before, _next_occurrence_on_or_after,
 )
-from backend.services.card_matching import card_matches_description
 from backend.services.pending import card_pending
 from backend.services.card_payment_model import CardPayment
 from backend.services.month_base import build_month_base, card_bill_occurrences
@@ -170,28 +169,6 @@ def _transaction_fed_card_ids(
         models.CreditCardTransaction.date <= as_of,
     ).distinct().all()
     return {card_id for (card_id,) in rows}
-
-
-def floor_mask(days, active_cards) -> list[bool]:
-    """Per forecast day: may it be the reported floor? False from a locked
-    card-payoff day (projected is_cc_locked, or a real card-matching payoff)
-    through to the next income day -- the Dashboard's Safety Margin rule."""
-    def _is_payoff_day(day) -> bool:
-        if any(t.is_cc_locked for t in day.transactions):
-            return True
-        return any(
-            t.is_actual and t.amount < 0
-            and any(card_matches_description(card, t.name) for card in active_cards)
-            for t in day.transactions
-        )
-    mask, in_locked_dip = [], False
-    for day in days:
-        if _is_payoff_day(day):
-            in_locked_dip = True
-        if any(t.type == "income" and t.amount > 0 for t in day.transactions):
-            in_locked_dip = False
-        mask.append(not in_locked_dip)
-    return mask
 
 
 class LookaheadWindow(NamedTuple):
