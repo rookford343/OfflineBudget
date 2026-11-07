@@ -3,9 +3,30 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
+from backend.services.one_off_preview import preview_one_off
 from backend.services.planned_auto_settle import apply_settlement
 
 router = APIRouter(prefix="/planned-expenses", tags=["planned-expenses"])
+
+
+def _require_owned(
+    db: Session, user: models.User, *,
+    account_id: int | None = None, card_id: int | None = None,
+    funding_account_id: int | None = None,
+) -> None:
+    """404 "Not found" for any non-null id the caller doesn't own.
+
+    One message for every case, so a caller can't tell another user's row
+    from a missing one."""
+    for aid in (account_id, funding_account_id):
+        if aid is not None and not db.query(models.Account.id).filter(
+            models.Account.id == aid, models.Account.user_id == user.id,
+        ).first():
+            raise HTTPException(status_code=404, detail="Not found")
+    if card_id is not None and not db.query(models.CreditCard.id).filter(
+        models.CreditCard.id == card_id, models.CreditCard.user_id == user.id,
+    ).first():
+        raise HTTPException(status_code=404, detail="Not found")
 
 
 @router.get("", response_model=list[schemas.PlannedExpenseOut])
@@ -26,12 +47,32 @@ def list_planned_expenses(
     return q.order_by(models.PlannedExpense.expected_date).all()
 
 
+@router.post("/preview", response_model=schemas.OneOffPreviewOut)
+def preview_planned_expense(
+    body: schemas.PlannedExpenseCreate,
+    account_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Safety Margin before and after a draft one-off. Writes nothing."""
+    _require_owned(
+        db, user, account_id=account_id, card_id=body.card_id,
+        funding_account_id=body.funding_account_id,
+    )
+    _require_owned(db, user, account_id=body.account_id)
+    return preview_one_off(db, user, account_id, body)
+
+
 @router.post("", response_model=schemas.PlannedExpenseOut, status_code=status.HTTP_201_CREATED)
 def create_planned_expense(
     body: schemas.PlannedExpenseCreate,
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
+    _require_owned(
+        db, user, account_id=body.account_id, card_id=body.card_id,
+        funding_account_id=body.funding_account_id,
+    )
     expense = models.PlannedExpense(
         user_id=user.id,
         name=body.name,
@@ -65,7 +106,12 @@ def update_planned_expense(
     ).first()
     if not expense:
         raise HTTPException(status_code=404, detail="Planned expense not found")
-    for field, value in body.model_dump(exclude_unset=True).items():
+    changes = body.model_dump(exclude_unset=True)
+    _require_owned(
+        db, user, account_id=changes.get("account_id"), card_id=changes.get("card_id"),
+        funding_account_id=changes.get("funding_account_id"),
+    )
+    for field, value in changes.items():
         setattr(expense, field, value)
     db.commit()
     db.refresh(expense)

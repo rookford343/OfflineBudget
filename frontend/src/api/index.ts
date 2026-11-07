@@ -296,6 +296,8 @@ export const plannedExpensesApi = {
   list: (includeSettled = false) =>
     api.get("/planned-expenses", { params: { include_settled: includeSettled } }).then((r) => r.data),
   create: (data: object) => api.post("/planned-expenses", data).then((r) => r.data),
+  preview: (accountId: number, data: object) =>
+    api.post("/planned-expenses/preview", data, { params: { account_id: accountId } }).then((r) => r.data),
   settle: (id: number, actual_amount: number | null) =>
     api.post(`/planned-expenses/${id}/settle`, { actual_amount }).then((r) => r.data),
   unsettle: (id: number) => api.post(`/planned-expenses/${id}/unsettle`).then((r) => r.data),

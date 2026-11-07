@@ -123,6 +123,26 @@ def pending_card_debits_by_card(
     return out
 
 
+def card_payoff_on(
+    db: Session, user: models.User, account: models.Account, card: models.CreditCard,
+    due: date, today: date, end: date, proposal: ScenarioProposal | None = None,
+) -> Decimal:
+    """What leaves checking for `card` on `due`: the model's payment there plus
+    the card-routed one-offs landing on it. The forecast renders a card-routed
+    one-off as its own line on the payoff date rather than folding it into
+    the payment amount, so the two are summed the same way here."""
+    plan = card_payment_plan(
+        db, user, account, today, end, include_unbilled_card_bills=True,
+        today=today, proposal=proposal,
+    )
+    total = sum((p.amount for p in plan.payments if p.card_id == card.id and p.due == due), Decimal("0"))
+    planned = window_planned_expenses(db, user.id, today, end, proposal)
+    for pe, _card in card_one_offs_by_payoff(planned, account.id, {card.id: card}).get(due, []):
+        amount = abs(Decimal(str(pe.amount)))
+        total += amount if pe.direction == models.PlannedDirection.outflow else -amount
+    return total
+
+
 def card_payments(
     db: Session, user: models.User, account: models.Account, start: date, end: date, *,
     include_unbilled_card_bills: bool, proposal: ScenarioProposal | None = None,

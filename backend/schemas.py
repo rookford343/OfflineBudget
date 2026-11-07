@@ -1790,6 +1790,27 @@ class PlannedExpenseOut(BaseModel):
     created_at: datetime
 
 
+class BeforeAfter(BaseModel):
+    before: Decimal
+    after: Decimal
+
+
+class CardPaymentBeforeAfter(BaseModel):
+    card_id: int
+    due: date
+    before: Decimal
+    after: Decimal
+    # after - before, computed server-side so the browser never does money math.
+    delta: Decimal
+
+
+class OneOffPreviewOut(BaseModel):
+    """What a draft one-off would do to the Safety Margin, without saving it."""
+    safety_margin_weekly: BeforeAfter
+    safety_margin: BeforeAfter
+    card_payment: Optional[CardPaymentBeforeAfter] = None
+
+
 class PlannedExpenseSettle(BaseModel):
     """Close out a one-off once its date has passed.
 

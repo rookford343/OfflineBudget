@@ -24,6 +24,7 @@ import CheckingBalancesCard from "../components/CheckingBalancesCard";
 import SafetyMarginHero from "../components/phone/SafetyMarginHero";
 import SpendableTile from "../components/phone/SpendableTile";
 import UpcomingOneOffs from "../components/phone/UpcomingOneOffs";
+import PlanOneOffSheet from "../components/phone/PlanOneOffSheet";
 import { lastBankSync } from "../lib/freshness";
 
 /** True while the viewport is at least `px` wide (Tailwind's sm=640, lg=1024). */
@@ -88,6 +89,7 @@ export default function Dashboard() {
   const isWide = useMinWidth(640);
   const balancesHidden = useBalancesHidden();
   const [showHelp, setShowHelp] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   // Backend already returns the digest's top categories highest-first --
   // this just re-orders that same top-5 set alphabetically on request,
   // matching Securo's "Highest first" sort control. Doesn't re-select which
@@ -234,6 +236,10 @@ export default function Dashboard() {
       })()
     : null;
 
+  const oneOffSheet = primaryChecking ? (
+    <PlanOneOffSheet open={planOpen} onOpenChange={setPlanOpen} accountId={primaryChecking.id} hidden={balancesHidden} />
+  ) : null;
+
   // Below lg: the phone layout. lg and up falls through to the desktop
   // layout below, which is unchanged.
   if (!isDesktop) {
@@ -256,6 +262,7 @@ export default function Dashboard() {
     const axisColor = isDark ? "#8f99a8" : "#6b7280";
     return (
       <div className="grid gap-4 sm:grid-cols-2 sm:items-start">
+        {oneOffSheet}
         <div className="space-y-4 min-w-0">
           {snapshot ? (
             <>
@@ -277,8 +284,7 @@ export default function Dashboard() {
           ) : (
             <div className="card text-sm text-gray-400">Loading…</div>
           )}
-          {/* Task 8 attaches the one-off planning flow to this button. */}
-          <button type="button" className="btn-primary w-full min-h-[44px]" disabled>+ Plan a one-off</button>
+          <button type="button" className="btn-primary w-full min-h-[44px]" disabled={!primaryChecking} onClick={() => setPlanOpen(true)}>+ Plan a one-off</button>
           {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
           <PlannedTransferReminder />
           <BillsToConfirm />
@@ -315,6 +321,7 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {oneOffSheet}
       <div>
         <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Dashboard <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
         <p className="text-sm text-gray-500">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
@@ -407,6 +414,7 @@ export default function Dashboard() {
                   ]}
                   className="ml-auto"
                 />
+                <button type="button" className="btn-secondary text-xs" onClick={() => setPlanOpen(true)}>+ Plan a one-off</button>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">

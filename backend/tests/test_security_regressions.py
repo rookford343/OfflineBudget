@@ -36,6 +36,9 @@ now refuses or neutralizes it.
   - table ownership guard: every table is user-owned (directly or through a
     foreign key) or on the explicit global allowlist, so a new unowned table
     fails loudly instead of re-breaking account deletion.
+  - planned expense ownership: preview, create and patch with another user's
+    card_id, account_id or funding_account_id (and the preview's account_id
+    query param) are 404 and write nothing.
   - spa static traversal: encoded and raw ../ paths never read files outside the
     frontend dist directory (.env, the database, source, pyproject), nor
     through a symlink inside it that points outside.
@@ -981,3 +984,67 @@ def test_cors__foreign_origin__gets_no_allow_origin():
     resp = TestClient(main.app).options("/api/health", headers={
         "Origin": "https://evil.example", "Access-Control-Request-Method": "GET"})
     assert "access-control-allow-origin" not in resp.headers
+
+
+def _planned_expense_fixture(db_session):
+    from datetime import date, timedelta
+    from decimal import Decimal
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from backend import models
+    from backend.dependencies import get_current_user, get_db
+    from backend.routers import planned_expenses as pe_router
+
+    owner = models.User(username="pe-owner", hashed_password="x", display_name="O")
+    other = models.User(username="pe-other", hashed_password="x", display_name="X")
+    db_session.add_all([owner, other])
+    db_session.flush()
+    mine = models.Account(user_id=owner.id, name="Mine", type=models.AccountType.checking,
+                          current_balance=Decimal("100"))
+    theirs = models.Account(user_id=other.id, name="Theirs", type=models.AccountType.savings,
+                            current_balance=Decimal("100"))
+    their_card = models.CreditCard(user_id=other.id, name="Theirs", credit_limit=Decimal("1000"),
+                                   statement_day=28, due_day=25)
+    db_session.add_all([mine, theirs, their_card])
+    db_session.flush()
+    own_expense = models.PlannedExpense(user_id=owner.id, name="Own", amount=Decimal("5"),
+                                        expected_date=date.today() + timedelta(days=5))
+    db_session.add(own_expense)
+    db_session.commit()
+
+    app = FastAPI()
+    app.include_router(pe_router.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: owner
+    body = {"name": "Trip", "amount": "10.00",
+            "expected_date": (date.today() + timedelta(days=9)).isoformat()}
+    return TestClient(app), mine, theirs, their_card, own_expense, body, models
+
+
+def _assert_planned_expense_404(db_session, client, mine, own_expense, body, models, field, value):
+    rows = db_session.query(models.PlannedExpense).count()
+    bad = {**body, field: value}
+    if field != "account_id":
+        bad["account_id"] = mine.id
+    assert client.post(f"/planned-expenses/preview?account_id={mine.id}", json=bad).status_code == 404
+    assert client.post("/planned-expenses", json=bad).status_code == 404
+    assert client.patch(f"/planned-expenses/{own_expense.id}", json={field: value}).status_code == 404
+    assert db_session.query(models.PlannedExpense).count() == rows
+    db_session.refresh(own_expense)
+    assert getattr(own_expense, field) is None
+
+
+def test_planned_expense__other_users_card__is_404(db_session):
+    """Preview, create and patch with another user's card_id are 404 and write nothing."""
+    client, mine, _theirs, their_card, own, body, models = _planned_expense_fixture(db_session)
+    _assert_planned_expense_404(db_session, client, mine, own, body, models, "card_id", their_card.id)
+
+
+def test_planned_expense__other_users_account__is_404(db_session):
+    """Preview, create and patch with another user's account_id or funding_account_id
+    are 404 and write nothing; the preview's own account_id query param too."""
+    client, mine, theirs, _card, own, body, models = _planned_expense_fixture(db_session)
+    _assert_planned_expense_404(db_session, client, mine, own, body, models, "account_id", theirs.id)
+    _assert_planned_expense_404(db_session, client, mine, own, body, models, "funding_account_id", theirs.id)
+    assert client.post(f"/planned-expenses/preview?account_id={theirs.id}",
+                       json={**body, "account_id": mine.id}).status_code == 404
