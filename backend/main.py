@@ -193,21 +193,25 @@ def _send_daily_summaries_locked() -> None:
                 # this email's snapshot), never the email.
                 readings = None
                 since: dict[str, str] = {}
+                since_changes: list = []
                 try:
                     from backend.services import metric_history
-                    from backend.services.metric_diff import since_last_email
+                    from backend.services.metric_diff import explain_since_last_email, since_last_email
+                    from backend.services.summary_generator import SINCE_KEYS
                     today = date.today()
                     readings = metric_history.collect_headline_metrics(db, user, today)
                     since = since_last_email(db, user, readings)
+                    since_changes = explain_since_last_email(db, user, readings, keys=SINCE_KEYS)
                 except Exception:  # noqa: BLE001 -- history must never stop the email
                     logger.exception("Daily summary: since-last-email lines failed for %s", user.username)
                     try:
                         db.rollback()  # a DB-level error must not break the session for the report
                     except Exception:  # noqa: BLE001
                         logger.exception("Daily summary: rollback after history failure failed")
-                    readings, since = None, {}
+                    readings, since, since_changes = None, {}, []
                 html_body, text_body = generate_daily_summary(
                     db, user, weekly_digest=weekly_digest, since_lines=since,
+                    since_changes=since_changes,
                 )
                 subject = f"Daily Budget Summary — {date.today().strftime('%B %-d, %Y')}"
                 if weekly_digest is not None:

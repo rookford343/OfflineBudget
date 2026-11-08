@@ -284,7 +284,7 @@ def _fires_soon(item: models.RecurringItem, today: date, days_ahead: int = 7) ->
 
 def generate_daily_summary(
     db: Session, user: models.User, *, weekly_digest: WeeklyDigest | None = None,
-    since_lines: dict[str, str] | None = None,
+    since_lines: dict[str, str] | None = None, since_changes: list | None = None,
 ) -> tuple[str, str]:
     """Return (html_body, text_body) for a daily budget summary email.
 
@@ -294,7 +294,9 @@ def generate_daily_summary(
     separate one.
 
     `since_lines` maps a headline key (SINCE_KEYS) to a short "since last
-    email" line (metric_diff.since_last_email), printed under that figure.
+    email" line (metric_diff.since_last_email), printed under that figure. `since_changes`
+    (metric_diff.explain_since_last_email) adds a closing section naming what
+    moved each figure; empty or None leaves it out.
     """
     since = since_lines or {}
     today = date.today()
@@ -593,6 +595,8 @@ def generate_daily_summary(
     ))
     month_section_text = f"{month_title.upper()}\n  Total spent: {fmt(month.total)}\n{month_tables_text}\n"
 
+    changes_html, changes_text = _changes_section(since_changes, _section)
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -624,6 +628,7 @@ def generate_daily_summary(
 {_section("💳", "Credit Cards", f"<table style='width:100%;font-size:14px'>{card_rows}</table>")}
 {month_section_html}
 {weekly_html}
+{changes_html}
 <p style='color:#9ca3af;font-size:11px;margin-top:24px;text-align:center'>Sent by OfflineBudget</p>
 </div>
 </body></html>"""
@@ -703,8 +708,72 @@ CREDIT CARDS
 {card_text}
 
 {month_section_text}
-{weekly_text}"""
+{weekly_text}{changes_text}"""
     return html, text
+
+
+CHANGES_MAX_ITEMS = 5
+
+
+def _change_bullets(causes) -> tuple[list[tuple[str, list[tuple[str, str]]]], int]:
+    """(bullets, hidden count). A bullet is (text, rows) with rows as (name,
+    amount text) for a grouped cause. Each line cause and each row counts as
+    one item; at most CHANGES_MAX_ITEMS are kept."""
+    from backend.services.metric_diff import money
+    bullets: list[tuple[str, list[tuple[str, str]]]] = []
+    used = hidden = 0
+    for c in causes:
+        if c.head:
+            rows = [(n, "" if a is None else money(a)) for n, a in c.rows]
+            room = max(CHANGES_MAX_ITEMS - used, 0)
+            if room:
+                bullets.append((c.head, rows[:room]))
+            used += min(len(rows), room)
+            hidden += len(rows) - min(len(rows), room)
+        elif used < CHANGES_MAX_ITEMS:
+            bullets.append((c.text, []))
+            used += 1
+        else:
+            hidden += 1
+    return bullets, hidden
+
+
+def _changes_section(changes: list | None, section) -> tuple[str, str]:
+    """The closing "What changed since last email" section: (html, text),
+    both empty when nothing moved."""
+    if not changes:
+        return "", ""
+    from backend.services.metric_diff import signed_money
+    esc = html_lib.escape
+    title = "What changed since last email"
+    html_parts: list[str] = []
+    text_lines: list[str] = []
+    for ch in changes:
+        delta = signed_money(ch.delta)
+        bullets, hidden = _change_bullets(ch.causes)
+        items = ""
+        text_lines.append(f"  {ch.label} {delta}")
+        for head, rows in bullets:
+            sub = "".join(
+                f"<li style='margin:1px 0'>{esc(n)}{(' ' + esc(a)) if a else ''}</li>" for n, a in rows
+            )
+            items += (
+                f"<li style='margin:2px 0'>{esc(head)}"
+                + (f"<ul style='margin:2px 0;padding-left:16px'>{sub}</ul>" if sub else "")
+                + "</li>"
+            )
+            text_lines.append(f"    - {head}")
+            text_lines += [f"        {n}{(' ' + a) if a else ''}" for n, a in rows]
+        if hidden:
+            items += f"<li style='margin:2px 0;color:#6b7280'>and {hidden} more</li>"
+            text_lines.append(f"    - and {hidden} more")
+        html_parts.append(
+            f"<p style='margin:10px 0 2px;font-size:14px;color:#111827;white-space:normal;"
+            f"word-break:break-word;overflow-wrap:break-word'><b>{esc(ch.label)}</b> {esc(delta)}</p>"
+            f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#374151;"
+            f"white-space:normal;word-break:break-word;overflow-wrap:break-word'>{items}</ul>"
+        )
+    return section("🔎", title, "".join(html_parts)), f"\n{title.upper()}\n" + "\n".join(text_lines) + "\n"
 
 
 def _breakdown_tables(categories, merchants, period: str) -> tuple[str, str]:

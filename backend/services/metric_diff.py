@@ -12,15 +12,16 @@ import json
 import logging
 from dataclasses import dataclass
 from itertools import combinations
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
 from backend import models, schemas
-from backend.services.calc_version import CALC_CHANGELOG
+from backend.services.calc_version import CALC_CHANGELOG, CALC_VERSION
 from backend.services.metric_history import (
     MetricReadingData,
+    collect_sources,
     latest_snapshot,
 )
 from backend.services.primary_account import primary_checking
@@ -520,4 +521,80 @@ def since_last_email(
             out[reading.key] = f"{signed_money(delta)} since last email"
         except Exception:  # noqa: BLE001 -- one bad stored reading drops only its own line
             logger.exception("Change history: no since-last-email line for %s", reading.key)
+    return out
+
+
+@dataclass(frozen=True)
+class EmailChange:
+    """One figure that moved since the last email, with what moved it."""
+    key: str
+    label: str
+    delta: Decimal
+    causes: list[Cause]
+
+
+def _transient_reading(
+    user_id: int, reading: MetricReadingData, sources_json: str, as_of: date, taken_at: datetime,
+) -> models.MetricReading:
+    """The reading as it would be stored, without adding it to any session, so
+    `explain_change` can compare it with a stored one before the email goes."""
+    snapshot = models.MetricSnapshot(
+        user_id=user_id, taken_at=taken_at, trigger="email", calc_version=CALC_VERSION,
+        as_of=as_of, sources_json=sources_json,
+    )
+    row = models.MetricReading(
+        metric_key=reading.key, label=reading.label, value=reading.value,
+        explain_json=reading.explain.model_dump_json(),
+    )
+    row.snapshot = snapshot
+    return row
+
+
+def _ancestor_label(key: str, labels: dict[str, str]) -> str | None:
+    """Label of the nearest figure up the DERIVED_FROM chain that is also listed."""
+    parent = DERIVED_FROM.get(key)
+    for _ in range(_MAX_INHERIT_DEPTH):
+        if parent is None:
+            return None
+        if parent in labels:
+            return labels[parent]
+        parent = DERIVED_FROM.get(parent)
+    return None
+
+
+def explain_since_last_email(
+    db: Session, user: models.User, readings: list[MetricReadingData], *,
+    keys: tuple[str, ...] | None = None, as_of: date | None = None,
+) -> list[EmailChange]:
+    """What moved each figure (by a cent or more) since the last "email"
+    snapshot, in the order of `readings`; `[]` when there is none. `keys`
+    limits it to the figures the email shows. A figure whose parent (see
+    DERIVED_FROM) is also listed gets one cause pointing at the parent."""
+    previous = latest_snapshot(db, user.id, "email")
+    if previous is None:
+        return []
+    as_of = as_of or date.today()
+    taken_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    sources_json = json.dumps(collect_sources(db, user, as_of), sort_keys=True)
+    before = {r.metric_key: r for r in previous.readings}
+    moved: list[tuple[MetricReadingData, Decimal, list[Cause]]] = []
+    for reading in readings:
+        prev = before.get(reading.key)
+        if prev is None or (keys is not None and reading.key not in keys):
+            continue
+        try:
+            delta = reading.value - Decimal(str(prev.value))
+            if abs(delta) < CENT:
+                continue
+            cur = _transient_reading(user.id, reading, sources_json, as_of, taken_at)
+            moved.append((reading, delta, _causes_or_fallback(db, user.id, reading.key, prev, cur)))
+        except Exception:  # noqa: BLE001 -- one bad stored reading drops only its own entry
+            logger.exception("Change history: no since-last-email changes for %s", reading.key)
+    labels = {r.key: r.label for r, _, _ in moved}
+    out: list[EmailChange] = []
+    for reading, delta, causes in moved:
+        parent = _ancestor_label(reading.key, labels)
+        if parent is not None:
+            causes = [Cause(f"Same causes as {parent}", None)]
+        out.append(EmailChange(reading.key, reading.label, delta, causes))
     return out

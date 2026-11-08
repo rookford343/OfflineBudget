@@ -253,3 +253,106 @@ def test_the_email_carries_lines_and_still_goes_when_history_breaks(db_session, 
     _run_send(db_session, monkeypatch, send)
     assert len(bodies) == 2 and "since last email" not in bodies[1]
     assert _email_count(db_session) == 2
+
+
+# ── "What changed since last email" closing section ──────────────────────────
+
+CHANGES_TITLE = "What changed since last email"
+
+
+def _explained(db, user, keys=None):
+    from backend.services.metric_diff import explain_since_last_email
+    return explain_since_last_email(db, user, collect_headline_metrics(db, user, TODAY), keys=keys)
+
+
+def _moved_world(db, monkeypatch, pending=2):
+    user, _ = _world(db, monkeypatch)
+    _add_pending(db, user, pending)
+    _set_previous(db, user, "safety_margin_week", D("-400.00"))
+    return user
+
+
+def test_section_comes_last_with_label_delta_and_cause(db_session, monkeypatch):
+    user = _moved_world(db_session, monkeypatch)
+    changes = _explained(db_session, user)
+    html, text = generate_daily_summary(db_session, user, since_changes=changes)
+    assert html.index("Sent by OfflineBudget") > html.index(CHANGES_TITLE) > html.index("Spending this month")
+    block = html[html.index(CHANGES_TITLE):html.index("Sent by OfflineBudget")]
+    assert "Safety Margin (this week)" in block and "−$400.00" in block
+    assert "new pending Test Visa charges" in block
+    assert text.rstrip().splitlines()[-1].startswith("    ")
+    tail = text[text.index(CHANGES_TITLE.upper()):]
+    assert "Safety Margin (this week)" in tail and "−$400.00" in tail and "new pending Test Visa" in tail
+    assert tail.index("Example Shop Number 0") < tail.index("Example Shop Number 1")
+
+
+def test_no_section_without_a_previous_email_or_a_move(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch, email_snapshot=False)
+    assert _explained(db_session, user) == []
+    for changes in (None, [], _explained(db_session, user)):
+        html, text = generate_daily_summary(db_session, user, since_changes=changes)
+        assert CHANGES_TITLE not in html and CHANGES_TITLE.upper() not in text
+
+
+def test_no_section_when_nothing_moved(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    changes = _explained(db_session, user)
+    assert changes == []
+    html, text = generate_daily_summary(db_session, user, since_changes=changes)
+    assert CHANGES_TITLE not in html and CHANGES_TITLE.upper() not in text
+
+
+def test_keys_limit_the_figures(db_session, monkeypatch):
+    user = _moved_world(db_session, monkeypatch)
+    assert [c.key for c in _explained(db_session, user, keys=("safety_margin_week",))] == ["safety_margin_week"]
+    assert _explained(db_session, user, keys=("checking_balance",)) == []
+
+
+def test_a_derived_figure_points_at_its_parent(db_session, monkeypatch):
+    user = _moved_world(db_session, monkeypatch)
+    _set_previous(db_session, user, "safety_margin", D("-400.00"))
+    changes = {c.key: c for c in _explained(db_session, user)}
+    parent = changes["safety_margin"]
+    child = changes["safety_margin_week"]
+    assert parent.causes[0].text != f"Same causes as {parent.label}"
+    assert [c.text for c in child.causes] == [f"Same causes as {parent.label}"]
+    html, text = generate_daily_summary(db_session, user, since_changes=list(changes.values()))
+    assert f"Same causes as {parent.label}" in html and f"Same causes as {parent.label}" in text
+
+
+def test_more_than_five_items_are_capped(db_session, monkeypatch):
+    user = _moved_world(db_session, monkeypatch, pending=8)
+    changes = [c for c in _explained(db_session, user) if c.key == "safety_margin_week"]
+    html, text = generate_daily_summary(db_session, user, since_changes=changes)
+    block = html[html.index(CHANGES_TITLE):]
+    assert block.count("Example Shop Number") == 5
+    assert "and 3 more" in block and "and 3 more" in text
+    assert "Example Shop Number 5" not in block
+
+
+def test_a_merchant_name_is_escaped(db_session, monkeypatch):
+    user = _moved_world(db_session, monkeypatch, pending=1)
+    db_session.query(models.CardPendingTransaction).update({"merchant": "Shop <b>Bold</b> & Sons"})
+    db_session.commit()
+    changes = _explained(db_session, user)
+    html, _ = generate_daily_summary(db_session, user, since_changes=changes)
+    assert "Shop &lt;b&gt;Bold&lt;/b&gt; &amp; Sons" in html
+    assert "<b>Bold</b>" not in html
+
+
+def test_the_email_still_goes_when_explaining_breaks(db_session, monkeypatch):
+    from backend.services import metric_diff
+    _moved_world(db_session, monkeypatch)
+    bodies = []
+
+    def send(db, to, subject, html, text, *a, **kw):
+        bodies.append(html)
+        return (True, None)
+
+    def boom(*a, **kw):
+        raise RuntimeError("explain broke")
+
+    monkeypatch.setattr(metric_diff, "explain_since_last_email", boom)
+    _run_send(db_session, monkeypatch, send)
+    assert len(bodies) == 1 and CHANGES_TITLE not in bodies[0]
+    assert "Sent by OfflineBudget" in bodies[0]
