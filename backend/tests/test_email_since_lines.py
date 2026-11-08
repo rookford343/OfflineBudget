@@ -356,3 +356,45 @@ def test_the_email_still_goes_when_explaining_breaks(db_session, monkeypatch):
     _run_send(db_session, monkeypatch, send)
     assert len(bodies) == 1 and CHANGES_TITLE not in bodies[0]
     assert "Sent by OfflineBudget" in bodies[0]
+    # The since-lines and the email snapshot survive the failed explanation.
+    assert "since last email" in bodies[0]
+    assert _email_count(db_session) == 2
+
+
+def _change(label="Figure", head="", text="a cause", rows=()):
+    from backend.services.metric_diff import Cause, EmailChange
+    cause = Cause(text=text, amount=None, head=head, items=tuple(n for n, _ in rows), rows=tuple(rows))
+    return EmailChange(key="safety_margin_week", label=label, delta=D("5.00"), causes=[cause])
+
+
+def test_a_figure_label_is_escaped(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    html, _ = generate_daily_summary(db_session, user, since_changes=[_change(label="Lab <b>X</b>")])
+    assert "Lab &lt;b&gt;X&lt;/b&gt;" in html and "<b>X</b>" not in html
+
+
+def test_a_grouped_cause_head_is_escaped(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    change = _change(head="Head <b>Y</b>", rows=[("Item One", D("1.00"))])
+    html, _ = generate_daily_summary(db_session, user, since_changes=[change])
+    assert "Head &lt;b&gt;Y&lt;/b&gt;" in html and "<b>Y</b>" not in html
+
+
+def test_a_line_cause_text_is_escaped(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    html, _ = generate_daily_summary(db_session, user, since_changes=[_change(text="Cause <b>Z</b>")])
+    assert "Cause &lt;b&gt;Z&lt;/b&gt;" in html and "<b>Z</b>" not in html
+
+
+def test_the_text_body_shows_a_capped_grouped_cause(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    rows = [(f"Item Number {i}", D("1.00")) for i in range(8)]
+    _, text = generate_daily_summary(
+        db_session, user, since_changes=[_change(head="Grouped head", rows=rows)],
+    )
+    tail = text[text.index(CHANGES_TITLE.upper()):]
+    assert "- Grouped head" in tail
+    for i in range(5):
+        assert f"Item Number {i}" in tail
+    assert "Item Number 5" not in tail
+    assert "- and 3 more" in tail

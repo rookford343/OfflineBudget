@@ -201,7 +201,15 @@ def _send_daily_summaries_locked() -> None:
                     today = date.today()
                     readings = metric_history.collect_headline_metrics(db, user, today)
                     since = since_last_email(db, user, readings)
-                    since_changes = explain_since_last_email(db, user, readings, keys=SINCE_KEYS)
+                    try:
+                        since_changes = explain_since_last_email(db, user, readings, keys=SINCE_KEYS)
+                    except Exception:  # noqa: BLE001 -- the explanation is optional; keep the since-lines and snapshot
+                        logger.exception("Daily summary: explaining changes failed for %s", user.username)
+                        try:
+                            db.rollback()
+                        except Exception:  # noqa: BLE001
+                            logger.exception("Daily summary: rollback after explain failure failed")
+                        since_changes = []
                 except Exception:  # noqa: BLE001 -- history must never stop the email
                     logger.exception("Daily summary: since-last-email lines failed for %s", user.username)
                     try:
