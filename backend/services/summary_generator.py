@@ -713,67 +713,80 @@ CREDIT CARDS
 
 
 CHANGES_MAX_ITEMS = 5
+CHANGES_MAX_REASONS = 6
 
 
-def _change_bullets(causes) -> tuple[list[tuple[str, list[tuple[str, str]]]], int]:
-    """(bullets, hidden count). A bullet is (text, rows) with rows as (name,
-    amount text) for a grouped cause. Each line cause and each row counts as
-    one item; at most CHANGES_MAX_ITEMS are kept."""
-    from backend.services.metric_diff import money
-    bullets: list[tuple[str, list[tuple[str, str]]]] = []
-    used = hidden = 0
-    for c in causes:
-        if c.head:
-            rows = [(n, "" if a is None else money(a)) for n, a in c.rows]
-            room = max(CHANGES_MAX_ITEMS - used, 0)
-            if room:
-                bullets.append((c.head, rows[:room]))
-            used += min(len(rows), room)
-            hidden += len(rows) - min(len(rows), room)
-        elif used < CHANGES_MAX_ITEMS:
-            bullets.append((c.text, []))
-            used += 1
-        else:
-            hidden += 1
-    return bullets, hidden
+def _reasons(changes) -> list[tuple]:
+    """The distinct reasons across all moved figures, in order of first
+    appearance: (cause, labels of the figures it moved, in `changes` order).
+    A group matches on head + row names, a line on its text. A "Same causes
+    as" placeholder is no reason; its figure counts as moved by every reason
+    of the parent."""
+    by_key = {ch.key: ch for ch in changes}
+
+    def causes_of(ch, depth=0):
+        if ch.causes and ch.causes[0].parent_key and depth < 8:
+            parent = by_key.get(ch.causes[0].parent_key)
+            return causes_of(parent, depth + 1) if parent is not None else []
+        return [] if ch.causes and ch.causes[0].parent_key else ch.causes
+
+    order: dict[tuple, list] = {}
+    for ch in changes:
+        for c in causes_of(ch):
+            ident = ("g", c.head, tuple(n for n, _ in c.rows)) if c.head else ("l", c.text)
+            entry = order.setdefault(ident, [c, []])
+            if ch.label not in entry[1]:
+                entry[1].append(ch.label)
+    return [(c, labels) for c, labels in order.values()]
 
 
 def _changes_section(changes: list | None, section) -> tuple[str, str]:
     """The closing "What changed since last email" section: (html, text),
-    both empty when nothing moved."""
+    both empty when nothing moved. One line of moved figures, then each
+    reason once."""
     if not changes:
         return "", ""
-    from backend.services.metric_diff import signed_money
+    from backend.services.metric_diff import money, signed_money
     esc = html_lib.escape
     title = "What changed since last email"
-    html_parts: list[str] = []
-    text_lines: list[str] = []
-    for ch in changes:
-        delta = signed_money(ch.delta)
-        bullets, hidden = _change_bullets(ch.causes)
-        items = ""
-        text_lines.append(f"  {ch.label} {delta}")
-        for head, rows in bullets:
-            sub = "".join(
-                f"<li style='margin:1px 0'>{esc(n)}{(' ' + esc(a)) if a else ''}</li>" for n, a in rows
-            )
-            items += (
-                f"<li style='margin:2px 0'>{esc(head)}"
-                + (f"<ul style='margin:2px 0;padding-left:16px'>{sub}</ul>" if sub else "")
-                + "</li>"
-            )
-            text_lines.append(f"    - {head}")
-            text_lines += [f"        {n}{(' ' + a) if a else ''}" for n, a in rows]
-        if hidden:
-            items += f"<li style='margin:2px 0;color:#6b7280'>and {hidden} more</li>"
-            text_lines.append(f"    - and {hidden} more")
-        html_parts.append(
-            f"<p style='margin:10px 0 2px;font-size:14px;color:#111827;white-space:normal;"
-            f"word-break:break-word;overflow-wrap:break-word'><b>{esc(ch.label)}</b> {esc(delta)}</p>"
-            f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#374151;"
-            f"white-space:normal;word-break:break-word;overflow-wrap:break-word'>{items}</ul>"
+    all_labels = [ch.label for ch in changes]
+    top_pairs = [f"{ch.label} {signed_money(ch.delta)}" for ch in changes]
+    reasons = _reasons(changes)
+    shown, extra = reasons[:CHANGES_MAX_REASONS], len(reasons) - CHANGES_MAX_REASONS
+    wrap = "white-space:normal;word-break:break-word;overflow-wrap:break-word"
+    top_html = " · ".join(f"<span style='white-space:nowrap'>{esc(t)}</span>" for t in top_pairs)
+    text_lines = [" · ".join(top_pairs)]
+    items_html = ""
+    for c, labels in shown:
+        rows = [(n, "" if a is None else money(a)) for n, a in c.rows] if c.head else []
+        kept, hidden = rows[:CHANGES_MAX_ITEMS], max(len(rows) - CHANGES_MAX_ITEMS, 0)
+        sub = "".join(
+            f"<li style='margin:1px 0'>{esc(n)}{(' ' + esc(a)) if a else ''}</li>" for n, a in kept
         )
-    return section("🔎", title, "".join(html_parts)), f"\n{title.upper()}\n" + "\n".join(text_lines) + "\n"
+        if hidden:
+            sub += f"<li style='margin:1px 0;color:#6b7280'>and {hidden} more</li>"
+        moved = labels != all_labels
+        note = f"Moved: {', '.join(labels)}" if moved else ""
+        items_html += (
+            f"<li style='margin:4px 0'>{esc(c.head or c.text)}"
+            + (f"<ul style='margin:2px 0;padding-left:16px'>{sub}</ul>" if sub else "")
+            + (f"<div style='font-size:12px;color:#6b7280'>{esc(note)}</div>" if note else "")
+            + "</li>"
+        )
+        text_lines.append(f"- {c.head or c.text}")
+        text_lines += [f"    {n}{(' ' + a) if a else ''}" for n, a in kept]
+        if hidden:
+            text_lines.append(f"    and {hidden} more")
+        if note:
+            text_lines.append(f"    {note}")
+    if extra > 0:
+        items_html += f"<li style='margin:4px 0;color:#6b7280'>and {extra} more reasons</li>"
+        text_lines.append(f"- and {extra} more reasons")
+    body = (
+        f"<p style='margin:10px 0 4px;font-size:14px;color:#111827;{wrap}'><b>{top_html}</b></p>"
+        f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#374151;{wrap}'>{items_html}</ul>"
+    )
+    return section("🔎", title, body), f"\n{title.upper()}\n" + "\n".join(text_lines) + "\n"
 
 
 def _breakdown_tables(categories, merchants, period: str) -> tuple[str, str]:

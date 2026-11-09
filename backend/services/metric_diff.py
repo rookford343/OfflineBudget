@@ -53,6 +53,7 @@ class Cause:
     items: tuple[str, ...] = ()
     rows: tuple[tuple[str, Decimal | None], ...] = ()  # (name, amount) per item, for the app
     short: str = ""  # headline form of a line cause, without its amount
+    parent_key: str = ""  # set on a "Same causes as ..." placeholder: the listed figure it points at
 
 
 def money(amount: Decimal) -> str:
@@ -550,14 +551,14 @@ def _transient_reading(
     return row
 
 
-def _ancestor_label(key: str, labels: dict[str, str]) -> str | None:
-    """Label of the nearest figure up the DERIVED_FROM chain that is also listed."""
+def _ancestor_key(key: str, labels: dict[str, str]) -> str | None:
+    """Key of the nearest figure up the DERIVED_FROM chain that is also listed."""
     parent = DERIVED_FROM.get(key)
     for _ in range(_MAX_INHERIT_DEPTH):
         if parent is None:
             return None
         if parent in labels:
-            return labels[parent]
+            return parent
         parent = DERIVED_FROM.get(parent)
     return None
 
@@ -593,8 +594,8 @@ def explain_since_last_email(
     labels = {r.key: r.label for r, _, _ in moved}
     out: list[EmailChange] = []
     for reading, delta, causes in moved:
-        parent = _ancestor_label(reading.key, labels)
+        parent = _ancestor_key(reading.key, labels)
         if parent is not None:
-            causes = [Cause(f"Same causes as {parent}", None)]
+            causes = [Cause(f"Same causes as {labels[parent]}", None, parent_key=parent)]
         out.append(EmailChange(reading.key, reading.label, delta, causes))
     return out

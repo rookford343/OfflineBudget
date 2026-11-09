@@ -314,10 +314,14 @@ def test_a_derived_figure_points_at_its_parent(db_session, monkeypatch):
     changes = {c.key: c for c in _explained(db_session, user)}
     parent = changes["safety_margin"]
     child = changes["safety_margin_week"]
-    assert parent.causes[0].text != f"Same causes as {parent.label}"
+    assert parent.causes[0].parent_key == ""
     assert [c.text for c in child.causes] == [f"Same causes as {parent.label}"]
-    html, text = generate_daily_summary(db_session, user, since_changes=list(changes.values()))
-    assert f"Same causes as {parent.label}" in html and f"Same causes as {parent.label}" in text
+    assert child.causes[0].parent_key == "safety_margin"
+    html, text = generate_daily_summary(db_session, user, since_changes=[parent, child])
+    assert "Same causes as" not in html and "Same causes as" not in text
+    top = text[text.index(CHANGES_TITLE.upper()):].splitlines()[1]
+    assert child.label in top and parent.label in top
+    assert "Moved:" not in text[text.index(CHANGES_TITLE.upper()):]
 
 
 def test_more_than_five_items_are_capped(db_session, monkeypatch):
@@ -328,6 +332,54 @@ def test_more_than_five_items_are_capped(db_session, monkeypatch):
     assert block.count("Example Shop Number") == 5
     assert "and 3 more" in block and "and 3 more" in text
     assert "Example Shop Number 5" not in block
+
+
+def test_one_batch_moving_two_figures_is_listed_once(db_session, monkeypatch):
+    user = _moved_world(db_session, monkeypatch, pending=3)
+    _set_previous(db_session, user, "next_month_minimum", D("-16.00"))
+    changes = [c for c in _explained(db_session, user) if c.key in ("safety_margin_week", "next_month_minimum")]
+    assert len(changes) == 2
+    html, text = generate_daily_summary(db_session, user, since_changes=changes)
+    html, text = html[html.index(CHANGES_TITLE):], text[text.index(CHANGES_TITLE.upper()):]
+    for body in (html, text):
+        assert body.count("new pending Test Visa charges") == 1
+        for i in range(3):
+            assert body.count(f"Example Shop Number {i} ") == 1
+        assert all(c.label in body for c in changes)
+    top = text.splitlines()[1]
+    assert all(c.label in top for c in changes)
+
+
+def _cause(head="", text="a cause", rows=()):
+    from backend.services.metric_diff import Cause
+    return Cause(text=text, amount=None, head=head, items=tuple(n for n, _ in rows), rows=tuple(rows))
+
+
+def _chg(key, label, causes, delta="5.00"):
+    from backend.services.metric_diff import EmailChange
+    return EmailChange(key=key, label=label, delta=D(delta), causes=causes)
+
+
+def test_a_partial_reason_names_the_figures_it_moved(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    shared = _cause(head="Shared batch", rows=[("Item One", D("1.00"))])
+    only_b = _cause(text="Only B reason")
+    changes = [_chg("k1", "Figure A", [shared]), _chg("k2", "Figure B", [shared, only_b])]
+    html, text = generate_daily_summary(db_session, user, since_changes=changes)
+    tail = text[text.index(CHANGES_TITLE.upper()):]
+    assert tail.count("Moved:") == 1
+    assert "Moved: Figure A, Figure B" not in tail
+    assert tail.index("Only B reason") < tail.index("Moved: Figure B")
+    assert tail.index("Shared batch") < tail.index("Only B reason")
+    assert html.count("Moved: Figure B") == 1 and "Moved: Figure A" not in html
+
+
+def test_seven_distinct_reasons_are_capped(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    changes = [_chg("k1", "Figure A", [_cause(text=f"Reason number {i}") for i in range(8)])]
+    html, text = generate_daily_summary(db_session, user, since_changes=changes)
+    assert "and 2 more reasons" in html and "and 2 more reasons" in text
+    assert "Reason number 5" in text and "Reason number 6" not in text
 
 
 def test_a_merchant_name_is_escaped(db_session, monkeypatch):
@@ -362,9 +414,7 @@ def test_the_email_still_goes_when_explaining_breaks(db_session, monkeypatch):
 
 
 def _change(label="Figure", head="", text="a cause", rows=()):
-    from backend.services.metric_diff import Cause, EmailChange
-    cause = Cause(text=text, amount=None, head=head, items=tuple(n for n, _ in rows), rows=tuple(rows))
-    return EmailChange(key="safety_margin_week", label=label, delta=D("5.00"), causes=[cause])
+    return _chg("safety_margin_week", label, [_cause(head=head, text=text, rows=rows)])
 
 
 def test_a_figure_label_is_escaped(db_session, monkeypatch):
@@ -397,4 +447,4 @@ def test_the_text_body_shows_a_capped_grouped_cause(db_session, monkeypatch):
     for i in range(5):
         assert f"Item Number {i}" in tail
     assert "Item Number 5" not in tail
-    assert "- and 3 more" in tail
+    assert "    and 3 more" in tail
