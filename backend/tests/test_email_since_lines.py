@@ -448,3 +448,61 @@ def test_the_text_body_shows_a_capped_grouped_cause(db_session, monkeypatch):
         assert f"Item Number {i}" in tail
     assert "Item Number 5" not in tail
     assert "    and 3 more" in tail
+
+
+def _reason_count(text):
+    tail = text[text.index(CHANGES_TITLE.upper()):]
+    return sum(1 for ln in tail.splitlines() if ln.startswith("- "))
+
+
+def test_same_head_and_names_with_different_amounts_stay_two_reasons(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    one = _cause(head="Batch head", rows=[("Item One", D("1.00"))])
+    two = _cause(head="Batch head", rows=[("Item One", D("2.00"))])
+    changes = [_chg("k1", "Figure A", [one]), _chg("k2", "Figure B", [two])]
+    _, text = generate_daily_summary(db_session, user, since_changes=changes)
+    assert _reason_count(text) == 2
+    assert "Item One $1.00" in text and "Item One $2.00" in text
+
+
+def test_same_head_with_different_names_stays_two_reasons(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    one = _cause(head="Batch head", rows=[("Item One", D("1.00"))])
+    two = _cause(head="Batch head", rows=[("Item Two", D("1.00"))])
+    changes = [_chg("k1", "Figure A", [one]), _chg("k2", "Figure B", [two])]
+    _, text = generate_daily_summary(db_session, user, since_changes=changes)
+    assert _reason_count(text) == 2
+
+
+def test_line_causes_differing_only_by_amount_stay_separate(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    changes = [
+        _chg("k1", "Figure A", [_cause(text="Example bill changed by $5.00")]),
+        _chg("k2", "Figure B", [_cause(text="Example bill changed by $6.00")]),
+    ]
+    _, text = generate_daily_summary(db_session, user, since_changes=changes)
+    assert _reason_count(text) == 2
+
+
+def test_a_figure_label_in_the_moved_note_is_escaped(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    changes = [
+        _chg("k1", "Lab <b>X</b>", [_cause(text="Reason one"), _cause(text="Reason two")]),
+        _chg("k2", "Figure B", [_cause(text="Reason two")]),
+    ]
+    html, _ = generate_daily_summary(db_session, user, since_changes=changes)
+    assert "Moved: Lab &lt;b&gt;X&lt;/b&gt;" in html and "<b>X</b>" not in html
+
+
+def test_a_child_listed_before_its_parent_merges_into_the_parent(db_session, monkeypatch):
+    from backend.services.metric_diff import Cause
+    user, _ = _world(db_session, monkeypatch)
+    placeholder = Cause(text="Same causes as Parent Figure", amount=None, parent_key="parent")
+    child = _chg("child", "Child Figure", [placeholder])
+    parent = _chg("parent", "Parent Figure", [_cause(text="Reason one"), _cause(text="Reason two")])
+    html, text = generate_daily_summary(db_session, user, since_changes=[child, parent])
+    tail = text[text.index(CHANGES_TITLE.upper()):]
+    assert "Same causes as" not in html and "Same causes as" not in text
+    assert "Moved:" not in tail and "Moved:" not in html
+    assert _reason_count(text) == 2
+    assert "Child Figure" in tail.splitlines()[1]

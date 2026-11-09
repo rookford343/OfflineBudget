@@ -719,7 +719,7 @@ CHANGES_MAX_REASONS = 6
 def _reasons(changes) -> list[tuple]:
     """The distinct reasons across all moved figures, in order of first
     appearance: (cause, labels of the figures it moved, in `changes` order).
-    A group matches on head + row names, a line on its text. A "Same causes
+    A group matches on head + (name, amount) rows, a line on its text. A "Same causes
     as" placeholder is no reason; its figure counts as moved by every reason
     of the parent."""
     by_key = {ch.key: ch for ch in changes}
@@ -733,7 +733,7 @@ def _reasons(changes) -> list[tuple]:
     order: dict[tuple, list] = {}
     for ch in changes:
         for c in causes_of(ch):
-            ident = ("g", c.head, tuple(n for n, _ in c.rows)) if c.head else ("l", c.text)
+            ident = ("g", c.head, tuple(c.rows)) if c.head else ("l", c.text)
             entry = order.setdefault(ident, [c, []])
             if ch.label not in entry[1]:
                 entry[1].append(ch.label)
