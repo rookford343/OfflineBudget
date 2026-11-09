@@ -5,7 +5,7 @@ with index.html as the fallback for client-side routes.
 """
 from __future__ import annotations
 
-from pathlib import Path
+import os
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
@@ -44,8 +44,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 def mount_frontend(app: FastAPI, dist_dir: str) -> None:
     """Serve files under dist_dir, falling back to index.html for non-/api GETs."""
-    root = Path(dist_dir).resolve()
-    index = root / "index.html"
+    root_str = os.path.realpath(dist_dir)
+    index = os.path.join(root_str, "index.html")
 
     @app.api_route("/{full_path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def spa(full_path: str):
@@ -53,12 +53,12 @@ def mount_frontend(app: FastAPI, dist_dir: str) -> None:
             raise HTTPException(status_code=404)
         if full_path:
             try:
-                candidate = (root / full_path).resolve()
+                full = os.path.realpath(os.path.join(root_str, full_path))
             except (OSError, ValueError):
                 raise HTTPException(status_code=404) from None
-            if candidate.is_relative_to(root) and candidate.is_file():
+            if full.startswith(root_str + os.sep) and os.path.isfile(full):
                 headers = {"Cache-Control": "no-cache"} if full_path in REVALIDATE_ALWAYS or full_path == "index.html" else None
-                return FileResponse(candidate, headers=headers)
+                return FileResponse(full, headers=headers)
         # A missing file (assets, icons, anything with an extension) is a real 404,
         # never index.html: the service worker would cache that HTML under a script URL.
         if full_path.startswith(("assets/", "icons/")) or "." in full_path.rsplit("/", 1)[-1]:
