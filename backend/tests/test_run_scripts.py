@@ -236,7 +236,7 @@ def test_production__backup_failure__does_not_start_server(
     stub.chmod(0o755)
     r = _run(
         sandbox / "scripts" / "run-production.sh",
-        env={**prod_dirs, "UV_CALLS": str(calls), "PATH": f"{bindir}:{os.environ['PATH']}"},
+        env={**prod_dirs, "UV_CALLS": str(calls), "OB_UV_BIN": str(stub)},
         cwd=sandbox,
     )
     assert r.returncode != 0

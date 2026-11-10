@@ -5,10 +5,11 @@
 set -euo pipefail
 
 # launchd gives a minimal PATH; make uv resolvable.
-export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.bun/bin"
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.bun/bin:$PATH"
 
 cd "$(dirname "$0")/.."
 
+UV="${OB_UV_BIN:-uv}"   # overridable so tests can stub uv
 SSL_DIR="${OB_SSL_DIR:-ssl}"
 DIST_DIR="${OB_DIST_DIR:-frontend/dist}"
 
@@ -23,7 +24,7 @@ if [ ! -f "$DIST_DIR/index.html" ]; then
   exit 1
 fi
 
-CMD=(uv run --locked uvicorn backend.main:app --host 0.0.0.0 --port 443
+CMD=("$UV" run --locked uvicorn backend.main:app --host 0.0.0.0 --port 443
      --ssl-certfile "$SSL_DIR/server.crt" --ssl-keyfile "$SSL_DIR/server.key" --no-proxy-headers)
 
 # Env must not be able to turn on --reload, other ports, etc.
@@ -42,7 +43,7 @@ fi
 # Snapshot the database the app will actually open (settings.DATABASE_URL), WAL-safe,
 # before the server can run startup migrations. If this fails, do not start:
 # a server that can't snapshot must not migrate.
-if ! uv run --locked python -m backend.services.db_backup; then
+if ! "$UV" run --locked python -m backend.services.db_backup; then
   echo "ERROR: startup database backup failed; not starting the server." >&2
   exit 1
 fi
