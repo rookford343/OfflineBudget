@@ -35,7 +35,20 @@ export FRONTEND_DIST_DIR="$DIST_DIR"
 if [ "${1:-}" = "--check" ]; then
   echo "uvicorn_env_vars=$(env | grep -c '^UVICORN_' || true)"
   echo "SCHEDULER_ENABLED=true FRONTEND_DIST_DIR=$DIST_DIR ${CMD[*]}"
+  echo "startup_backup=data/backups/startup-*.db keep=10 min_interval=10m retain=48h"
   exit 0
+fi
+
+# Snapshot the live DB (WAL-safe) before the server can run startup migrations.
+# If this fails, do not start: a server that can't snapshot must not migrate.
+if ! uv run --locked python -c "
+from backend.config import settings
+from backend.services.db_backup import startup_backup
+p = startup_backup(settings.LIVE_DATABASE_PATH, 'data/backups', keep=10)
+print('startup_backup:', p or 'skipped (no database yet)')
+"; then
+  echo "ERROR: startup database backup failed; not starting the server." >&2
+  exit 1
 fi
 
 exec "${CMD[@]}"

@@ -79,6 +79,8 @@ launchctl bootout gui/$(id -u)/com.offlinebudget.server
 
 The server starts at login, not at boot (accepted limitation after a reboot). Logs: `data/logs/server.{out,err}.log`.
 
+Every start first snapshots the database to `data/backups/startup-<timestamp>.db` (at most one per 10 minutes; the newest 10 are kept, and older ones are deleted only after 48 hours); if the snapshot fails, the server does not start.
+
 ### 5. Firewall
 
 ```bash

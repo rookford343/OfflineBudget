@@ -210,3 +210,9 @@ def test_make_ca__signs_own_host_but_not_other_domains(tmp_path: Path) -> None:
     bad = results["example.com"]
     assert bad.returncode != 0
     assert "permitted subtree violation" in (bad.stdout + bad.stderr)
+
+
+def test_production__check__announces_startup_backup(prod_dirs: dict[str, str]) -> None:
+    r = _run(PROD, "--check", env=prod_dirs)
+    assert r.returncode == 0, r.stderr
+    assert "startup_backup=data/backups/startup-*.db keep=10 min_interval=10m retain=48h" in r.stdout
