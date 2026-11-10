@@ -737,7 +737,7 @@ export default function Forecast() {
                 ))}
                 {todayOnChart && (
                   <ReferenceLine yAxisId="left" x={todayOnChart} stroke="#6366f1" strokeOpacity={0.6} strokeDasharray="2 3"
-                    label={{ value: "Today", position: "insideTopRight", fontSize: 11, fill: "#818cf8" }} />
+                    label={{ value: "Today", position: isSm ? "insideTopRight" : "insideTopLeft", fontSize: isSm ? 11 : 10, fill: "#818cf8" }} />
                 )}
                 {dragFrom && dragTo && (
                   <ReferenceArea yAxisId="left" x1={dragFrom} x2={dragTo} fill="#6366f1" fillOpacity={0.12} />
@@ -749,7 +749,7 @@ export default function Forecast() {
                     stroke={isDarkMode() ? "#fbbf24" : "#b45309"}
                     strokeWidth={2}
                     strokeDasharray="6 3"
-                    label={{ value: "Cushion", position: "insideBottomRight", fontSize: 11, fontWeight: 600, fill: isDarkMode() ? "#fbbf24" : "#b45309" }}
+                    label={isSm ? { value: "Cushion", position: "insideBottomRight", fontSize: 11, fontWeight: 600, fill: isDarkMode() ? "#fbbf24" : "#b45309" } : undefined}
                   />
                 )}
                 {showThreshold && risk?.action_threshold != null && (
@@ -759,7 +759,7 @@ export default function Forecast() {
                     stroke={isDarkMode() ? "#f87171" : "#b91c1c"}
                     strokeWidth={2}
                     strokeDasharray="6 3"
-                    label={{ value: "Action threshold", position: "insideTopRight", fontSize: 11, fontWeight: 600, fill: isDarkMode() ? "#f87171" : "#b91c1c" }}
+                    label={isSm ? { value: "Action threshold", position: "insideTopRight", fontSize: 11, fontWeight: 600, fill: isDarkMode() ? "#f87171" : "#b91c1c" } : undefined}
                   />
                 )}
                 {hasSavingsSeries && (
@@ -771,10 +771,28 @@ export default function Forecast() {
                 {hasScenario && (
                   <Area yAxisId="left" type="stepAfter" dataKey="scenario" name="Scenario" stroke={chartTheme().series2} strokeWidth={2} fill="url(#forecastScenarioGradient)" dot={false} strokeDasharray="5 3" animationDuration={800} animationEasing="ease-out" />
                 )}
-                <Legend />
+                <Legend wrapperStyle={isSm ? undefined : { fontSize: 11 }} />
               </ComposedChart>
             )}
           </ResponsiveContainer>
+          {/* Below sm the two threshold labels collide with each other and the
+              lines, so they move into a key under the chart. */}
+          {!isSm && chartView === "balance" && showThreshold && (
+            <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+              {lowBalanceThreshold != null && lowBalanceThreshold > 0 && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block w-4 border-t-2 border-dashed" style={{ borderColor: isDarkMode() ? "#fbbf24" : "#b45309" }} />
+                  Cushion
+                </span>
+              )}
+              {risk?.action_threshold != null && (
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block w-4 border-t-2 border-dashed" style={{ borderColor: isDarkMode() ? "#f87171" : "#b91c1c" }} />
+                  Action threshold
+                </span>
+              )}
+            </div>
+          )}
         </div>
       )}
 

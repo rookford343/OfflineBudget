@@ -3,10 +3,13 @@
 @tailwind utilities;
 
 @layer base {
+  /* Same colours as the <main> surface, so a viewport-fit=cover safe area
+     (the Duo status strip) matches the app instead of showing browser gray. */
+  html { @apply bg-gray-50 dark:bg-gray-900; }
   body {
     @apply bg-gray-50 text-gray-900 antialiased;
     /* Dark: warm-slate, not pure black — reduces eye strain */
-    @apply dark:bg-[#21242e] dark:text-[#c4ccd8];
+    @apply dark:bg-gray-900 dark:text-[#c4ccd8];
     margin: 0;
   }
   * { box-sizing: border-box; }

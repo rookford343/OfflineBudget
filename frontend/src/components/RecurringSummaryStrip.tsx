@@ -96,8 +96,8 @@ export default function RecurringSummaryStrip({
         </button>
       </div>
 
-      <div className="grid gap-4 items-start md:grid-cols-3">
-        <div className="stat-card">
+      <div className="grid gap-4 items-start md:grid-cols-2 lg:grid-cols-3">
+        <div className="stat-card md:col-span-2 lg:col-span-1">
           <span className="stat-label">Income</span>
           <span className="stat-value text-green-600">{fmt(incomeTotal)}</span>
           {incomeOccurrences.length > 0 && (
@@ -106,13 +106,13 @@ export default function RecurringSummaryStrip({
                 const item = incomeById[occ.recurring_item_id];
                 return (
                   <div key={`${occ.recurring_item_id}-${idx}`} className="flex items-center justify-between gap-2 text-sm">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate text-gray-700 dark:text-[#c4ccd8]">{occ.name}</p>
                       <p className="text-xs text-gray-400">
                         {shortDate(occ.date)}
                         {Number(occ.ss_boost ?? 0) > 0 && (
                           <span
-                            className="ml-1 text-indigo-500 dark:text-indigo-300"
+                            className="block lg:inline lg:ml-1 text-indigo-500 dark:text-indigo-300"
                             title="Wage base met, so Social Security is no longer withheld from this paycheck"
                           >
                             incl. +{fmt(occ.ss_boost)} Social Security max

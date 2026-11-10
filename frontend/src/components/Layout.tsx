@@ -116,7 +116,7 @@ export default function Layout() {
   const pctChangeFor = (a: any): number | null => pctByAccount.get(a.id) ?? null;
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       {/* Sidebar */}
       <aside className="hidden lg:flex w-60 flex-col bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 shrink-0">
         <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">

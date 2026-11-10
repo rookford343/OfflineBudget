@@ -63,14 +63,6 @@ export default function MoreSheet({ onClose, onLogout, balancesHidden, onToggleB
             <LogOut size={18} /> Log out
           </button>
         </div>
-        {/* TEMPORARY: the owner reads the Duo's folded/unfolded CSS widths off
-            this line for docs/ios-lessons.md; remove once recorded. */}
-        <div className="border-t border-gray-100 dark:border-gray-700 mt-2 pt-2">
-          <p className="px-3 text-[11px] font-semibold uppercase tracking-wide text-gray-400">About</p>
-          <p className="px-3 py-1 text-xs text-gray-500 dark:text-gray-400">
-            Screen width (temporary): <span data-testid="inner-width">{window.innerWidth}</span> px
-          </p>
-        </div>
       </div>
     </div>
   );

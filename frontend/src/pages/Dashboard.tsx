@@ -286,7 +286,7 @@ export default function Dashboard() {
                   <AreaChart data={phoneChart} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#3a4051" : "#e5e7eb"} />
                     <XAxis dataKey="day" tick={{ fontSize: 11, fill: axisColor }} />
-                    <YAxis tick={{ fontSize: 11, fill: axisColor }} tickFormatter={(v: number) => balancesHidden ? "•••" : fmt(v)} width={balancesHidden ? 40 : 76} domain={["auto", "auto"]} />
+                    <YAxis tick={{ fontSize: 11, fill: axisColor }} tickFormatter={(v: number) => balancesHidden ? "•••" : fmt(v, { notation: "compact", minimumFractionDigits: 0, maximumFractionDigits: 1 }).replace("K", "k")} width={balancesHidden ? 40 : 52} domain={["auto", "auto"]} />
                     <Tooltip
                       contentStyle={{ backgroundColor: isDark ? "#2a2f3d" : "#ffffff", border: `1px solid ${isDark ? "#3a4051" : "#e5e7eb"}`, borderRadius: 8, fontSize: 12 }}
                       formatter={(v: number) => [maskIfHidden(balancesHidden, fmt(v))]}

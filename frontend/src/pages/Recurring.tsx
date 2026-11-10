@@ -296,7 +296,7 @@ export default function Recurring() {
           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Recurring Items <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
           <p className="text-sm text-gray-500">Income and bills that repeat monthly</p>
         </div>
-        <button onClick={openNew} className="btn-primary"><Plus size={16} /> Add Item</button>
+        <button onClick={openNew} className="btn-primary whitespace-nowrap shrink-0"><Plus size={16} /> Add Item</button>
       </div>
 
       <BillsToConfirm />

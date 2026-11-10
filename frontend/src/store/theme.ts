@@ -9,6 +9,8 @@ export function getTheme(): "dark" | "light" {
 
 export function applyTheme(dark: boolean): void {
   document.documentElement.classList.toggle("dark", dark);
+  // The app picks its own theme (not the OS), so keep the browser chrome colour in step.
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.setAttribute("content", dark ? "#111827" : "#f9fafb"));
 }
 
 export function initTheme(): void {
