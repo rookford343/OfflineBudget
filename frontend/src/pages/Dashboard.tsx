@@ -401,7 +401,6 @@ export default function Dashboard() {
                   ]}
                   className="ml-auto"
                 />
-                <button type="button" className="btn-secondary text-xs" onClick={() => setPlanOpen(true)}>+ Plan a one-off</button>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
