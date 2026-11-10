@@ -93,6 +93,18 @@ def _kids(row: schemas.ExplainRow) -> dict[tuple[str, int], schemas.ExplainChild
     return _keyed([*row.children, *row.informational_children])
 
 
+def _child_changes(before: schemas.ExplainRow, after: schemas.ExplainRow) -> list[LineChange]:
+    """The child lines of one receipt row whose amounts differ."""
+    old_kids, new_kids = _kids(before), _kids(after)
+    changes: list[LineChange] = []
+    for ckey in [*old_kids, *(k for k in new_kids if k not in old_kids)]:
+        c_old = old_kids[ckey].amount if ckey in old_kids else None
+        c_new = new_kids[ckey].amount if ckey in new_kids else None
+        if _differs(c_old, c_new):
+            changes.append(LineChange(ckey[0], c_old, c_new))
+    return changes
+
+
 def diff_explanations(old: schemas.Explanation, new: schemas.Explanation) -> list[LineChange]:
     """The deepest receipt lines whose amounts differ. A row whose children
     changed is reported by those children, not by the row itself."""
@@ -109,18 +121,37 @@ def diff_explanations(old: schemas.Explanation, new: schemas.Explanation) -> lis
             if _differs(line.old, line.new):
                 changes.append(line)
             continue
-        old_kids, new_kids = _kids(before), _kids(after)
-        child_changes = []
-        for ckey in [*old_kids, *(k for k in new_kids if k not in old_kids)]:
-            c_old = old_kids[ckey].amount if ckey in old_kids else None
-            c_new = new_kids[ckey].amount if ckey in new_kids else None
-            if _differs(c_old, c_new):
-                child_changes.append(LineChange(ckey[0], c_old, c_new))
+        child_changes = _child_changes(before, after)
         if child_changes:
             changes.extend(child_changes)
         elif _differs(before.amount, after.amount):
             changes.append(LineChange(key[0], before.amount, after.amount))
     return changes
+
+
+def _signed(row: schemas.ExplainRow | None) -> Decimal | None:
+    """A row's amount as it adds into the result: a subtracted row is negative."""
+    if row is None:
+        return None
+    return -row.amount if row.op == "subtract" else row.amount
+
+
+def math_lines(old: schemas.Explanation, new: schemas.Explanation) -> list[schemas.HistoryMathLine]:
+    """Every receipt line of both readings, signed so the new amounts add up to
+    the new figure, in the order `diff_explanations` walks them. A line's parts
+    are its child lines that changed."""
+    old_rows, new_rows = _rows(old), _rows(new)
+    lines: list[schemas.HistoryMathLine] = []
+    for key in [*old_rows, *(k for k in new_rows if k not in old_rows)]:
+        before, after = old_rows.get(key), new_rows.get(key)
+        parts = [] if before is None or after is None else [
+            schemas.HistoryMathPart(label=c.label, delta=(c.new or Decimal("0")) - (c.old or Decimal("0")))
+            for c in _child_changes(before, after)
+        ]
+        lines.append(schemas.HistoryMathLine(
+            label=key[0], old=_signed(before), new=_signed(after), parts=parts,
+        ))
+    return lines
 
 
 def _line_cause(change: LineChange) -> Cause:
@@ -440,12 +471,15 @@ def _history_cause(c: Cause) -> schemas.HistoryCause:
     )
 
 
+def _local(t: datetime) -> datetime:
+    """A stored naive-UTC time in the server's local zone."""
+    return t.replace(tzinfo=timezone.utc).astimezone()
+
+
 def _since_text(prev_taken: datetime, cur_taken: datetime) -> str:
     """"since 7:00 AM" on the same local day, else "since Mon 7:00 AM", in the
     server's local zone (stored times are naive UTC)."""
-    def local(t: datetime) -> datetime:
-        return t.replace(tzinfo=timezone.utc).astimezone()
-    prev_local, cur_local = local(prev_taken), local(cur_taken)
+    prev_local, cur_local = _local(prev_taken), _local(cur_taken)
     fmt = "%-I:%M %p" if prev_local.date() == cur_local.date() else "%a %-I:%M %p"
     return "since " + prev_local.strftime(fmt)
 
@@ -495,6 +529,71 @@ def changes_for(
             calc_changed=prev_snap.calc_version != cur_snap.calc_version,
         ))
     return out
+
+
+def statement_headline(causes: list[Cause]) -> str:
+    """The collapsed-row label for a statement row: named source events when
+    there are any, else the receipt lines."""
+    events = [c for c in causes if not c.short]
+    return headline(events or causes)
+
+
+def _statement_math(prev: models.MetricReading, cur: models.MetricReading) -> list[schemas.HistoryMathLine]:
+    """Before/after receipt lines, `[]` when a stored receipt cannot be read."""
+    try:
+        return math_lines(
+            schemas.Explanation.model_validate_json(prev.explain_json),
+            schemas.Explanation.model_validate_json(cur.explain_json),
+        )
+    except (ValueError, KeyError, TypeError, AttributeError, ArithmeticError):
+        return []
+
+
+def statement_for(
+    db: Session, user_id: int, newest: models.MetricReading, max_days: int,
+) -> schemas.HistoryStatementOut:
+    """The figure's changes as a statement: newest first, grouped by local day,
+    each row with the balance before and after, its source events and the
+    receipt math. `max_days` counts days that had a change; `has_more` says a
+    further day exists. The period runs from the oldest shown change."""
+    metric_key = newest.metric_key
+    readings = (
+        db.query(models.MetricReading)
+        .join(models.MetricSnapshot, models.MetricReading.snapshot_id == models.MetricSnapshot.id)
+        .filter(models.MetricSnapshot.user_id == user_id, models.MetricReading.metric_key == metric_key)
+        .order_by(models.MetricSnapshot.taken_at.desc(), models.MetricSnapshot.id.desc())
+        .all()
+    )
+    days: list[schemas.HistoryStatementDay] = []
+    has_more = False
+    for cur, prev in zip(readings, readings[1:]):
+        old_value, new_value = Decimal(str(prev.value)), Decimal(str(cur.value))
+        delta = new_value - old_value
+        if abs(delta) < CENT:
+            continue
+        day = _local(cur.snapshot.taken_at).date()
+        if not days or days[-1].day != day:
+            if len(days) >= max_days:
+                has_more = True
+                break
+            days.append(schemas.HistoryStatementDay(day=day, delta=Decimal("0"), rows=[]))
+        causes = _causes_or_fallback(db, user_id, metric_key, prev, cur)
+        days[-1].rows.append(schemas.HistoryStatementRow(
+            taken_at=cur.snapshot.taken_at, delta=delta, old_value=old_value, new_value=new_value,
+            headline=statement_headline(causes),
+            events=[_history_cause(c) for c in causes if not c.short and c.text != _NOTHING_NAMED],
+            math=_statement_math(prev, cur),
+        ))
+        days[-1].delta += delta
+    shown = [row for d in days for row in d.rows]
+    oldest = shown[-1] if shown else None
+    return schemas.HistoryStatementOut(
+        metric_key=metric_key, label=newest.label, current_value=Decimal(str(newest.value)),
+        period_delta=shown[0].new_value - oldest.old_value if oldest else None,
+        period_from=oldest.old_value if oldest else None,
+        period_since=oldest.taken_at if oldest else None,
+        days=days, has_more=has_more,
+    )
 
 
 # ── The daily email's "since last email" lines ───────────────────────────────

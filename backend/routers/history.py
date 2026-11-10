@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_current_user, get_db
 from backend.services import metric_history
-from backend.services.metric_diff import changes_for
+from backend.services.metric_diff import changes_for, statement_for
 
 router = APIRouter(prefix="/history", tags=["history"])
 
@@ -38,6 +38,19 @@ def clear_history(
     return {"deleted": len(ids)}
 
 
+def _newest_reading(db: Session, user_id: int, metric_key: str) -> models.MetricReading:
+    newest = (
+        db.query(models.MetricReading)
+        .join(models.MetricSnapshot, models.MetricReading.snapshot_id == models.MetricSnapshot.id)
+        .filter(models.MetricSnapshot.user_id == user_id, models.MetricReading.metric_key == metric_key)
+        .order_by(models.MetricSnapshot.taken_at.desc(), models.MetricSnapshot.id.desc())
+        .first()
+    )
+    if newest is None:
+        raise HTTPException(status_code=404, detail="No history for that figure")
+    return newest
+
+
 @router.get("/{metric_key}", response_model=schemas.MetricHistoryOut)
 def metric_history_for(
     metric_key: str = Path(pattern=KEY_PATTERN),
@@ -45,16 +58,18 @@ def metric_history_for(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    newest = (
-        db.query(models.MetricReading)
-        .join(models.MetricSnapshot, models.MetricReading.snapshot_id == models.MetricSnapshot.id)
-        .filter(models.MetricSnapshot.user_id == user.id, models.MetricReading.metric_key == metric_key)
-        .order_by(models.MetricSnapshot.taken_at.desc(), models.MetricSnapshot.id.desc())
-        .first()
-    )
-    if newest is None:
-        raise HTTPException(status_code=404, detail="No history for that figure")
+    newest = _newest_reading(db, user.id, metric_key)
     return schemas.MetricHistoryOut(
         metric_key=metric_key, label=newest.label, current_value=newest.value,
         changes=changes_for(db, user.id, metric_key, limit),
     )
+
+
+@router.get("/{metric_key}/statement", response_model=schemas.HistoryStatementOut)
+def metric_statement_for(
+    metric_key: str = Path(pattern=KEY_PATTERN),
+    days: int = Query(7, ge=1, le=90),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    return statement_for(db, user.id, _newest_reading(db, user.id, metric_key), days)

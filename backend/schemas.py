@@ -2797,3 +2797,42 @@ class MetricHistoryOut(BaseModel):
     label: str
     current_value: Decimal
     changes: list[MetricChangeOut]
+
+
+class HistoryMathPart(BaseModel):
+    label: str
+    delta: Decimal
+
+
+class HistoryMathLine(BaseModel):
+    label: str
+    old: Optional[Decimal]  # None = the line was not on the earlier receipt
+    new: Optional[Decimal]  # None = the line is gone from the later receipt
+    parts: list[HistoryMathPart] = []
+
+
+class HistoryStatementRow(BaseModel):
+    taken_at: datetime
+    delta: Decimal
+    old_value: Decimal
+    new_value: Decimal
+    headline: str
+    events: list[HistoryCause]
+    math: list[HistoryMathLine]
+
+
+class HistoryStatementDay(BaseModel):
+    day: date
+    delta: Decimal
+    rows: list[HistoryStatementRow]
+
+
+class HistoryStatementOut(BaseModel):
+    metric_key: str
+    label: str
+    current_value: Decimal
+    period_delta: Optional[Decimal]
+    period_from: Optional[Decimal]
+    period_since: Optional[datetime]
+    days: list[HistoryStatementDay]
+    has_more: bool

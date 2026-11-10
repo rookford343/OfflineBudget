@@ -191,6 +191,7 @@ def test_malformed_readings_degrade_to_inputs_changed(db_session):
 
 @pytest.mark.parametrize("method, path", [
     ("GET", "/history/leftover"),
+    ("GET", "/history/leftover/statement"),
     ("POST", "/history/snapshot"),
     ("DELETE", "/history"),
 ])
