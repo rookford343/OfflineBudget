@@ -93,11 +93,19 @@ def _kids(row: schemas.ExplainRow) -> dict[tuple[str, int], schemas.ExplainChild
     return _keyed([*row.children, *row.informational_children])
 
 
-def _child_changes(before: schemas.ExplainRow, after: schemas.ExplainRow) -> list[LineChange]:
-    """The child lines of one receipt row whose amounts differ."""
+def _child_changes(
+    before: schemas.ExplainRow, after: schemas.ExplainRow, breakdown_only: bool = False,
+) -> list[LineChange]:
+    """The child lines of one receipt row whose amounts differ. With
+    `breakdown_only`, an informational child on one side only is left out: it
+    is not part of the row's arithmetic."""
     old_kids, new_kids = _kids(before), _kids(after)
+    info = {id(c) for c in (*before.informational_children, *after.informational_children)}
     changes: list[LineChange] = []
     for ckey in [*old_kids, *(k for k in new_kids if k not in old_kids)]:
+        if breakdown_only and (ckey in old_kids) != (ckey in new_kids) \
+                and id(old_kids.get(ckey) or new_kids[ckey]) in info:
+            continue
         c_old = old_kids[ckey].amount if ckey in old_kids else None
         c_new = new_kids[ckey].amount if ckey in new_kids else None
         if _differs(c_old, c_new):
@@ -139,14 +147,15 @@ def _signed(row: schemas.ExplainRow | None) -> Decimal | None:
 def math_lines(old: schemas.Explanation, new: schemas.Explanation) -> list[schemas.HistoryMathLine]:
     """Every receipt line of both readings, signed so the new amounts add up to
     the new figure, in the order `diff_explanations` walks them. A line's parts
-    are its child lines that changed."""
+    are its child lines that changed, signed like the line itself."""
     old_rows, new_rows = _rows(old), _rows(new)
     lines: list[schemas.HistoryMathLine] = []
     for key in [*old_rows, *(k for k in new_rows if k not in old_rows)]:
         before, after = old_rows.get(key), new_rows.get(key)
+        sign = -1 if before is not None and before.op == "subtract" else 1
         parts = [] if before is None or after is None else [
-            schemas.HistoryMathPart(label=c.label, delta=(c.new or Decimal("0")) - (c.old or Decimal("0")))
-            for c in _child_changes(before, after)
+            schemas.HistoryMathPart(label=c.label, delta=sign * ((c.new or Decimal("0")) - (c.old or Decimal("0"))))
+            for c in _child_changes(before, after, breakdown_only=True)
         ]
         lines.append(schemas.HistoryMathLine(
             label=key[0], old=_signed(before), new=_signed(after), parts=parts,
@@ -589,7 +598,7 @@ def statement_for(
     oldest = shown[-1] if shown else None
     return schemas.HistoryStatementOut(
         metric_key=metric_key, label=newest.label, current_value=Decimal(str(newest.value)),
-        period_delta=shown[0].new_value - oldest.old_value if oldest else None,
+        current_taken_at=newest.snapshot.taken_at, period_delta=shown[0].new_value - oldest.old_value if oldest else None,
         period_from=oldest.old_value if oldest else None,
         period_since=oldest.taken_at if oldest else None,
         days=days, has_more=has_more,

@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { History, X, ChevronRight, ChevronDown } from "lucide-react";
 import { historyApi, type HistoryStatementRow } from "../api";
-import { dayLabel, itemMoney, mathFigures, periodLine, signedMoney } from "../lib/historyMoney";
+import { dayLabel, itemMoney, mathFigures, periodLine, sameFigure, signedMoney } from "../lib/historyMoney";
 import { maskMoneyText } from "../lib/maskMoney";
 import { useBalancesHidden } from "../store/balanceVisibility";
 
@@ -16,6 +16,8 @@ function asDate(iso: string): Date {
 
 const clock = (iso: string) => asDate(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 const shortDate = (iso: string) => asDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+const capFirst = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 const riseFall = (delta: string) => delta.startsWith("-")
   ? "text-red-600 dark:text-red-400"
@@ -37,7 +39,7 @@ function RowDetail({ row, title, hidden }: { row: HistoryStatementRow; title: st
               <li key={ki}>
                 {k.head ? (
                   <>
-                    <span className="break-words">{maskMoneyText(hidden, k.head)}</span>
+                    <span className="break-words">{maskMoneyText(hidden, capFirst(k.head))}</span>
                     <ul className="mt-0.5 space-y-0.5 list-none">
                       {k.items.map((it, ii) => (
                         <li key={ii} className="flex justify-between gap-2">
@@ -51,7 +53,7 @@ function RowDetail({ row, title, hidden }: { row: HistoryStatementRow; title: st
                   </>
                 ) : (
                   <span className="flex justify-between gap-2">
-                    <span className="break-words min-w-0">{maskMoneyText(hidden, k.text)}</span>
+                    <span className="break-words min-w-0">{maskMoneyText(hidden, capFirst(k.text))}</span>
                     {k.amount != null && (
                       <span className="tabular-nums whitespace-nowrap">{signedMoney(hidden, k.amount, true)}</span>
                     )}
@@ -96,7 +98,7 @@ function Statement({ metricKey, title }: { metricKey: string; title: string }) {
   const [days, setDays] = useState(7);
   // Open rows are tracked by reading time: the list grows as days load.
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const { data, isLoading, isError } = useQuery({
+  const { data: fetched, isLoading, isError, isFetching } = useQuery({
     queryKey: ["history", metricKey, days],
     queryFn: () => historyApi.statement(metricKey, days).catch((e: any) => {
       if (e?.response?.status === 404) return null; // no readings yet
@@ -104,13 +106,17 @@ function Statement({ metricKey, title }: { metricKey: string; title: string }) {
     }),
     placeholderData: keepPreviousData, // keep the list on screen while more loads
   });
+  // A failed load of earlier days drops the query's data; keep the last good list.
+  const lastGood = useRef(fetched);
+  if (fetched) lastGood.current = fetched;
+  const data = fetched ?? lastGood.current;
   const toggle = (k: string) => setExpanded(s => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const hasDays = (data?.days.length ?? 0) > 0;
 
   return (
     <div>
       {isLoading && <p className="text-sm text-gray-400">Loading…</p>}
-      {isError && <p className="text-sm text-red-500">Couldn't load the history.</p>}
+      {isError && !data && <p className="text-sm text-red-500">Couldn't load the history.</p>}
       {!isLoading && !isError && !hasDays && (
         <p className="text-sm text-gray-400">No changes recorded yet.</p>
       )}
@@ -118,6 +124,9 @@ function Statement({ metricKey, title }: { metricKey: string; title: string }) {
         <div className="mb-3">
           <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-100">
             {signedMoney(hidden, data.current_value, false)}
+          </p>
+          <p className="text-xs text-gray-400">
+            as of {shortDate(data.current_taken_at)}, {clock(data.current_taken_at)}
           </p>
           {data.period_delta != null && data.period_from != null && data.period_since != null && (
             <p className="text-sm text-gray-500 dark:text-gray-400">
@@ -130,7 +139,7 @@ function Statement({ metricKey, title }: { metricKey: string; title: string }) {
         <div key={d.day} className="mb-3">
           <div className="flex justify-between gap-2 border-b border-gray-200 dark:border-gray-600 pb-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
             <span>{dayLabel(d.day, new Date())}</span>
-            <span className={`tabular-nums ${riseFall(d.delta)}`}>{signedMoney(hidden, d.delta, true)}</span>
+            <span className={`tabular-nums ${sameFigure(d.delta, "0") ? "" : riseFall(d.delta)}`}>{signedMoney(hidden, d.delta, true)}</span>
           </div>
           {d.rows.map(r => {
             // Expandable only when opening shows more than the row already says.
@@ -163,9 +172,10 @@ function Statement({ metricKey, title }: { metricKey: string; title: string }) {
           })}
         </div>
       ))}
+      {isError && data && <p className="text-xs text-red-500 mb-1">Couldn't load earlier days.</p>}
       {data?.has_more && (
-        <button type="button" onClick={() => setDays(n => n + 7)} className="btn-ghost text-sm w-full">
-          Show earlier days
+        <button type="button" disabled={isFetching} onClick={() => setDays(n => n + 7)} className="btn-ghost text-sm w-full">
+          {isFetching ? "Loading…" : "Show earlier days"}
         </button>
       )}
       {hasDays && (

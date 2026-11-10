@@ -2831,6 +2831,7 @@ class HistoryStatementOut(BaseModel):
     metric_key: str
     label: str
     current_value: Decimal
+    current_taken_at: datetime
     period_delta: Optional[Decimal]
     period_from: Optional[Decimal]
     period_since: Optional[datetime]

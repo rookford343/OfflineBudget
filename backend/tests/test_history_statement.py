@@ -69,6 +69,24 @@ def test_math_lines_parts_are_the_changed_children():
     assert lines[0].parts == [schemas.HistoryMathPart(label="Card estimate", delta=D("-60"))]
 
 
+def test_math_lines_parts_under_a_subtracted_row_take_its_sign():
+    old = _receipt(_row("start", "Low", "1000", kids=[("A", "100")]),
+                   _row("subtract", "Bills", "300", kids=[("Rent", "300")]))
+    new = _receipt(_row("start", "Low", "1060", kids=[("A", "160")]),
+                   _row("subtract", "Bills", "360", kids=[("Rent", "360")]))
+    lines = math_lines(old, new)
+    assert lines[0].parts == [schemas.HistoryMathPart(label="A", delta=D("60"))]
+    assert lines[1].parts == [schemas.HistoryMathPart(label="Rent", delta=D("-60"))]
+
+
+def test_math_lines_parts_skip_one_sided_informational_children():
+    old = _receipt(_row("start", "Low", "1000", kids=[("Real", "10")], info=[("Both", "5"), ("Moved", "7")]))
+    new = _receipt(_row("start", "Low", "1000", kids=[("Fresh", "20")], info=[("Both", "9"), ("Shown", "40")]))
+    parts = {p.label: p.delta for p in math_lines(old, new)[0].parts}
+    # Informational "Moved" (old only) and "Shown" (new only) are not arithmetic.
+    assert parts == {"Real": D("-10"), "Fresh": D("20"), "Both": D("4")}
+
+
 def test_statement_headline_drops_line_causes_when_an_event_exists():
     causes = [Cause("x", None, head="new pending Visa charge"), Cause("Low -$5.00", D("-5"), short="Low changed")]
     assert statement_headline(causes) == "New pending Visa charge"
@@ -121,6 +139,14 @@ def test_statement_max_days_counts_days_with_changes(db_session):
     assert out.has_more is False
 
 
+def test_statement_current_taken_at_is_the_newest_reading(db_session):
+    user = _user(db_session)
+    for t, v in ((_at(2, 8), "500"), (_at(2, 9), "450"), (_at(3, 10), "450")):
+        _snap(db_session, user, t, v)
+    out = _statement(db_session, user)
+    assert out.current_taken_at == _at(3, 10)  # the newest reading did not move
+
+
 def test_statement_no_changes_is_empty(db_session):
     user = _user(db_session)
     _snap(db_session, user, _at(1), "100")
@@ -160,8 +186,22 @@ def test_statement_route_returns_the_statement(db_session):
     _snap(db_session, user, _at(2), "90")
     body = _client(db_session, user).get("/history/leftover/statement?days=3").json()
     assert body["metric_key"] == "leftover" and len(body["days"]) == 1
-    assert _client(db_session, user).get("/history/leftover/statement?days=0").status_code == 422
-    assert _client(db_session, user).get("/history/leftover/statement?days=91").status_code == 422
+    # The frontend reads the sign off these strings (startsWith("-")).
+    row = body["days"][0]["rows"][0]
+    assert isinstance(body["current_value"], str) and isinstance(body["period_delta"], str)
+    assert isinstance(body["days"][0]["delta"], str)
+    assert all(isinstance(row[k], str) for k in ("delta", "old_value", "new_value"))
+    assert row["delta"].startswith("-")
+
+
+def test_statement_route_days_cap_is_the_retention(db_session):
+    user = _user(db_session)
+    _snap(db_session, user, _at(1), "100")
+    _snap(db_session, user, _at(2), "90")
+    client = _client(db_session, user)
+    assert client.get("/history/leftover/statement?days=0").status_code == 422
+    assert client.get("/history/leftover/statement?days=400").status_code == 200
+    assert client.get("/history/leftover/statement?days=401").status_code == 422
 
 
 def test_statement_route_unknown_key_is_404(db_session):

@@ -468,7 +468,7 @@ export interface HistoryStatementRow {
 }
 export interface HistoryStatementDay { day: string; delta: string; rows: HistoryStatementRow[] }
 export interface HistoryStatement {
-  metric_key: string; label: string; current_value: string;
+  metric_key: string; label: string; current_value: string; current_taken_at: string;
   period_delta: string | null; period_from: string | null; period_since: string | null;
   days: HistoryStatementDay[]; has_more: boolean;
 }

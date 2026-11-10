@@ -68,7 +68,7 @@ def metric_history_for(
 @router.get("/{metric_key}/statement", response_model=schemas.HistoryStatementOut)
 def metric_statement_for(
     metric_key: str = Path(pattern=KEY_PATTERN),
-    days: int = Query(7, ge=1, le=90),
+    days: int = Query(7, ge=1, le=400),
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
