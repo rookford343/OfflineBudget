@@ -216,3 +216,31 @@ def test_production__check__announces_startup_backup(prod_dirs: dict[str, str]) 
     r = _run(PROD, "--check", env=prod_dirs)
     assert r.returncode == 0, r.stderr
     assert "startup_backup=data/backups/startup-*.db keep=10 min_interval=10m retain=48h" in r.stdout
+
+
+def test_production__backup_failure__does_not_start_server(
+    tmp_path: Path, prod_dirs: dict[str, str]
+) -> None:
+    """Fake `uv` fails the backup call; the script must exit non-zero and never exec uvicorn."""
+    sandbox = tmp_path / "repo"
+    (sandbox / "scripts").mkdir(parents=True)
+    shutil.copy(PROD, sandbox / "scripts" / "run-production.sh")
+    calls = tmp_path / "uv-calls.log"
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    stub = bindir / "uv"
+    stub.write_text(
+        '#!/bin/bash\necho "$*" >> "$UV_CALLS"\n'
+        'case "$*" in *backend.services.db_backup*) exit 1;; esac\nexit 0\n'
+    )
+    stub.chmod(0o755)
+    r = _run(
+        sandbox / "scripts" / "run-production.sh",
+        env={**prod_dirs, "UV_CALLS": str(calls), "PATH": f"{bindir}:{os.environ['PATH']}"},
+        cwd=sandbox,
+    )
+    assert r.returncode != 0
+    assert "not starting the server" in r.stderr
+    logged = calls.read_text()
+    assert "backend.services.db_backup" in logged
+    assert "uvicorn" not in logged

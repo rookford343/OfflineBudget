@@ -2,7 +2,16 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from backend.services.db_backup import backup_database, startup_backup
+import subprocess
+import sys
+
+import pytest
+
+from backend.services.db_backup import (
+    backup_database,
+    database_file_from_url,
+    startup_backup,
+)
 
 
 def _wal_db_with_uncheckpointed_write(path: Path) -> None:
@@ -137,3 +146,62 @@ def test_startup_backup_keeps_recent_files_even_outside_newest_ten(tmp_path):
     startup_backup(src, backups, now=NOW)
 
     assert all(f.exists() for f in recent)  # all <48h: none deleted despite 13 > keep
+
+
+def test_startup_backup_clock_stepped_back_still_snapshots(tmp_path):
+    """A future-dated newest file (clock stepped backwards) must not suppress
+    snapshots until the clock catches up."""
+    src = tmp_path / "budget.db"
+    _wal_db_with_uncheckpointed_write(src)
+    backups = tmp_path / "backups"
+    backups.mkdir()
+    future = _touch_startup(backups, NOW + timedelta(days=3))
+
+    snap = startup_backup(src, backups, now=NOW)
+
+    assert snap != future and snap.exists()
+    assert future.exists()  # negative age is clamped, never counted as expired
+
+
+def test_database_file_from_url_accepts_sqlite_file():
+    assert database_file_from_url("sqlite:///./data/budget.db") == Path("data/budget.db")
+
+
+@pytest.mark.parametrize(
+    "url", ["sqlite://", "sqlite:///:memory:", "postgresql://u:p@h/db"]
+)
+def test_database_file_from_url_fails_closed(url):
+    with pytest.raises(ValueError):
+        database_file_from_url(url)
+
+
+def test_production_snapshot_follows_database_url_not_live_path(tmp_path):
+    """The snapshot must be of the DB the app opens (DATABASE_URL)."""
+    root = Path(__file__).resolve().parents[2]
+    db = tmp_path / "other.db"
+    _wal_db_with_uncheckpointed_write(db)
+    r = subprocess.run(  # noqa: S603 - fixed interpreter + repo module, no user input
+        [sys.executable, "-m", "backend.services.db_backup"],
+        cwd=tmp_path, capture_output=True, text=True, check=False, timeout=60,
+        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(root),
+             "DATABASE_URL": f"sqlite:///{db}"},
+    )
+    assert r.returncode == 0, r.stderr
+    (snap,) = (tmp_path / "data" / "backups").glob("startup-*.db")
+    conn = sqlite3.connect(snap)
+    try:
+        assert conn.execute("SELECT name FROM plans").fetchall() == [("Rivian R2 purchase",)]
+    finally:
+        conn.close()
+
+
+def test_production_snapshot_non_sqlite_url_exits_nonzero(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    r = subprocess.run(  # noqa: S603 - fixed interpreter + repo module, no user input
+        [sys.executable, "-m", "backend.services.db_backup"],
+        cwd=tmp_path, capture_output=True, text=True, check=False, timeout=60,
+        env={"PATH": "/usr/bin:/bin", "PYTHONPATH": str(root),
+             "DATABASE_URL": "postgresql://u:p@h/db"},
+    )
+    assert r.returncode == 1
+    assert "cannot snapshot" in r.stderr

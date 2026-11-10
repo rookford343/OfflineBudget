@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # launchd gives a minimal PATH; make uv resolvable.
-export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.bun/bin:$PATH"
+export PATH="$PATH:/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.bun/bin"
 
 cd "$(dirname "$0")/.."
 
@@ -39,14 +39,10 @@ if [ "${1:-}" = "--check" ]; then
   exit 0
 fi
 
-# Snapshot the live DB (WAL-safe) before the server can run startup migrations.
-# If this fails, do not start: a server that can't snapshot must not migrate.
-if ! uv run --locked python -c "
-from backend.config import settings
-from backend.services.db_backup import startup_backup
-p = startup_backup(settings.LIVE_DATABASE_PATH, 'data/backups', keep=10)
-print('startup_backup:', p or 'skipped (no database yet)')
-"; then
+# Snapshot the database the app will actually open (settings.DATABASE_URL), WAL-safe,
+# before the server can run startup migrations. If this fails, do not start:
+# a server that can't snapshot must not migrate.
+if ! uv run --locked python -m backend.services.db_backup; then
   echo "ERROR: startup database backup failed; not starting the server." >&2
   exit 1
 fi

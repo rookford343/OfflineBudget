@@ -14,7 +14,8 @@ with no sidecars, which is what a restore point has to be.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta
+import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
@@ -62,7 +63,8 @@ def startup_backup(
     server starts (and migrates).
 
     - Returns None when `src_path` doesn't exist (fresh install).
-    - Throttle: if the newest startup snapshot is younger than `min_interval`,
+    - Throttle: if a startup snapshot is younger than `min_interval` (and not
+      future-dated),
       no new one is taken and that path is returned. Under a KeepAlive
       crash-restart loop this keeps the pre-crash snapshot from being rotated out.
     - Retention: a `startup-*.db` is deleted only if it is BOTH outside the
@@ -72,7 +74,8 @@ def startup_backup(
     if not src.exists():
         return None
     out_dir = Path(backup_dir)
-    now = now or datetime.now()
+    # Naive UTC throughout: filenames carry UTC stamps, immune to DST/zone changes.
+    now = now or datetime.now(timezone.utc).replace(tzinfo=None)
 
     def _existing() -> list[tuple[datetime, Path]]:
         found = [(t, p) for p in out_dir.glob("startup-*.db")
@@ -80,12 +83,45 @@ def startup_backup(
         return sorted(found, key=lambda tp: tp[0], reverse=True)  # newest first
 
     existing = _existing()
-    if existing and now - existing[0][0] < min_interval:
-        print(f"startup_backup: skipped, newest snapshot {existing[0][1].name} is recent")
-        return existing[0][1]
+    # Future-dated files (clock stepped backwards) never count as "recent",
+    # otherwise they would suppress snapshots until the clock catches up.
+    recent = [(t, p) for t, p in existing if timedelta(0) <= now - t < min_interval]
+    if recent:
+        print(f"startup_backup: skipped, recent snapshot {recent[0][1].name} exists")
+        return recent[0][1]
 
     dest = backup_database(src, out_dir / f"startup-{now.strftime(_STAMP)}.db")
     for t, old in _existing()[keep:]:
-        if now - t > retain:
+        if max(now - t, timedelta(0)) > retain:
             old.unlink()
     return dest
+
+
+def database_file_from_url(url: str) -> Path:
+    """File path of a sqlite SQLAlchemy URL (relative paths resolve against the
+    cwd, exactly as the app's engine resolves them). Raises ValueError otherwise."""
+    from sqlalchemy.engine import make_url
+
+    parsed = make_url(url)
+    if parsed.get_backend_name() != "sqlite" or not parsed.database \
+            or parsed.database == ":memory:":
+        raise ValueError("DATABASE_URL is not a file-backed sqlite database")
+    return Path(parsed.database)
+
+
+def main() -> int:
+    """Production pre-start snapshot of the database the app will actually open."""
+    from backend.config import settings
+
+    try:
+        src = database_file_from_url(settings.DATABASE_URL)
+    except ValueError as exc:
+        print(f"ERROR: cannot snapshot: {exc}", file=sys.stderr)
+        return 1
+    path = startup_backup(src, "data/backups", keep=10)
+    print("startup_backup:", path or "skipped (no database yet)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
