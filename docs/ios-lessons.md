@@ -4,7 +4,11 @@ Lessons for the future native iOS app, updated as the phone-on-home-network work
 
 ## Passkeys on .local
 
-Pending owner test. Record here, for both Safari and the home-screen app, whether passkey create and get worked on `df-macbookpro16.local` over the private-CA certificate, with the exact error name and message for any failure.
+Owner result, 2026-11-09: Safari on iPhone created and used a passkey with rp.id `df-macbookpro16.local` over the private-CA HTTPS with no warning. A wrong host name (`df-macbookpro.local`) loads but must not be used (a passkey is bound to the exact host). The home-screen (standalone) passkey test is still pending: record here whether create and get work there, with the exact error name and message for any failure.
+
+## Duo viewport widths
+
+Measured from the owner's iPhone screenshots (3x scale): folded is about 457px CSS wide, unfolded about 951px. Unfolded sits in Tailwind's `sm` to `lg` (640 to 1023) range, so it gets the phone-wide layout, not the desktop one. The status bar sits on one side of the screen, so the safe-area inset there must be painted with the page background (html/body, theme-color) and content must respect `env(safe-area-inset-left/right)`.
 
 ## Forecast, Recurring and Spending at phone widths
 

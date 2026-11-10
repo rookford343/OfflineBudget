@@ -28,7 +28,7 @@ Starting the LaunchAgent runs database migrations immediately, and a second runn
    FRONTEND_URL=https://df-macbookpro16.local
    ```
 
-Only then continue with steps 1 to 6 below (certificate, build, LaunchAgent, firewall, deploy).
+Only then continue with steps 1 to 6 below (certificate, build, LaunchAgent, deploy, firewall).
 
 ### 1. Private CA and server certificate
 
@@ -81,15 +81,23 @@ The server starts at login, not at boot (accepted limitation after a reboot). Lo
 
 Every start first snapshots the database to `data/backups/startup-<timestamp>.db` (at most one per 10 minutes; the newest 10 are kept, and older ones are deleted only after 48 hours); if the snapshot fails, the server does not start.
 
-### 5. Firewall
+### 5. Deploy
+
+```bash
+scripts/deploy.sh
+```
+
+Refuses to run with uncommitted changes. Builds the frontend into a temporary directory and swaps it into `frontend/dist`, backs up the database to `data/backups/pre-deploy-<timestamp>.db` (it refuses if `data/budget.db` is missing), records the deployed commit in `data/logs/deployed-commit`, restarts the LaunchAgent, and waits up to 30 seconds for `https://df-macbookpro16.local/api/health` to return 200.
+
+### 6. Firewall
 
 ```bash
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on --setstealthmode on
-PY="$(uv run --locked python -c "import sys,os;print(os.path.realpath(sys.executable))")"
+PY="$(ps -o comm= -p "$(lsof -tnP -iTCP:443 -sTCP:LISTEN)")"
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$PY" --unblockapp "$PY"
 ```
 
-`PY` is the real path of the uv-managed venv Python that serves the app. Re-run these two commands whenever uv's Python version changes (the path changes with it, and the firewall would block the new binary).
+Run this after the server is up (step 5): `PY` is the binary that is actually listening on port 443. Do not use `sys.executable`: Homebrew's framework Python re-execs into `.../Resources/Python.app/Contents/MacOS/Python`, and that is the binary `lsof` and the firewall see, not `.../bin/python3.11`. If the command prints nothing, the server is not listening yet; check `data/logs/server.err.log`, or find the path by hand with `lsof -nP -iTCP:443 -sTCP:LISTEN` and `ps -p <PID> -o comm=`. Re-run both commands whenever uv's Python version changes (the path changes with it, and the firewall would block the new binary).
 
 Also turn off automatic exceptions for signed software, so only the binary you added is allowed in:
 
@@ -98,14 +106,6 @@ sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setallowsigned off --seta
 ```
 
 (UI: System Settings, Network, Firewall, Options, turn off "Automatically allow built-in software" and "Automatically allow downloaded signed software".)
-
-### 6. Deploy
-
-```bash
-scripts/deploy.sh
-```
-
-Refuses to run with uncommitted changes. Builds the frontend into a temporary directory and swaps it into `frontend/dist`, backs up the database to `data/backups/pre-deploy-<timestamp>.db` (it refuses if `data/budget.db` is missing), records the deployed commit in `data/logs/deployed-commit`, restarts the LaunchAgent, and waits up to 30 seconds for `https://df-macbookpro16.local/api/health` to return 200.
 
 ### Development
 
