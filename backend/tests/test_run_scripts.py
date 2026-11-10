@@ -58,10 +58,33 @@ def test_production__check__https_only_no_reload(prod_dirs: dict[str, str]) -> N
     assert "SCHEDULER_ENABLED=true" in r.stdout
     assert "FRONTEND_DIST_DIR=" in r.stdout
     assert "--ssl-certfile" in r.stdout
-    assert "--port 443" in r.stdout
     assert "--no-proxy-headers" in r.stdout
     assert "--reload" not in r.stdout
     assert "--port 8000" not in r.stdout
+
+
+def test_production__default__binds_loopback_only(prod_dirs: dict[str, str]) -> None:
+    r = _run(PROD, "--check", env=prod_dirs)
+    assert r.returncode == 0, r.stderr
+    assert "exposure=mac-only" in r.stdout
+    assert "--host 127.0.0.1" in r.stdout
+    assert "--port 8443" in r.stdout
+    assert "0.0.0.0" not in r.stdout  # noqa: S104 - asserting the absence of an all-interfaces bind
+
+
+def test_production__lan_exposure__binds_all_interfaces_on_443(prod_dirs: dict[str, str]) -> None:
+    r = _run(PROD, "--check", env={**prod_dirs, "OB_EXPOSURE": "lan"})
+    assert r.returncode == 0, r.stderr
+    assert "exposure=lan" in r.stdout
+    assert "--host 0.0.0.0" in r.stdout  # noqa: S104 - asserting the explicit LAN opt-in
+    assert "--port 443" in r.stdout
+    assert "--ssl-certfile" in r.stdout
+
+
+def test_production__unknown_exposure__refuses(prod_dirs: dict[str, str]) -> None:
+    r = _run(PROD, "--check", env={**prod_dirs, "OB_EXPOSURE": "public"})
+    assert r.returncode == 1
+    assert "OB_EXPOSURE" in r.stderr
 
 
 def test_dev__live_db__refuses() -> None:

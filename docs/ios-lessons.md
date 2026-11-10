@@ -1,6 +1,6 @@
 # iOS lessons
 
-Lessons for the future native iOS app, updated as the phone-on-home-network work proceeds.
+Lessons for the future native iOS app, updated as the phone-on-home-network work proceeds. Project wrap-up and reversal steps: [phone-access-retrospective.md](phone-access-retrospective.md).
 
 ## Passkeys on .local
 

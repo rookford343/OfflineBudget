@@ -95,13 +95,13 @@ them unlinked and they get a budget of their own.
 
 ## 4. Access from Another Device on Your Home Network
 
-The dev server (`./scripts/start.sh`) binds 127.0.0.1 only and is not reachable from other devices. To use the app from your phone on home Wi-Fi, set up the production HTTPS server: see [SETUP.md, Phone on home Wi-Fi](SETUP.md#phone-on-home-wi-fi).
+The dev server (`./scripts/start.sh`) binds 127.0.0.1 only and is not reachable from other devices. To use the app from your phone on home Wi-Fi, set up the production HTTPS server: see [SETUP.md, Optional: phone access](SETUP.md#optional-phone-access-on-home-wi-fi).
 
 ---
 
 ## 5. HTTPS on Your Home Network
 
-HTTPS comes from a private CA and the production runner, not the dev script. See [SETUP.md, Phone on home Wi-Fi](SETUP.md#phone-on-home-wi-fi).
+HTTPS comes from a private CA and the production runner, not the dev script. See [SETUP.md, Optional: phone access](SETUP.md#optional-phone-access-on-home-wi-fi).
 
 ---
 
@@ -458,7 +458,7 @@ Check that `ALLOWED_ORIGINS` in `.env` includes the URL you're accessing from. R
 If you changed `JWT_SECRET` in `.env`, all existing tokens are invalidated. Log in again.
 
 **HTTPS cert not trusted by browser**
-Install and trust the CA profile on the device (see [SETUP.md](SETUP.md#phone-on-home-wi-fi)).
+Install and trust the CA profile on the device (see [SETUP.md](SETUP.md#optional-phone-access-on-home-wi-fi)).
 
 ---
 

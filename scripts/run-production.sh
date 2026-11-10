@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Production server: one HTTPS uvicorn on 0.0.0.0:443 serving the built app and /api,
-# with the scheduler on. Run by the com.offlinebudget.server LaunchAgent.
+# Production server: one HTTPS uvicorn serving the built app and /api, with the scheduler on.
+# OB_EXPOSURE=mac-only (default) binds 127.0.0.1:8443; OB_EXPOSURE=lan binds 0.0.0.0:443. Run by the com.offlinebudget.server LaunchAgent.
 # Usage: scripts/run-production.sh [--check]   (--check prints the command and exits)
 set -euo pipefail
 
@@ -24,7 +24,15 @@ if [ ! -f "$DIST_DIR/index.html" ]; then
   exit 1
 fi
 
-CMD=("$UV" run --locked uvicorn backend.main:app --host 0.0.0.0 --port 443
+# macOS only lets a normal user bind ports below 1024 on the wildcard address, so loopback uses 8443.
+EXPOSURE="${OB_EXPOSURE:-mac-only}"
+case "$EXPOSURE" in
+  mac-only) BIND_HOST=127.0.0.1; BIND_PORT=8443 ;;
+  lan)      BIND_HOST=0.0.0.0;   BIND_PORT=443 ;;
+  *) echo "ERROR: OB_EXPOSURE must be 'mac-only' or 'lan' (got '$EXPOSURE')." >&2; exit 1 ;;
+esac
+
+CMD=("$UV" run --locked uvicorn backend.main:app --host "$BIND_HOST" --port "$BIND_PORT"
      --ssl-certfile "$SSL_DIR/server.crt" --ssl-keyfile "$SSL_DIR/server.key" --no-proxy-headers)
 
 # Env must not be able to turn on --reload, other ports, etc.
@@ -35,6 +43,7 @@ export FRONTEND_DIST_DIR="$DIST_DIR"
 
 if [ "${1:-}" = "--check" ]; then
   echo "uvicorn_env_vars=$(env | grep -c '^UVICORN_' || true)"
+  echo "exposure=$EXPOSURE"
   echo "SCHEDULER_ENABLED=true FRONTEND_DIST_DIR=$DIST_DIR ${CMD[*]}"
   echo "startup_backup=data/backups/startup-*.db keep=10 min_interval=10m retain=48h"
   exit 0

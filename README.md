@@ -111,7 +111,7 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 
 Open **http://localhost:5173** → Create an account → Run through the Quick Start wizard.
 
-> **Phone on your home Wi-Fi:** the private-CA HTTPS setup is in [Phone on home Wi-Fi](docs/SETUP.md#phone-on-home-wi-fi). `start.sh` is dev-only and binds 127.0.0.1.
+> **HTTPS, Mac-only by default:** setup is in [docs/SETUP.md](docs/SETUP.md); phone access is an [optional switch](docs/SETUP.md#optional-phone-access-on-home-wi-fi). `start.sh` is dev-only and binds 127.0.0.1.
 
 ---
 
@@ -122,6 +122,7 @@ Open **http://localhost:5173** → Create an account → Run through the Quick S
 | [Getting Started](docs/start-guide.md) | First-time setup, LAN access, initial budget configuration |
 | [Technical Guide](docs/technical-guide.md) | Architecture, data model, forecast engine, adding new features |
 | [Number Architecture](docs/architecture.md) | Where every figure is calculated, how to trace a mismatch, contributor rules |
+| [Phone access retrospective](docs/phone-access-retrospective.md) | What we built for phone access, lessons, and how to undo it |
 | [Privacy](docs/PRIVACY.md) | What's stored, what leaves your machine, how to delete it |
 | [Security](SECURITY.md) | Threat model, password storage, JWT, HTTPS, backup strategy |
 
@@ -504,7 +505,7 @@ error with a **Reconnect** button; reconnecting runs a sync straight away.
 
 ## HTTPS on LAN
 
-Production serves HTTPS on port 443 with a certificate from your own private CA (`scripts/tls/`). Full steps: [Phone on home Wi-Fi](docs/SETUP.md#phone-on-home-wi-fi).
+Production serves HTTPS on `127.0.0.1:8443` (Mac-only; `OB_EXPOSURE=lan` opens port 443 to the Wi-Fi) with a certificate from your own private CA (`scripts/tls/`). Full steps: [docs/SETUP.md](docs/SETUP.md).
 
 ---
 

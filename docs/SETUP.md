@@ -1,8 +1,8 @@
 # Setup
 
-## Phone on home Wi-Fi
+## Mac-only HTTPS (default)
 
-OfflineBudget runs as one HTTPS uvicorn process on port 443 under a macOS LaunchAgent. It serves the built app and `/api`, and it is the only process with the scheduler on. Host name: `df-macbookpro16.local`.
+OfflineBudget runs as one HTTPS uvicorn process under a macOS LaunchAgent. By default (`OB_EXPOSURE=mac-only`) it listens on `127.0.0.1:8443` only, so nothing on Wi-Fi can reach it. (macOS lets a normal user bind port 443 only on all interfaces, which is why loopback uses 8443.) Open `https://df-macbookpro16.local:8443`. It serves the built app and `/api`, and it is the only process with the scheduler on. Host name: `df-macbookpro16.local`.
 
 ### 0. Before you start (do these first, in order)
 
@@ -24,11 +24,19 @@ Starting the LaunchAgent runs database migrations immediately, and a second runn
 3. Set the production origin in `.env`:
 
    ```
-   ALLOWED_ORIGINS=https://df-macbookpro16.local
-   FRONTEND_URL=https://df-macbookpro16.local
+   ALLOWED_ORIGINS=https://df-macbookpro16.local:8443
+   FRONTEND_URL=https://df-macbookpro16.local:8443
    ```
 
-Only then continue with steps 1 to 6 below (certificate, build, LaunchAgent, deploy, firewall).
+   `FRONTEND_URL` is also the URL `scripts/deploy.sh` health-checks (`<FRONTEND_URL>/api/health`).
+
+4. Make the Mac use loopback for its own name (otherwise mDNS may resolve it to the Wi-Fi address, which is closed). Add this line to `/etc/hosts` (`sudo nano /etc/hosts`):
+
+   ```
+   127.0.0.1 df-macbookpro16.local
+   ```
+
+Only then continue with steps 1 to 5 below (certificate, trust, build, LaunchAgent, deploy). No firewall change is needed in Mac-only mode.
 
 ### 1. Private CA and server certificate
 
@@ -37,7 +45,7 @@ scripts/tls/make-ca.sh                                  # writes ~/.offlinebudge
 scripts/tls/issue-cert.sh ~/.offlinebudget-ca df-macbookpro16.local ssl
 ```
 
-The CA is limited to `pathlen:0` and name-constrained to `df-macbookpro16.local` and `budget.thedigitaltrailhead.com`: a certificate it signs for any other domain is rejected by clients. If you created a CA before this constraint existed, it is not constrained. Delete `~/.offlinebudget-ca` and remove the old profile from the phone (Settings, General, VPN & Device Management), then recreate the CA, reissue the certificate and reinstall the profile (step 2).
+The CA is limited to `pathlen:0` and name-constrained to `df-macbookpro16.local` and `budget.thedigitaltrailhead.com`: a certificate it signs for any other domain is rejected by clients. If you created a CA before this constraint existed, it is not constrained. Delete `~/.offlinebudget-ca`, then recreate the CA, reissue the certificate and re-trust it (step 2; on a phone, remove the old profile first).
 
 `issue-cert.sh` prints the expiry date (825 days). To renew before then, reissue with the same CA (the old pair moves to `ssl/server.<timestamp>.bak.*`) and redeploy:
 
@@ -46,13 +54,17 @@ scripts/tls/issue-cert.sh --renew ~/.offlinebudget-ca df-macbookpro16.local ssl
 scripts/deploy.sh
 ```
 
-Delete the `ssl/server.*.bak.*` files once the renewed certificate is verified on the phone.
+Delete the `ssl/server.*.bak.*` files once the renewed certificate is verified.
 
-### 2. Trust the CA on the iPhone
+### 2. Trust the CA on the Mac
 
-1. AirDrop `~/.offlinebudget-ca/ca.crt` to the phone, then install the profile from Settings, General, VPN & Device Management.
-2. Settings, General, About, Certificate Trust Settings: turn on full trust for the CA.
-3. Open `https://df-macbookpro16.local` in Safari.
+```bash
+sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ~/.offlinebudget-ca/ca.crt
+# or, login keychain only (no sudo):
+security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db ~/.offlinebudget-ca/ca.crt
+```
+
+Then open `https://df-macbookpro16.local:8443` in the browser.
 
 ### 3. Build the app
 
@@ -87,9 +99,16 @@ Every start first snapshots the database to `data/backups/startup-<timestamp>.db
 scripts/deploy.sh
 ```
 
-Refuses to run with uncommitted changes. Builds the frontend into a temporary directory and swaps it into `frontend/dist`, backs up the database to `data/backups/pre-deploy-<timestamp>.db` (it refuses if `data/budget.db` is missing), records the deployed commit in `data/logs/deployed-commit`, restarts the LaunchAgent, and waits up to 30 seconds for `https://df-macbookpro16.local/api/health` to return 200.
+Refuses to run with uncommitted changes. Builds the frontend into a temporary directory and swaps it into `frontend/dist`, backs up the database to `data/backups/pre-deploy-<timestamp>.db` (it refuses if `data/budget.db` is missing), records the deployed commit in `data/logs/deployed-commit`, restarts the LaunchAgent, and waits up to 30 seconds for `<FRONTEND_URL>/api/health` (default `https://df-macbookpro16.local:8443`) to return 200.
 
-### 6. Firewall
+## Optional: phone access on home Wi-Fi
+
+Off by default and not actively developed (see [the retrospective](phone-access-retrospective.md)). To turn it on:
+
+1. **Expose the server.** In `~/Library/LaunchAgents/com.offlinebudget.server.plist` change the `OB_EXPOSURE` value to `lan` (binds `0.0.0.0:443`), then reload: `launchctl bootout gui/$(id -u)/com.offlinebudget.server && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.offlinebudget.server.plist`.
+2. **URLs.** In `.env` set `ALLOWED_ORIGINS` and `FRONTEND_URL` to `https://df-macbookpro16.local` (no `:8443`). The Mac's `/etc/hosts` line can stay.
+3. **Trust the CA on the iPhone.** AirDrop `~/.offlinebudget-ca/ca.crt` to the phone and install the profile (Settings, General, VPN & Device Management). Then Settings, General, About, Certificate Trust Settings: turn on full trust. Open `https://df-macbookpro16.local` in Safari (type the exact name; `df-macbookpro.local` is wrong).
+4. **Firewall.** Needed so the phone can connect:
 
 ```bash
 sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setglobalstate on --setstealthmode on
@@ -107,6 +126,8 @@ sudo /usr/libexec/ApplicationFirewall/socketfilterfw --setallowsigned off --seta
 
 (UI: System Settings, Network, Firewall, Options, turn off "Automatically allow built-in software" and "Automatically allow downloaded signed software".)
 
-### Development
+To turn it off again: set `OB_EXPOSURE` back to `mac-only`, reload the LaunchAgent, put the `:8443` URLs back in `.env`, and undo the firewall and phone items in the [reversal checklist](phone-access-retrospective.md#reversal-checklist).
+
+## Development
 
 `scripts/start.sh` runs a reloading backend and Vite on 127.0.0.1 with the scheduler off, against `data/dev.db`. On first run it creates `data/dev.db` from the live database with `backup_database()`. It refuses to run against `data/budget.db`. `scripts/start.sh --check` and `scripts/run-production.sh --check` print what they would run and change nothing.

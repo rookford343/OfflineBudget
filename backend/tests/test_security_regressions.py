@@ -59,7 +59,8 @@ now refuses or neutralizes it.
     app's hostnames, so a certificate for any other domain signed by it fails
     openssl verify (tests in test_run_scripts.py).
   - cross-references in test_run_scripts.py: production serves HTTPS only
-    (test_production__*), dev binds loopback with the scheduler off
+    (test_production__*), production binds loopback only by default
+    (test_production__default__binds_loopback_only), dev binds loopback with the scheduler off
     (test_dev__check__loopback_and_scheduler_off), and dev refuses the live database
     by path, symlink, hard link and case (test_dev__*live_db__refuses).
 """

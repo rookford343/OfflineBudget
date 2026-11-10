@@ -15,6 +15,11 @@
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>OB_EXPOSURE</key>
+    <string>mac-only</string>
+  </dict>
   <key>StandardOutPath</key>
   <string>__REPO__/data/logs/server.out.log</string>
   <key>StandardErrorPath</key>

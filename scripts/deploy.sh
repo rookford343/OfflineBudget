@@ -38,7 +38,10 @@ echo "Deployed commit $(cat data/logs/deployed-commit)"
 
 launchctl kickstart -k "gui/$(id -u)/com.offlinebudget.server"
 
-URL="https://df-macbookpro16.local/api/health"
+# One URL to change: FRONTEND_URL in .env (https://df-macbookpro16.local:8443 in Mac-only mode,
+# https://df-macbookpro16.local in LAN mode).
+BASE_URL="$(sed -n 's/^FRONTEND_URL=//p' .env 2>/dev/null | tail -n1 | tr -d '"'"'"' ' | sed 's|/*$||')"
+URL="${BASE_URL:-https://df-macbookpro16.local:8443}/api/health"
 for _ in $(seq 1 30); do
   code="$(curl -s --max-time 3 -o /dev/null -w '%{http_code}' --cacert "$HOME/.offlinebudget-ca/ca.crt" "$URL" || true)"
   if [ "$code" = "200" ]; then
