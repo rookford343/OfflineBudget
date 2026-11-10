@@ -460,16 +460,22 @@ export const checkingLevelApi = {
 // ── Change history (what moved each headline figure) ────────────────────────
 export interface HistoryCauseItem { name: string; amount: string | null }
 export interface HistoryCause { text: string; amount: string | null; head: string | null; items: HistoryCauseItem[] }
-export interface MetricChange {
-  taken_at: string; previous_taken_at: string | null; trigger: string;
-  old_value: string | null; new_value: string | null; delta: string | null;
-  summary: string; headline: string; causes: HistoryCause[]; calc_changed: boolean;
+export interface HistoryMathPart { label: string; delta: string }
+export interface HistoryMathLine { label: string; old: string | null; new: string | null; parts: HistoryMathPart[] }
+export interface HistoryStatementRow {
+  taken_at: string; delta: string; old_value: string; new_value: string;
+  headline: string; events: HistoryCause[]; math: HistoryMathLine[];
 }
-export interface MetricHistory { metric_key: string; label: string; current_value: string | null; changes: MetricChange[] }
+export interface HistoryStatementDay { day: string; delta: string; rows: HistoryStatementRow[] }
+export interface HistoryStatement {
+  metric_key: string; label: string; current_value: string;
+  period_delta: string | null; period_from: string | null; period_since: string | null;
+  days: HistoryStatementDay[]; has_more: boolean;
+}
 
 export const historyApi = {
-  changes: (key: string, limit = 30): Promise<MetricHistory> =>
-    api.get(`/history/${encodeURIComponent(key)}`, { params: { limit } }).then((r) => r.data),
+  statement: (key: string, days: number): Promise<HistoryStatement> =>
+    api.get(`/history/${encodeURIComponent(key)}/statement`, { params: { days } }).then((r) => r.data),
   snapshot: (): Promise<{ recorded: boolean }> => api.post("/history/snapshot").then((r) => r.data),
   clear: (): Promise<{ deleted: number }> => api.delete("/history").then((r) => r.data),
 };

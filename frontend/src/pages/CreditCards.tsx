@@ -249,7 +249,7 @@ export default function CreditCards() {
             {c.next_payment_date && parseFloat(c.balance_due) > 0 && (
               <div className="mt-1 text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
                 Pay {maskIfHidden(balancesHidden, fmt(c.balance_due))} by {new Date(c.next_payment_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                <WhatChanged metrics={[{ key: `card_payment:${c.id}`, title: `${c.name} payment` }]} />
+                <WhatChanged metric={{ key: `card_payment:${c.id}`, title: `${c.name} payment` }} />
               </div>
             )}
           </div>

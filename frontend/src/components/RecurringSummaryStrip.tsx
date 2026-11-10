@@ -176,7 +176,7 @@ export default function RecurringSummaryStrip({
             <HowCalculated title="Left over" explanations={[summary?.explain?.left_over]} />
             {/* Snapshots only record the current month's figure. */}
             {year === now.getFullYear() && month === now.getMonth() + 1 && (
-              <WhatChanged metrics={[{ key: "leftover", title: "Left over" }]} />
+              <WhatChanged metric={{ key: "leftover", title: "Left over" }} />
             )}
           </span>
           <span className={`stat-value ${leftOver >= 0 ? "text-green-600" : "text-red-600"}`}>
