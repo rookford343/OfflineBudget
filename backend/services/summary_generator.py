@@ -733,6 +733,13 @@ def _reasons(changes) -> list[tuple]:
     order: dict[tuple, list] = {}
     for ch in changes:
         for c in causes_of(ch):
+            # Unlike statement_for's `not c.short` filter, this only drops a line
+            # cause whose text is purely its own short form (no amount added) —
+            # the popup has a math-lines fallback table for every line cause, the
+            # email doesn't, so the email keeps any line cause that still names a
+            # real figure. Deliberately different filters; don't unify them.
+            if not c.head and c.text == c.short:
+                continue
             ident = ("g", c.head, tuple(c.rows)) if c.head else ("l", c.text)
             entry = order.setdefault(ident, [c, []])
             if ch.label not in entry[1]:

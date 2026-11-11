@@ -350,9 +350,9 @@ def test_one_batch_moving_two_figures_is_listed_once(db_session, monkeypatch):
     assert all(c.label in top for c in changes)
 
 
-def _cause(head="", text="a cause", rows=()):
+def _cause(head="", text="a cause", rows=(), short=""):
     from backend.services.metric_diff import Cause
-    return Cause(text=text, amount=None, head=head, items=tuple(n for n, _ in rows), rows=tuple(rows))
+    return Cause(text=text, amount=None, head=head, items=tuple(n for n, _ in rows), rows=tuple(rows), short=short)
 
 
 def _chg(key, label, causes, delta="5.00"):
@@ -372,6 +372,31 @@ def test_a_partial_reason_names_the_figures_it_moved(db_session, monkeypatch):
     assert tail.index("Only B reason") < tail.index("Moved: Figure B")
     assert tail.index("Shared batch") < tail.index("Only B reason")
     assert html.count("Moved: Figure B") == 1 and "Moved: Figure A" not in html
+
+
+def test_a_vague_inherited_cause_is_filtered_out(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    vague = _cause(text="Card bills already charged changed", short="Card bills already charged changed")
+    substantive = _cause(
+        text="Jan 15 — CC Estimate: Test Visa −$40.00", short="Jan 15 — CC Estimate: Test Visa changed"
+    )
+    changes = [_chg("k1", "Figure A", [vague, substantive])]
+    html, text = generate_daily_summary(db_session, user, since_changes=changes)
+    html, text = html[html.index(CHANGES_TITLE):], text[text.index(CHANGES_TITLE.upper()):]
+    assert "Card bills already charged changed" not in html
+    assert "Card bills already charged changed" not in text
+    assert "Jan 15 — CC Estimate: Test Visa −$40.00" in html
+    assert "Jan 15 — CC Estimate: Test Visa −$40.00" in text
+
+
+def test_a_grouped_head_cause_is_never_dropped_by_the_vague_filter(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    grouped = _cause(head="New pending charges", rows=[("Some Merchant", D("12.34"))])
+    changes = [_chg("k1", "Figure A", [grouped])]
+    html, text = generate_daily_summary(db_session, user, since_changes=changes)
+    html, text = html[html.index(CHANGES_TITLE):], text[text.index(CHANGES_TITLE.upper()):]
+    assert "New pending charges" in html and "New pending charges" in text
+    assert "Some Merchant" in html and "Some Merchant" in text
 
 
 def test_seven_distinct_reasons_are_capped(db_session, monkeypatch):
