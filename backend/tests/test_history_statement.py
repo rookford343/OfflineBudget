@@ -42,12 +42,17 @@ def _statement(db, user, days=7):
 
 
 def test_math_lines_sign_subtracted_rows_and_add_up():
-    old = _receipt(_row("start", "Low", "2000"), _row("subtract", "Bills", "800"), _row("result", "Total", "1200"))
-    new = _receipt(_row("start", "Low", "1900"), _row("subtract", "Bills", "850"), _row("result", "Total", "1050"))
+    old = _receipt(_row("start", "Low", "2000"), _row("subtract", "Bills", "800"),
+                   _row("add", "Fees", "50"), _row("result", "Total", "1250"))
+    new = _receipt(_row("start", "Low", "1900"), _row("subtract", "Bills", "850"),
+                   _row("add", "Fees", "50"), _row("result", "Total", "1100"))
     lines = math_lines(old, new)
+    # Fees is unchanged and dropped. Low and Bills both moved and are shown,
+    # Bills signed negative because it's a subtracted row.
     assert [(ln.label, ln.old, ln.new) for ln in lines] == [
         ("Low", D("2000"), D("1900")), ("Bills", D("-800"), D("-850"))]
-    assert sum(ln.new for ln in lines) == D("1050")
+    old_total, new_total = D("1250"), D("1100")
+    assert sum((ln.new or D("0")) - (ln.old or D("0")) for ln in lines) == new_total - old_total
 
 
 def test_math_lines_skip_result_and_divide_rows():

@@ -147,9 +147,9 @@ def _signed(row: schemas.ExplainRow | None) -> Decimal | None:
 def math_lines(old: schemas.Explanation, new: schemas.Explanation) -> list[schemas.HistoryMathLine]:
     """Every receipt line of both readings whose own amount moved, or that is
     one-sided (added/removed), or whose children changed under an unchanged
-    net -- signed so the new amounts add up to the new figure, in the order
-    `diff_explanations` walks them. A line's parts are its child lines that
-    changed, signed like the line itself."""
+    net -- signed so each line's change (new minus old) sums to the figure's
+    overall change, in the order `diff_explanations` walks them. A line's
+    parts are its child lines that changed, signed like the line itself."""
     old_rows, new_rows = _rows(old), _rows(new)
     lines: list[schemas.HistoryMathLine] = []
     for key in [*old_rows, *(k for k in new_rows if k not in old_rows)]:
