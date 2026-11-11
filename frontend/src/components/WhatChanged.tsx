@@ -3,7 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { History, X, ChevronRight, ChevronDown } from "lucide-react";
 import { historyApi, type HistoryStatementRow } from "../api";
-import { dayLabel, itemMoney, mathFigures, periodLine, sameFigure, signedMoney } from "../lib/historyMoney";
+import { dayLabel, displayHeadline, itemMoney, mathFigures, periodLine, sameFigure, signedMoney } from "../lib/historyMoney";
 import { maskMoneyText } from "../lib/maskMoney";
 import { useBalancesHidden } from "../store/balanceVisibility";
 
@@ -39,7 +39,10 @@ function RowDetail({ row, title, hidden }: { row: HistoryStatementRow; title: st
               <li key={ki}>
                 {k.head ? (
                   <>
-                    <span className="break-words">{maskMoneyText(hidden, capFirst(k.head))}</span>
+                    {/* events[0]'s head is what the row's own collapsed headline is built from
+                        (see statement_headline in metric_diff.py), so repeating it here says
+                        nothing new — only events[1:] ("+ N more") are new information. */}
+                    {ki > 0 && <span className="break-words">{maskMoneyText(hidden, capFirst(k.head))}</span>}
                     <ul className="mt-0.5 space-y-0.5 list-none">
                       {k.items.map((it, ii) => (
                         <li key={ii} className="flex justify-between gap-2">
@@ -154,7 +157,7 @@ function Statement({ metricKey, title }: { metricKey: string; title: string }) {
                     <span className="block text-xs text-gray-400">{clock(r.taken_at)}</span>
                     <span className="flex items-center gap-1 text-gray-800 dark:text-gray-200">
                       {expandable && (isOpen ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />)}
-                      <span className="break-words min-w-0">{maskMoneyText(hidden, r.headline)}</span>
+                      <span className="break-words min-w-0">{maskMoneyText(hidden, displayHeadline(r.headline, r.events))}</span>
                     </span>
                   </span>
                   <span className="text-right">

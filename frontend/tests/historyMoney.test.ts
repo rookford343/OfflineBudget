@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { dayLabel, itemMoney, mathFigures, periodLine, sameFigure, signedMoney } from "../src/lib/historyMoney";
+import type { HistoryCause } from "../src/api";
+import { dayLabel, displayHeadline, itemMoney, mathFigures, periodLine, sameFigure, signedMoney } from "../src/lib/historyMoney";
 
 describe("history money display", () => {
   test("hidden mode masks item and signed amounts", () => {
@@ -44,5 +45,27 @@ describe("statement wording", () => {
   test("hidden mode masks statement figures", () => {
     expect(periodLine(true, "-906.00", "2000.00", "")).not.toMatch(/\d/);
     expect(mathFigures(true, "2032.00", "1894.00")).not.toMatch(/\d/);
+  });
+});
+
+describe("displayHeadline", () => {
+  const cause = (items: { name: string; amount: string | null }[]): HistoryCause => (
+    { text: "", amount: null, head: "", items }
+  );
+
+  test("one event, one item appends the item's name", () => {
+    const events = [cause([{ name: "Example Coffee Co", amount: "-4.50" }])];
+    expect(displayHeadline("Pending charges changed", events)).toBe("Pending charges changed: Example Coffee Co");
+  });
+  test("one event, two items leaves the headline unchanged", () => {
+    const events = [cause([{ name: "Example Coffee Co", amount: "-4.50" }, { name: "Example Grocer", amount: "-32.10" }])];
+    expect(displayHeadline("Pending charges changed", events)).toBe("Pending charges changed");
+  });
+  test("two events leaves the headline unchanged", () => {
+    const events = [cause([{ name: "Example Coffee Co", amount: "-4.50" }]), cause([{ name: "Example Grocer", amount: "-32.10" }])];
+    expect(displayHeadline("Pending charges changed", events)).toBe("Pending charges changed");
+  });
+  test("zero events leaves the headline unchanged", () => {
+    expect(displayHeadline("Balance updated", [])).toBe("Balance updated");
   });
 });

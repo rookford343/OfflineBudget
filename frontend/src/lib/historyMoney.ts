@@ -1,5 +1,6 @@
 import { fmt } from "./utils";
 import { maskIfHidden } from "../store/balanceVisibility";
+import type { HistoryCause } from "../api";
 
 // Display only: the backend's signed decimal string picks the sign, fmt()
 // formats the magnitude. No arithmetic on the figure.
@@ -40,6 +41,16 @@ export function dayLabel(day: string, today: Date): string {
     && date.getMonth() === today.getMonth() && date.getDate() === today.getDate();
   const md = date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   return isToday ? `Today, ${md}` : `${date.toLocaleDateString("en-US", { weekday: "short" })}, ${md}`;
+}
+
+// A row's collapsed headline, naming the one item it's about when there's
+// only one. The multi-item and multi-event cases stay as-is; amounts stay in
+// the expanded detail only, never in a headline.
+export function displayHeadline(headline: string, events: HistoryCause[]): string {
+  if (events.length === 1 && events[0].items.length === 1) {
+    return `${headline}: ${events[0].items[0].name}`;
+  }
+  return headline;
 }
 
 // One math line's before/after, worded for a line that appeared, vanished or held.
