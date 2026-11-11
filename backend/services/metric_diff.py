@@ -145,9 +145,11 @@ def _signed(row: schemas.ExplainRow | None) -> Decimal | None:
 
 
 def math_lines(old: schemas.Explanation, new: schemas.Explanation) -> list[schemas.HistoryMathLine]:
-    """Every receipt line of both readings, signed so the new amounts add up to
-    the new figure, in the order `diff_explanations` walks them. A line's parts
-    are its child lines that changed, signed like the line itself."""
+    """Every receipt line of both readings whose own amount moved, or that is
+    one-sided (added/removed), or whose children changed under an unchanged
+    net -- signed so the new amounts add up to the new figure, in the order
+    `diff_explanations` walks them. A line's parts are its child lines that
+    changed, signed like the line itself."""
     old_rows, new_rows = _rows(old), _rows(new)
     lines: list[schemas.HistoryMathLine] = []
     for key in [*old_rows, *(k for k in new_rows if k not in old_rows)]:
@@ -157,8 +159,11 @@ def math_lines(old: schemas.Explanation, new: schemas.Explanation) -> list[schem
             schemas.HistoryMathPart(label=c.label, delta=sign * ((c.new or Decimal("0")) - (c.old or Decimal("0"))))
             for c in _child_changes(before, after, breakdown_only=True)
         ]
+        old_amt, new_amt = _signed(before), _signed(after)
+        if before is not None and after is not None and old_amt == new_amt and not parts:
+            continue
         lines.append(schemas.HistoryMathLine(
-            label=key[0], old=_signed(before), new=_signed(after), parts=parts,
+            label=key[0], old=old_amt, new=new_amt, parts=parts,
         ))
     return lines
 

@@ -43,23 +43,24 @@ def _statement(db, user, days=7):
 
 def test_math_lines_sign_subtracted_rows_and_add_up():
     old = _receipt(_row("start", "Low", "2000"), _row("subtract", "Bills", "800"), _row("result", "Total", "1200"))
-    new = _receipt(_row("start", "Low", "1900"), _row("subtract", "Bills", "800"), _row("result", "Total", "1100"))
+    new = _receipt(_row("start", "Low", "1900"), _row("subtract", "Bills", "850"), _row("result", "Total", "1050"))
     lines = math_lines(old, new)
     assert [(ln.label, ln.old, ln.new) for ln in lines] == [
-        ("Low", D("2000"), D("1900")), ("Bills", D("-800"), D("-800"))]
-    assert sum(ln.new for ln in lines) == D("1100")
+        ("Low", D("2000"), D("1900")), ("Bills", D("-800"), D("-850"))]
+    assert sum(ln.new for ln in lines) == D("1050")
 
 
 def test_math_lines_skip_result_and_divide_rows():
     old = _receipt(_row("start", "Low", "700"), _row("divide", "Weeks", "4"), _row("result", "Total", "175"))
-    assert [ln.label for ln in math_lines(old, old)] == ["Low"]
+    new = _receipt(_row("start", "Low", "750"), _row("divide", "Weeks", "4"), _row("result", "Total", "188"))
+    assert [ln.label for ln in math_lines(old, new)] == ["Low"]
 
 
 def test_math_lines_line_on_one_side():
     old = _receipt(_row("start", "Low", "100"), _row("add", "Gone", "30"))
     new = _receipt(_row("start", "Low", "100"), _row("add", "Fresh", "20"))
     assert [(ln.label, ln.old, ln.new) for ln in math_lines(old, new)] == [
-        ("Low", D("100"), D("100")), ("Gone", D("30"), None), ("Fresh", None, D("20"))]
+        ("Gone", D("30"), None), ("Fresh", None, D("20"))]
 
 
 def test_math_lines_parts_are_the_changed_children():
@@ -85,6 +86,20 @@ def test_math_lines_parts_skip_one_sided_informational_children():
     parts = {p.label: p.delta for p in math_lines(old, new)[0].parts}
     # Informational "Moved" (old only) and "Shown" (new only) are not arithmetic.
     assert parts == {"Real": D("-10"), "Fresh": D("20"), "Both": D("4")}
+
+
+def test_math_lines_keeps_an_unchanged_line_whose_children_shifted():
+    old = _receipt(_row("start", "Low", "1000", kids=[("A", "100"), ("B", "200")]))
+    new = _receipt(_row("start", "Low", "1000", kids=[("A", "150"), ("B", "150")]))
+    lines = math_lines(old, new)
+    assert [(ln.label, ln.old, ln.new) for ln in lines] == [("Low", D("1000"), D("1000"))]
+    assert {p.label: p.delta for p in lines[0].parts} == {"A": D("50"), "B": D("-50")}
+
+
+def test_math_lines_drops_a_line_with_no_change_and_no_parts():
+    old = _receipt(_row("start", "Flat", "500"))
+    new = _receipt(_row("start", "Flat", "500"))
+    assert math_lines(old, new) == []
 
 
 def test_statement_headline_drops_line_causes_when_an_event_exists():
