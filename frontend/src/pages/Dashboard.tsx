@@ -53,6 +53,51 @@ function nextCardDueOccurrence(dueDay: number, today: Date): { date: Date; days:
   return { date: candidate, days };
 }
 
+type LowestBalanceRow = { label: string; amount: number; date: string; isLookaheadRow: boolean };
+
+/** [{ label, amount, date, isLookaheadRow }, ...] (0, 1, or 2 rows) for the
+ *  "lowest balance" lines under the Household Snapshot cards. Ported
+ *  line-for-line from backend/services/summary_generator.py's
+ *  _lowest_balance_rows (lines 52-78), plus the move-to-checking condition
+ *  from _move_to_checking_line (lines 32-39) applied by the caller, so the
+ *  dashboard and the daily email never disagree on which rows show, in what
+ *  order, or whether next month's low and the 3-month low get merged.
+ *  `isLookaheadRow` marks the row Python's `_is_lookahead_row` would pick out
+ *  (the one covering "the next 3 months") -- only that row gets the
+ *  cushion/danger coloring and warning phrase. */
+function lowestBalanceRows(snapshot: any): LowestBalanceRow[] {
+  const lookaheadDate: string | null = snapshot.lookahead_minimum_date ?? null;
+  const nextMonthDate: string | null = snapshot.next_month_minimum_date ?? null;
+  if (lookaheadDate == null && nextMonthDate == null) return [];
+
+  const quarterRow: LowestBalanceRow | null = lookaheadDate != null
+    ? { label: "Lowest in the next 3 months", amount: parseFloat(snapshot.lookahead_minimum), date: lookaheadDate, isLookaheadRow: true }
+    : null;
+
+  if (nextMonthDate == null) return quarterRow ? [quarterRow] : [];
+
+  const nmLabel = snapshot.next_month_label || "next month";
+  const nextMonthAmount = parseFloat(snapshot.next_month_minimum);
+  const same = quarterRow != null && nextMonthDate === lookaheadDate && nextMonthAmount === quarterRow.amount;
+  if (same) {
+    return [{
+      label: `Lowest next month (${nmLabel}) and in the next 3 months`,
+      amount: nextMonthAmount,
+      date: nextMonthDate,
+      isLookaheadRow: true,
+    }];
+  }
+
+  const rows: LowestBalanceRow[] = [{
+    label: `Lowest next month (${nmLabel})`,
+    amount: nextMonthAmount,
+    date: nextMonthDate,
+    isLookaheadRow: false,
+  }];
+  if (quarterRow) rows.push(quarterRow);
+  return rows;
+}
+
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
 
 Key sections:
@@ -452,36 +497,55 @@ export default function Dashboard() {
               </div>
               {/* A warning signal, not a spending figure: Safety Margin reads
                   next month's low, so a dip further out shows here instead --
-                  plain when ok, amber below the user's safety cushion, red
-                  below $0 (status decided by the backend's lookahead_status). */}
-              {snapshot.lookahead_minimum_date && (() => {
+                  plain (sign-colored) when ok, amber below the user's safety
+                  cushion, red below $0 on the 3-month row (status decided by
+                  the backend's lookahead_status). When next month's low is a
+                  distinct date/amount from the 3-month low, it gets its own
+                  row above the 3-month one -- see lowestBalanceRows() --
+                  with a "move money into checking" line right under the
+                  first row when the backend says next month dips below $0. */}
+              {lowestBalanceRows(snapshot).map((row, i) => {
                 const status = snapshot.lookahead_status ?? "ok";
-                const figureClass = status === "danger"
-                  ? "text-red-600 dark:text-red-400"
-                  : status === "warning"
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-gray-700 dark:text-gray-200";
+                const warn = row.isLookaheadRow && status !== "ok";
+                const figureClass = warn
+                  ? status === "danger"
+                    ? "text-red-600 dark:text-red-400"
+                    : "text-amber-600 dark:text-amber-400"
+                  : row.amount < 0
+                    ? "text-red-600 dark:text-red-400"
+                    : "text-green-600 dark:text-green-400";
                 return (
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-3 text-center">
-                    Lowest projected balance in the next 3 months:{" "}
-                    <span className={`font-semibold tabular-nums ${figureClass}`}>
-                      {maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.lookahead_minimum)))}
-                    </span>{" "}
-                    on {new Date(snapshot.lookahead_minimum_date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
-                    <span className="inline-flex align-middle">
-                      <HowCalculated title="3-month lowest point" explanations={[snapshot.explain?.lookahead_minimum]} />
-                      <WhatChanged metric={{ key: "lookahead_minimum", title: "3-month lowest point" }} />
-                    </span>
-                    {status !== "ok" && (
-                      <span className={`block mt-0.5 font-medium ${figureClass}`}>
-                        {status === "danger"
-                          ? "below $0"
-                          : `below your ${maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.safety_cushion)))} cushion`}
-                      </span>
+                  <div key={row.label}>
+                    <p className={`text-xs text-gray-500 dark:text-gray-400 ${i === 0 ? "mt-3" : "mt-1"} text-center`}>
+                      {row.label}:{" "}
+                      <span className={`font-semibold tabular-nums ${figureClass}`}>
+                        {maskIfHidden(balancesHidden, fmt(row.amount))}
+                      </span>{" "}
+                      on {new Date(row.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
+                      {row.isLookaheadRow && (
+                        <span className="inline-flex align-middle">
+                          <HowCalculated title="3-month lowest point" explanations={[snapshot.explain?.lookahead_minimum]} />
+                          <WhatChanged metric={{ key: "lookahead_minimum", title: "3-month lowest point" }} />
+                        </span>
+                      )}
+                      {warn && (
+                        <span className={`block mt-0.5 font-medium ${figureClass}`}>
+                          {status === "danger"
+                            ? "below $0"
+                            : `below your ${maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.safety_cushion)))} cushion`}
+                        </span>
+                      )}
+                    </p>
+                    {i === 0 && snapshot.next_month_minimum_date && parseFloat(snapshot.move_to_checking_needed) > 0 && (
+                      <p className="text-[11px] text-red-600 dark:text-red-400 mt-1 text-center">
+                        Move {maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.move_to_checking_needed)))} into checking by{" "}
+                        {new Date(new Date(snapshot.next_month_minimum_date + "T12:00:00").getFullYear(), new Date(snapshot.next_month_minimum_date + "T12:00:00").getMonth(), 1)
+                          .toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </p>
                     )}
-                  </p>
+                  </div>
                 );
-              })()}
+              })}
             </div>
           )}
       {/* Spans the row while the band is two-up: wrapping alone into a
