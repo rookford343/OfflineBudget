@@ -123,21 +123,18 @@ def _best_recurring_match(
         if not (name_hits or history_hits):
             continue
         if item.is_floating and item.frequency == models.RecurringFrequency.monthly:
-            # No fixed date to be "near" -- a floating item only has to be
-            # due somewhere in the transaction's calendar month. A monthly
-            # item fires exactly once in any month its start/end bounds
-            # cover, so this checks those bounds against on's month instead
-            # of looping _fires_on over every day -- is_active is deliberately
-            # left out here (unlike _fires_on) because every caller already
-            # queries only is_active==True candidates before reaching this
-            # function. Scoped to monthly per the floating-expenses design
-            # doc; other frequencies fall through to the window check below.
+            # No fixed date to be "near" -- a floating item only has to fire
+            # somewhere in the transaction's calendar month. Loops _fires_on
+            # over every day of that month rather than a +/-window check, so
+            # the floating path stays under the exact same is_active/
+            # start_date/end_date gate every other candidate is subject to.
+            # Scoped to monthly per the floating-expenses design doc; other
+            # frequencies fall through to the window check below.
             days_in_month = monthrange(on.year, on.month)[1]
-            month_start = date(on.year, on.month, 1)
-            month_end = date(on.year, on.month, days_in_month)
-            if item.start_date > month_end:
-                continue
-            if item.end_date and item.end_date < month_start:
+            if not any(
+                _fires_on(item, date(on.year, on.month, day))
+                for day in range(1, days_in_month + 1)
+            ):
                 continue
         else:
             window = _MATCH_WINDOW_DAYS if name_hits else 3
