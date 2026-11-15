@@ -50,12 +50,20 @@ def _blank_snapshot(**overrides) -> BudgetSnapshot:
         next_month_minimum=Decimal("0"),
         next_month_minimum_date=None,
         next_month_label=None,
+        move_to_checking_needed=Decimal("0"),
         explain={},
         cards=[],
         categories=[],
         top_merchants=[],
     )
     defaults.update(overrides)
+    if "move_to_checking_needed" not in overrides:
+        nm_min = defaults["next_month_minimum"]
+        defaults["move_to_checking_needed"] = (
+            _round_up_to_thousand(-nm_min)
+            if defaults["next_month_minimum_date"] is not None and nm_min < 0
+            else Decimal("0.00")
+        )
     return BudgetSnapshot(**defaults)
 
 

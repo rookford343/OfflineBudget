@@ -2039,6 +2039,12 @@ class BudgetSnapshot(BaseModel):
     next_month_minimum: Decimal = Decimal("0")
     next_month_minimum_date: Optional[date] = None
     next_month_label: Optional[str] = None
+    # Rounded UP to the next whole $1,000 -- how the daily email's "Move $Y
+    # into checking by <date>" line is sized (see
+    # services/budget_snapshot._round_up_to_thousand). 0.00 when next month's
+    # low isn't negative. API-additive: defaulted so existing callers/fixtures
+    # keep working unchanged.
+    move_to_checking_needed: Decimal = Decimal("0.00")
     # Receipts for the headline numbers, keyed as in services/budget_snapshot.py.
     explain: dict[str, Explanation] = {}
     cards: list[CardSnapshot]

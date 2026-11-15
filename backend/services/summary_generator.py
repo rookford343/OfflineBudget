@@ -1,7 +1,7 @@
 import calendar
 import html as html_lib
 from datetime import date, datetime, timedelta, timezone
-from decimal import Decimal, ROUND_CEILING
+from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
@@ -9,7 +9,7 @@ from backend.schemas import BankConnectionStatusOut, MonthlySummary, WeeklyDiges
 from backend.services.cushion import cushion_for
 from backend.services.forecast_engine import _next_occurrence_on_or_after
 from backend.services.forecast_walk import standard_walk, walk_risk
-from backend.services.budget_snapshot import compute_budget_snapshot, spending_breakdown
+from backend.services.budget_snapshot import compute_budget_snapshot, spending_breakdown, _round_up_to_thousand  # noqa: F401 -- re-exported so `from backend.services.summary_generator import _round_up_to_thousand` keeps working
 from backend.services.pending import card_pending
 from backend.services.upcoming_bills import upcoming_bills
 from backend.services.primary_account import primary_checking
@@ -29,24 +29,14 @@ def _fmt(v: Decimal) -> str:
     return f"${v:,.2f}"
 
 
-def _round_up_to_thousand(amount: Decimal) -> Decimal:
-    """`amount` (always non-negative here) rounded UP to the next whole
-    $1,000 -- 612.40 -> 1000, 1000.00 -> 1000 (already a multiple, so no
-    bump), 1000.01 -> 2000. Used for "Move $Y into checking" -- Y is sized
-    in whole thousands, not to the cent, because that is how the user
-    actually moves money between accounts."""
-    return (amount / Decimal("1000")).to_integral_value(rounding=ROUND_CEILING) * Decimal("1000")
-
-
 def _move_to_checking_line(snap) -> str | None:
     """"Move $Y into checking by <1st of next month>" when next month's low
-    is projected to dip below $0, else None. Y is the amount that brings
-    that low back to exactly $0, rounded up to the next $1,000."""
-    if snap.next_month_minimum_date is None or snap.next_month_minimum >= 0:
+    is projected to dip below $0, else None. Y is `snap.move_to_checking_needed`,
+    computed once in budget_snapshot.py so the email and dashboard agree."""
+    if snap.next_month_minimum_date is None or snap.move_to_checking_needed <= 0:
         return None
-    move_amount = _round_up_to_thousand(-snap.next_month_minimum)
     move_by = snap.next_month_minimum_date.replace(day=1)
-    return f"Move {_fmt(move_amount)} into checking by {move_by.strftime('%b %-d')}"
+    return f"Move {_fmt(snap.move_to_checking_needed)} into checking by {move_by.strftime('%b %-d')}"
 
 
 def _lowest_balance_rows(snap) -> list[tuple[str, Decimal, date]]:

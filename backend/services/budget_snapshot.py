@@ -321,6 +321,22 @@ def _next_month_minimum(
     return minimum, minimum_date, start, label
 
 
+def _round_up_to_thousand(amount: Decimal) -> Decimal:
+    """`amount` (always non-negative here) rounded UP to the next whole
+    $1,000 -- 612.40 -> 1000, 1000.00 -> 1000 (already a multiple, so no
+    bump), 1000.01 -> 2000. Used for "Move $Y into checking" -- Y is sized
+    in whole thousands, not to the cent, because that is how the user
+    actually moves money between accounts.
+
+    Moved here from summary_generator.py (2026-11-15) so the email and the
+    Dashboard compute `move_to_checking_needed` once, in one place --
+    summary_generator re-exports this name so
+    `from backend.services.summary_generator import _round_up_to_thousand`
+    keeps working for its existing test.
+    """
+    return (amount / Decimal("1000")).to_integral_value(rounding=ROUND_CEILING) * Decimal("1000")
+
+
 DEFAULT_SAFETY_CUSHION = DEFAULT_CUSHION
 
 
@@ -612,6 +628,11 @@ def compute_budget_snapshot(
     next_month_min, next_month_min_date, _next_month_start, next_month_label = _next_month_minimum(
         display_window, as_of,
     )
+    move_to_checking_needed = (
+        _round_up_to_thousand(-next_month_min)
+        if next_month_min_date is not None and next_month_min < 0
+        else Decimal("0.00")
+    )
     safety_cushion = (
         cushion_for(user)
     )
@@ -882,6 +903,7 @@ def compute_budget_snapshot(
         next_month_minimum=next_month_min,
         next_month_minimum_date=next_month_min_date,
         next_month_label=next_month_label,
+        move_to_checking_needed=move_to_checking_needed,
         explain=explain,
         cards=cards,
         categories=categories,

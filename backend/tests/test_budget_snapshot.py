@@ -158,6 +158,51 @@ def test_no_active_cards_gives_zero_card_balance(db_session):
     assert snapshot.left_to_spend == Decimal("0.00")
 
 
+def test_move_to_checking_needed_rounds_up_when_next_month_low_is_negative(db_session):
+    user = models.User(username="movecheck1", hashed_password="x", display_name="MoveCheck1")
+    db_session.add(user)
+    db_session.flush()
+    account = models.Account(
+        user_id=user.id, name="Main Checking", type=models.AccountType.checking,
+        current_balance=Decimal("1000.00"),
+    )
+    db_session.add(account)
+    db_session.flush()
+    # One-off bill inside next month (November, relative to as_of Oct 29)
+    # deep enough to push the checking balance negative: 1000.00 - 1612.40
+    # = -612.40.
+    db_session.add(models.PlannedExpense(
+        user_id=user.id, account_id=account.id, name="Big one-off bill",
+        amount=Decimal("1612.40"), expected_date=date(2026, 11, 10),
+    ))
+    db_session.commit()
+
+    snap = compute_budget_snapshot(db_session, user, account.id, as_of=date(2026, 10, 29))
+
+    assert snap.next_month_minimum == Decimal("-612.40")
+    assert snap.move_to_checking_needed == Decimal("1000.00")
+
+
+def test_move_to_checking_needed_is_zero_when_next_month_low_is_non_negative(db_session):
+    user = models.User(username="movecheck2", hashed_password="x", display_name="MoveCheck2")
+    db_session.add(user)
+    db_session.flush()
+    account = models.Account(
+        user_id=user.id, name="Main Checking", type=models.AccountType.checking,
+        current_balance=Decimal("5000.00"),
+    )
+    db_session.add(account)
+    db_session.commit()
+
+    snap = compute_budget_snapshot(db_session, user, account.id, as_of=date(2026, 10, 29))
+
+    # No bills/expenses seeded, so next month's low is just the standing
+    # checking balance -- non-negative, so nothing needs to move.
+    assert snap.next_month_minimum_date is not None
+    assert snap.next_month_minimum >= 0
+    assert snap.move_to_checking_needed == Decimal("0.00")
+
+
 def test_pending_charges_move_left_to_spend_only(db_session):
     """A pending charge is money already spent, so it must reduce Left to
     Spend by exactly its amount -- Left to Spend subtracts pending_charges
