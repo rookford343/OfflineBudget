@@ -202,6 +202,18 @@ def build_month_base(
         ).all()
     }
 
+    # A floating item's user has marked "not this month" -- excluded from
+    # every list below exactly like a normal non-firing day, so Leftover,
+    # the Budget page, and card_bill_occurrences all agree it didn't happen.
+    skipped_item_ids: set[int] = {
+        s.recurring_item_id
+        for s in db.query(models.RecurringSkip).filter(
+            models.RecurringSkip.user_id == user.id,
+            models.RecurringSkip.year == year,
+            models.RecurringSkip.month == month,
+        ).all()
+    }
+
     income_items_all = [i for i in items if i.type == models.RecurringType.income]
     boosts = ss_paycheck_boosts(db, user, income_items_all, year, month)
 
@@ -209,6 +221,8 @@ def build_month_base(
     for item in items:
         for d in days:
             if not _fires_on(item, d):
+                continue
+            if item.id in skipped_item_ids:
                 continue
             override = overrides.get((item.id, d))
             amount = override if override is not None else item.amount

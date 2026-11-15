@@ -909,6 +909,13 @@ class RecurringLinkResult(BaseModel):
     category_name: Optional[str] = None
 
 
+class RecurringSkipBody(BaseModel):
+    """Body for POST/DELETE /recurring/{item_id}/skip -- the (year, month)
+    a floating item's occurrence is marked 'not this month'."""
+    year: int
+    month: int
+
+
 class CategoryRolloverUpdate(BaseModel):
     rollover_enabled: bool
 

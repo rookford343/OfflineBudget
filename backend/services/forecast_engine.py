@@ -1186,6 +1186,18 @@ def build_forecast(
         if t.recurring_item_id:
             actual_by_ri.setdefault(t.recurring_item_id, []).append(t.date)
 
+    # A floating item's user has marked "not this month" -- skip projecting
+    # it for that (item, year, month) only, the same way month_base.py's
+    # build_month_base excludes it from monthly_bills, so the Forecast tab
+    # and the Recurring page agree it didn't happen.
+    skipped_months: set[tuple[int, int, int]] = {
+        (s.recurring_item_id, s.year, s.month)
+        for s in db.query(models.RecurringSkip).filter(
+            models.RecurringSkip.user_id == user_id,
+            models.RecurringSkip.recurring_item_id.in_([item.id for item in recurring_items]),
+        ).all()
+    }
+
     # Draw the wage base down for wages already RECEIVED before today, before
     # projecting forward -- from today onward the day walk does its own drawdown.
     if ss is not None:
@@ -1255,6 +1267,8 @@ def build_forecast(
             if not fires_projected:
                 continue
             if item.id in adj_actual_recurring_ids:
+                continue
+            if (item.id, current.year, current.month) in skipped_months:
                 continue
 
             # Suppress projected if a linked actual exists for this item but arrived on a

@@ -394,6 +394,49 @@ def _assert_account_owned(db: Session, user_id: int, account_id: int) -> None:
         raise HTTPException(status_code=404, detail="Account not found")
 
 
+@router.post("/{item_id}/skip", status_code=status.HTTP_201_CREATED)
+def skip_month(
+    item_id: int,
+    body: schemas.RecurringSkipBody,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Mark a floating item's occurrence 'not this month' -- excludes it from
+    build_month_base's monthly_bills and build_forecast's day walk for that
+    (year, month) only. Idempotent: creating a skip that already exists is a
+    no-op, not an error, so a double-click or a retried request doesn't 409."""
+    item = _get_or_404(db, user.id, item_id)
+    existing = db.query(models.RecurringSkip).filter(
+        models.RecurringSkip.recurring_item_id == item.id,
+        models.RecurringSkip.year == body.year,
+        models.RecurringSkip.month == body.month,
+    ).first()
+    if not existing:
+        db.add(models.RecurringSkip(
+            user_id=user.id, recurring_item_id=item.id,
+            year=body.year, month=body.month,
+        ))
+        db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{item_id}/skip", status_code=status.HTTP_204_NO_CONTENT)
+def unskip_month(
+    item_id: int,
+    year: int,
+    month: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    item = _get_or_404(db, user.id, item_id)
+    db.query(models.RecurringSkip).filter(
+        models.RecurringSkip.recurring_item_id == item.id,
+        models.RecurringSkip.year == year,
+        models.RecurringSkip.month == month,
+    ).delete()
+    db.commit()
+
+
 @router.post("/{item_id}/link-pattern", response_model=schemas.RecurringLinkResult)
 def link_pattern_to_item(
     item_id: int,
