@@ -326,6 +326,10 @@ class RecurringItem(Base):
     # already answered "Keep" for; the prompt stays quiet until a newer one.
     amount_varies: Mapped[bool] = mapped_column(Boolean, default=False)
     drift_dismissed_through: Mapped[date | None] = mapped_column(Date)
+    # When true, the checking/card matchers (Task 2/4) accept the real
+    # transaction anywhere in the item's due month instead of requiring it
+    # near day_of_month.
+    is_floating: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
@@ -540,6 +544,7 @@ class CreditCardTransaction(Base):
     card_id: Mapped[int] = mapped_column(Integer, ForeignKey("credit_cards.id"), nullable=False)
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
+    recurring_item_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("recurring_items.id"))
     import_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_card_imports.id"))
     date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)  # positive=charge, negative=refund/credit
@@ -767,6 +772,26 @@ class BillAmountOverride(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     recurring_item: Mapped["RecurringItem"] = relationship()
+
+
+class RecurringSkip(Base):
+    """One month a floating RecurringItem is marked 'not this month' instead
+    of matched to a real transaction. Keyed to (recurring_item_id, year,
+    month) rather than a date -- a floating item has no fixed due date to
+    key against, just the month it's expected to fire in."""
+    __tablename__ = "recurring_skips"
+    __table_args__ = (
+        UniqueConstraint("recurring_item_id", "year", "month"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    recurring_item_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("recurring_items.id"), nullable=False,
+    )
+    year: Mapped[int] = mapped_column(Integer, nullable=False)
+    month: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class ScenarioOverride(Base):

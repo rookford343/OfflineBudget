@@ -318,6 +318,7 @@ class RecurringCreate(BaseModel):
     # the 17th) -- drives services/bill_prompts.py's "Bills to confirm"
     # prompts. None means the item never prompts.
     statement_day: Optional[int] = None
+    is_floating: bool = False
 
     @field_validator("day_of_month")
     @classmethod
@@ -351,6 +352,7 @@ class RecurringUpdate(BaseModel):
     notes: Optional[str] = None
     statement_day: Optional[int] = None
     amount_varies: Optional[bool] = None
+    is_floating: Optional[bool] = None
 
     @field_validator("statement_day")
     @classmethod
@@ -379,6 +381,7 @@ class RecurringOut(BaseModel):
     notes: Optional[str]
     statement_day: Optional[int] = None
     amount_varies: bool = False
+    is_floating: bool = False
 
 
 class UpcomingBillOut(BaseModel):

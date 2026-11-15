@@ -325,6 +325,13 @@ def upgrade_schema():
         "ALTER TABLE users ADD COLUMN pretax_per_paycheck NUMERIC(14,2)",
         "ALTER TABLE users ADD COLUMN tax_withholding_as_of DATE",
         "ALTER TABLE users ADD COLUMN safety_cushion NUMERIC(14,2)",
+        # Floating recurring expenses -- see models.py's RecurringItem.is_floating
+        # and CreditCardTransaction.recurring_item_id, and
+        # docs/superpowers/specs/2026-11-15-floating-recurring-expenses-design.md.
+        # RecurringSkip is a brand-new table, created by create_all -- no
+        # ALTER entry needed for it.
+        "ALTER TABLE recurring_items ADD COLUMN is_floating BOOLEAN DEFAULT 0",
+        "ALTER TABLE credit_card_transactions ADD COLUMN recurring_item_id INTEGER REFERENCES recurring_items(id)",
     ]
     with engine.connect() as conn:
         for s in stmts:
