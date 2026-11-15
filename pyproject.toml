@@ -2,7 +2,7 @@
 name = "offlinebudget"
 version = "0.1.0"
 description = "Forecasting-first household budget tracker you host yourself"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11.5,<3.12"
 # Direct dependencies, pinned exactly. uv.lock pins every transitive one and
 # records a SHA-256 for each file; installs that don't match fail.
 dependencies = [
