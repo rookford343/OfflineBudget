@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { recurringApi, accountsApi, categoriesApi, cardsApi, billOverridesApi } from "../api";
+import { recurringApi, accountsApi, categoriesApi, cardsApi, billOverridesApi, householdMembersApi } from "../api";
 import { fmt, fmtDate } from "../lib/utils";
 import { Plus, Pencil, Trash2, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt, CalendarClock } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
@@ -9,6 +9,7 @@ import AmountDrift from "../components/AmountDrift";
 import TriageInbox from "../components/TriageInbox";
 import RecurringSummaryStrip from "../components/RecurringSummaryStrip";
 import RecurringCategoryRollup from "../components/RecurringCategoryRollup";
+import RecurringOwnerRollup from "../components/RecurringOwnerRollup";
 import { CategoryOptions, AccountOptions, RecurringOptions } from "../lib/selectOptions";
 import { sortCategoryList, byName } from "../lib/selectOptions";
 
@@ -21,7 +22,7 @@ function endMonthLabel(iso: string): string {
   return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
 }
 
-const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "", amount_varies: false, is_floating: false };
+const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", owner_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "", amount_varies: false, is_floating: false };
 
 /** Next occurrence of a monthly item's due day, on or after today.
  *  Only monthly items get inline actual-amount entry: yearly and quarterly
@@ -164,6 +165,7 @@ export default function Recurring() {
   const { data: accounts = [] } = useQuery({ queryKey: ["accounts"], queryFn: accountsApi.list });
   const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoriesApi.list });
   const { data: cards = [] } = useQuery<any[]>({ queryKey: ["cards"], queryFn: cardsApi.list });
+  const { data: householdMembers = [] } = useQuery<any[]>({ queryKey: ["household-members"], queryFn: householdMembersApi.list });
   const activeCards = (cards as any[]).filter((c: any) => c.is_active);
   const allCats = sortCategoryList(categories.flatMap((c: any) => [c, ...(c.children ?? [])]), categories as any[]);
 
@@ -187,14 +189,33 @@ export default function Recurring() {
   const createMut = useMutation({ mutationFn: recurringApi.create, onSuccess: done });
   const updateMut = useMutation({ mutationFn: ({ id, data }: any) => recurringApi.update(id, data), onSuccess: done });
   const deleteMut = useMutation({ mutationFn: recurringApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setDeleteId(null); } });
+  // "+ Add person" in the Owner select: creates the household member, then
+  // selects it on the open form the same way a newly-added category or
+  // account would be picked up -- the mutation's onSuccess writes straight
+  // into `form.owner_id` rather than requiring a second selection step.
+  const createOwnerMut = useMutation({
+    mutationFn: (name: string) => householdMembersApi.create({ name }),
+    onSuccess: (newMember: any) => {
+      qc.invalidateQueries({ queryKey: ["household-members"] });
+      setForm((f) => ({ ...f, owner_id: String(newMember.id) }));
+    },
+  });
+  function handleOwnerChange(value: string) {
+    if (value === "__add_person__") {
+      const name = window.prompt("Household member's name:");
+      if (name && name.trim()) createOwnerMut.mutate(name.trim());
+      return;
+    }
+    setForm({ ...form, owner_id: value });
+  }
 
   function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["amount-drift"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setShowForm(false); setEditItem(null); }
   function openNew() { setForm({ ...emptyForm, account_id: accounts[0]?.id?.toString() ?? "" }); setEditItem(null); setShowForm(true); }
-  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "", amount_varies: !!i.amount_varies, is_floating: !!i.is_floating }); setShowForm(true); }
+  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), owner_id: String(i.owner_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "", amount_varies: !!i.amount_varies, is_floating: !!i.is_floating }); setShowForm(true); }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null, is_floating: form.frequency === "monthly" && !!form.is_floating };
+    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, owner_id: form.owner_id ? parseInt(form.owner_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null, is_floating: form.frequency === "monthly" && !!form.is_floating };
     if (editItem) updateMut.mutate({ id: editItem.id, data });
     else createMut.mutate(data);
   }
@@ -405,7 +426,10 @@ export default function Recurring() {
         onShiftMonth={shiftMonth}
       />
 
-      <RecurringCategoryRollup groups={breakdown?.by_category ?? []} />
+      <div className="grid md:grid-cols-2 gap-6">
+        <RecurringCategoryRollup groups={breakdown?.by_category ?? []} />
+        <RecurringOwnerRollup groups={breakdown?.by_owner ?? []} />
+      </div>
 
       {/* Ongoing vs. temporary. A device payment that rolls off in 8 months
           isn't what life costs -- blending the two overstates the future. */}
@@ -641,6 +665,14 @@ export default function Recurring() {
                   <option value="">None</option>
                   <CategoryOptions categories={categories as any[]}
                     type={form.type === "credit_card_payment" ? "expense" : form.type} />
+                </select>
+              </div>
+              <div>
+                <label className="label">Owner</label>
+                <select className="input" value={form.owner_id} onChange={e => handleOwnerChange(e.target.value)} disabled={createOwnerMut.isPending}>
+                  <option value="">Family</option>
+                  {byName(householdMembers as any[]).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  <option value="__add_person__">+ Add person</option>
                 </select>
               </div>
               <div>

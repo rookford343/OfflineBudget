@@ -147,6 +147,15 @@ def get_breakdown(
             models.Category.user_id == user.id,
         ).all()
     }
+    # Scoped to this user only, same reasoning as `categories` above -- an
+    # item's owner_id is looked up through this dict, so a household member
+    # belonging to someone else (or since deleted) simply misses and the
+    # item falls into Family rather than leaking a foreign member's name.
+    household_members = {
+        m.id: m for m in db.query(models.HouseholdMember).filter(
+            models.HouseholdMember.user_id == user.id,
+        ).all()
+    }
 
     today = date.today()
     ongoing: list[schemas.RecurringBreakdownItem] = []
@@ -156,11 +165,17 @@ def get_breakdown(
     income_monthly = Decimal("0")
     expense_monthly = Decimal("0")
     groups: dict[int | None, dict] = {}
+    owner_groups: dict[int | None, dict] = {}
 
     def _group(group_id: int | None, group_name: str) -> dict:
         return groups.setdefault(group_id, {
             "group_id": group_id, "group_name": group_name,
             "monthly": Decimal("0"), "categories": {}, "items": [],
+        })
+
+    def _owner_group(owner_id: int | None, owner_name: str) -> dict:
+        return owner_groups.setdefault(owner_id, {
+            "owner_id": owner_id, "owner_name": owner_name, "monthly": Decimal("0"), "items": [],
         })
 
     for item in items:
@@ -188,6 +203,17 @@ def get_breakdown(
             # card charges already counted elsewhere, so folding it in here
             # would double-count that spending.
             expense_monthly += monthly
+
+            owner = household_members.get(item.owner_id) if item.owner_id else None
+            if owner is not None:
+                og = _owner_group(owner.id, owner.name)
+            else:
+                # owner_id is None (never tagged) or points at a member that
+                # no longer resolves for this user -- both read as Family.
+                og = _owner_group(None, "Family")
+            og["items"].append(out)
+            og["monthly"] += monthly
+
             cat = categories.get(item.category_id) if item.category_id else None
             if cat is None:
                 g = _group(None, "Unclassified")
@@ -239,6 +265,26 @@ def get_breakdown(
             items=sorted(unclassified["items"], key=lambda i: i.monthly_equivalent, reverse=True),
         ))
 
+    # Family (owner_id=None, including any item whose tagged member no longer
+    # resolves) is popped out and appended last -- same placement as
+    # Unclassified above, and for the same reason: it's the default/fallback
+    # bucket every item starts in, not a deliberately chosen grouping, so it
+    # trails the named owners instead of competing with them for top spot.
+    family = owner_groups.pop(None, None)
+    by_owner = [
+        schemas.RecurringOwnerGroup(
+            owner_id=og["owner_id"], owner_name=og["owner_name"], monthly=og["monthly"],
+            items=sorted(og["items"], key=lambda i: i.monthly_equivalent, reverse=True),
+        )
+        for og in owner_groups.values()
+    ]
+    by_owner.sort(key=lambda g: g.monthly, reverse=True)
+    if family is not None:
+        by_owner.append(schemas.RecurringOwnerGroup(
+            owner_id=None, owner_name="Family", monthly=family["monthly"],
+            items=sorted(family["items"], key=lambda i: i.monthly_equivalent, reverse=True),
+        ))
+
     inactive = [
         schemas.RecurringBreakdownItem(
             id=i.id, name=i.name, amount=i.amount, type=i.type, frequency=i.frequency,
@@ -252,7 +298,7 @@ def get_breakdown(
         ongoing=ongoing, ending=ending, inactive=inactive,
         ongoing_monthly=ongoing_monthly, ending_monthly=ending_monthly,
         income_monthly=income_monthly, expense_monthly=expense_monthly,
-        by_category=by_category,
+        by_category=by_category, by_owner=by_owner,
     )
 
 

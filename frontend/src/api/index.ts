@@ -102,6 +102,14 @@ export const categoriesApi = {
   remove: (id: number) => api.delete(`/categories/${id}`),
 };
 
+// ── Household Members ────────────────────────────────────────────────────────
+export const householdMembersApi = {
+  list: () => api.get("/household-members").then((r) => r.data),
+  create: (data: { name: string }) => api.post("/household-members", data).then((r) => r.data),
+  update: (id: number, data: { name: string }) => api.patch(`/household-members/${id}`, data).then((r) => r.data),
+  remove: (id: number) => api.delete(`/household-members/${id}`),
+};
+
 // ── Recurring ─────────────────────────────────────────────────────────────────
 export const recurringApi = {
   list: (activeOnly = true) => api.get("/recurring", { params: { active_only: activeOnly } }).then((r) => r.data),

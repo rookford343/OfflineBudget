@@ -476,6 +476,26 @@ class RecurringCategoryGroup(BaseModel):
     items: list[RecurringBreakdownItem]
 
 
+class RecurringOwnerGroup(BaseModel):
+    """One owner bucket -- a HouseholdMember, or the synthetic "Family" bucket
+    for owner_id=None -- the "who does this spending belong to" axis of the
+    Recurring page's rollups. Independent from by_category: this groups the
+    same items along a different dimension, not a merge of the two.
+
+    owner_id is None only for Family, which includes every item with no
+    explicit owner -- plus, defensively, any item whose owner_id points at a
+    household member that's since been deleted or belongs to a different
+    user (shouldn't happen given the delete guard on DELETE
+    /household-members/{id}, but falls back to Family rather than dropping
+    the item or crashing if it ever does). Included only when it actually
+    has items, same convention as by_category's Unclassified.
+    """
+    owner_id: Optional[int]
+    owner_name: str
+    monthly: Decimal
+    items: list[RecurringBreakdownItem]
+
+
 class RecurringBreakdown(BaseModel):
     """Recurring commitments split by whether they ever stop.
 
@@ -505,6 +525,14 @@ class RecurringBreakdown(BaseModel):
     # Recurring page's "By category" rollup. Sorted by monthly descending at
     # every level, with a trailing Unclassified group always last.
     by_category: list[RecurringCategoryGroup]
+    # Active expense items only, grouped owner -> bill (one level deep, no
+    # nested category layer) for the Recurring page's "By owner" rollup.
+    # Sorted by monthly descending, with the Family bucket always trailing --
+    # same placement reasoning as by_category's Unclassified: Family is the
+    # default/fallback bucket every item starts in, not a deliberately
+    # chosen grouping, so it trails the named owners instead of competing
+    # with them for the top spot.
+    by_owner: list[RecurringOwnerGroup]
 
 
 # ── Month Summary ─────────────────────────────────────────────────────────────
