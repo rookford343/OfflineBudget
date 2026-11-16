@@ -142,13 +142,33 @@ def test_other_users_accounts_and_items_never_leak_into_contingency(client, db_s
     other_user = models.User(username="cp-other", hashed_password="x", display_name="Other")
     db_session.add(other_user)
     db_session.flush()
+    # savings + is_emergency_fund=True so this account would actually be
+    # picked up by emergency_fund_balance()'s type filter if user_id scoping
+    # were broken -- a checking-type account would be excluded by the type
+    # filter alone and prove nothing about scoping.
     other_account = models.Account(
-        user_id=other_user.id, name="Other Checking", type=models.AccountType.checking,
+        user_id=other_user.id, name="Other Savings", type=models.AccountType.savings,
         is_emergency_fund=True, current_balance=Decimal("999999.00"),
     )
     db_session.add(other_account)
     db_session.flush()
-    _essential_item(db_session, other_user, other_account, name="Other User Item", amount=Decimal("99999.00"))
+    # is_essential=False so this item would actually land in cut_list if
+    # user_id scoping were broken -- an essential item can never enter
+    # cut_list regardless of whose it is, which would make the assertion
+    # below pass even with no scoping at all.
+    _essential_item(
+        db_session, other_user, other_account, name="Other User Item",
+        amount=Decimal("99999.00"), is_essential=False,
+    )
+    other_groceries_cat = models.Category(
+        user_id=other_user.id, name="Groceries", type=models.CategoryType.expense, color="#000000",
+    )
+    db_session.add(other_groceries_cat)
+    db_session.flush()
+    db_session.add(models.BudgetAllocation(
+        user_id=other_user.id, category_id=other_groceries_cat.id, year=date.today().year,
+        month=0, budgeted_amount=Decimal("99999.00"),
+    ))
     db_session.commit()
 
     body = test_client.get("/recurring/contingency").json()
@@ -156,3 +176,22 @@ def test_other_users_accounts_and_items_never_leak_into_contingency(client, db_s
     assert body["floor"] == "0.00"
     assert body["emergency_fund_balance"] == "0.00"
     assert body["cut_list"] == []
+
+
+def test_emergency_fund_balance_and_surplus_computed_correctly(client, db_session):
+    test_client, user, account = client
+    # Essential item makes the floor non-zero, so surplus = balance - floor
+    # actually exercises a subtraction, not just balance-minus-zero.
+    _essential_item(db_session, user, account, amount=Decimal("1000.00"))
+    fund_account = models.Account(
+        user_id=user.id, name="Emergency Fund", type=models.AccountType.savings,
+        is_emergency_fund=True, current_balance=Decimal("10000.00"),
+    )
+    db_session.add(fund_account)
+    db_session.commit()
+
+    body = test_client.get("/recurring/contingency").json()
+
+    assert body["floor"] == "3000.00"
+    assert body["emergency_fund_balance"] == "10000.00"
+    assert body["surplus"] == "7000.00"
