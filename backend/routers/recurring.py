@@ -1,10 +1,12 @@
-from datetime import date
-from decimal import Decimal
+from datetime import date, datetime
+from decimal import ROUND_HALF_UP, Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from backend import models
 from backend import schemas
 from backend.dependencies import get_db, get_current_user
+from backend.services.contingency import emergency_fund_balance as _emergency_fund_balance
+from backend.services.month_base import budget_allocation_total
 from backend.services.recurring_math import monthly_equivalent as _monthly_equivalent
 from backend.routers._shared import owned_or_404
 
@@ -304,6 +306,65 @@ def get_breakdown(
     )
 
 
+# Declared BEFORE /{item_id} on purpose: FastAPI matches routes in
+# declaration order, so the other way round "contingency" is read as an
+# item_id and this endpoint 422s instead of answering.
+@router.get("/contingency", response_model=schemas.ContingencyPlan)
+def get_contingency(
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Floor/surplus/cut-list for "what if income stopped" scenarios.
+
+    floor is 3x essential monthly burn: active essential recurring expenses
+    plus the Groceries budget allocation (groceries are rarely tracked as a
+    recurring item, so the floor would understate real essential spend
+    without it). surplus compares that floor against the emergency fund's
+    actual balance. cut_list is every active non-essential expense, biggest
+    first -- what a scenario can pause to close a shortfall.
+    """
+    items = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == user.id,
+        models.RecurringItem.is_active == True,
+    ).all()
+
+    essential_monthly = Decimal("0")
+    cut_list: list[schemas.ContingencyCutItem] = []
+    for item in items:
+        # Only type == expense counts, same exclusion get_breakdown uses --
+        # credit_card_payment falls through here too, since it pays off card
+        # charges already counted elsewhere and would double-count them.
+        if item.type != models.RecurringType.expense:
+            continue
+        monthly = _monthly_equivalent(item)
+        if item.is_essential:
+            essential_monthly += monthly
+        else:
+            cut_list.append(schemas.ContingencyCutItem(
+                id=item.id, name=item.name, monthly_equivalent=monthly,
+                is_paused=item.contingency_paused_at is not None,
+            ))
+
+    today = date.today()
+    essential_monthly += budget_allocation_total(db, user.id, "Groceries", today.year, today.month)
+    floor = (essential_monthly * 3).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    emergency_fund_balance = _emergency_fund_balance(db, user.id).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP,
+    )
+
+    surplus = (emergency_fund_balance - floor).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    cut_list.sort(key=lambda i: i.monthly_equivalent, reverse=True)
+
+    return schemas.ContingencyPlan(
+        floor=floor,
+        emergency_fund_balance=emergency_fund_balance,
+        surplus=surplus,
+        cut_list=cut_list,
+    )
+
+
 @router.get("/bills-to-confirm", response_model=list[schemas.BillToConfirmOut])
 def get_bills_to_confirm(
     db: Session = Depends(get_db),
@@ -529,6 +590,36 @@ def unskip_month(
         models.RecurringSkip.year == year,
         models.RecurringSkip.month == month,
     ).delete()
+    db.commit()
+
+
+@router.post("/{item_id}/contingency-pause", status_code=status.HTTP_201_CREATED)
+def contingency_pause(
+    item_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Mark an item paused for a contingency scenario -- it stays in
+    get_contingency's cut_list (so its monthly_equivalent is still visible)
+    but with is_paused=True, for the frontend (Task 3) to render as already
+    cut. An essential item can never be paused: it's the floor a scenario is
+    built to protect, not something to cut."""
+    item = _get_or_404(db, user.id, item_id)
+    if item.is_essential:
+        raise HTTPException(status_code=400, detail="Cannot pause an essential item")
+    item.contingency_paused_at = datetime.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/{item_id}/contingency-pause", status_code=status.HTTP_204_NO_CONTENT)
+def contingency_unpause(
+    item_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    item = _get_or_404(db, user.id, item_id)
+    item.contingency_paused_at = None
     db.commit()
 
 

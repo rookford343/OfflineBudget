@@ -54,6 +54,7 @@ SHARED_LAYER = {
     "services/forecast_baseline.py": "the saved start-of-month forecast and Balance Flow's headline figures",
     "services/savings_series.py": "combined savings balance per day for the Forecast chart",
     "services/calc_version.py": "the calculation version",
+    "services/contingency.py": "the emergency fund's balance for contingency planning",
     "services/tax_service.py": "tax estimates, their own domain",
     "services/bank_sync_service.py": "writes synced balances and pending charges",
     "services/plaid_sync_service.py": "writes synced balances and pending charges",

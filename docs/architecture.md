@@ -88,6 +88,7 @@ Paths are under `backend/` unless noted. Names are functions unless noted.
 | Quarter checkpoint conflict | Saved quarter-end balance minus the forecast close, and whether they differ by more than $1 | `checkpoint_delta` (services/forecast_walk.py), `checkpoint_conflict`, on `QuarterSummary` (`_attach_quarter_checkpoints`, routers/forecast.py) | Forecast page |
 | Balance Flow headline | Month-to-date change (last balance through today minus the month's first) and drift from forecast (last balance minus the saved start-of-month forecast for today); drift is blank without a baseline | `balance_flow_figures` (services/forecast_baseline.py) over `build_forecast` and the saved `MonthlyForecastSnapshot`; `GET /forecast/balance-flow` (routers/forecast.py) | Dashboard Balance Flow card |
 | Calculation version | Hand-bumped integer naming the current calculation meaning | `CALC_VERSION` (services/calc_version.py) | Explain panels, changelog below |
+| Contingency plan (floor, emergency fund balance, surplus, cut list) | Floor = 3x essential monthly burn (active essential recurring expenses via `monthly_equivalent`, plus the Groceries budget allocation); emergency fund balance = active savings/money-market accounts flagged `is_emergency_fund`; surplus = balance minus floor; cut list = active non-essential expenses, biggest first | `get_contingency` (routers/recurring.py) over `emergency_fund_balance` (services/contingency.py), `monthly_equivalent` (services/recurring_math.py) and `budget_allocation_total` (services/month_base.py) | Contingency planning page |
 
 ## Shared primitives
 
@@ -279,6 +280,7 @@ Three tests keep the layer from eroding; all run in the normal suite.
   longer matches a violation fails the test. Adding a module to the allowlist needs a line in this
   document: the shared-layer modules are `month_base`, `real_spend`, `pending`, `forecast_walk`,
   `forecast_engine`, `card_payment_model`, `cushion`, `budget_track` (Track Budgets figures), `spending_figures` (Spending averages, direct spend, source splits, discretionary left), `card_spending` (per-card spending this month, balance-only fallback), `savings_series` (combined savings balance), `recurring_math` (monthly equivalent, bill variance), `forecast_baseline` (saved month baseline, Balance Flow figures), `account_balances` (pending-adjusted balances), `net_worth` (assets, liabilities and net worth), `net_position` (Net Position and card cycle figures), `available_to_spend` (Available to Spend and its walk to Left to Spend), `calc_version`, `tax_service` (tax estimates),
+  `contingency` (the emergency fund's balance for contingency planning),
   and the writers `bank_sync_service`, `plaid_sync_service`, `import_service` and
   `planned_auto_settle`, plus `statement_reconcile` (matches a statement's credits to synced card
   rows, not a headline figure). The scan also covers SQL `func.sum(...)`.

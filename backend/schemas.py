@@ -539,6 +539,31 @@ class RecurringBreakdown(BaseModel):
     by_owner: list[RecurringOwnerGroup]
 
 
+# ── Contingency planning ──────────────────────────────────────────────────────
+# Floor/surplus/cut-list for "what if income stopped" scenarios. See
+# routers/recurring.py's get_contingency for how each field is computed.
+
+class ContingencyCutItem(BaseModel):
+    id: int
+    name: str
+    monthly_equivalent: Decimal
+    is_paused: bool
+
+
+class ContingencyPlan(BaseModel):
+    # Essential recurring expenses' monthly total (plus the Groceries budget
+    # allocation) times 3 -- the minimum monthly burn a scenario must be able
+    # to sustain.
+    floor: Decimal
+    emergency_fund_balance: Decimal
+    # emergency_fund_balance - floor. Negative means the fund can't cover
+    # three months of essential burn.
+    surplus: Decimal
+    # Non-essential active expense items, sorted by monthly_equivalent
+    # descending -- what a scenario can pause to close a shortfall.
+    cut_list: list[ContingencyCutItem]
+
+
 # ── Month Summary ─────────────────────────────────────────────────────────────
 # Real (not averaged) totals for one calendar month, built by walking every day
 # of the month through forecast_engine._fires_on -- see services/month_summary.py.
