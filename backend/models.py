@@ -283,6 +283,23 @@ class Category(Base):
     budget_allocations: Mapped[list[BudgetAllocation]] = relationship(back_populates="category")
 
 
+# ── Household Members ────────────────────────────────────────────────────────
+
+class HouseholdMember(Base):
+    """A person a recurring item can be tagged to (RecurringItem.owner_id)
+    instead of always being generic 'Family' spending. linked_user_id
+    optionally ties this member to an actual login -- nullable and unique so
+    at most one household member row maps to any given login."""
+    __tablename__ = "household_members"
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    linked_user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 # ── Recurring Items ───────────────────────────────────────────────────────────
 
 class RecurringItem(Base):
@@ -292,6 +309,10 @@ class RecurringItem(Base):
     user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
     account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id"), nullable=False)
     category_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("categories.id"))
+    # Who this item's spending belongs to -- null means generic "Family"
+    # spending (the default every existing item keeps). See
+    # models.HouseholdMember.
+    owner_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("household_members.id"))
     card_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("credit_cards.id"))
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)

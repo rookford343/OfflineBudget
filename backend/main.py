@@ -36,6 +36,7 @@ from backend.routers import bill_overrides as bill_overrides_router_module
 from backend.routers import adventures as adventures_router_module
 from backend.routers import wish_list as wish_list_router_module
 from backend.routers import bonus_plans as bonus_plans_router_module
+from backend.routers import household_members as household_members_router_module
 
 logger = logging.getLogger(__name__)
 
@@ -501,6 +502,7 @@ api_router.include_router(bill_overrides_router_module.router)
 api_router.include_router(adventures_router_module.router)
 api_router.include_router(wish_list_router_module.router)
 api_router.include_router(bonus_plans_router_module.router)
+api_router.include_router(household_members_router_module.router)
 
 
 @api_router.get("/health", tags=["health"])

@@ -332,6 +332,10 @@ def upgrade_schema():
         # ALTER entry needed for it.
         "ALTER TABLE recurring_items ADD COLUMN is_floating BOOLEAN DEFAULT 0",
         "ALTER TABLE credit_card_transactions ADD COLUMN recurring_item_id INTEGER REFERENCES recurring_items(id)",
+        # Household member owner tags -- see models.py's HouseholdMember and
+        # RecurringItem.owner_id. household_members itself is new, so it needs
+        # no ALTER entry -- create_tables() makes it.
+        "ALTER TABLE recurring_items ADD COLUMN owner_id INTEGER REFERENCES household_members(id)",
     ]
     with engine.connect() as conn:
         for s in stmts:

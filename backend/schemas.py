@@ -299,6 +299,18 @@ class CategoryOut(BaseModel):
 CategoryOut.model_rebuild()
 
 
+# ── Household Members ────────────────────────────────────────────────────────
+
+class HouseholdMemberCreate(BaseModel):
+    name: str
+
+
+class HouseholdMemberOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    name: str
+
+
 # ── Recurring Items ───────────────────────────────────────────────────────────
 
 class RecurringCreate(BaseModel):
@@ -308,6 +320,7 @@ class RecurringCreate(BaseModel):
     frequency: RecurringFrequency = RecurringFrequency.monthly
     account_id: int
     category_id: Optional[int] = None
+    owner_id: Optional[int] = None
     card_id: Optional[int] = None
     day_of_month: int  # 1-31; 0 = last day
     month_of_year: Optional[int] = None  # 1-12 for yearly items
@@ -357,6 +370,7 @@ class RecurringUpdate(BaseModel):
     frequency: Optional[RecurringFrequency] = None
     account_id: Optional[int] = None
     category_id: Optional[int] = None
+    owner_id: Optional[int] = None
     card_id: Optional[int] = None
     day_of_month: Optional[int] = None
     month_of_year: Optional[int] = None
@@ -382,6 +396,7 @@ class RecurringOut(BaseModel):
     id: int
     account_id: int
     category_id: Optional[int]
+    owner_id: Optional[int] = None
     card_id: Optional[int] = None
     name: str
     amount: Decimal
