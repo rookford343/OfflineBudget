@@ -78,6 +78,15 @@ threatening to look at.)
   special-casing: Mortgage/Rent, Insurance, and Vehicles are all
   `is_discretionary=0` today, so they land essential by default with zero
   extra logic.
+- **Create-time default, then manual forever (Dan's explicit call):** when a
+  new item is created, `is_essential` defaults from the chosen category the
+  same way the migration backfill does (`NOT category.is_discretionary`,
+  `True` if uncategorized) — a one-time starting guess, not a live binding.
+  After that, `is_essential` is Dan's own flag: changing an item's category
+  later (for any reason, including recategorizing an existing bill) never
+  touches `is_essential` again. This trades "stays perfectly in sync with
+  category" for "never silently overwrites a choice Dan made," which Dan
+  chose explicitly after the builder check flagged the ambiguity.
 - `RecurringItem.contingency_paused_at: datetime | None`, default `None`.
   Non-null means Dan has confirmed, outside the app, that this expense is
   actually paused/cancelled. A nullable timestamp (not a bare boolean)
@@ -87,18 +96,23 @@ threatening to look at.)
   case Dan wants this to auto-clear on some condition (none identified in
   this conversation; default is it never auto-clears, only a manual
   uncheck).
-- No new table for groceries. The floor's grocery component reads the
-  current `budget_allocations` row for the user's "Groceries" category
-  (matched by category name, `month=0`), the same source the Budget page
-  itself reads. If no such row exists, the grocery component is `$0` (no
-  error) — my call, flagged for the builder check.
+- No new table for groceries. The floor's grocery component reuses the
+  existing `budget_allocation_total()` helper (`backend/services/month_base.py:53-77`)
+  for the user's "Groceries" category — the same helper `month_base`,
+  `month_summary`, `available_to_spend`, and `budget_snapshot` already share.
+  That helper resolves a month-specific override over the `month=0` default
+  when one is set (not a flat `month=0`-only read, corrected after the
+  builder check flagged the original wording as contradicting both this
+  codebase's existing convention and this design's own "recalculated live,
+  never stale" goal). If no row resolves at all, the grocery component is
+  `$0` (no error) — my call, flagged for the builder check.
 
 ## The floor calculation
 
 ```
 essential_monthly = sum(monthly_equivalent for each active, expense-type,
                          is_essential=True RecurringItem)
-                     + groceries_budget_allocation (current month=0 row, or 0)
+                     + budget_allocation_total(groceries category, current year/month, or 0)
 
 floor = essential_monthly * 3
 ```
@@ -120,7 +134,13 @@ Goals / Forecast on the Planning section of the sidebar — matches this app's
 existing nav grouping).
 
 - **Headline numbers:** the floor (3-month essential run-rate), the current
-  Money Market balance, and the surplus (`MM balance - floor`). Surplus
+  emergency-fund balance, and the surplus (`emergency-fund balance - floor`).
+  "Emergency-fund balance" means accounts with `is_emergency_fund == True`
+  (not `type == money_market`) — the same filter `budget_snapshot.py:707-715`
+  already uses to isolate the emergency fund from its complement "savings
+  pool," per the `Account` model's own comment on why account type alone
+  can't be used for this. Today that's just the Money Market account; this
+  stays correct automatically if that ever changes. Surplus
   rendered as a warning/negative state when it's below zero — the floor
   isn't covered.
 - **Cut list:** every active, expense-type, `is_essential=False` recurring
@@ -144,5 +164,3 @@ existing nav grouping).
   conventions.
 - Exact page layout within the "dedicated page, simple list" brief above —
   no mockup was requested for this feature.
-- Whether the Essential toggle's default-on-create behavior (new items with
-  no category yet) needs a test beyond the migration backfill case.
