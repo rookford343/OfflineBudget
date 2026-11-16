@@ -50,6 +50,8 @@ def create_recurring(
     user: models.User = Depends(get_current_user),
 ):
     _assert_account_owned(db, user.id, body.account_id)
+    if body.owner_id is not None:
+        owned_or_404(db, models.HouseholdMember, body.owner_id, user.id, "Household member not found")
     item = models.RecurringItem(user_id=user.id, **body.model_dump())
     db.add(item)
     db.commit()
@@ -445,6 +447,8 @@ def update_recurring(
             status_code=422,
             detail="is_floating requires type=expense and frequency=monthly",
         )
+    if "owner_id" in updates and updates["owner_id"] is not None:
+        owned_or_404(db, models.HouseholdMember, updates["owner_id"], user.id, "Household member not found")
     for field, value in updates.items():
         setattr(item, field, value)
     db.commit()

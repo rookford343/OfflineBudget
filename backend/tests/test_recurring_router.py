@@ -50,3 +50,35 @@ def test_patch_updates_start_date(client, db_session):
 
     resp = test_client.get(f"/recurring/{item.id}")
     assert resp.json()["start_date"] == "2026-09-15"
+
+
+def test_create_with_nonexistent_owner_id_is_404(client):
+    """A owner_id that doesn't resolve to any household member is a clean
+    404, not a raw unhandled IntegrityError 500 from the owner_id FK
+    constraint."""
+    test_client, user, checking = client
+    body = {
+        "name": "Test Item", "amount": "10.00", "type": "expense",
+        "account_id": checking.id, "day_of_month": 1,
+        "start_date": "2026-01-01", "owner_id": 999999,
+    }
+    resp = test_client.post("/recurring", json=body)
+    assert resp.status_code == 404
+
+
+def test_patch_with_nonexistent_owner_id_is_404(client, db_session):
+    """Same as creation above, via PATCH's generic setattr loop."""
+    test_client, user, checking = client
+    item = models.RecurringItem(
+        user_id=user.id, account_id=checking.id, name="Test Item",
+        amount=Decimal("45.00"), type=models.RecurringType.expense,
+        day_of_month=15, start_date=date(2026, 1, 1),
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    resp = test_client.patch(f"/recurring/{item.id}", json={"owner_id": 999999})
+    assert resp.status_code == 404
+    db_session.refresh(item)
+    assert item.owner_id is None

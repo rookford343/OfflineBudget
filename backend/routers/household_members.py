@@ -62,11 +62,31 @@ def delete_household_member(
     user: models.User = Depends(get_current_user),
 ):
     member = _get_or_404(db, user.id, member_id)
+    # Scoped to this user AND to active items only: a cross-user reference
+    # should no longer be creatable (recurring.py validates owner_id against
+    # the caller's own household members on create/update), but this count
+    # stays defensively user-scoped regardless, and a soft-deleted
+    # (is_active=False) item never counts -- a removed item shouldn't make
+    # the member it once pointed at permanently undeletable.
     referenced = db.query(models.RecurringItem).filter(
         models.RecurringItem.owner_id == member.id,
+        models.RecurringItem.user_id == user.id,
+        models.RecurringItem.is_active == True,
     ).count()
     if referenced:
         raise HTTPException(status_code=400, detail="Cannot delete a household member referenced by recurring items")
+    # The guard above only blocks on this user's active items, so a row can
+    # still physically reference this member via the raw owner_id FK at this
+    # point: this user's own soft-deleted item, or (defensively, pre-fix
+    # data) another user's item. owner_id has no ON DELETE behavior, so
+    # leaving either in place would turn db.delete(member) below into an
+    # unhandled FK IntegrityError instead of the clean 204 the guard just
+    # decided this delete should get. Clear the FK on every such row first --
+    # a soft-deleted item keeps its own history, it just stops pointing at a
+    # member that no longer exists.
+    db.query(models.RecurringItem).filter(
+        models.RecurringItem.owner_id == member.id,
+    ).update({models.RecurringItem.owner_id: None}, synchronize_session=False)
     db.delete(member)
     db.commit()
 

@@ -96,3 +96,59 @@ def test_delete_unreferenced_household_member_succeeds(client):
 
     r3 = test_client.get("/household-members")
     assert not any(m["id"] == member_id for m in r3.json())
+
+
+def test_delete_allowed_when_only_referencing_item_is_soft_deleted(client, db_session):
+    """A recurring item that referenced this member but was later soft-deleted
+    (is_active=False) must not count toward the delete guard -- the guard's
+    reference count only considers active items, the same convention
+    by_category/by_owner already use elsewhere for 'does this item count'.
+    Otherwise a removed item permanently blocks deleting the member it once
+    pointed at."""
+    test_client, user, checking = client
+
+    r = test_client.post("/household-members", json={"name": "Former Roommate"})
+    member_id = r.json()["id"]
+
+    item = models.RecurringItem(
+        user_id=user.id, account_id=checking.id, name="Old Rent Split",
+        amount=Decimal("300.00"), type=models.RecurringType.expense,
+        day_of_month=1, start_date=date(2026, 1, 1), owner_id=member_id,
+        is_active=False,
+    )
+    db_session.add(item)
+    db_session.commit()
+
+    r2 = test_client.delete(f"/household-members/{member_id}")
+    assert r2.status_code == 204
+
+
+def test_delete_ignores_other_users_recurring_item_pointing_at_this_member(client, db_session):
+    """Defensive: the delete-guard's reference count is scoped to the
+    caller's own recurring items, not just to this member's id. Create/update
+    now block tagging another user's member via owner_id, but the guard
+    stays user-scoped regardless -- so even if another user's item somehow
+    points at this member, it must not block this user's delete, and (per
+    the reviewer's reproduction) a subsequent account deletion must not hit
+    a raw FK IntegrityError either."""
+    test_client, user, checking = client
+
+    r = test_client.post("/household-members", json={"name": "Widely Tagged"})
+    member_id = r.json()["id"]
+
+    other = models.User(username="other-ho", hashed_password="x", display_name="Other")
+    db_session.add(other)
+    db_session.flush()
+    other_checking = models.Account(user_id=other.id, name="Other Checking", type=models.AccountType.checking)
+    db_session.add(other_checking)
+    db_session.flush()
+    cross_user_item = models.RecurringItem(
+        user_id=other.id, account_id=other_checking.id, name="Other's Item",
+        amount=Decimal("50.00"), type=models.RecurringType.expense,
+        day_of_month=1, start_date=date(2026, 1, 1), owner_id=member_id,
+    )
+    db_session.add(cross_user_item)
+    db_session.commit()
+
+    r2 = test_client.delete(f"/household-members/{member_id}")
+    assert r2.status_code == 204

@@ -39,6 +39,10 @@ now refuses or neutralizes it.
   - planned expense ownership: preview, create and patch with another user's
     card_id, account_id, funding_account_id or category_id (and the preview's
     account_id query param) are 404 and write nothing.
+  - recurring item owner_id ownership: create and patch with another user's
+    household member as owner_id are 404 and write nothing -- mirrors the
+    category_id/account_id ownership checks above, applied to the owner-tag
+    feature's own FK.
   - spa static traversal: encoded and raw ../ paths never read files outside the
     frontend dist directory (.env, the database, source, pyproject), nor
     through a symlink inside it that points outside.
@@ -1169,3 +1173,52 @@ def test_planned_expense__outflow_amount_not_positive__is_422(db_session, amount
         assert ok.status_code == 201
     finally:
         app.dependency_overrides.clear()
+
+
+def _recurring_owner_fixture(db_session):
+    from datetime import date
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from backend import models
+    from backend.dependencies import get_current_user, get_db
+    from backend.routers import recurring as recurring_router
+
+    owner = models.User(username="ro-owner", hashed_password="x", display_name="O")
+    other = models.User(username="ro-other", hashed_password="x", display_name="X")
+    db_session.add_all([owner, other])
+    db_session.flush()
+    mine = models.Account(user_id=owner.id, name="Mine", type=models.AccountType.checking,
+                          current_balance=Decimal("100"))
+    their_member = models.HouseholdMember(user_id=other.id, name="Their Kid")
+    db_session.add_all([mine, their_member])
+    db_session.flush()
+    own_item = models.RecurringItem(
+        user_id=owner.id, account_id=mine.id, name="Own Item", amount=Decimal("10.00"),
+        type=models.RecurringType.expense, day_of_month=1, start_date=date(2026, 1, 1),
+    )
+    db_session.add(own_item)
+    db_session.commit()
+
+    app = FastAPI()
+    app.include_router(recurring_router.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: owner
+    body = {"name": "Tagged", "amount": "10.00", "type": "expense",
+            "account_id": mine.id, "day_of_month": 1, "start_date": "2026-01-01"}
+    return TestClient(app), own_item, their_member, body, models
+
+
+def test_recurring_owner_id__other_users_household_member__is_404(db_session):
+    """Create and patch with another user's household member as owner_id are
+    404, not 201/200 -- owner_id must resolve to a HouseholdMember belonging
+    to the caller, mirroring the category_id/account_id ownership checks on
+    planned expenses above, applied to the owner-tag feature's own FK."""
+    client, own_item, their_member, body, models = _recurring_owner_fixture(db_session)
+
+    rows = db_session.query(models.RecurringItem).count()
+    bad = {**body, "owner_id": their_member.id}
+    assert client.post("/recurring", json=bad).status_code == 404
+    assert client.patch(f"/recurring/{own_item.id}", json={"owner_id": their_member.id}).status_code == 404
+    assert db_session.query(models.RecurringItem).count() == rows
+    db_session.refresh(own_item)
+    assert own_item.owner_id is None
