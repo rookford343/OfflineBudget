@@ -351,6 +351,13 @@ class RecurringItem(Base):
     # transaction anywhere in the item's due month instead of requiring it
     # near day_of_month.
     is_floating: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Contingency planning: whether this item keeps paying when a scenario
+    # pauses discretionary spending. Defaults True (and backfills True/False
+    # from the item's category) so every existing item keeps paying unless
+    # it's rooted in a discretionary category. contingency_paused_at is set
+    # when a contingency scenario pauses this item, null otherwise.
+    is_essential: Mapped[bool] = mapped_column(Boolean, default=True)
+    contingency_paused_at: Mapped[datetime | None] = mapped_column(DateTime)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

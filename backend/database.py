@@ -336,6 +336,12 @@ def upgrade_schema():
         # RecurringItem.owner_id. household_members itself is new, so it needs
         # no ALTER entry -- create_tables() makes it.
         "ALTER TABLE recurring_items ADD COLUMN owner_id INTEGER REFERENCES household_members(id)",
+        # Contingency planning -- see models.py's RecurringItem.is_essential
+        # and docs/superpowers/sdd/2026-11-16-contingency-planning-plan.
+        # is_essential has its own ALTER+backfill block below, not here --
+        # unlike every other line in this list, its backfill must run only
+        # once (see that block's comment).
+        "ALTER TABLE recurring_items ADD COLUMN contingency_paused_at DATETIME",
     ]
     with engine.connect() as conn:
         for s in stmts:
@@ -344,6 +350,23 @@ def upgrade_schema():
                 conn.commit()
             except Exception:
                 conn.rollback()  # column already exists — skip
+
+    # is_essential needs a backfill from each item's category, not just a
+    # flat default -- unlike every other line above, a plain UPDATE here
+    # would re-run (and clobber Dan's manual edits) on every restart, since
+    # UPDATE doesn't fail once already applied the way ALTER does. Running
+    # the backfill only inside the branch where the ALTER just newly
+    # succeeded makes it a true one-time migration.
+    with engine.connect() as conn:
+        try:
+            conn.execute(text("ALTER TABLE recurring_items ADD COLUMN is_essential BOOLEAN DEFAULT 1"))
+            conn.execute(text(
+                "UPDATE recurring_items SET is_essential = 0 WHERE category_id IN "
+                "(SELECT id FROM categories WHERE is_discretionary = 1)"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()  # column already exists -- backfill already ran
 
 
 def migrate_cushions(db, apply: bool) -> list[str]:

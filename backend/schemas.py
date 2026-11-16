@@ -293,6 +293,7 @@ class CategoryOut(BaseModel):
     icon: Optional[str]
     sort_order: int
     tax_deductible: bool = False
+    is_discretionary: bool = False
     children: list["CategoryOut"] = []
 
 
@@ -332,6 +333,7 @@ class RecurringCreate(BaseModel):
     # prompts. None means the item never prompts.
     statement_day: Optional[int] = None
     is_floating: bool = False
+    is_essential: bool = True
 
     @field_validator("day_of_month")
     @classmethod
@@ -382,6 +384,7 @@ class RecurringUpdate(BaseModel):
     statement_day: Optional[int] = None
     amount_varies: Optional[bool] = None
     is_floating: Optional[bool] = None
+    is_essential: Optional[bool] = None
 
     @field_validator("statement_day")
     @classmethod
@@ -412,6 +415,7 @@ class RecurringOut(BaseModel):
     statement_day: Optional[int] = None
     amount_varies: bool = False
     is_floating: bool = False
+    is_essential: bool = True
 
 
 class UpcomingBillOut(BaseModel):
