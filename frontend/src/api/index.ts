@@ -144,6 +144,11 @@ export const recurringApi = {
     api.post(`/recurring/${itemId}/skip`, { year, month }).then((r) => r.data),
   unskipMonth: (itemId: number, year: number, month: number) =>
     api.delete(`/recurring/${itemId}/skip`, { params: { year, month } }).then((r) => r.data),
+  // Floor/emergency-fund/surplus + cut-list for "what if income stopped"
+  // scenarios (Task 2's /recurring/contingency).
+  contingency: () => api.get("/recurring/contingency").then((r) => r.data),
+  contingencyPause: (itemId: number) => api.post(`/recurring/${itemId}/contingency-pause`).then((r) => r.data),
+  contingencyUnpause: (itemId: number) => api.delete(`/recurring/${itemId}/contingency-pause`),
 };
 
 // ── Forecast ──────────────────────────────────────────────────────────────────

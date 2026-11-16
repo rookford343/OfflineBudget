@@ -20,6 +20,7 @@ import NetWorth from "./pages/NetWorth";
 import AccountDetail from "./pages/AccountDetail";
 import WishList from "./pages/WishList";
 import Adventures from "./pages/Adventures";
+import Contingency from "./pages/Contingency";
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   return isAuthenticated() ? <>{children}</> : <Navigate to="/login" replace />;
@@ -57,6 +58,7 @@ export default function App() {
           <Route path="accounts/:id" element={<AccountDetail />} />
           <Route path="import" element={<Import />} />
           <Route path="budget" element={<Budget />} />
+          <Route path="contingency" element={<Contingency />} />
           <Route path="settings/*" element={<Settings />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

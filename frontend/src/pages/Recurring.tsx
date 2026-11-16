@@ -22,7 +22,7 @@ function endMonthLabel(iso: string): string {
   return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
 }
 
-const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", owner_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "", amount_varies: false, is_floating: false };
+const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", owner_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "", amount_varies: false, is_floating: false, is_essential: true };
 
 /** Next occurrence of a monthly item's due day, on or after today.
  *  Only monthly items get inline actual-amount entry: yearly and quarterly
@@ -185,6 +185,12 @@ export default function Recurring() {
   const [editItem, setEditItem] = useState<any | null>(null);
   const [form, setForm] = useState({ ...emptyForm });
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  // Has the user manually touched the Essential checkbox in this form
+  // session? Until they do, picking a category on a brand-new item
+  // auto-defaults is_essential from that category's is_discretionary --
+  // once true, that auto-default never fires again ("create-time default,
+  // then manual forever").
+  const [essentialTouched, setEssentialTouched] = useState(false);
 
   const createMut = useMutation({ mutationFn: recurringApi.create, onSuccess: done });
   const updateMut = useMutation({ mutationFn: ({ id, data }: any) => recurringApi.update(id, data), onSuccess: done });
@@ -210,12 +216,12 @@ export default function Recurring() {
   }
 
   function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["amount-drift"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setShowForm(false); setEditItem(null); }
-  function openNew() { setForm({ ...emptyForm, account_id: accounts[0]?.id?.toString() ?? "" }); setEditItem(null); setShowForm(true); }
-  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), owner_id: String(i.owner_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "", amount_varies: !!i.amount_varies, is_floating: !!i.is_floating }); setShowForm(true); }
+  function openNew() { setForm({ ...emptyForm, account_id: accounts[0]?.id?.toString() ?? "" }); setEditItem(null); setEssentialTouched(false); setShowForm(true); }
+  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), owner_id: String(i.owner_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "", amount_varies: !!i.amount_varies, is_floating: !!i.is_floating, is_essential: !!i.is_essential }); setEssentialTouched(false); setShowForm(true); }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, owner_id: form.owner_id ? parseInt(form.owner_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null, is_floating: form.frequency === "monthly" && !!form.is_floating };
+    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, owner_id: form.owner_id ? parseInt(form.owner_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null, is_floating: form.frequency === "monthly" && !!form.is_floating, is_essential: form.is_essential };
     if (editItem) updateMut.mutate({ id: editItem.id, data });
     else createMut.mutate(data);
   }
@@ -505,6 +511,7 @@ export default function Recurring() {
                         account_id: accounts[0]?.id?.toString() ?? "",
                       });
                       setEditItem(null);
+                      setEssentialTouched(false);
                       setShowForm(true);
                     }}
                     className="btn-primary py-1 px-2 text-xs"
@@ -661,7 +668,23 @@ export default function Recurring() {
               </div>
               <div>
                 <label className="label">Category</label>
-                <select className="input" value={form.category_id} onChange={e => setForm({ ...form, category_id: e.target.value })}>
+                <select className="input" value={form.category_id} onChange={e => {
+                  const category_id = e.target.value;
+                  // Create-time default only: a brand-new item (editItem ===
+                  // null) that the user hasn't manually marked Essential yet
+                  // picks up the selected category's !is_discretionary as a
+                  // starting point. Editing an existing item's category must
+                  // never touch is_essential, which editItem === null already
+                  // guarantees here.
+                  if (editItem === null && !essentialTouched) {
+                    const cat = allCats.find((c: any) => String(c.id) === category_id);
+                    if (cat) {
+                      setForm({ ...form, category_id, is_essential: !cat.is_discretionary });
+                      return;
+                    }
+                  }
+                  setForm({ ...form, category_id });
+                }}>
                   <option value="">None</option>
                   <CategoryOptions categories={categories as any[]}
                     type={form.type === "credit_card_payment" ? "expense" : form.type} />
@@ -693,6 +716,13 @@ export default function Recurring() {
                 <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                   <input type="checkbox" checked={form.is_floating} onChange={e => setForm({ ...form, is_floating: e.target.checked })} />
                   Floating (date varies — matches anywhere in the month)
+                </label>
+              )}
+              {form.type === "expense" && (
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input type="checkbox" checked={form.is_essential}
+                    onChange={e => { setEssentialTouched(true); setForm({ ...form, is_essential: e.target.checked }); }} />
+                  Essential (always keep paying this)
                 </label>
               )}
               {form.type === "expense" && form.frequency === "monthly" && !form.card_id && (
