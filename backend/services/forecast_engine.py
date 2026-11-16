@@ -1189,14 +1189,14 @@ def build_forecast(
     # A floating item's user has marked "not this month" -- skip projecting
     # it for that (item, year, month) only, the same way month_base.py's
     # build_month_base excludes it from monthly_bills, so the Forecast tab
-    # and the Recurring page agree it didn't happen.
-    skipped_months: set[tuple[int, int, int]] = {
-        (s.recurring_item_id, s.year, s.month)
-        for s in db.query(models.RecurringSkip).filter(
-            models.RecurringSkip.user_id == user_id,
-            models.RecurringSkip.recurring_item_id.in_([item.id for item in recurring_items]),
-        ).all()
-    }
+    # and the Recurring page agree it didn't happen. effective_skips() also
+    # drops any skip whose month already has a real linked transaction -- a
+    # match always wins over a skip (design doc) -- so this agrees with
+    # month_base.py on that rule too, not just on which months are skipped.
+    from backend.services.recurring_skips import effective_skips
+    skipped_months: set[tuple[int, int, int]] = effective_skips(
+        db, user_id, [item.id for item in recurring_items],
+    )
 
     # Draw the wage base down for wages already RECEIVED before today, before
     # projecting forward -- from today onward the day walk does its own drawdown.

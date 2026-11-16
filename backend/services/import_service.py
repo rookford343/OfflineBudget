@@ -1,7 +1,6 @@
 """Shared import logic used by both the HTTP router and CLI."""
 from __future__ import annotations
 import re
-from calendar import monthrange
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from sqlalchemy import func, or_
@@ -124,17 +123,16 @@ def _best_recurring_match(
             continue
         if item.is_floating and item.frequency == models.RecurringFrequency.monthly:
             # No fixed date to be "near" -- a floating item only has to fire
-            # somewhere in the transaction's calendar month. Loops _fires_on
-            # over every day of that month rather than a +/-window check, so
-            # the floating path stays under the exact same is_active/
-            # start_date/end_date gate every other candidate is subject to.
-            # Scoped to monthly per the floating-expenses design doc; other
-            # frequencies fall through to the window check below.
-            days_in_month = monthrange(on.year, on.month)[1]
-            if not any(
-                _fires_on(item, date(on.year, on.month, day))
-                for day in range(1, days_in_month + 1)
-            ):
+            # somewhere in the transaction's calendar month. _fires_in_month
+            # (shared with card_recurring_match.py and
+            # recurring_floating_status.py) loops _fires_on over every day
+            # of that month rather than a +/-window check, so the floating
+            # path stays under the exact same is_active/start_date/end_date
+            # gate every other candidate is subject to. Scoped to monthly
+            # per the floating-expenses design doc; other frequencies fall
+            # through to the window check below.
+            from backend.services.recurring_schedule import _fires_in_month
+            if not _fires_in_month(item, on.year, on.month):
                 continue
         else:
             window = _MATCH_WINDOW_DAYS if name_hits else 3
@@ -150,13 +148,27 @@ def _best_recurring_match(
 
 
 def _payee_history(db: Session, user_id: int) -> dict[int, set[str]]:
-    """Each bill's payee words, learned from transactions already linked to it."""
+    """Each bill's payee words, learned from transactions already linked to
+    it -- checking Transaction.description, and CreditCardTransaction.merchant
+    for a card-linked item. Before the card half was added here, a card-linked
+    floating item's history_hits was always 0: this query only ever looked at
+    checking rows, so a card item never got credit for its own past matches
+    the way a checking item already did -- same blind-spot shape as the
+    checking-only matcher bug this plan's Task 2 fixed."""
     out: dict[int, set[str]] = {}
     rows = db.query(models.Transaction.recurring_item_id, models.Transaction.description).filter(
         models.Transaction.user_id == user_id, models.Transaction.recurring_item_id.isnot(None),
     )
     for item_id, desc in rows:
         out.setdefault(item_id, set()).update(_evidence_tokens(desc))
+    card_rows = db.query(
+        models.CreditCardTransaction.recurring_item_id, models.CreditCardTransaction.merchant,
+    ).filter(
+        models.CreditCardTransaction.user_id == user_id,
+        models.CreditCardTransaction.recurring_item_id.isnot(None),
+    )
+    for item_id, merchant in card_rows:
+        out.setdefault(item_id, set()).update(_evidence_tokens(merchant))
     return out
 
 
@@ -186,8 +198,21 @@ def _try_auto_match(txn: models.Transaction, db: Session) -> None:
 def _try_auto_match_card(ct: models.CreditCardTransaction, db: Session) -> None:
     """Card-side twin of _try_auto_match: link ct to a floating recurring
     expense charged to the same card. best_card_recurring_match itself
-    enforces is_floating/amount>0, so this candidate pool only needs to be
-    narrowed to the card."""
+    enforces is_floating/amount>0 on the CANDIDATE recurring items, so this
+    candidate pool only needs to be narrowed to the card -- but ct itself
+    must also be a real charge, not a refund/credit.
+
+    CreditCardTransaction.amount is positive=charge, negative=refund/credit
+    (see run_import's ct= construction above for the sign-flip rationale).
+    best_card_recurring_match takes abs(amount) before comparing, with no
+    sign check of its own -- it also serves build_preview's card branch,
+    which passes ParsedRow.amount (the opposite convention: negative=charge)
+    and only ever calls it when that row is already a charge. Without this
+    guard here, a $45.00 refund landed as ct.amount=-45.00, got abs()'d to
+    45.00, and matched the Haircut item as if it were that month's charge --
+    reproduced live: a refund auto-linked as the month's match."""
+    if ct.amount <= 0:
+        return
     from backend.services.card_recurring_match import best_card_recurring_match
 
     recurring = db.query(models.RecurringItem).filter(

@@ -334,6 +334,21 @@ class RecurringCreate(BaseModel):
             raise ValueError("statement_day must be None or 1-31")
         return v
 
+    @model_validator(mode="after")
+    def _validate_floating_scope(self) -> "RecurringCreate":
+        # The checking/card matchers and the skip endpoint only know how to
+        # handle a floating item that fires exactly once a month on an
+        # expense -- the frontend form already gates the checkbox to
+        # type=expense/frequency=monthly, but nothing stopped a direct API
+        # call from setting is_floating=True on an income item or a
+        # credit_card_payment, or on a weekly/quarterly/yearly item.
+        if self.is_floating and (
+            self.type != RecurringType.expense
+            or self.frequency != RecurringFrequency.monthly
+        ):
+            raise ValueError("is_floating requires type=expense and frequency=monthly")
+        return self
+
 
 class RecurringUpdate(BaseModel):
     name: Optional[str] = None
@@ -914,6 +929,16 @@ class RecurringSkipBody(BaseModel):
     a floating item's occurrence is marked 'not this month'."""
     year: int
     month: int
+
+    @field_validator("month")
+    @classmethod
+    def validate_month(cls, v: int) -> int:
+        # Same bounds pattern as day_of_month/statement_day above -- an
+        # out-of-range month (0, 13, -5, ...) would silently create a skip
+        # row that can never match any real (item, year, month) lookup.
+        if not (1 <= v <= 12):
+            raise ValueError("month must be between 1 and 12")
+        return v
 
 
 class RecurringFloatingStatus(BaseModel):

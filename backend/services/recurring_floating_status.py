@@ -9,19 +9,29 @@ This answers it per item for one calendar month by checking, in order:
 
   1. matched -- a Transaction (checking item) or CreditCardTransaction (card
      item, card_id set) linked via recurring_item_id with a date inside the
-     month. Wins over a skip: per the design doc, finding both a skip row
-     and a real match for the same (item, year, month) is a stale-skip
-     condition, not a tie to display -- the skip row is deleted here as
-     part of computing status, so the database never sits in that
-     contradictory state.
-  2. skipped -- a RecurringSkip row exists for (item, year, month).
-  3. pending -- neither.
+     month.
+  2. skipped -- an effective (still-in-effect) RecurringSkip row exists for
+     (item, year, month). effective_skips() -- shared with month_base.py and
+     forecast_engine.py -- already excludes a skip whose month has a real
+     linked match, so a match always wins over a skip consistently, without
+     this function needing to delete the stale row itself: it simply has no
+     effect, here or anywhere else, once a real match exists. (Status
+     "matched" above is derived straight from a linked transaction existing,
+     so the ordering here can never produce both "matched" and "skipped" for
+     the same (item, year, month) even with the stale row left in place.)
+  3. pending -- neither, and the item actually fires this month
+     (_fires_in_month) -- an item that hasn't started yet, has already
+     ended, or isn't monthly is left out entirely rather than shown as
+     "Pending" with a Skip button for a month month_base.py/
+     forecast_engine.py already exclude it from.
 """
 from __future__ import annotations
 from calendar import monthrange
 from datetime import date
 from sqlalchemy.orm import Session
 from backend import models, schemas
+from backend.services.recurring_schedule import _fires_in_month
+from backend.services.recurring_skips import effective_skips
 
 
 def build_floating_status(
@@ -35,19 +45,31 @@ def build_floating_status(
         models.RecurringItem.is_active == True,
         models.RecurringItem.is_floating == True,
     ).order_by(models.RecurringItem.id).all()
+    # Nothing at the data layer ties is_floating to frequency == monthly
+    # (schemas.py's validators reject the combination through the API, but
+    # a row from before that validation existed could still have it) --
+    # same explicit monthly guard the checking/card matchers already carry
+    # alongside their own _fires_in_month check, for the same reason: a
+    # weekly/biweekly/quarterly/yearly item fires correctly within the
+    # month by _fires_in_month's definition, just more than once, which
+    # isn't a shape this one-row-per-item-per-month status display can
+    # represent.
+    items = [
+        i for i in items
+        if i.frequency == models.RecurringFrequency.monthly and _fires_in_month(i, year, month)
+    ]
+
+    skipped_item_ids = {
+        item_id
+        for (item_id, _y, _m) in effective_skips(
+            db, user_id, [i.id for i in items], year=year, month=month,
+        )
+    }
 
     rows: list[schemas.RecurringFloatingStatus] = []
     for item in items:
         match = _find_match(db, item, month_start, month_end)
         if match is not None:
-            # Match wins over skip -- clear the now-stale skip row rather
-            # than report "matched" while leaving the database holding a
-            # contradictory "skipped" row for the same month.
-            db.query(models.RecurringSkip).filter(
-                models.RecurringSkip.recurring_item_id == item.id,
-                models.RecurringSkip.year == year,
-                models.RecurringSkip.month == month,
-            ).delete()
             matched_amount = abs(match.amount)
             rows.append(schemas.RecurringFloatingStatus(
                 recurring_item_id=item.id, status="matched",
@@ -56,17 +78,11 @@ def build_floating_status(
             ))
             continue
 
-        skipped = db.query(models.RecurringSkip).filter(
-            models.RecurringSkip.recurring_item_id == item.id,
-            models.RecurringSkip.year == year,
-            models.RecurringSkip.month == month,
-        ).first() is not None
         rows.append(schemas.RecurringFloatingStatus(
             recurring_item_id=item.id,
-            status="skipped" if skipped else "pending",
+            status="skipped" if item.id in skipped_item_ids else "pending",
         ))
 
-    db.commit()
     return rows
 
 

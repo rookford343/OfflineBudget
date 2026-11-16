@@ -461,3 +461,34 @@ def test_a_synced_charge_and_its_refund_net_to_zero_discretionary_spend(db_sessi
     run_import(db_session, user, rows, account_id=None, card_id=card.id)
 
     assert discretionary_spend_in_range(db_session, user.id, date(2026, 8, 1), date(2026, 8, 7)) == Decimal("0.00")
+
+
+def test_card_refund_never_auto_matches_a_floating_item(db_session):
+    """Regression: best_card_recurring_match takes abs(amount) before
+    comparing, with no sign check of its own, and _try_auto_match_card used
+    to call it on every unlinked card row regardless of sign -- so a refund
+    (negative CreditCardTransaction.amount, this codebase's convention)
+    could auto-link as if it were the month's real charge. Reproduced live:
+    a $45.00 refund linked as the month's match."""
+    user, card = _make_user_and_card(db_session)
+    account = models.Account(user_id=user.id, name="Checking", type=models.AccountType.checking)
+    db_session.add(account)
+    db_session.flush()
+    item = models.RecurringItem(
+        user_id=user.id, account_id=account.id, card_id=card.id, name="Test Barbers",
+        amount=Decimal("45.00"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly, day_of_month=15,
+        start_date=date(2026, 1, 1), is_floating=True,
+    )
+    db_session.add(item)
+    db_session.commit()
+
+    # Refund/credit, per ParsedRow convention (positive = return) -- flips to
+    # a negative CreditCardTransaction.amount on insert, same $45.00
+    # magnitude and a payee name that would otherwise score a name hit.
+    rows = [schemas.ImportConfirmRow(date=date(2026, 11, 10), description="TEST BARBER SHOP", amount=Decimal("45.00"))]
+    run_import(db_session, user, rows, account_id=None, card_id=card.id)
+
+    txn = db_session.query(models.CreditCardTransaction).filter_by(card_id=card.id).one()
+    assert txn.amount == Decimal("-45.00")  # negative = refund/credit
+    assert txn.recurring_item_id is None

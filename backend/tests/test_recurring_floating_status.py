@@ -83,11 +83,14 @@ def test_matched_wins_over_skip(db_session, test_user, test_account):
     assert out[0].matched_amount == Decimal("150.00")
     assert out[0].variance == Decimal("0.00")
 
-    # the stale skip row is gone, not left sitting alongside the match
+    # The stale skip row is left in place -- it simply has no effect once a
+    # real match exists, consistently everywhere (effective_skips(), shared
+    # with month_base.py/forecast_engine.py), rather than being deleted as a
+    # side effect of this one read.
     remaining = db_session.query(models.RecurringSkip).filter_by(
         recurring_item_id=item.id,
     ).count()
-    assert remaining == 0
+    assert remaining == 1
 
 
 def test_matched_variance_reflects_amount_difference(db_session, test_user, test_account):
@@ -166,6 +169,55 @@ def test_inactive_item_excluded(db_session, test_user, test_account):
 
 def test_non_floating_item_excluded(db_session, test_user, test_account):
     item = _floating_item(test_user, test_account, is_floating=False, day_of_month=1)
+    db_session.add(item)
+    db_session.commit()
+
+    out = build_floating_status(db_session, test_user.id, 2026, 11)
+
+    assert out == []
+
+
+def test_item_not_yet_started_excluded(db_session, test_user, test_account):
+    """Regression: the status list used to show every active floating item
+    for the requested month with no frequency/start_date/end_date check at
+    all -- an item that hasn't started yet could show "Pending -- expected
+    this month" with a Skip button even though month_base/forecast_engine
+    correctly exclude it. _fires_in_month() now gates this the same way."""
+    item = _floating_item(test_user, test_account, start_date=date(2026, 12, 1))
+    db_session.add(item)
+    db_session.commit()
+
+    out = build_floating_status(db_session, test_user.id, 2026, 11)
+
+    assert out == []
+
+    # The month it actually starts in still shows it.
+    out_december = build_floating_status(db_session, test_user.id, 2026, 12)
+    assert len(out_december) == 1
+
+
+def test_already_ended_item_excluded(db_session, test_user, test_account):
+    item = _floating_item(test_user, test_account, end_date=date(2026, 10, 31))
+    db_session.add(item)
+    db_session.commit()
+
+    out = build_floating_status(db_session, test_user.id, 2026, 11)
+
+    assert out == []
+
+
+def test_non_monthly_floating_item_excluded(db_session, test_user, test_account):
+    """Nothing at the data layer ties is_floating to frequency == monthly
+    (schemas.py's RecurringCreate/RecurringUpdate validators reject this
+    combination through the API, but a row created directly, or one from
+    before that validation existed, could still have it) -- a
+    weekly/quarterly/yearly item flagged is_floating must not show a
+    Matched/Pending/Skipped row for every one of its several occurrences a
+    month collapsed into one."""
+    item = _floating_item(
+        test_user, test_account, frequency=models.RecurringFrequency.weekly,
+        day_of_month=0, start_date=date(2026, 1, 5),
+    )
     db_session.add(item)
     db_session.commit()
 

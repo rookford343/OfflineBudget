@@ -39,6 +39,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.forecast_engine import _fires_on, ss_paycheck_boosts
+from backend.services.recurring_skips import effective_skips
 
 ZERO = Decimal("0")
 
@@ -205,13 +206,16 @@ def build_month_base(
     # A floating item's user has marked "not this month" -- excluded from
     # every list below exactly like a normal non-firing day, so Leftover,
     # the Budget page, and card_bill_occurrences all agree it didn't happen.
+    # effective_skips() drops any skip whose month already has a real linked
+    # transaction -- a match always wins over a skip (design doc), and this
+    # is the one place that rule is enforced for EVERY caller, not just
+    # whoever happens to hit GET /recurring/floating-status for this exact
+    # (item, year, month) first.
     skipped_item_ids: set[int] = {
-        s.recurring_item_id
-        for s in db.query(models.RecurringSkip).filter(
-            models.RecurringSkip.user_id == user.id,
-            models.RecurringSkip.year == year,
-            models.RecurringSkip.month == month,
-        ).all()
+        item_id
+        for (item_id, _y, _m) in effective_skips(
+            db, user.id, [i.id for i in items], year=year, month=month,
+        )
     }
 
     income_items_all = [i for i in items if i.type == models.RecurringType.income]

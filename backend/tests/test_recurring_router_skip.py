@@ -63,6 +63,29 @@ def test_skip_then_unskip(client, db_session):
     ).count() == 0
 
 
+@pytest.mark.parametrize("month", [0, 13, -5])
+def test_skip_rejects_out_of_range_month(client, db_session, month):
+    """RecurringSkipBody.month used to accept any integer -- 0, 13, -5 --
+    silently creating a skip row that could never match any real
+    (item, year, month) lookup."""
+    test_client, user, checking = client
+    item = models.RecurringItem(
+        user_id=user.id, account_id=checking.id, name="Test Cleaning Co",
+        amount=Decimal("150.00"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly, day_of_month=0,
+        start_date=date(2026, 1, 1), is_floating=True,
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    r = test_client.post(f"/recurring/{item.id}/skip", json={"year": 2026, "month": month})
+    assert r.status_code == 422
+    assert db_session.query(models.RecurringSkip).filter(
+        models.RecurringSkip.recurring_item_id == item.id,
+    ).count() == 0
+
+
 def test_skip_rejected_for_non_floating_item(client, db_session):
     """RecurringSkip is keyed on (item, year, month) with no day/occurrence
     granularity -- unambiguous only for a floating monthly item (exactly one

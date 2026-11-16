@@ -382,7 +382,24 @@ def update_recurring(
     user: models.User = Depends(get_current_user),
 ):
     item = _get_or_404(db, user.id, item_id)
-    for field, value in body.model_dump(exclude_unset=True).items():
+    updates = body.model_dump(exclude_unset=True)
+    # RecurringUpdate is partial, so this can't be a field validator the way
+    # RecurringCreate's is -- a PATCH that only sends is_floating=True has no
+    # type/frequency in its own body to check against. Validate the MERGED
+    # state (this PATCH's fields over the item's current ones) before
+    # applying anything, so a half-applied update is never committed.
+    merged_is_floating = updates.get("is_floating", item.is_floating)
+    merged_type = updates.get("type", item.type)
+    merged_frequency = updates.get("frequency", item.frequency)
+    if merged_is_floating and (
+        merged_type != models.RecurringType.expense
+        or merged_frequency != models.RecurringFrequency.monthly
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="is_floating requires type=expense and frequency=monthly",
+        )
+    for field, value in updates.items():
         setattr(item, field, value)
     db.commit()
     db.refresh(item)
@@ -530,9 +547,27 @@ def link_pattern_to_item(
                 txn.category_id = item.category_id
         result.linked_checking = len(checking)
 
-        # Card rows have no recurring_item_id column, so the useful half there
-        # is categorisation.
-        if item.category_id:
+        # A card-linked item (card_id set) gets the same manual-teach
+        # fallback the checking side already has above: claim unlinked
+        # CreditCardTransaction rows by recurring_item_id, not just
+        # category. CreditCardTransaction.recurring_item_id was added in an
+        # earlier task of this plan -- this used to be a stale comment
+        # claiming card rows had no such column at all, so the card side of
+        # this endpoint only ever categorized, never linked. A checking-only
+        # item (no card_id) has no card-side matcher counterpart to teach,
+        # so it keeps the category-only behavior.
+        if item.card_id is not None:
+            card_rows = db.query(models.CreditCardTransaction).filter(
+                models.CreditCardTransaction.user_id == user.id,
+                models.CreditCardTransaction.recurring_item_id.is_(None),
+                models.CreditCardTransaction.merchant.ilike(like),
+            ).all()
+            for txn in card_rows:
+                txn.recurring_item_id = item.id
+                if item.category_id:
+                    txn.category_id = item.category_id
+            result.linked_card = len(card_rows)
+        elif item.category_id:
             card_rows = db.query(models.CreditCardTransaction).filter(
                 models.CreditCardTransaction.user_id == user.id,
                 models.CreditCardTransaction.category_id.is_(None),
