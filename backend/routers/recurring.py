@@ -406,6 +406,16 @@ def skip_month(
     (year, month) only. Idempotent: creating a skip that already exists is a
     no-op, not an error, so a double-click or a retried request doesn't 409."""
     item = _get_or_404(db, user.id, item_id)
+    # RecurringSkip is keyed on (item, year, month) with no day/occurrence
+    # granularity -- unambiguous only for a floating monthly item, which has
+    # exactly one occurrence a month. Skipping a weekly/biweekly item would
+    # silently remove every occurrence that month instead of one, and a
+    # non-floating item already has a fixed due date an override can target.
+    if not item.is_floating or item.frequency != models.RecurringFrequency.monthly:
+        raise HTTPException(
+            status_code=400,
+            detail="Only a floating monthly item can be skipped for a month",
+        )
     existing = db.query(models.RecurringSkip).filter(
         models.RecurringSkip.recurring_item_id == item.id,
         models.RecurringSkip.year == body.year,

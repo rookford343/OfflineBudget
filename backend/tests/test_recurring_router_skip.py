@@ -61,3 +61,27 @@ def test_skip_then_unskip(client, db_session):
     assert db_session.query(models.RecurringSkip).filter(
         models.RecurringSkip.recurring_item_id == item.id,
     ).count() == 0
+
+
+def test_skip_rejected_for_non_floating_item(client, db_session):
+    """RecurringSkip is keyed on (item, year, month) with no day/occurrence
+    granularity -- unambiguous only for a floating monthly item (exactly one
+    occurrence a month). A non-floating item has a fixed due date an
+    override can target instead, so skip_month must reject it rather than
+    silently removing whatever occurrence(s) land that month."""
+    test_client, user, checking = client
+    item = models.RecurringItem(
+        user_id=user.id, account_id=checking.id, name="Test Mortgage Co",
+        amount=Decimal("1800.00"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly, day_of_month=1,
+        start_date=date(2026, 1, 1), is_floating=False,
+    )
+    db_session.add(item)
+    db_session.commit()
+    db_session.refresh(item)
+
+    r = test_client.post(f"/recurring/{item.id}/skip", json={"year": 2026, "month": 11})
+    assert r.status_code == 400
+    assert db_session.query(models.RecurringSkip).filter(
+        models.RecurringSkip.recurring_item_id == item.id,
+    ).count() == 0

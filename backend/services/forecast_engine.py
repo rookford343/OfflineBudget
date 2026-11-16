@@ -1268,7 +1268,13 @@ def build_forecast(
                 continue
             if item.id in adj_actual_recurring_ids:
                 continue
-            if (item.id, current.year, current.month) in skipped_months:
+            # Keyed by the NATURAL due date, same reason as bill_actuals below:
+            # a Sunday Feb 1 due date posts on Friday Jan 30, but month_base.py
+            # has no weekend-shift logic and attributes the occurrence (and the
+            # skip row the Recurring page writes) to February. Keying on
+            # `current` here would look up January and silently fail to
+            # suppress it.
+            if (item.id, natural_fire_date.year, natural_fire_date.month) in skipped_months:
                 continue
 
             # Suppress projected if a linked actual exists for this item but arrived on a
