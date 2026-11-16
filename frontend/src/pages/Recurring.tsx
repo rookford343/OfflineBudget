@@ -184,7 +184,7 @@ export default function Recurring() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null, is_floating: !!form.is_floating };
+    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null, is_floating: form.frequency === "monthly" && !!form.is_floating };
     if (editItem) updateMut.mutate({ id: editItem.id, data });
     else createMut.mutate(data);
   }
@@ -598,7 +598,7 @@ export default function Recurring() {
                 <label className="label">Frequency</label>
                 <div className="flex rounded-lg bg-gray-100 p-1">
                   {["monthly", "quarterly", "yearly"].map(f => (
-                    <button key={f} type="button" onClick={() => setForm({ ...form, frequency: f })}
+                    <button key={f} type="button" onClick={() => setForm({ ...form, frequency: f, is_floating: f === "monthly" ? form.is_floating : false })}
                       className={`flex-1 py-1.5 text-sm font-medium rounded-md transition-colors capitalize ${form.frequency === f ? "bg-white dark:bg-[#3a4256] shadow-sm text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-300"}`}>
                       {f}
                     </button>
@@ -637,7 +637,17 @@ export default function Recurring() {
                 <label className="label">Day of Month (0 = last day)</label>
                 <input type="number" min="0" max="31" className="input" value={form.day_of_month} onChange={e => setForm({ ...form, day_of_month: e.target.value })} required />
               </div>
-              {form.type === "expense" && (
+              {/* Monthly-only: matches both matchers' (import_service.py /
+                  card_recurring_match.py) and the skip endpoint's existing
+                  is_floating-implies-monthly scope. A weekly/biweekly item
+                  firing several times a month has no single "anywhere in
+                  the month" occurrence to match against, so the checkbox
+                  itself must not be reachable off-monthly -- not just left
+                  to the matchers to silently ignore. The frequency toggle
+                  above forces is_floating back to false the moment the
+                  frequency moves away from monthly, and submit() re-checks
+                  this same condition as a last line of defense. */}
+              {form.type === "expense" && form.frequency === "monthly" && (
                 <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
                   <input type="checkbox" checked={form.is_floating} onChange={e => setForm({ ...form, is_floating: e.target.checked })} />
                   Floating (date varies — matches anywhere in the month)
