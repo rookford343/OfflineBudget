@@ -183,11 +183,30 @@ def _try_auto_match(txn: models.Transaction, db: Session) -> None:
         txn.recurring_item_id = best.id
 
 
+def _try_auto_match_card(ct: models.CreditCardTransaction, db: Session) -> None:
+    """Card-side twin of _try_auto_match: link ct to a floating recurring
+    expense charged to the same card. best_card_recurring_match itself
+    enforces is_floating/amount>0, so this candidate pool only needs to be
+    narrowed to the card."""
+    from backend.services.card_recurring_match import best_card_recurring_match
+
+    recurring = db.query(models.RecurringItem).filter(
+        models.RecurringItem.user_id == ct.user_id,
+        models.RecurringItem.card_id == ct.card_id,
+        models.RecurringItem.is_active == True,
+    ).all()
+    best = best_card_recurring_match(recurring, ct.merchant, ct.amount, ct.date,
+                                     _confirmed_bill_amounts(db, ct.user_id), _payee_history(db, ct.user_id))
+    if best is not None:
+        ct.recurring_item_id = best.id
+
+
 def build_preview(
     db: Session,
     user: models.User,
     parsed_rows: list[ParsedRow],
     skip_categorization: bool = False,
+    card_id: int | None = None,
 ) -> list[schemas.ImportPreviewRow]:
     """Categorize parsed rows using transaction history and keyword rules."""
     if skip_categorization:
@@ -248,9 +267,16 @@ def build_preview(
         models.RecurringItem.user_id == user.id,
         models.RecurringItem.is_active == True,
     ).all()
-    expense_recurring = [r for r in all_recurring if r.type == models.RecurringType.expense]
-    income_recurring = [r for r in all_recurring if r.type == models.RecurringType.income]
-    cc_payment_recurring = [r for r in all_recurring if r.type == models.RecurringType.credit_card_payment]
+    if card_id is not None:
+        # Card-side matching only ever considers items charged to this card;
+        # best_card_recurring_match itself narrows further to is_floating
+        # and amount > 0, so this pool doesn't need to pre-filter those.
+        from backend.services.card_recurring_match import best_card_recurring_match
+        card_recurring = [r for r in all_recurring if r.card_id == card_id]
+    else:
+        expense_recurring = [r for r in all_recurring if r.type == models.RecurringType.expense]
+        income_recurring = [r for r in all_recurring if r.type == models.RecurringType.income]
+        cc_payment_recurring = [r for r in all_recurring if r.type == models.RecurringType.credit_card_payment]
 
     confirmed_amounts = _confirmed_bill_amounts(db, user.id)
     payee_history = _payee_history(db, user.id)
@@ -278,7 +304,16 @@ def build_preview(
         suggested_item_id = None
         suggested_item_name = None
 
-        if row.amount < 0:
+        if card_id is not None:
+            # Card rows follow SimpleFIN/ParsedRow convention: negative is a
+            # charge, positive a return/credit -- only a charge can match a
+            # recurring expense.
+            if row.amount < 0:
+                best = best_card_recurring_match(card_recurring, row.description, row.amount, row.date,
+                                                 confirmed_amounts, payee_history)
+                if best is not None:
+                    suggested_item_id, suggested_item_name = best.id, best.name
+        elif row.amount < 0:
             # The matcher itself routes card-payment debits to card-payment
             # items and everything else to expenses.
             suggested_item_id, suggested_item_name = _best_suggestion(expense_recurring + cc_payment_recurring, row)
@@ -594,7 +629,10 @@ def run_import(
                 merchant=row.description,
                 source=card_source,
                 external_id=row.external_id,
+                recurring_item_id=row.recurring_item_id,
             )
+            if not row.recurring_item_id:
+                _try_auto_match_card(ct, db)
             db.add(ct)
 
             card = db.get(models.CreditCard, card_id)

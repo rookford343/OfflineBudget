@@ -221,7 +221,7 @@ def _import(
             recurring_item_id=r.suggested_recurring_item_id,
             external_id=parsed[r.row_index].external_id,
         )
-        for r in build_preview(db, user, parsed)
+        for r in build_preview(db, user, parsed, card_id=link.local_credit_card_id)
     ]
     result = run_import(
         db, user, confirm,

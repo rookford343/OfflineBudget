@@ -379,7 +379,7 @@ def _sync_link(
     imported = 0
     skipped = 0
     if parsed_rows:
-        preview_rows = build_preview(db, user, parsed_rows)
+        preview_rows = build_preview(db, user, parsed_rows, card_id=link.local_credit_card_id)
         # build_preview stamps each preview row with the index of the ParsedRow
         # it came from, so we recover SimpleFIN's transaction id by index rather
         # than widening the preview/confirm contract for every CSV caller.

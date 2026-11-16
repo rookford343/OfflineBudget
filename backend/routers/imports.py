@@ -43,7 +43,7 @@ async def preview_import(
     if not parsed_rows:
         raise HTTPException(status_code=422, detail="No valid rows found in file")
 
-    preview_rows = build_preview(db, user, parsed_rows, skip_categorization=skip_categorization)
+    preview_rows = build_preview(db, user, parsed_rows, skip_categorization=skip_categorization, card_id=card_id)
     categorized = sum(1 for r in preview_rows if not r.needs_review)
 
     return schemas.ImportPreviewResponse(
