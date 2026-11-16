@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Pencil, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { recurringApi } from "../api";
@@ -29,29 +28,23 @@ function shortDate(iso: string): string {
  * Household Snapshot Leftover for the same month.
  */
 export default function RecurringSummaryStrip({
-  incomeItems, onEdit, onDelete,
+  incomeItems, onEdit, onDelete, year, month, onShiftMonth,
 }: {
   incomeItems: any[];
   onEdit: (item: any) => void;
   onDelete: (id: number) => void;
+  // Lifted up to Recurring.tsx -- the floating-item status display (Task 5)
+  // reads the same (year, month) this strip's totals do, so the page has
+  // one shared notion of "which month" instead of two independent ones.
+  year: number;
+  month: number;
+  onShiftMonth: (delta: number) => void;
 }) {
   const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month, setMonth] = useState(now.getMonth() + 1);
-
   const { data: summary } = useQuery<any>({
     queryKey: ["recurring-month-summary", year, month],
     queryFn: () => recurringApi.monthSummary(year, month),
   });
-
-  function shiftMonth(delta: number) {
-    let m = month + delta;
-    let y = year;
-    if (m > 12) { m = 1; y += 1; }
-    if (m < 1) { m = 12; y -= 1; }
-    setMonth(m);
-    setYear(y);
-  }
 
   const incomeById: Record<number, any> = Object.fromEntries(incomeItems.map((i: any) => [i.id, i]));
 
@@ -80,7 +73,7 @@ export default function RecurringSummaryStrip({
     <div className="space-y-3">
       <div className="flex items-center justify-center gap-3">
         <button
-          type="button" onClick={() => shiftMonth(-1)} className="btn-ghost p-1"
+          type="button" onClick={() => onShiftMonth(-1)} className="btn-ghost p-1"
           aria-label="Previous month"
         >
           <ChevronLeft size={16} />
@@ -89,7 +82,7 @@ export default function RecurringSummaryStrip({
           {MONTHS[month - 1]} {year}
         </span>
         <button
-          type="button" onClick={() => shiftMonth(1)} className="btn-ghost p-1"
+          type="button" onClick={() => onShiftMonth(1)} className="btn-ghost p-1"
           aria-label="Next month"
         >
           <ChevronRight size={16} />

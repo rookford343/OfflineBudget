@@ -916,6 +916,25 @@ class RecurringSkipBody(BaseModel):
     month: int
 
 
+class RecurringFloatingStatus(BaseModel):
+    """One row of GET /recurring/floating-status?year=&month= -- the
+    Matched/Pending/Skipped read for one active floating item in one
+    calendar month (Task 5 of the floating-recurring-expenses plan).
+
+    matched_amount and variance are server-computed (variance =
+    matched_amount - the item's planned amount) so the frontend never does
+    money arithmetic of its own. "matched" wins over "skipped": a stale
+    RecurringSkip row for the same (item, year, month) is deleted as soon
+    as a linked transaction is found, so the two statuses can never both
+    be true for the same month.
+    """
+    recurring_item_id: int
+    status: Literal["matched", "pending", "skipped"]
+    matched_date: Optional[date] = None
+    matched_amount: Optional[Decimal] = None
+    variance: Optional[Decimal] = None
+
+
 class CategoryRolloverUpdate(BaseModel):
     rollover_enabled: bool
 

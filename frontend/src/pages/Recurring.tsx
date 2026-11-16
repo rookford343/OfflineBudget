@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { recurringApi, accountsApi, categoriesApi, cardsApi, billOverridesApi } from "../api";
-import { fmt } from "../lib/utils";
+import { fmt, fmtDate } from "../lib/utils";
 import { Plus, Pencil, Trash2, TrendingDown, X, Sparkles, HelpCircle, CreditCard, Receipt, CalendarClock } from "lucide-react";
 import HelpPanel from "../components/HelpPanel";
 import BillsToConfirm from "../components/BillsToConfirm";
@@ -21,7 +21,7 @@ function endMonthLabel(iso: string): string {
   return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
 }
 
-const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "", amount_varies: false };
+const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "", amount_varies: false, is_floating: false };
 
 /** Next occurrence of a monthly item's due day, on or after today.
  *  Only monthly items get inline actual-amount entry: yearly and quarterly
@@ -47,6 +47,43 @@ export default function Recurring() {
   const [billEditId, setBillEditId] = useState<number | null>(null);
   const [billAmt, setBillAmt] = useState("");
   const qc = useQueryClient();
+
+  // The month the summary strip and the floating-item status display both
+  // read -- lifted up from RecurringSummaryStrip (its only caller) so the
+  // two stay in lockstep instead of showing two different "which month"
+  // notions on the same page.
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth() + 1);
+  function shiftMonth(delta: number) {
+    let m = month + delta;
+    let y = year;
+    if (m > 12) { m = 1; y += 1; }
+    if (m < 1) { m = 12; y -= 1; }
+    setMonth(m);
+    setYear(y);
+  }
+
+  // Per-item Matched/Pending/Skipped read for floating items, scoped to the
+  // same month as the summary strip above.
+  const { data: floatingStatus = [] } = useQuery<any[]>({
+    queryKey: ["recurring-floating-status", year, month],
+    queryFn: () => recurringApi.floatingStatus(year, month),
+  });
+  const floatingStatusByItemId: Record<number, any> = Object.fromEntries(
+    floatingStatus.map((s: any) => [s.recurring_item_id, s]),
+  );
+  const invalidateFloatingStatus = () => qc.invalidateQueries({ queryKey: ["recurring-floating-status"] });
+  const skipMut = useMutation({
+    mutationFn: ({ itemId, year: y, month: m }: { itemId: number; year: number; month: number }) =>
+      recurringApi.skipMonth(itemId, y, m),
+    onSuccess: invalidateFloatingStatus,
+  });
+  const unskipMut = useMutation({
+    mutationFn: ({ itemId, year: y, month: m }: { itemId: number; year: number; month: number }) =>
+      recurringApi.unskipMonth(itemId, y, m),
+    onSuccess: invalidateFloatingStatus,
+  });
 
   // Known statement amounts for upcoming occurrences. Keyed by
   // "<itemId>|<dueDate>" so a row can find its own without scanning.
@@ -143,11 +180,11 @@ export default function Recurring() {
 
   function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["amount-drift"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setShowForm(false); setEditItem(null); }
   function openNew() { setForm({ ...emptyForm, account_id: accounts[0]?.id?.toString() ?? "" }); setEditItem(null); setShowForm(true); }
-  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "", amount_varies: !!i.amount_varies }); setShowForm(true); }
+  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "", amount_varies: !!i.amount_varies, is_floating: !!i.is_floating }); setShowForm(true); }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null };
+    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null, is_floating: !!form.is_floating };
     if (editItem) updateMut.mutate({ id: editItem.id, data });
     else createMut.mutate(data);
   }
@@ -186,6 +223,15 @@ export default function Recurring() {
     const projected = parseFloat(item.amount || "0");
     const actual = override ? parseFloat(override.actual_amount) : null;
     const variance = override ? parseFloat(override.variance ?? "0") : 0;
+
+    // Matched/Pending/Skipped read for this (floating item, selected month),
+    // scoped to floating items only per the design doc's status display --
+    // a fixed-day item already shows its real state through the due-date
+    // badge above and the actual-amount entry below.
+    const fs = item.is_floating ? floatingStatusByItemId[item.id] : null;
+    const floatingStatusValue: "matched" | "pending" | "skipped" = fs?.status ?? "pending";
+    const floatingVariance = fs?.variance != null ? parseFloat(fs.variance) : 0;
+    const skipBusy = skipMut.isPending || unskipMut.isPending;
 
     return (
       <div className="py-2.5 border-b border-gray-50 last:border-0">
@@ -239,6 +285,42 @@ export default function Recurring() {
             {variance === 0 ? "as projected" : `${variance > 0 ? "+" : "−"}${fmt(Math.abs(variance))} vs projected ${fmt(projected)}`}
           </span>
           <button onClick={() => clearBillMut.mutate(override.id)} className="text-gray-400 hover:text-red-500">clear</button>
+        </div>
+      )}
+
+      {/* Matched/Pending/Skipped for a floating item in the selected month --
+          its real date varies, so unlike a fixed-day bill there's no due
+          date to show a badge off; this is the only place that state shows. */}
+      {item.is_floating && (
+        <div className="mt-1.5 flex items-center gap-2 text-xs">
+          {floatingStatusValue === "matched" && (
+            <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+              Matched: {fmt(fs.matched_amount)} on {fmtDate(fs.matched_date)}
+              {floatingVariance !== 0 && (
+                <span className={floatingVariance > 0 ? "text-red-500 ml-1" : "text-emerald-600 ml-1"}>
+                  (variance {floatingVariance > 0 ? "+" : "−"}{fmt(Math.abs(floatingVariance))})
+                </span>
+              )}
+            </span>
+          )}
+          {floatingStatusValue === "skipped" && (
+            <span className="text-gray-400">Skipped this month</span>
+          )}
+          {floatingStatusValue === "pending" && (
+            <span className="text-amber-600 dark:text-amber-400">Pending — expected this month</span>
+          )}
+          {floatingStatusValue !== "matched" && (
+            <button
+              type="button"
+              disabled={skipBusy}
+              className="btn-ghost px-1.5 py-0.5 text-xs"
+              onClick={() => (floatingStatusValue === "skipped"
+                ? unskipMut.mutate({ itemId: item.id, year, month })
+                : skipMut.mutate({ itemId: item.id, year, month }))}
+            >
+              {floatingStatusValue === "skipped" ? "Unskip" : "Skip this month"}
+            </button>
+          )}
         </div>
       )}
 
@@ -308,6 +390,9 @@ export default function Recurring() {
         incomeItems={income}
         onEdit={openEdit}
         onDelete={(id) => setDeleteId(id)}
+        year={year}
+        month={month}
+        onShiftMonth={shiftMonth}
       />
 
       <RecurringCategoryRollup groups={breakdown?.by_category ?? []} />
@@ -552,6 +637,12 @@ export default function Recurring() {
                 <label className="label">Day of Month (0 = last day)</label>
                 <input type="number" min="0" max="31" className="input" value={form.day_of_month} onChange={e => setForm({ ...form, day_of_month: e.target.value })} required />
               </div>
+              {form.type === "expense" && (
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input type="checkbox" checked={form.is_floating} onChange={e => setForm({ ...form, is_floating: e.target.checked })} />
+                  Floating (date varies — matches anywhere in the month)
+                </label>
+              )}
               {form.type === "expense" && form.frequency === "monthly" && !form.card_id && (
                 <div>
                   <label className="label">Statement arrives around day <span className="text-gray-400 font-normal">(optional)</span></label>

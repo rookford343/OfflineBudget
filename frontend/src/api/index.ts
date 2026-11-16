@@ -127,6 +127,15 @@ export const recurringApi = {
   monthSummary: (year: number, month: number) =>
     api.get("/recurring/month-summary", { params: { year, month } }).then((r) => r.data),
   upcoming: (days = 30) => api.get("/recurring/upcoming", { params: { days } }).then((r) => r.data),
+  // Per-item, per-month Matched/Pending/Skipped read for floating items
+  // (Task 5). matched_amount/variance come straight from the response --
+  // never computed client-side.
+  floatingStatus: (year: number, month: number) =>
+    api.get("/recurring/floating-status", { params: { year, month } }).then((r) => r.data),
+  skipMonth: (itemId: number, year: number, month: number) =>
+    api.post(`/recurring/${itemId}/skip`, { year, month }).then((r) => r.data),
+  unskipMonth: (itemId: number, year: number, month: number) =>
+    api.delete(`/recurring/${itemId}/skip`, { params: { year, month } }).then((r) => r.data),
 };
 
 // ── Forecast ──────────────────────────────────────────────────────────────────
