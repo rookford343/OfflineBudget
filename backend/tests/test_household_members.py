@@ -127,10 +127,17 @@ def test_delete_ignores_other_users_recurring_item_pointing_at_this_member(clien
     """Defensive: the delete-guard's reference count is scoped to the
     caller's own recurring items, not just to this member's id. Create/update
     now block tagging another user's member via owner_id, but the guard
-    stays user-scoped regardless -- so even if another user's item somehow
-    points at this member, it must not block this user's delete, and (per
-    the reviewer's reproduction) a subsequent account deletion must not hit
-    a raw FK IntegrityError either."""
+    stays user-scoped regardless -- so this user's own active items never
+    block the delete based on another tenant's data.
+
+    The bulk FK-clear that runs after the guard is also user-scoped: it must
+    never mutate another tenant's row, even a stale cross-tenant reference
+    like this test's `cross_user_item` (pre-dating recurring.py's ownership
+    validation). Left untouched, that row's owner_id FK still points at this
+    member, so the delete can't actually complete -- it must come back as
+    the same 400 the guard above uses, not a silent 204 (which would mean
+    the cross-user row got mutated) and not an unhandled 500 (a raw FK
+    IntegrityError)."""
     test_client, user, checking = client
 
     r = test_client.post("/household-members", json={"name": "Widely Tagged"})
@@ -151,4 +158,17 @@ def test_delete_ignores_other_users_recurring_item_pointing_at_this_member(clien
     db_session.commit()
 
     r2 = test_client.delete(f"/household-members/{member_id}")
-    assert r2.status_code == 204
+    # The scoped bulk-clear correctly leaves this stale cross-tenant
+    # reference alone, which means the member can't actually be deleted
+    # (its row is still FK-referenced) -- the delete is refused with the
+    # same 400 the active-item guard above uses, rather than silently
+    # succeeding (which would require mutating another tenant's row) or
+    # raising an unhandled FK IntegrityError.
+    assert r2.status_code == 400
+
+    # Confirm the member was NOT deleted and the cross-user item's owner_id
+    # was left completely alone -- still pointing at the (still-existing)
+    # member, since the delete never happened.
+    db_session.refresh(cross_user_item)
+    assert cross_user_item.owner_id == member_id
+    assert db_session.get(models.HouseholdMember, member_id) is not None

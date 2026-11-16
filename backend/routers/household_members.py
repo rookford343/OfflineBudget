@@ -77,18 +77,33 @@ def delete_household_member(
         raise HTTPException(status_code=400, detail="Cannot delete a household member referenced by recurring items")
     # The guard above only blocks on this user's active items, so a row can
     # still physically reference this member via the raw owner_id FK at this
-    # point: this user's own soft-deleted item, or (defensively, pre-fix
-    # data) another user's item. owner_id has no ON DELETE behavior, so
-    # leaving either in place would turn db.delete(member) below into an
-    # unhandled FK IntegrityError instead of the clean 204 the guard just
-    # decided this delete should get. Clear the FK on every such row first --
-    # a soft-deleted item keeps its own history, it just stops pointing at a
-    # member that no longer exists.
+    # point: this user's own soft-deleted item. owner_id has no ON DELETE
+    # behavior, so leaving that in place would turn db.delete(member) below
+    # into an unhandled FK IntegrityError instead of the clean 204 the guard
+    # just decided this delete should get. Clear the FK on every such row
+    # first -- a soft-deleted item keeps its own history, it just stops
+    # pointing at a member that no longer exists. Deliberately scoped to
+    # this user: another user's row must never be mutated by this request,
+    # even a stale/defensive-only cross-tenant reference (recurring.py
+    # blocks creating new ones), so we do NOT touch it here.
     db.query(models.RecurringItem).filter(
         models.RecurringItem.owner_id == member.id,
+        models.RecurringItem.user_id == user.id,
     ).update({models.RecurringItem.owner_id: None}, synchronize_session=False)
     db.delete(member)
-    db.commit()
+    # A stale cross-tenant row (pre-dating the ownership validation in
+    # recurring.py, or otherwise pre-existing corrupt data) can still
+    # reference this member and was deliberately left untouched above, so
+    # this commit can legitimately hit the FK constraint. Converting that
+    # into the same 400 the guard above already returns -- rather than
+    # letting it surface as an unhandled 500 -- keeps the member stuck
+    # undeletable in that narrow, should-no-longer-happen case instead of
+    # either crashing or silently mutating the other tenant's data.
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Cannot delete a household member referenced by recurring items")
 
 
 def _get_or_404(db: Session, user_id: int, member_id: int) -> models.HouseholdMember:
