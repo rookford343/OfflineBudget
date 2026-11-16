@@ -73,7 +73,17 @@ export default function Recurring() {
   const floatingStatusByItemId: Record<number, any> = Object.fromEntries(
     floatingStatus.map((s: any) => [s.recurring_item_id, s]),
   );
-  const invalidateFloatingStatus = () => qc.invalidateQueries({ queryKey: ["recurring-floating-status"] });
+  const invalidateFloatingStatus = () => {
+    qc.invalidateQueries({ queryKey: ["recurring-floating-status"] });
+    // Skip/unskip changes month_base's output for this month, which the
+    // summary strip's totals (recurring-month-summary) and the category
+    // rollup (recurring-breakdown) both read -- without this they kept
+    // showing stale totals right after a skip/unskip, same keys the
+    // item-edit mutation's done() below already invalidates for an
+    // equivalent amount-affecting change.
+    qc.invalidateQueries({ queryKey: ["recurring-month-summary"] });
+    qc.invalidateQueries({ queryKey: ["recurring-breakdown"] });
+  };
   const skipMut = useMutation({
     mutationFn: ({ itemId, year: y, month: m }: { itemId: number; year: number; month: number }) =>
       recurringApi.skipMonth(itemId, y, m),
