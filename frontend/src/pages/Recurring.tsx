@@ -194,7 +194,7 @@ export default function Recurring() {
 
   const createMut = useMutation({ mutationFn: recurringApi.create, onSuccess: done });
   const updateMut = useMutation({ mutationFn: ({ id, data }: any) => recurringApi.update(id, data), onSuccess: done });
-  const deleteMut = useMutation({ mutationFn: recurringApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setDeleteId(null); } });
+  const deleteMut = useMutation({ mutationFn: recurringApi.remove, onSuccess: () => { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); qc.invalidateQueries({ queryKey: ["recurring-contingency"] }); setDeleteId(null); } });
   // "+ Add person" in the Owner select: creates the household member, then
   // selects it on the open form the same way a newly-added category or
   // account would be picked up -- the mutation's onSuccess writes straight
@@ -215,7 +215,7 @@ export default function Recurring() {
     setForm({ ...form, owner_id: value });
   }
 
-  function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["amount-drift"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); setShowForm(false); setEditItem(null); }
+  function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["amount-drift"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); qc.invalidateQueries({ queryKey: ["recurring-contingency"] }); setShowForm(false); setEditItem(null); }
   function openNew() { setForm({ ...emptyForm, account_id: accounts[0]?.id?.toString() ?? "" }); setEditItem(null); setEssentialTouched(false); setShowForm(true); }
   function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), owner_id: String(i.owner_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "", amount_varies: !!i.amount_varies, is_floating: !!i.is_floating, is_essential: !!i.is_essential }); setEssentialTouched(false); setShowForm(true); }
 
@@ -677,6 +677,11 @@ export default function Recurring() {
                   // never touch is_essential, which editItem === null already
                   // guarantees here.
                   if (editItem === null && !essentialTouched) {
+                    if (category_id === "") {
+                      // "None" / uncategorized defaults to essential.
+                      setForm({ ...form, category_id, is_essential: true });
+                      return;
+                    }
                     const cat = allCats.find((c: any) => String(c.id) === category_id);
                     if (cat) {
                       setForm({ ...form, category_id, is_essential: !cat.is_discretionary });

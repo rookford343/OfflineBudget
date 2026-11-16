@@ -357,16 +357,34 @@ def upgrade_schema():
     # UPDATE doesn't fail once already applied the way ALTER does. Running
     # the backfill only inside the branch where the ALTER just newly
     # succeeded makes it a true one-time migration.
-    with engine.connect() as conn:
+    #
+    # The ALTER and the UPDATE run inside one explicit transaction on a raw
+    # DBAPI connection rather than through engine.connect()'s implicit one --
+    # pysqlite auto-commits "ALTER TABLE ADD COLUMN" the instant it runs
+    # unless it's already inside a transaction, so engine.connect()'s normal
+    # commit()/rollback() can only ever undo the UPDATE, never the ALTER: a
+    # UPDATE failure (lock contention, etc.) would leave the column
+    # permanently stranded with its DEFAULT 1, and the next startup's ALTER
+    # would then fail as "duplicate column" -- caught by the same except --
+    # so the backfill would never be retried. Issuing "BEGIN" ourselves on
+    # the raw connection puts both statements inside one real SQLite
+    # transaction, which SQLite's own transactional DDL support can roll
+    # back as a unit on any failure, making this safely retryable.
+    raw_conn = engine.raw_connection()
+    try:
+        cur = raw_conn.cursor()
+        cur.execute("BEGIN")
         try:
-            conn.execute(text("ALTER TABLE recurring_items ADD COLUMN is_essential BOOLEAN DEFAULT 1"))
-            conn.execute(text(
+            cur.execute("ALTER TABLE recurring_items ADD COLUMN is_essential BOOLEAN DEFAULT 1")
+            cur.execute(
                 "UPDATE recurring_items SET is_essential = 0 WHERE category_id IN "
                 "(SELECT id FROM categories WHERE is_discretionary = 1)"
-            ))
-            conn.commit()
+            )
+            cur.execute("COMMIT")
         except Exception:
-            conn.rollback()  # column already exists -- backfill already ran
+            cur.execute("ROLLBACK")  # column doesn't exist yet, or backfill already ran -- either way, safe to retry next startup
+    finally:
+        raw_conn.close()
 
 
 def migrate_cushions(db, apply: bool) -> list[str]:

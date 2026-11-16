@@ -71,3 +71,47 @@ def test_existing_item_backfills_essential_from_category(monkeypatch):
         }
     assert rows["Pre-migration Discretionary"] == 0
     assert rows["Pre-migration Necessary"] == 1
+
+
+def test_backfill_failure_rolls_back_the_alter_too(monkeypatch):
+    """If the backfill UPDATE fails, the preceding ALTER TABLE ADD COLUMN
+    must not be left stranded -- both run in one explicit transaction on a
+    raw DBAPI connection, so SQLite's transactional DDL rolls back the
+    column add along with the failed UPDATE. Simulated here by never
+    creating `categories` at all, so the UPDATE's subquery against it raises
+    "no such table". Before the fix, engine.connect()'s implicit
+    commit/rollback could only undo the UPDATE -- pysqlite auto-commits
+    "ALTER TABLE ADD COLUMN" the instant it runs, so the column would
+    survive, permanently stranded with its DEFAULT 1, and every subsequent
+    startup's ALTER would fail as "duplicate column" (caught by the same
+    except) -- so the backfill would never be retried."""
+    import backend.database as database_module
+
+    test_engine = create_engine(
+        "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool,
+    )
+    with test_engine.connect() as conn:
+        # Deliberately no `categories` table -- the backfill UPDATE's
+        # subquery against it must raise.
+        conn.execute(text("""
+            CREATE TABLE recurring_items (
+                id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL,
+                account_id INTEGER NOT NULL, category_id INTEGER,
+                name VARCHAR(128) NOT NULL, amount NUMERIC(14,2) NOT NULL,
+                type VARCHAR(20) NOT NULL, frequency VARCHAR(10) DEFAULT 'monthly',
+                day_of_month INTEGER NOT NULL, start_date DATE NOT NULL,
+                is_active BOOLEAN DEFAULT 1
+            )
+        """))
+        conn.execute(text(
+            "INSERT INTO recurring_items (user_id, account_id, category_id, name, amount, type, day_of_month, start_date) "
+            "VALUES (1, 1, NULL, 'Pre-migration Item', 45.00, 'expense', 15, '2026-01-01')"
+        ))
+        conn.commit()
+
+    monkeypatch.setattr(database_module, "engine", test_engine)
+    database_module.upgrade_schema()
+
+    with test_engine.connect() as conn:
+        columns = {row[1] for row in conn.execute(text("PRAGMA table_info(recurring_items)"))}
+    assert "is_essential" not in columns

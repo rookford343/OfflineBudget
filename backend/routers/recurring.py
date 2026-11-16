@@ -510,6 +510,12 @@ def update_recurring(
         )
     if "owner_id" in updates and updates["owner_id"] is not None:
         owned_or_404(db, models.HouseholdMember, updates["owner_id"], user.id, "Household member not found")
+    # "Paused" only makes sense for a non-essential item -- if this update
+    # flips is_essential back to True, clear any stale pause so the item
+    # doesn't silently reappear "Paused" with a never-re-confirmed date if
+    # it's later flipped back to non-essential.
+    if updates.get("is_essential") is True:
+        updates["contingency_paused_at"] = None
     for field, value in updates.items():
         setattr(item, field, value)
     db.commit()
