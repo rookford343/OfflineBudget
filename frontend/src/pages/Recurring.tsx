@@ -10,6 +10,7 @@ import TriageInbox from "../components/TriageInbox";
 import RecurringSummaryStrip from "../components/RecurringSummaryStrip";
 import RecurringCategoryRollup from "../components/RecurringCategoryRollup";
 import RecurringOwnerRollup from "../components/RecurringOwnerRollup";
+import RecurringAccountRollup from "../components/RecurringAccountRollup";
 import { CategoryOptions, AccountOptions, RecurringOptions } from "../lib/selectOptions";
 import { sortCategoryList, byName } from "../lib/selectOptions";
 
@@ -432,9 +433,10 @@ export default function Recurring() {
         onShiftMonth={shiftMonth}
       />
 
-      <div className="grid md:grid-cols-2 gap-6">
+      <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6">
         <RecurringCategoryRollup groups={breakdown?.by_category ?? []} />
         <RecurringOwnerRollup groups={breakdown?.by_owner ?? []} />
+        <RecurringAccountRollup groups={breakdown?.by_account ?? []} />
       </div>
 
       {/* Ongoing vs. temporary. A device payment that rolls off in 8 months
