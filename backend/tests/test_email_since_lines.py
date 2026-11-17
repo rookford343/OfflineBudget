@@ -548,8 +548,11 @@ def _bump_old_receipt(db, user, key, amount):
 
 
 def test_receipt_key_carries_old_new_and_math(db_session, monkeypatch):
+    # safety_margin_week's own math comes from its parent safety_margin (see
+    # _receipt_math) since its own tree is a thin divide skeleton with
+    # nothing to diff -- bump the parent's stored row to get a real line.
     user = _moved_world(db_session, monkeypatch)
-    _bump_old_receipt(db_session, user, "safety_margin_week", D("1.00"))
+    _bump_old_receipt(db_session, user, "safety_margin", D("1.00"))
     changes = _explained(db_session, user, receipt_keys=frozenset({"safety_margin_week"}))
     change = next(c for c in changes if c.key == "safety_margin_week")
     assert change.old_value is not None and change.new_value is not None
@@ -586,6 +589,38 @@ def test_a_broken_math_lines_call_drops_only_the_math(db_session, monkeypatch):
     change = next(c for c in changes if c.key == "safety_margin_week")
     assert change.old_value is not None and change.new_value is not None
     assert change.math == ()
+
+
+def _bump_old_receipt_row(db, user, key, row_index, amount):
+    """Like `_bump_old_receipt`, but a chosen row -- for proving a parent
+    figure's own real itemized line (not just its first row) is what shows
+    up in a derived figure's receipt math, not a generic restatement."""
+    snap = metric_history.latest_snapshot(db, user.id, "email")
+    row = next(r for r in snap.readings if r.metric_key == key)
+    explain = schemas.Explanation.model_validate_json(row.explain_json)
+    explain.rows[row_index].amount += amount
+    row.explain_json = explain.model_dump_json()
+    db.commit()
+
+
+def test_receipt_math_comes_from_the_parent_when_the_childs_own_tree_is_thin(db_session, monkeypatch):
+    """safety_margin_week's own Explanation is just "Safety Margin ÷ weeks
+    left" (see weekly_explanation) -- divide and result rows are both
+    skipped by math_lines, so its own tree alone can show at most one line,
+    restating the parent's total. safety_margin (the parent) has the real
+    itemized rows (budget_snapshot.py's ExplainBuilder for "safety_margin").
+    Bumping two of the parent's stored rows proves the receipt's math comes
+    from the parent's real lines, not the child's thin skeleton."""
+    user = _moved_world(db_session, monkeypatch)
+    _bump_old_receipt_row(db_session, user, "safety_margin", 1, D("50.00"))
+    _bump_old_receipt_row(db_session, user, "safety_margin", 2, D("-30.00"))
+    changes = _explained(db_session, user, receipt_keys=frozenset({"safety_margin_week"}))
+    change = next(c for c in changes if c.key == "safety_margin_week")
+    labels = [m.label for m in change.math]
+    assert "This month's card bills" in labels
+    assert "Card bills already charged" in labels
+    assert len(labels) >= 2
+    assert "Safety Margin" not in labels
 
 
 # ── The receipt block for Safety Margin ──────────────────────────────────────
@@ -722,11 +757,10 @@ def test_receipt_math_line_shows_a_minus_sign_for_a_negative_value(db_session, m
 def test_safety_margin_gets_the_full_receipt_end_to_end(db_session, monkeypatch):
     from backend.services.summary_generator import SINCE_RECEIPT_KEYS
     user = _moved_world(db_session, monkeypatch)
-    # _moved_world only shifts the stored email reading's value (_set_previous),
-    # never its receipt JSON, so safety_margin_week's own math_lines diff is
-    # otherwise empty -- same reason test_receipt_key_carries_old_new_and_math
-    # (Task 1) bumps the old receipt to get a real math line.
-    _bump_old_receipt(db_session, user, "safety_margin_week", D("1.00"))
+    # safety_margin_week's math is sourced from its parent safety_margin (see
+    # _receipt_math), so bump the parent's stored row to get a real line --
+    # same reason test_receipt_key_carries_old_new_and_math (Task 1) does.
+    _bump_old_receipt(db_session, user, "safety_margin", D("1.00"))
     changes = _explained(db_session, user, keys=None, receipt_keys=SINCE_RECEIPT_KEYS)
     html, text = generate_daily_summary(db_session, user, since_changes=changes)
     block = html[html.index(CHANGES_TITLE):]
@@ -736,7 +770,8 @@ def test_safety_margin_gets_the_full_receipt_end_to_end(db_session, monkeypatch)
 
 def test_the_send_loop_gives_safety_margin_the_full_receipt(db_session, monkeypatch):
     user = _moved_world(db_session, monkeypatch)
-    _bump_old_receipt(db_session, user, "safety_margin_week", D("1.00"))
+    # Bump the parent's row -- safety_margin_week's math is sourced from it.
+    _bump_old_receipt(db_session, user, "safety_margin", D("1.00"))
     bodies = []
 
     def send(db, to, subject, html, text, *a, **kw):

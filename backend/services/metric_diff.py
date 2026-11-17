@@ -679,11 +679,28 @@ def _ancestor_key(key: str, labels: dict[str, str]) -> str | None:
     return None
 
 
-def _receipt_math(prev: models.MetricReading, reading: MetricReadingData) -> tuple[schemas.HistoryMathLine, ...]:
-    """Before/after receipt lines for a since-last-email change, `()` when a
-    stored receipt cannot be read."""
+def _receipt_math(
+    prev: models.MetricReading, reading: MetricReadingData, readings: list[MetricReadingData],
+) -> tuple[schemas.HistoryMathLine, ...]:
+    """Before/after receipt lines for a since-last-email change. A figure
+    derived from a parent (see DERIVED_FROM) has only a thin divide skeleton
+    of its own -- the parent's Explanation carries the real itemized lines,
+    so when a parent is resolvable the math comes from the parent's old and
+    new readings instead, the same substitution `_parent_causes` makes for
+    causes. `reading.explain` is already the live Explanation, so no
+    transient MetricReading is needed for the "new" side the way
+    `_transient_reading` builds one for `explain_change` -- `math_lines`
+    only ever needs the two Explanation trees. `()` when a stored receipt
+    cannot be read."""
+    old_source, new_explain = prev, reading.explain
+    parent_key = DERIVED_FROM.get(reading.key)
+    if parent_key is not None:
+        prev_parent = _reading_of(prev.snapshot, parent_key)
+        parent_reading = next((r for r in readings if r.key == parent_key), None)
+        if prev_parent is not None and parent_reading is not None:
+            old_source, new_explain = prev_parent, parent_reading.explain
     try:
-        return tuple(math_lines(schemas.Explanation.model_validate_json(prev.explain_json), reading.explain))
+        return tuple(math_lines(schemas.Explanation.model_validate_json(old_source.explain_json), new_explain))
     except (ValueError, KeyError, TypeError, AttributeError, ArithmeticError):
         return ()
 
@@ -719,7 +736,7 @@ def explain_since_last_email(
                 continue
             cur = _transient_reading(user.id, reading, sources_json, as_of, taken_at)
             causes = _causes_or_fallback(db, user.id, reading.key, prev, cur)
-            math = _receipt_math(prev, reading) if reading.key in receipt_keys else ()
+            math = _receipt_math(prev, reading, readings) if reading.key in receipt_keys else ()
             moved.append((reading, delta, causes, old_value, math))
         except Exception:  # noqa: BLE001 -- one bad stored reading drops only its own entry
             logger.exception("Change history: no since-last-email changes for %s", reading.key)
