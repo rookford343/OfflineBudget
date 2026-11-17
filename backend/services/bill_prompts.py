@@ -29,6 +29,7 @@ from datetime import date, timedelta
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.services.forecast_engine import _next_occurrence_on_or_after
+from backend.services.pending_amount import amount_on
 
 
 def _clamp_day(year: int, month: int, day: int) -> int:
@@ -87,7 +88,7 @@ def bills_to_confirm(db: Session, user_id: int, today: date) -> list[schemas.Bil
         out.append(schemas.BillToConfirmOut(
             recurring_item_id=item.id,
             name=item.name,
-            estimated_amount=item.amount,
+            estimated_amount=amount_on(item, due_date),
             statement_date=statement_date,
             due_date=due_date,
         ))

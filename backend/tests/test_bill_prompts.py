@@ -58,12 +58,15 @@ def _item(
     db, user, acct, *, name="Power Co", amount="100.00", statement_day=17,
     day_of_month=8, frequency=models.RecurringFrequency.monthly,
     type=models.RecurringType.expense, card_id=None, is_active=True,
+    pending_amount=None, pending_amount_effective_date=None,
 ):
     item = models.RecurringItem(
         user_id=user.id, account_id=acct.id, name=name, amount=Decimal(amount),
         type=type, frequency=frequency, day_of_month=day_of_month,
         statement_day=statement_day, card_id=card_id, is_active=is_active,
         start_date=date(2020, 1, 1),
+        pending_amount=pending_amount,
+        pending_amount_effective_date=pending_amount_effective_date,
     )
     db.add(item); db.commit()
     return item
@@ -107,6 +110,23 @@ def test_prompts_with_statement_and_due_dates(db_session, statement_day, due_day
     assert results[0].recurring_item_id == item.id
     assert results[0].statement_date == statement_date
     assert results[0].due_date == due_date
+
+
+# ── Scheduled amount changes ─────────────────────────────────────────────────
+
+def test_estimated_amount_uses_the_pending_amount_once_due_date_reaches_effective(db_session):
+    user = _user(db_session); acct = _account(db_session, user)
+    item = _item(
+        db_session, user, acct, statement_day=17, day_of_month=8, amount="100.00",
+        pending_amount=Decimal("125.00"), pending_amount_effective_date=date(2026, 11, 1),
+    )
+    # D = Oct 17, due = Nov 8 -- the effective date (Nov 1) has already arrived
+    # by then, so the estimate shown should be the new amount, not the stale one.
+    results = bills_to_confirm(db_session, user.id, date(2026, 10, 16))
+    assert len(results) == 1
+    assert results[0].recurring_item_id == item.id
+    assert results[0].due_date == date(2026, 11, 8)
+    assert results[0].estimated_amount == Decimal("125.00")
 
 
 # ── Crossing month and year ends ─────────────────────────────────────────────
