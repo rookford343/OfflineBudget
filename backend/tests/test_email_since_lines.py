@@ -586,3 +586,122 @@ def test_a_broken_math_lines_call_drops_only_the_math(db_session, monkeypatch):
     change = next(c for c in changes if c.key == "safety_margin_week")
     assert change.old_value is not None and change.new_value is not None
     assert change.math == ()
+
+
+# ── The receipt block for Safety Margin ──────────────────────────────────────
+
+def _receipt_chg(key, label, causes, math, old, new, delta):
+    from backend.services.metric_diff import EmailChange
+    return EmailChange(key=key, label=label, delta=D(delta), causes=causes,
+                        old_value=D(old), new_value=D(new), math=tuple(math))
+
+
+def _math_line(label, old, new, parts=()):
+    from backend.schemas import HistoryMathLine, HistoryMathPart
+    return HistoryMathLine(label=label, old=D(old) if old is not None else None,
+                            new=D(new) if new is not None else None,
+                            parts=[HistoryMathPart(label=n, delta=D(d)) for n, d in parts])
+
+
+def test_receipt_figure_gets_its_own_breakdown(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    receipt = _receipt_chg(
+        "safety_margin_week", "Safety Margin (this week)",
+        [_cause(text="new pending Test Visa charge")],
+        [_math_line("Pending charges", "0.00", "400.00")],
+        old="1234.56", new="834.56", delta="-400.00",
+    )
+    html, text = generate_daily_summary(db_session, user, since_changes=[receipt])
+    block = html[html.index(CHANGES_TITLE):]
+    assert "$1,234.56" in block and "$834.56" in block and "−$400.00" in block
+    assert "How the number moved" in block and "new pending Test Visa charge" in block
+    tail = text[text.index(CHANGES_TITLE.upper()):]
+    assert "How the number moved" in tail and "$1,234.56" in tail and "$834.56" in tail
+
+
+def test_receipt_figure_is_excluded_from_the_shared_reasons_list(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    shared = _cause(text="Only normal reason")
+    other = _chg("k1", "Figure A", [shared])
+    receipt = _receipt_chg("safety_margin_week", "Safety Margin (this week)", [_cause(text="receipt-only reason")],
+                           [], old="100.00", new="50.00", delta="-50.00")
+    html, text = generate_daily_summary(db_session, user, since_changes=[other, receipt])
+    top_line = text[text.index(CHANGES_TITLE.upper()):].splitlines()[1]
+    assert "Safety Margin" not in top_line
+    # Landmark adjusted from the brief's "How the number moved" (this receipt's
+    # math is []  -- the sub-section is omitted per Step 3's spec, so that
+    # string never appears -- `.index` would raise). The receipt's own header
+    # is always printed regardless of math, and it reliably marks where the
+    # shared/others reasons list ends and this figure's own content begins.
+    shared_body = text[text.index(CHANGES_TITLE.upper()):text.index("Safety Margin (this week):")]
+    assert "receipt-only reason" not in shared_body
+
+
+def test_receipt_only_change_still_renders_the_section(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    receipt = _receipt_chg("safety_margin_week", "Safety Margin (this week)", [_cause(text="a cause")],
+                           [], old="100.00", new="50.00", delta="-50.00")
+    html, text = generate_daily_summary(db_session, user, since_changes=[receipt])
+    assert CHANGES_TITLE in html and CHANGES_TITLE.upper() in text
+    assert " · " not in html[html.index(CHANGES_TITLE):]  # no empty shared top-line
+
+
+def test_no_receipt_section_when_safety_margin_did_not_move(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    other = _chg("k1", "Figure A", [_cause(text="a cause")])
+    html, text = generate_daily_summary(db_session, user, since_changes=[other])
+    assert "How the number moved" not in html and "How the number moved" not in text
+
+
+def test_receipt_causes_are_capped_like_the_shared_list(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    causes = [_cause(text=f"Reason number {i}") for i in range(8)]
+    receipt = _receipt_chg("safety_margin_week", "Safety Margin (this week)", causes, [],
+                           old="100.00", new="50.00", delta="-50.00")
+    html, text = generate_daily_summary(db_session, user, since_changes=[receipt])
+    assert "and 3 more" in html and "and 3 more" in text
+
+
+def test_receipt_text_is_escaped(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    receipt = _receipt_chg("safety_margin_week", "Safety Margin (this week)",
+                           [_cause(text="Shop <b>Bold</b>")], [], old="100.00", new="50.00", delta="-50.00")
+    html, _ = generate_daily_summary(db_session, user, since_changes=[receipt])
+    assert "Shop &lt;b&gt;Bold&lt;/b&gt;" in html and "<b>Bold</b>" not in html
+
+
+def test_math_figures_one_sided_and_no_change():
+    from backend.services.summary_generator import _math_figures
+    from backend.services.metric_diff import money, signed_money
+    assert _math_figures(None, D("20.00"), money, signed_money) == f"added, {money(D('20.00'))}"
+    assert _math_figures(D("20.00"), None, money, signed_money) == f"removed, was {money(D('20.00'))}"
+    assert _math_figures(D("20.00"), D("20.00"), money, signed_money) == f"{money(D('20.00'))}, no change"
+    assert _math_figures(D("20.00"), D("30.00"), money, signed_money) == f"{money(D('20.00'))} → {money(D('30.00'))}"
+
+
+def test_safety_margin_gets_the_full_receipt_end_to_end(db_session, monkeypatch):
+    from backend.services.summary_generator import SINCE_RECEIPT_KEYS
+    user = _moved_world(db_session, monkeypatch)
+    # _moved_world only shifts the stored email reading's value (_set_previous),
+    # never its receipt JSON, so safety_margin_week's own math_lines diff is
+    # otherwise empty -- same reason test_receipt_key_carries_old_new_and_math
+    # (Task 1) bumps the old receipt to get a real math line.
+    _bump_old_receipt(db_session, user, "safety_margin_week", D("1.00"))
+    changes = _explained(db_session, user, keys=None, receipt_keys=SINCE_RECEIPT_KEYS)
+    html, text = generate_daily_summary(db_session, user, since_changes=changes)
+    block = html[html.index(CHANGES_TITLE):]
+    assert "How the number moved" in block and "Safety Margin (this week)" in block
+    assert "How the number moved" in text[text.index(CHANGES_TITLE.upper()):]
+
+
+def test_the_send_loop_gives_safety_margin_the_full_receipt(db_session, monkeypatch):
+    user = _moved_world(db_session, monkeypatch)
+    _bump_old_receipt(db_session, user, "safety_margin_week", D("1.00"))
+    bodies = []
+
+    def send(db, to, subject, html, text, *a, **kw):
+        bodies.append(html)
+        return (True, None)
+
+    _run_send(db_session, monkeypatch, send)
+    assert "How the number moved" in bodies[0]

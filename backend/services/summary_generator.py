@@ -86,6 +86,11 @@ SINCE_QUARTER = "lookahead_minimum"
 SINCE_CHECKING = "checking_balance"
 SINCE_KEYS = (SINCE_SPENDABLE, SINCE_MARGIN, SINCE_NEXT_MONTH, SINCE_QUARTER, SINCE_CHECKING)
 
+# Keys that get the full itemized receipt (old/new value + math lines) in the
+# "What changed" section below, instead of being folded into its shared
+# top-line + reasons list -- see explain_since_last_email's receipt_keys.
+SINCE_RECEIPT_KEYS = frozenset({SINCE_MARGIN})
+
 
 def _lowest_row_since(label: str, since: dict[str, str]) -> str | None:
     """The since line for a `_lowest_balance_rows` row: next month's low, the
@@ -737,52 +742,148 @@ def _reasons(changes) -> list[tuple]:
     return [(c, labels) for c, labels in order.values()]
 
 
+def _cause_item(c, esc, money) -> tuple[str, list[str]]:
+    """One cause's own markup: its grouped `head` with up to CHANGES_MAX_ITEMS
+    `rows` (then an "and N more" line), or its plain `text` -- the rendering
+    a reason gets in the shared top-line list, reused verbatim for a receipt
+    figure's own "What changed" causes (see `_receipt_block`), so the two
+    lists can never render a cause differently."""
+    rows = [(n, "" if a is None else money(a)) for n, a in c.rows] if c.head else []
+    kept, hidden = rows[:CHANGES_MAX_ITEMS], max(len(rows) - CHANGES_MAX_ITEMS, 0)
+    sub = "".join(
+        f"<li style='margin:1px 0'>{esc(n)}{(' ' + esc(a)) if a else ''}</li>" for n, a in kept
+    )
+    if hidden:
+        sub += f"<li style='margin:1px 0;color:#6b7280'>and {hidden} more</li>"
+    html = esc(c.head or c.text) + (f"<ul style='margin:2px 0;padding-left:16px'>{sub}</ul>" if sub else "")
+    text_lines = [c.head or c.text] + [f"    {n}{(' ' + a) if a else ''}" for n, a in kept]
+    if hidden:
+        text_lines.append(f"    and {hidden} more")
+    return html, text_lines
+
+
+def _math_figures(old: Decimal | None, new: Decimal | None, money, signed_money) -> str:
+    """One math line's before/after, worded for a line that appeared,
+    vanished, held steady, or moved -- mirrors
+    frontend/src/lib/historyMoney.ts's mathFigures()."""
+    if old is None:
+        return f"added, {money(new)}"
+    if new is None:
+        return f"removed, was {money(old)}"
+    if old == new:
+        return f"{money(old)}, no change"
+    return f"{money(old)} → {money(new)}"
+
+
+def _receipt_block(ch, money, signed_money, esc, wrap) -> tuple[str, list[str]]:
+    """The full itemized receipt for the one figure (if any) whose key is in
+    `receipt_keys` (see explain_since_last_email): its own header (old → new,
+    signed delta), a "What changed" sub-section listing its own causes --
+    never collapsed to "Same causes as ..." -- capped at CHANGES_MAX_ITEMS
+    like the shared reasons list, and a "How the number moved" sub-section
+    walking `ch.math` line by line with a bold total row. ("", []) when `ch`
+    is None (nothing moved this batch, or the email names no receipt figure)
+    or, for the math sub-section alone, when `ch.math` is empty (mirrors
+    WhatChanged.tsx's `row.math.length > 0` guard)."""
+    if ch is None:
+        return "", []
+    header_text = f"{ch.label}: {money(ch.old_value)} → {money(ch.new_value)} ({signed_money(ch.delta)})"
+    header_html = f"{esc(ch.label)}: {money(ch.old_value)} → {money(ch.new_value)} ({signed_money(ch.delta)})"
+
+    causes, extra = ch.causes[:CHANGES_MAX_ITEMS], max(len(ch.causes) - CHANGES_MAX_ITEMS, 0)
+    cause_items_html = ""
+    cause_text_lines: list[str] = []
+    for c in causes:
+        item_html, item_text_lines = _cause_item(c, esc, money)
+        cause_items_html += f"<li style='margin:4px 0'>{item_html}</li>"
+        cause_text_lines.append(f"- {item_text_lines[0]}")
+        cause_text_lines += item_text_lines[1:]
+    if extra > 0:
+        cause_items_html += f"<li style='margin:4px 0;color:#6b7280'>and {extra} more</li>"
+        cause_text_lines.append(f"- and {extra} more")
+
+    sub_heading = "margin:10px 0 2px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em"
+    html = (
+        f"<p style='margin:10px 0 4px;font-size:14px;color:#111827;{wrap}'><b>{header_html}</b></p>"
+        f"<p style='{sub_heading}'>What changed</p>"
+        f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#374151;{wrap}'>{cause_items_html}</ul>"
+    )
+    text_lines = [header_text, "What changed", *cause_text_lines]
+
+    if ch.math:
+        total = _math_figures(ch.old_value, ch.new_value, money, signed_money)
+        math_items_html = "".join(
+            f"<li style='margin:2px 0'>{esc(m.label)}: {_math_figures(m.old, m.new, money, signed_money)}"
+            + "".join(
+                f"<div style='padding-left:16px;color:#6b7280'>{esc(p.label)} {signed_money(p.delta)}</div>"
+                for p in m.parts
+            ) + "</li>"
+            for m in ch.math
+        )
+        html += (
+            f"<p style='{sub_heading}'>How the number moved</p>"
+            f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#374151;{wrap}'>"
+            f"{math_items_html}<li style='margin:2px 0;font-weight:600'>{esc(ch.label)}: {total}</li></ul>"
+        )
+        text_lines.append("How the number moved")
+        for m in ch.math:
+            text_lines.append(f"  {m.label}: {_math_figures(m.old, m.new, money, signed_money)}")
+            text_lines += [f"    {p.label} {signed_money(p.delta)}" for p in m.parts]
+        text_lines.append(f"  {ch.label}: {total}")
+
+    return html, text_lines
+
+
 def _changes_section(changes: list | None, section) -> tuple[str, str]:
     """The closing "What changed since last email" section: (html, text),
     both empty when nothing moved. One line of moved figures, then each
-    reason once."""
+    reason once, scoped to the figures that aren't getting the full receipt
+    treatment below (see `_receipt_block`) -- the one figure in `changes`
+    carrying its own old/new value and math (SINCE_RECEIPT_KEYS) gets its own
+    itemized receipt instead of folding into this shared list."""
     if not changes:
         return "", ""
     from backend.services.metric_diff import money, signed_money
     esc = html_lib.escape
     title = "What changed since last email"
-    all_labels = [ch.label for ch in changes]
-    top_pairs = [f"{ch.label} {signed_money(ch.delta)}" for ch in changes]
-    reasons = _reasons(changes)
-    shown, extra = reasons[:CHANGES_MAX_REASONS], len(reasons) - CHANGES_MAX_REASONS
     wrap = "white-space:normal;word-break:break-word;overflow-wrap:break-word"
-    top_html = " · ".join(f"<span style='white-space:nowrap'>{esc(t)}</span>" for t in top_pairs)
-    text_lines = [" · ".join(top_pairs)]
-    items_html = ""
-    for c, labels in shown:
-        rows = [(n, "" if a is None else money(a)) for n, a in c.rows] if c.head else []
-        kept, hidden = rows[:CHANGES_MAX_ITEMS], max(len(rows) - CHANGES_MAX_ITEMS, 0)
-        sub = "".join(
-            f"<li style='margin:1px 0'>{esc(n)}{(' ' + esc(a)) if a else ''}</li>" for n, a in kept
+    receipt = next((ch for ch in changes if ch.old_value is not None), None)
+    others = [ch for ch in changes if ch.old_value is None]
+
+    others_html, others_text_lines = "", []
+    if others:
+        all_labels = [ch.label for ch in others]
+        top_pairs = [f"{ch.label} {signed_money(ch.delta)}" for ch in others]
+        reasons = _reasons(others)
+        shown, extra = reasons[:CHANGES_MAX_REASONS], len(reasons) - CHANGES_MAX_REASONS
+        top_html = " · ".join(f"<span style='white-space:nowrap'>{esc(t)}</span>" for t in top_pairs)
+        others_text_lines = [" · ".join(top_pairs)]
+        items_html = ""
+        for c, labels in shown:
+            item_html, item_text_lines = _cause_item(c, esc, money)
+            moved = labels != all_labels
+            note = f"Moved: {', '.join(labels)}" if moved else ""
+            items_html += (
+                f"<li style='margin:4px 0'>{item_html}"
+                + (f"<div style='font-size:12px;color:#6b7280'>{esc(note)}</div>" if note else "")
+                + "</li>"
+            )
+            others_text_lines.append(f"- {item_text_lines[0]}")
+            others_text_lines += item_text_lines[1:]
+            if note:
+                others_text_lines.append(f"    {note}")
+        if extra > 0:
+            items_html += f"<li style='margin:4px 0;color:#6b7280'>and {extra} more reasons</li>"
+            others_text_lines.append(f"- and {extra} more reasons")
+        others_html = (
+            f"<p style='margin:10px 0 4px;font-size:14px;color:#111827;{wrap}'><b>{top_html}</b></p>"
+            f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#374151;{wrap}'>{items_html}</ul>"
         )
-        if hidden:
-            sub += f"<li style='margin:1px 0;color:#6b7280'>and {hidden} more</li>"
-        moved = labels != all_labels
-        note = f"Moved: {', '.join(labels)}" if moved else ""
-        items_html += (
-            f"<li style='margin:4px 0'>{esc(c.head or c.text)}"
-            + (f"<ul style='margin:2px 0;padding-left:16px'>{sub}</ul>" if sub else "")
-            + (f"<div style='font-size:12px;color:#6b7280'>{esc(note)}</div>" if note else "")
-            + "</li>"
-        )
-        text_lines.append(f"- {c.head or c.text}")
-        text_lines += [f"    {n}{(' ' + a) if a else ''}" for n, a in kept]
-        if hidden:
-            text_lines.append(f"    and {hidden} more")
-        if note:
-            text_lines.append(f"    {note}")
-    if extra > 0:
-        items_html += f"<li style='margin:4px 0;color:#6b7280'>and {extra} more reasons</li>"
-        text_lines.append(f"- and {extra} more reasons")
-    body = (
-        f"<p style='margin:10px 0 4px;font-size:14px;color:#111827;{wrap}'><b>{top_html}</b></p>"
-        f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#374151;{wrap}'>{items_html}</ul>"
-    )
+
+    receipt_html, receipt_text_lines = _receipt_block(receipt, money, signed_money, esc, wrap)
+
+    body = others_html + receipt_html
+    text_lines = others_text_lines + receipt_text_lines
     return section("🔎", title, body), f"\n{title.upper()}\n" + "\n".join(text_lines) + "\n"
 
 

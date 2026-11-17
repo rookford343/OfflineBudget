@@ -198,12 +198,14 @@ def _send_daily_summaries_locked() -> None:
                 try:
                     from backend.services import metric_history
                     from backend.services.metric_diff import explain_since_last_email, since_last_email
-                    from backend.services.summary_generator import SINCE_KEYS
+                    from backend.services.summary_generator import SINCE_KEYS, SINCE_RECEIPT_KEYS
                     today = date.today()
                     readings = metric_history.collect_headline_metrics(db, user, today)
                     since = since_last_email(db, user, readings)
                     try:
-                        since_changes = explain_since_last_email(db, user, readings, keys=SINCE_KEYS)
+                        since_changes = explain_since_last_email(
+                            db, user, readings, keys=SINCE_KEYS, receipt_keys=SINCE_RECEIPT_KEYS,
+                        )
                     except Exception:  # noqa: BLE001 -- the explanation is optional; keep the since-lines and snapshot
                         logger.exception("Daily summary: explaining changes failed for %s", user.username)
                         try:
