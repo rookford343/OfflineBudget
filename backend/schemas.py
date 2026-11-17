@@ -537,6 +537,16 @@ class RecurringBreakdown(BaseModel):
     # chosen grouping, so it trails the named owners instead of competing
     # with them for the top spot.
     by_owner: list[RecurringOwnerGroup]
+    # Active expense items only, grouped account/card -> category -> bill for
+    # the Recurring page's "By account" rollup. group_id/group_name is an
+    # account.id/account.name, or a card.id/card.name when the item carries a
+    # card_id (a card charge groups under the card, not the checking account
+    # that pays it off). Sorted by monthly descending at every level, same as
+    # by_category. No synthetic catch-all bucket here (unlike by_category's
+    # Unclassified/by_owner's Family) -- account_id is required on every item,
+    # so a bucket is only ever emitted once it has at least one item, and an
+    # account/card with zero recurring items never produces an empty one.
+    by_account: list[RecurringCategoryGroup]
 
 
 # ── Contingency planning ──────────────────────────────────────────────────────

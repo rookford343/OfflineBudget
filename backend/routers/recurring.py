@@ -160,6 +160,21 @@ def get_breakdown(
             models.HouseholdMember.user_id == user.id,
         ).all()
     }
+    # Scoped to this user only, same reasoning as `categories`/
+    # `household_members` above -- an item's card_id/account_id is looked up
+    # through these dicts, so a card or account belonging to a different
+    # user (or since deleted) simply misses and the item is left out of
+    # by_account rather than leaking a foreign holder's name into it.
+    cards = {
+        c.id: c for c in db.query(models.CreditCard).filter(
+            models.CreditCard.user_id == user.id,
+        ).all()
+    }
+    accounts = {
+        a.id: a for a in db.query(models.Account).filter(
+            models.Account.user_id == user.id,
+        ).all()
+    }
 
     today = date.today()
     ongoing: list[schemas.RecurringBreakdownItem] = []
@@ -170,6 +185,11 @@ def get_breakdown(
     expense_monthly = Decimal("0")
     groups: dict[int | None, dict] = {}
     owner_groups: dict[int | None, dict] = {}
+    # Keyed by (kind, id) rather than a bare id -- accounts and credit cards
+    # are separate tables with independent primary keys, so an account and a
+    # card can validly share the same numeric id for this user; a bare-int
+    # key would silently conflate their buckets.
+    account_groups: dict[tuple[str, int], dict] = {}
 
     def _group(group_id: int | None, group_name: str) -> dict:
         return groups.setdefault(group_id, {
@@ -180,6 +200,18 @@ def get_breakdown(
     def _owner_group(owner_id: int | None, owner_name: str) -> dict:
         return owner_groups.setdefault(owner_id, {
             "owner_id": owner_id, "owner_name": owner_name, "monthly": Decimal("0"), "items": [],
+        })
+
+    def _account_group(kind: str, group_id: int, group_name: str) -> dict:
+        # No None key here, unlike `_group`/`_owner_group` -- there is no
+        # Unclassified/Family equivalent for by_account (see RecurringBreakdown
+        # schema docstring), so this is only ever called with a resolved
+        # account/card id, and only once that holder is about to get an item.
+        # `kind` disambiguates the dict key only -- the emitted group_id below
+        # is still the bare account.id/card.id the API contract promises.
+        return account_groups.setdefault((kind, group_id), {
+            "group_id": group_id, "group_name": group_name,
+            "monthly": Decimal("0"), "categories": {}, "items": [],
         })
 
     for item in items:
@@ -243,6 +275,29 @@ def get_breakdown(
                     node["monthly"] += monthly
                     g["monthly"] += monthly
 
+            # by_account: a card charge groups under the card, not the
+            # checking account that eventually pays it off -- card_id wins
+            # over account_id when both are set. Nests by the item's own
+            # category_id directly (not its parent, unlike by_category above)
+            # since the top-level axis here is the account/card, not the
+            # category tree.
+            if item.card_id is not None:
+                kind, holder, holder_id = "card", cards.get(item.card_id), item.card_id
+            else:
+                kind, holder, holder_id = "account", accounts.get(item.account_id), item.account_id
+            if holder is not None:
+                ag = _account_group(kind, holder_id, holder.name)
+                if cat is None:
+                    ag["items"].append(out)
+                else:
+                    node = ag["categories"].setdefault(cat.id, {
+                        "category_id": cat.id, "category_name": cat.name,
+                        "monthly": Decimal("0"), "items": [],
+                    })
+                    node["items"].append(out)
+                    node["monthly"] += monthly
+                ag["monthly"] += monthly
+
     ending.sort(key=lambda i: i.end_date)
 
     unclassified = groups.pop(None, None)
@@ -289,6 +344,27 @@ def get_breakdown(
             items=sorted(family["items"], key=lambda i: i.monthly_equivalent, reverse=True),
         ))
 
+    # No pop-and-append-last step here, unlike by_category/by_owner above --
+    # there's no synthetic catch-all bucket for by_account, and every bucket
+    # in account_groups was only created once it had at least one item, so
+    # none of them are empty (Review Focus: no empty buckets).
+    by_account = [
+        schemas.RecurringCategoryGroup(
+            group_id=g["group_id"], group_name=g["group_name"], monthly=g["monthly"],
+            categories=sorted(
+                (schemas.RecurringCategoryNode(
+                    category_id=c["category_id"], category_name=c["category_name"],
+                    monthly=c["monthly"],
+                    items=sorted(c["items"], key=lambda i: i.monthly_equivalent, reverse=True),
+                ) for c in g["categories"].values()),
+                key=lambda n: n.monthly, reverse=True,
+            ),
+            items=sorted(g["items"], key=lambda i: i.monthly_equivalent, reverse=True),
+        )
+        for g in account_groups.values()
+    ]
+    by_account.sort(key=lambda g: g.monthly, reverse=True)
+
     inactive = [
         schemas.RecurringBreakdownItem(
             id=i.id, name=i.name, amount=i.amount, type=i.type, frequency=i.frequency,
@@ -302,7 +378,7 @@ def get_breakdown(
         ongoing=ongoing, ending=ending, inactive=inactive,
         ongoing_monthly=ongoing_monthly, ending_monthly=ending_monthly,
         income_monthly=income_monthly, expense_monthly=expense_monthly,
-        by_category=by_category, by_owner=by_owner,
+        by_category=by_category, by_owner=by_owner, by_account=by_account,
     )
 
 
