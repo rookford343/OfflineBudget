@@ -43,6 +43,7 @@ from backend.services.forecast_engine import (
     is_card_bill_in_month,
 )
 from backend.services.pending import card_pending, checking_pending_debits
+from backend.services.pending_amount import amount_on
 
 
 @dataclass(frozen=True)
@@ -381,7 +382,7 @@ def card_payment_plan(
                         and is_card_bill_in_month(item, cursor)
                     ):
                         continue
-                    subscriptions_before_close += item.amount
+                    subscriptions_before_close += amount_on(item, cursor)
                 cursor += timedelta(days=1)
             derived_amount = carried + subscriptions_before_close
             derived_amount = max(derived_amount - excess_paid, Decimal("0"))

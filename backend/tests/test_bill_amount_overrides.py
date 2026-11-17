@@ -146,6 +146,26 @@ def test_response_carries_the_projection_for_comparison(db_session):
     assert r["recurring_item_name"] == "Duke Electric"
 
 
+def test_projection_uses_the_pending_amount_once_its_effective_date_has_arrived(db_session):
+    """If the item has a scheduled amount change whose effective date is
+    on/after the override's due_date, the projection (and so the variance)
+    must compare against the NEW amount, not the stale item.amount -- a
+    separate reader of RecurringItem.amount from build_forecast, missed by
+    the amount_on() rollout in commit 59af848. Without the fix this reports
+    a phantom variance of 214.07 - 180.00 instead of 0.00."""
+    user, acct, item = _seed(db_session)
+    due = _next_due()
+    item.pending_amount = Decimal("214.07")
+    item.pending_amount_effective_date = due
+    db_session.commit()
+    c = _client(db_session, user)
+    r = c.post("/bill-overrides", json={
+        "recurring_item_id": item.id, "due_date": due.isoformat(), "actual_amount": "214.07"}).json()
+
+    assert Decimal(r["projected_amount"]) == Decimal("214.07")
+    assert Decimal(r["variance"]) == Decimal("0.00")
+
+
 def test_deleting_an_override_restores_the_projection(db_session):
     user, acct, item = _seed(db_session)
     c = _client(db_session, user)

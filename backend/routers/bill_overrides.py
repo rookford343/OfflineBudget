@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
+from backend.services.pending_amount import amount_on
 from backend.services.recurring_math import bill_variance
 
 router = APIRouter(prefix="/bill-overrides", tags=["bill-overrides"])
@@ -22,7 +23,7 @@ def _to_out(o: models.BillAmountOverride) -> schemas.BillAmountOverrideOut:
     """Carries the projected amount alongside the actual so a caller can show
     the variance without a second round trip -- comparing the two is the
     entire point of the feature."""
-    projected = o.recurring_item.amount if o.recurring_item else Decimal("0")
+    projected = amount_on(o.recurring_item, o.due_date) if o.recurring_item else Decimal("0")
     return schemas.BillAmountOverrideOut(
         id=o.id,
         recurring_item_id=o.recurring_item_id,

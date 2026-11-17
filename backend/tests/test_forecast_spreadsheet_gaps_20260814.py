@@ -583,6 +583,47 @@ def test_the_cycle_after_a_locked_payoff_uses_the_carried_balance(db_session):
     )
 
 
+# Review finding on the amount_on() rollout (commit 59af848): this cycle-estimate
+# branch walks each card-routed recurring item day by day and summed item.amount
+# directly -- a separate code path from _card_subscription_charges (already
+# fixed), so a scheduled pending_amount change effective before the subscription's
+# occurrence inside the window was silently ignored here.
+
+def test_the_cycle_after_a_locked_payoff_uses_the_pending_amount_once_effective(db_session):
+    """Same scenario as test_the_cycle_after_a_locked_payoff_uses_the_carried_balance
+    above (carried balance 1000 + a subscription posting before the close), except
+    the subscription has a pending_amount change already effective by the time it
+    posts in this window -- the carried cycle must use the new $250.00, not the
+    stale $100.00."""
+    today = date.today()
+    close_date = today + timedelta(days=14)
+    sub_date = today + timedelta(days=6)
+    due_day = (close_date + timedelta(days=3)).day
+    user = _user(db_session, username="carriedpending")
+    account = _checking(db_session, user, balance="60000.00")
+    card = _card(db_session, user, name="Chase", statement_day=close_date.day, due_day=due_day,
+                 current_balance=Decimal("4000.00"), balance_due=Decimal("3000.00"),
+                 pending_charges=Decimal("0"),
+                 next_payment_date=today + timedelta(days=200),
+                 monthly_spend_estimate=Decimal("15000.00"))
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=account.id, card_id=card.id, name="Sub",
+        amount=Decimal("100.00"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly,
+        day_of_month=sub_date.day, start_date=date(2026, 1, 1),
+        pending_amount=Decimal("250.00"), pending_amount_effective_date=today,
+    ))
+    db_session.commit()
+
+    entries = build_forecast(db_session, user.id, account.id, today, today + timedelta(days=120))
+    estimates = dict(_named(entries, "CC Estimate: Chase"))
+
+    next_cycle = [amt for d, amt in estimates.items() if close_date <= d < close_date + timedelta(days=28)]
+    assert next_cycle == [Decimal("-1250.00")], (
+        f"carried (1000) + the pending amount (250), not the stale 100, got {next_cycle}"
+    )
+
+
 def test_safety_floor_leaves_unbilled_card_bills_out_of_the_carried_cycle(db_session, monkeypatch):
     """Safety Margin subtracts this month's card bills itself (the user's sheet,
     '2026 Overview'!B18), so the floor's walk must not ALSO fold them into the
