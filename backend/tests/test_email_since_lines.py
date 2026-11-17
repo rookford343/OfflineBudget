@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from unittest.mock import patch
 
-from backend import models
+from backend import models, schemas
 from backend.services import metric_history
 from backend.services.metric_diff import since_last_email
 from backend.services.metric_history import collect_headline_metrics, record_snapshot
@@ -260,9 +260,11 @@ def test_the_email_carries_lines_and_still_goes_when_history_breaks(db_session, 
 CHANGES_TITLE = "What changed since last email"
 
 
-def _explained(db, user, keys=None):
+def _explained(db, user, keys=None, receipt_keys=frozenset()):
     from backend.services.metric_diff import explain_since_last_email
-    return explain_since_last_email(db, user, collect_headline_metrics(db, user, TODAY), keys=keys)
+    return explain_since_last_email(
+        db, user, collect_headline_metrics(db, user, TODAY), keys=keys, receipt_keys=receipt_keys,
+    )
 
 
 def _moved_world(db, monkeypatch, pending=2):
@@ -531,3 +533,56 @@ def test_a_child_listed_before_its_parent_merges_into_the_parent(db_session, mon
     assert "Moved:" not in tail and "Moved:" not in html
     assert _reason_count(text) == 2
     assert "Child Figure" in tail.splitlines()[1]
+
+
+def _bump_old_receipt(db, user, key, amount):
+    """Disturb the previous email reading's own receipt line (not just its
+    headline value, which `_set_previous` already shifts) so a real math
+    line exists between it and today's live receipt."""
+    snap = metric_history.latest_snapshot(db, user.id, "email")
+    row = next(r for r in snap.readings if r.metric_key == key)
+    explain = schemas.Explanation.model_validate_json(row.explain_json)
+    explain.rows[0].amount += amount
+    row.explain_json = explain.model_dump_json()
+    db.commit()
+
+
+def test_receipt_key_carries_old_new_and_math(db_session, monkeypatch):
+    user = _moved_world(db_session, monkeypatch)
+    _bump_old_receipt(db_session, user, "safety_margin_week", D("1.00"))
+    changes = _explained(db_session, user, receipt_keys=frozenset({"safety_margin_week"}))
+    change = next(c for c in changes if c.key == "safety_margin_week")
+    assert change.old_value is not None and change.new_value is not None
+    assert change.new_value - change.old_value == change.delta
+    assert len(change.math) > 0
+
+
+def test_non_receipt_keys_keep_the_old_defaults(db_session, monkeypatch):
+    user = _moved_world(db_session, monkeypatch, pending=1)
+    _set_previous(db_session, user, "next_month_minimum", D("-16.00"))
+    changes = _explained(db_session, user, receipt_keys=frozenset({"safety_margin_week"}))
+    other = next(c for c in changes if c.key == "next_month_minimum")
+    assert other.old_value is None and other.new_value is None and other.math == ()
+
+
+def test_receipt_key_keeps_its_own_causes_even_with_its_parent_also_listed(db_session, monkeypatch):
+    user = _moved_world(db_session, monkeypatch)
+    _set_previous(db_session, user, "safety_margin", D("-400.00"))
+    changes = {c.key: c for c in _explained(db_session, user, receipt_keys=frozenset({"safety_margin_week"}))}
+    child = changes["safety_margin_week"]
+    assert child.causes[0].parent_key == ""
+    assert not any(c.text.startswith("Same causes as") for c in child.causes)
+
+
+def test_a_broken_math_lines_call_drops_only_the_math(db_session, monkeypatch):
+    from backend.services import metric_diff
+    user = _moved_world(db_session, monkeypatch)
+
+    def boom(*a, **kw):
+        raise ValueError("bad receipt")
+
+    monkeypatch.setattr(metric_diff, "math_lines", boom)
+    changes = _explained(db_session, user, receipt_keys=frozenset({"safety_margin_week"}))
+    change = next(c for c in changes if c.key == "safety_margin_week")
+    assert change.old_value is not None and change.new_value is not None
+    assert change.math == ()

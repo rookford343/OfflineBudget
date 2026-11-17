@@ -645,6 +645,9 @@ class EmailChange:
     label: str
     delta: Decimal
     causes: list[Cause]
+    old_value: Decimal | None = None
+    new_value: Decimal | None = None
+    math: tuple[schemas.HistoryMathLine, ...] = ()
 
 
 def _transient_reading(
@@ -676,14 +679,27 @@ def _ancestor_key(key: str, labels: dict[str, str]) -> str | None:
     return None
 
 
+def _receipt_math(prev: models.MetricReading, reading: MetricReadingData) -> tuple[schemas.HistoryMathLine, ...]:
+    """Before/after receipt lines for a since-last-email change, `()` when a
+    stored receipt cannot be read."""
+    try:
+        return tuple(math_lines(schemas.Explanation.model_validate_json(prev.explain_json), reading.explain))
+    except (ValueError, KeyError, TypeError, AttributeError, ArithmeticError):
+        return ()
+
+
 def explain_since_last_email(
     db: Session, user: models.User, readings: list[MetricReadingData], *,
     keys: tuple[str, ...] | None = None, as_of: date | None = None,
+    receipt_keys: frozenset[str] = frozenset(),
 ) -> list[EmailChange]:
     """What moved each figure (by a cent or more) since the last "email"
     snapshot, in the order of `readings`; `[]` when there is none. `keys`
     limits it to the figures the email shows. A figure whose parent (see
-    DERIVED_FROM) is also listed gets one cause pointing at the parent."""
+    DERIVED_FROM) is also listed gets one cause pointing at the parent,
+    unless its key is in `receipt_keys`: that figure keeps its own causes
+    and also carries its old/new value and receipt math (the email's "full
+    receipt" view), instead of the usual `None`/`None`/`()` defaults."""
     previous = latest_snapshot(db, user.id, "email")
     if previous is None:
         return []
@@ -691,24 +707,34 @@ def explain_since_last_email(
     taken_at = datetime.now(timezone.utc).replace(tzinfo=None)
     sources_json = json.dumps(collect_sources(db, user, as_of), sort_keys=True)
     before = {r.metric_key: r for r in previous.readings}
-    moved: list[tuple[MetricReadingData, Decimal, list[Cause]]] = []
+    moved: list[tuple[MetricReadingData, Decimal, list[Cause], Decimal, tuple[schemas.HistoryMathLine, ...]]] = []
     for reading in readings:
         prev = before.get(reading.key)
         if prev is None or (keys is not None and reading.key not in keys):
             continue
         try:
-            delta = reading.value - Decimal(str(prev.value))
+            old_value = Decimal(str(prev.value))
+            delta = reading.value - old_value
             if abs(delta) < CENT:
                 continue
             cur = _transient_reading(user.id, reading, sources_json, as_of, taken_at)
-            moved.append((reading, delta, _causes_or_fallback(db, user.id, reading.key, prev, cur)))
+            causes = _causes_or_fallback(db, user.id, reading.key, prev, cur)
+            math = _receipt_math(prev, reading) if reading.key in receipt_keys else ()
+            moved.append((reading, delta, causes, old_value, math))
         except Exception:  # noqa: BLE001 -- one bad stored reading drops only its own entry
             logger.exception("Change history: no since-last-email changes for %s", reading.key)
-    labels = {r.key: r.label for r, _, _ in moved}
+    labels = {r.key: r.label for r, _, _, _, _ in moved}
     out: list[EmailChange] = []
-    for reading, delta, causes in moved:
-        parent = _ancestor_key(reading.key, labels)
-        if parent is not None:
-            causes = [Cause(f"Same causes as {labels[parent]}", None, parent_key=parent)]
-        out.append(EmailChange(reading.key, reading.label, delta, causes))
+    for reading, delta, causes, old_value, math in moved:
+        is_receipt = reading.key in receipt_keys
+        if not is_receipt:
+            parent = _ancestor_key(reading.key, labels)
+            if parent is not None:
+                causes = [Cause(f"Same causes as {labels[parent]}", None, parent_key=parent)]
+        out.append(EmailChange(
+            reading.key, reading.label, delta, causes,
+            old_value=old_value if is_receipt else None,
+            new_value=reading.value if is_receipt else None,
+            math=math if is_receipt else (),
+        ))
     return out
