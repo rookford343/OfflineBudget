@@ -1313,7 +1313,7 @@ def build_forecast(
             else:
                 base = (
                     item.pending_amount
-                    if item.pending_amount is not None and current >= item.pending_amount_effective_date
+                    if item.pending_amount is not None and natural_fire_date >= item.pending_amount_effective_date
                     else item.amount
                 )
                 base_amount = base + override_map.get(item.id, Decimal("0"))

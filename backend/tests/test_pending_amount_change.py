@@ -231,3 +231,48 @@ def test_running_it_twice_on_the_same_day_is_a_no_op_the_second_time(db_session)
     promote_due_pending_amounts(db_session, date(2027, 1, 1))
     ids = promote_due_pending_amounts(db_session, date(2027, 1, 1))
     assert ids == []
+
+
+# Finding 1 (final whole-branch review): the amount boundary must compare
+# against the NATURAL due date, not the weekend-shifted posting date
+# (`current`). May 1, 2027 is a Saturday, so that occurrence posts on the
+# preceding Friday, April 30 -- but its natural due date (May 1) is still
+# on/after a May 1 effective date, so the new amount must already apply.
+
+def test_weekend_shifted_posting_still_uses_the_new_amount_on_its_natural_date(db_session):
+    user, checking, _ = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 5, 1),
+    )
+    entries = build_forecast(db_session, user.id, checking.id, date(2027, 4, 1), date(2027, 5, 31))
+    # Sanity check: the fix didn't overshoot -- the April occurrence (posts
+    # ~April 1, well before the May 1 effective date) still uses the old amount.
+    assert _amount_on(entries, "Test Mortgage", date(2027, 4, 1)) == D("-2200.00")
+    # The May 1 occurrence posts on Friday April 30 (weekend shift), and
+    # must already reflect the new amount since its natural due date (May 1)
+    # is on/after the May 1 effective date.
+    assert _amount_on(entries, "Test Mortgage", date(2027, 4, 30)) == D("-1950.00")
+
+
+# Finding 2 (final whole-branch review): promoting a scheduled amount change
+# must mark every pre-change payment as already-reconciled
+# (drift_dismissed_through), so the "Amounts changed?" drift prompt doesn't
+# immediately offer to revert the promotion by comparing the last payment at
+# the OLD amount against the item's new amount.
+
+def test_promotion_sets_drift_dismissed_through_to_the_day_before_effective(db_session):
+    _, _, item = _mortgage_world(db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1))
+    assert item.drift_dismissed_through is None
+    promote_due_pending_amounts(db_session, date(2027, 1, 1))
+    db_session.refresh(item)
+    assert item.drift_dismissed_through == date(2026, 12, 31)
+
+
+def test_promotion_does_not_pull_back_a_later_drift_dismissed_through(db_session):
+    user, checking, item = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1),
+    )
+    item.drift_dismissed_through = date(2027, 1, 15)
+    db_session.commit()
+    promote_due_pending_amounts(db_session, date(2027, 1, 1))
+    db_session.refresh(item)
+    assert item.drift_dismissed_through == date(2027, 1, 15)
