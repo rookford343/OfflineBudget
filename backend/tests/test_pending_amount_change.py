@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from backend import models
 from backend.dependencies import get_db, get_current_user
 from backend.routers import recurring as recurring_router_module
+from backend.services.forecast_engine import build_forecast
 
 D = Decimal
 
@@ -129,3 +130,76 @@ def test_update_can_clear_a_scheduled_change(client, auth_headers, db_session, t
     )
     assert r.status_code == 200
     assert r.json()["pending_amount"] is None and r.json()["pending_amount_effective_date"] is None
+
+
+# Task 2: build_forecast resolves the scheduled amount change by occurrence date.
+#
+# ForecastTransaction.amount is signed (confirmed against test_checking_level.py's
+# sweep/inflow assertions and by running build_forecast directly against this
+# fixture before writing these assertions): an expense's occurrence amount comes
+# back negative. _amount_on below returns that signed value as-is, so a
+# "Test Mortgage" expense of $2,200.00/mo appears as Decimal("-2200.00"), not
+# Decimal("2200.00").
+
+def _mortgage_world(db, pending_amount=None, effective_date=None):
+    user = models.User(username="forecastpending", hashed_password="x", display_name="ForecastPending")
+    db.add(user)
+    db.flush()
+    checking = models.Account(
+        user_id=user.id, name="Checking", type=models.AccountType.checking,
+        current_balance=D("10000.00"),
+    )
+    db.add(checking)
+    db.flush()
+    item = models.RecurringItem(
+        user_id=user.id, account_id=checking.id, name="Test Mortgage", amount=D("2200.00"),
+        type=models.RecurringType.expense, frequency=models.RecurringFrequency.monthly,
+        day_of_month=1, start_date=date(2026, 1, 1),
+        pending_amount=pending_amount, pending_amount_effective_date=effective_date,
+    )
+    db.add(item)
+    db.commit()
+    return user, checking, item
+
+
+def _amount_on(entries, name, on_day):
+    for e in entries:
+        if e.date == on_day:
+            for t in e.transactions:
+                if t.name == name:
+                    return t.amount
+    return None
+
+
+def test_pre_effective_occurrence_keeps_the_old_amount(db_session):
+    user, checking, _ = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1),
+    )
+    entries = build_forecast(db_session, user.id, checking.id, date(2026, 12, 1), date(2026, 12, 31))
+    assert _amount_on(entries, "Test Mortgage", date(2026, 12, 1)) == D("-2200.00")
+
+
+def test_on_and_after_effective_occurrence_uses_the_new_amount(db_session):
+    user, checking, _ = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1),
+    )
+    entries = build_forecast(db_session, user.id, checking.id, date(2027, 1, 1), date(2027, 1, 31))
+    assert _amount_on(entries, "Test Mortgage", date(2027, 1, 1)) == D("-1950.00")
+
+
+def test_no_pending_amount_is_unaffected(db_session):
+    user, checking, _ = _mortgage_world(db_session)
+    entries = build_forecast(db_session, user.id, checking.id, date(2027, 1, 1), date(2027, 1, 31))
+    assert _amount_on(entries, "Test Mortgage", date(2027, 1, 1)) == D("-2200.00")
+
+
+def test_a_confirmed_statement_amount_still_beats_a_pending_change(db_session):
+    user, checking, item = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1),
+    )
+    db_session.add(models.BillAmountOverride(
+        user_id=user.id, recurring_item_id=item.id, due_date=date(2027, 1, 1), actual_amount=D("2015.42"),
+    ))
+    db_session.commit()
+    entries = build_forecast(db_session, user.id, checking.id, date(2027, 1, 1), date(2027, 1, 31))
+    assert _amount_on(entries, "Test Mortgage", date(2027, 1, 1)) == D("-2015.42")

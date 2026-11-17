@@ -1311,7 +1311,12 @@ def build_forecast(
             elif bonus_gross_amt is not None:
                 base_amount = bonus_net(bonus_plan, bonus_gross_amt) + override_map.get(item.id, Decimal("0"))
             else:
-                base_amount = item.amount + override_map.get(item.id, Decimal("0"))
+                base = (
+                    item.pending_amount
+                    if item.pending_amount is not None and current >= item.pending_amount_effective_date
+                    else item.amount
+                )
+                base_amount = base + override_map.get(item.id, Decimal("0"))
             is_cc = item.type == models.RecurringType.credit_card_payment
 
             # SS paycheck boost: accumulate gross, apply boost once wage base is hit
