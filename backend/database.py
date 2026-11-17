@@ -342,6 +342,13 @@ def upgrade_schema():
         # unlike every other line in this list, its backfill must run only
         # once (see that block's comment).
         "ALTER TABLE recurring_items ADD COLUMN contingency_paused_at DATETIME",
+        # Scheduled future amount change -- see models.py's RecurringItem.
+        # pending_amount/pending_amount_effective_date and
+        # docs/superpowers/sdd/2026-11-16-recurring-pending-amount-change-plan.
+        # Needs no backfill (unlike is_essential above): every existing row's
+        # correct default is NULL -- no row has a scheduled change yet.
+        "ALTER TABLE recurring_items ADD COLUMN pending_amount NUMERIC(14,2)",
+        "ALTER TABLE recurring_items ADD COLUMN pending_amount_effective_date DATE",
     ]
     with engine.connect() as conn:
         for s in stmts:

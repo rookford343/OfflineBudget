@@ -358,6 +358,15 @@ class RecurringItem(Base):
     # when a contingency scenario pauses this item, null otherwise.
     is_essential: Mapped[bool] = mapped_column(Boolean, default=True)
     contingency_paused_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # A known future amount change (e.g. a mortgage payment dropping after an
+    # escrow re-analysis) scheduled today without retroactively applying to
+    # months before it takes effect. Task 2/3 (forecast engine, scheduler
+    # sweep) read these; Task 4 adds the frontend UI. Both-or-neither --
+    # enforced in RecurringCreate's model_validator and update_recurring's
+    # merged-state check, not here, since the ORM layer allows partial
+    # writes.
+    pending_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    pending_amount_effective_date: Mapped[date | None] = mapped_column(Date)
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

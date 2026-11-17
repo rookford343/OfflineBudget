@@ -584,6 +584,15 @@ def update_recurring(
             status_code=422,
             detail="is_floating requires type=expense and frequency=monthly",
         )
+    merged_pending_amount = updates.get("pending_amount", item.pending_amount)
+    merged_pending_amount_effective_date = updates.get(
+        "pending_amount_effective_date", item.pending_amount_effective_date
+    )
+    if (merged_pending_amount is None) != (merged_pending_amount_effective_date is None):
+        raise HTTPException(
+            status_code=422,
+            detail="pending_amount and pending_amount_effective_date must both be set or both be None",
+        )
     if "owner_id" in updates and updates["owner_id"] is not None:
         owned_or_404(db, models.HouseholdMember, updates["owner_id"], user.id, "Household member not found")
     # "Paused" only makes sense for a non-essential item -- if this update

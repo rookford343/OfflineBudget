@@ -334,6 +334,11 @@ class RecurringCreate(BaseModel):
     statement_day: Optional[int] = None
     is_floating: bool = False
     is_essential: bool = True
+    # A known future amount change (e.g. a mortgage payment dropping after an
+    # escrow re-analysis), scheduled today without retroactively applying to
+    # months before it takes effect. Both-or-neither, enforced below.
+    pending_amount: Optional[Decimal] = None
+    pending_amount_effective_date: Optional[date] = None
 
     @field_validator("day_of_month")
     @classmethod
@@ -364,6 +369,14 @@ class RecurringCreate(BaseModel):
             raise ValueError("is_floating requires type=expense and frequency=monthly")
         return self
 
+    @model_validator(mode="after")
+    def _validate_pending_pair(self) -> "RecurringCreate":
+        if (self.pending_amount is None) != (self.pending_amount_effective_date is None):
+            raise ValueError(
+                "pending_amount and pending_amount_effective_date must both be set or both be None"
+            )
+        return self
+
 
 class RecurringUpdate(BaseModel):
     name: Optional[str] = None
@@ -385,6 +398,8 @@ class RecurringUpdate(BaseModel):
     amount_varies: Optional[bool] = None
     is_floating: Optional[bool] = None
     is_essential: Optional[bool] = None
+    pending_amount: Optional[Decimal] = None
+    pending_amount_effective_date: Optional[date] = None
 
     @field_validator("statement_day")
     @classmethod
@@ -416,6 +431,8 @@ class RecurringOut(BaseModel):
     amount_varies: bool = False
     is_floating: bool = False
     is_essential: bool = True
+    pending_amount: Optional[Decimal] = None
+    pending_amount_effective_date: Optional[date] = None
 
 
 class UpcomingBillOut(BaseModel):
