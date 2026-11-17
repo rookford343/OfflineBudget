@@ -762,17 +762,32 @@ def _cause_item(c, esc, money) -> tuple[str, list[str]]:
     return html, text_lines
 
 
+def _value_money(amount: Decimal, money) -> str:
+    """A snapshot value's own figure (old or new -- never a delta), with a
+    plain minus sign when it's negative and nothing extra otherwise (never a
+    "+") -- the convention frontend/src/lib/historyMoney.ts's
+    signedMoney(hidden, v, false) already uses for a value rather than a
+    delta. `money()` alone is f"${{abs(amount):,.2f}}" and silently strips
+    the sign, which is actively misleading for Safety Margin: it legitimately
+    goes negative in production (this file already color-codes
+    safety_margin_weekly < 0 elsewhere)."""
+    from backend.services.metric_diff import CENT, MINUS
+    return f"{MINUS if amount.quantize(CENT) < 0 else ''}{money(amount)}"
+
+
 def _math_figures(old: Decimal | None, new: Decimal | None, money, signed_money) -> str:
     """One math line's before/after, worded for a line that appeared,
     vanished, held steady, or moved -- mirrors
-    frontend/src/lib/historyMoney.ts's mathFigures()."""
+    frontend/src/lib/historyMoney.ts's mathFigures(). `old`/`new` are
+    snapshot values, not deltas, so they go through `_value_money`, not the
+    unsigned `money()`."""
     if old is None:
-        return f"added, {money(new)}"
+        return f"added, {_value_money(new, money)}"
     if new is None:
-        return f"removed, was {money(old)}"
+        return f"removed, was {_value_money(old, money)}"
     if old == new:
-        return f"{money(old)}, no change"
-    return f"{money(old)} → {money(new)}"
+        return f"{_value_money(old, money)}, no change"
+    return f"{_value_money(old, money)} → {_value_money(new, money)}"
 
 
 def _receipt_block(ch, money, signed_money, esc, wrap) -> tuple[str, list[str]]:
@@ -787,8 +802,9 @@ def _receipt_block(ch, money, signed_money, esc, wrap) -> tuple[str, list[str]]:
     WhatChanged.tsx's `row.math.length > 0` guard)."""
     if ch is None:
         return "", []
-    header_text = f"{ch.label}: {money(ch.old_value)} → {money(ch.new_value)} ({signed_money(ch.delta)})"
-    header_html = f"{esc(ch.label)}: {money(ch.old_value)} → {money(ch.new_value)} ({signed_money(ch.delta)})"
+    old_v, new_v = _value_money(ch.old_value, money), _value_money(ch.new_value, money)
+    header_text = f"{ch.label}: {old_v} → {new_v} ({signed_money(ch.delta)})"
+    header_html = f"{esc(ch.label)}: {old_v} → {new_v} ({signed_money(ch.delta)})"
 
     causes, extra = ch.causes[:CHANGES_MAX_ITEMS], max(len(ch.causes) - CHANGES_MAX_ITEMS, 0)
     cause_items_html = ""

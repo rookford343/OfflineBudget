@@ -679,6 +679,46 @@ def test_math_figures_one_sided_and_no_change():
     assert _math_figures(D("20.00"), D("30.00"), money, signed_money) == f"{money(D('20.00'))} → {money(D('30.00'))}"
 
 
+def test_math_figures_shows_a_minus_sign_for_a_negative_value():
+    # money() alone is unsigned (f"${{abs(amount):,.2f}}"); a negative
+    # snapshot value must still read as negative, not as a healthy positive
+    # figure -- Safety Margin legitimately goes negative in production.
+    from backend.services.summary_generator import _math_figures
+    from backend.services.metric_diff import money, signed_money
+    assert _math_figures(D("-20.00"), D("5.00"), money, signed_money) == f"−{money(D('-20.00'))} → {money(D('5.00'))}"
+    assert _math_figures(D("5.00"), D("-20.00"), money, signed_money) == f"{money(D('5.00'))} → −{money(D('-20.00'))}"
+    assert _math_figures(None, D("-20.00"), money, signed_money) == f"added, −{money(D('-20.00'))}"
+    assert _math_figures(D("-20.00"), None, money, signed_money) == f"removed, was −{money(D('-20.00'))}"
+
+
+def test_receipt_header_shows_a_minus_sign_for_a_negative_old_or_new_value(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    receipt = _receipt_chg("safety_margin_week", "Safety Margin (this week)", [_cause(text="a cause")], [],
+                           old="-50.00", new="30.00", delta="80.00")
+    html, text = generate_daily_summary(db_session, user, since_changes=[receipt])
+    block = html[html.index(CHANGES_TITLE):]
+    # Must be the signed "−$50.00 → $30.00", not the unsigned "$50.00 →
+    # $30.00" money() alone would silently produce for a negative old_value.
+    assert "Safety Margin (this week): −$50.00 → $30.00 (+$80.00)" in block
+    tail = text[text.index(CHANGES_TITLE.upper()):]
+    assert "Safety Margin (this week): −$50.00 → $30.00 (+$80.00)" in tail
+
+
+def test_receipt_math_line_shows_a_minus_sign_for_a_negative_value(db_session, monkeypatch):
+    user, _ = _world(db_session, monkeypatch)
+    receipt = _receipt_chg(
+        "safety_margin_week", "Safety Margin (this week)", [_cause(text="a cause")],
+        [_math_line("Checking balance", "-10.00", "40.00")],
+        old="100.00", new="150.00", delta="50.00",
+    )
+    html, text = generate_daily_summary(db_session, user, since_changes=[receipt])
+    block = html[html.index(CHANGES_TITLE):]
+    assert "Checking balance: −$10.00 → $40.00" in block
+    assert "Checking balance: $10.00 → $40.00" not in block
+    tail = text[text.index(CHANGES_TITLE.upper()):]
+    assert "Checking balance: −$10.00 → $40.00" in tail
+
+
 def test_safety_margin_gets_the_full_receipt_end_to_end(db_session, monkeypatch):
     from backend.services.summary_generator import SINCE_RECEIPT_KEYS
     user = _moved_world(db_session, monkeypatch)
