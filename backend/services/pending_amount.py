@@ -1,11 +1,23 @@
-"""Promotes a scheduled amount change once its effective date arrives."""
+"""Resolves and promotes a RecurringItem's scheduled amount change."""
 from __future__ import annotations
 
 from datetime import date, timedelta
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
 from backend import models
+
+
+def amount_on(item: models.RecurringItem, as_of: date) -> Decimal:
+    """The item's correct amount as of a given date: its scheduled
+    pending_amount once as_of reaches pending_amount_effective_date, else
+    its current amount. The single source of truth every forward-looking
+    reader of RecurringItem.amount must go through -- see build_forecast,
+    upcoming_bills, month_base, and the card-subscription-charge walk."""
+    if item.pending_amount is not None and as_of >= item.pending_amount_effective_date:
+        return item.pending_amount
+    return item.amount
 
 
 def promote_due_pending_amounts(db: Session, as_of: date) -> list[int]:

@@ -38,6 +38,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from backend import models, schemas
+from backend.services.pending_amount import amount_on
 from backend.services.forecast_engine import _fires_on, ss_paycheck_boosts
 from backend.services.recurring_skips import effective_skips
 
@@ -229,7 +230,7 @@ def build_month_base(
             if item.id in skipped_item_ids:
                 continue
             override = overrides.get((item.id, d))
-            amount = override if override is not None else item.amount
+            amount = override if override is not None else amount_on(item, d)
             overridden = override is not None
 
             if item.type == models.RecurringType.income:

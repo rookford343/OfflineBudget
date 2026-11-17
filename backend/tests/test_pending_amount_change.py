@@ -276,3 +276,151 @@ def test_promotion_does_not_pull_back_a_later_drift_dismissed_through(db_session
     promote_due_pending_amounts(db_session, date(2027, 1, 1))
     db_session.refresh(item)
     assert item.drift_dismissed_through == date(2027, 1, 15)
+
+
+# Final review finding: build_forecast's own inline old-vs-pending resolution
+# duplicated the same date comparison three other forward-looking readers of
+# RecurringItem.amount also needed (Dashboard Upcoming Bills, the daily
+# email's 7-day section, the Recurring page's future-month summary) -- each
+# one read item.amount directly and so kept showing the OLD amount for days/
+# weeks before a scheduled change took effect, disagreeing with the Forecast/
+# Contingency pages that already resolved it correctly. amount_on() is the
+# single shared helper every one of those readers (plus the card-subscription
+# -charge walk feeding card_payment_model.py) now goes through, so there is
+# exactly one place that does this date comparison, not four.
+
+from backend.services.pending_amount import amount_on
+
+
+def _plain_item(amount, pending_amount=None, effective_date=None) -> models.RecurringItem:
+    """An unpersisted RecurringItem -- amount_on() only reads plain
+    attributes, so no db session/commit is needed for these pure-function
+    tests of the helper in isolation."""
+    return models.RecurringItem(
+        name="Plain", amount=amount, type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly, day_of_month=1,
+        start_date=date(2026, 1, 1),
+        pending_amount=pending_amount, pending_amount_effective_date=effective_date,
+    )
+
+
+def test_amount_on_before_effective_date_returns_the_old_amount():
+    item = _plain_item(D("2200.00"), D("1950.00"), date(2027, 1, 1))
+    assert amount_on(item, date(2026, 12, 31)) == D("2200.00")
+
+
+def test_amount_on_on_the_effective_date_returns_the_new_amount():
+    item = _plain_item(D("2200.00"), D("1950.00"), date(2027, 1, 1))
+    assert amount_on(item, date(2027, 1, 1)) == D("1950.00")
+
+
+def test_amount_on_after_the_effective_date_returns_the_new_amount():
+    item = _plain_item(D("2200.00"), D("1950.00"), date(2027, 1, 1))
+    assert amount_on(item, date(2027, 6, 15)) == D("1950.00")
+
+
+def test_amount_on_with_no_pending_amount_returns_the_plain_amount():
+    item = _plain_item(D("500.00"))
+    assert amount_on(item, date(2026, 1, 1)) == D("500.00")
+
+
+# Dashboard surface: GET /recurring/upcoming (the Upcoming Bills card) reads
+# upcoming_bills() directly.
+
+def test_upcoming_bills_dashboard_card_shows_the_new_amount_once_effective(db_session):
+    from backend.services.upcoming_bills import upcoming_bills
+
+    user, checking, item = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1),
+    )
+    bills = upcoming_bills(
+        db_session, user.id, date(2026, 12, 20), 30, types=[models.RecurringType.expense],
+    )
+    bill = next(b for b in bills if b.recurring_item_id == item.id)
+    assert bill.due_date == date(2027, 1, 1)
+    assert bill.amount == D("1950.00"), "the Dashboard card must show the new amount, not the stale item.amount"
+    # estimated_amount is documented to stay the plain planning amount
+    # (item.amount itself hasn't been promoted yet) -- unaffected by this fix.
+    assert bill.estimated_amount == D("2200.00")
+
+
+def test_upcoming_bills_dashboard_card_keeps_the_old_amount_before_effective(db_session):
+    from backend.services.upcoming_bills import upcoming_bills
+
+    user, checking, item = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 6, 1),
+    )
+    bills = upcoming_bills(
+        db_session, user.id, date(2026, 12, 20), 30, types=[models.RecurringType.expense],
+    )
+    bill = next(b for b in bills if b.recurring_item_id == item.id)
+    assert bill.due_date == date(2027, 1, 1)
+    assert bill.amount == D("2200.00")
+
+
+# Recurring page's future-month summary: build_month_base is the single
+# per-occurrence resolution point read by both the Recurring page strip
+# (via build_month_summary) and the Dashboard's Leftover.
+
+def test_month_base_future_month_resolves_the_pending_amount(db_session):
+    from backend.services.month_base import build_month_base
+
+    user, checking, item = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1),
+    )
+    base = build_month_base(db_session, user, 2027, 1)
+    occurrence = next(o for o in base.monthly_bills if o.recurring_item_id == item.id)
+    assert occurrence.amount == D("1950.00")
+
+
+def test_month_base_a_month_before_effective_keeps_the_old_amount(db_session):
+    from backend.services.month_base import build_month_base
+
+    user, checking, item = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1),
+    )
+    base = build_month_base(db_session, user, 2026, 12)
+    occurrence = next(o for o in base.monthly_bills if o.recurring_item_id == item.id)
+    assert occurrence.amount == D("2200.00")
+
+
+# Card-subscription-charge walk: feeds the credit-card payoff projections in
+# card_payment_model.py (_card_subscription_charges builds the subscription-
+# fallback estimate from each card's own recurring items).
+
+def test_card_subscription_charges_uses_the_pending_amount_on_or_after_effective(db_session):
+    from backend.services.forecast_engine import _card_subscription_charges
+
+    user, checking, item = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1),
+    )
+    charges = _card_subscription_charges([item], date(2026, 12, 1), date(2027, 1, 31))
+    assert charges[date(2026, 12, 1)] == D("2200.00")
+    assert charges[date(2027, 1, 1)] == D("1950.00")
+
+
+# Cross-surface agreement: for the same item and the same future occurrence
+# date, upcoming_bills(), build_month_base(), and build_forecast's own walk
+# must all resolve to the identical amount -- the thing Dan asked this fix to
+# prove ("now agree with the forecast/Contingency figures").
+
+def test_upcoming_bills_month_base_and_forecast_agree_across_the_effective_date(db_session):
+    from backend.services.upcoming_bills import upcoming_bills
+    from backend.services.month_base import build_month_base
+
+    user, checking, item = _mortgage_world(
+        db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1),
+    )
+
+    bills = upcoming_bills(
+        db_session, user.id, date(2026, 12, 20), 30, types=[models.RecurringType.expense],
+    )
+    upcoming_amount = next(b for b in bills if b.recurring_item_id == item.id).amount
+
+    base = build_month_base(db_session, user, 2027, 1)
+    month_base_amount = next(o for o in base.monthly_bills if o.recurring_item_id == item.id).amount
+
+    entries = build_forecast(db_session, user.id, checking.id, date(2027, 1, 1), date(2027, 1, 31))
+    forecast_amount = abs(_amount_on(entries, "Test Mortgage", date(2027, 1, 1)))
+
+    assert upcoming_amount == month_base_amount == forecast_amount == D("1950.00")

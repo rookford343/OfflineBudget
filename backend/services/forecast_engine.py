@@ -20,6 +20,7 @@ from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
 from backend.services.tax_service import ss_wage_base_for
 from backend.services.card_matching import card_matches_description
 from backend.services.cushion import cushion_status
+from backend.services.pending_amount import amount_on
 
 # How many days before "today" a scheduled recurring item can still be
 # missing its actual and get folded into today's opening balance anyway,
@@ -125,7 +126,7 @@ def _card_subscription_charges(
     while current <= end_date:
         for item in items:
             if _fires_on(item, current) and not (skip and skip(item, current)):
-                charges[current] = charges.get(current, Decimal("0")) + item.amount
+                charges[current] = charges.get(current, Decimal("0")) + amount_on(item, current)
         current += timedelta(days=1)
     return charges
 
@@ -1311,11 +1312,7 @@ def build_forecast(
             elif bonus_gross_amt is not None:
                 base_amount = bonus_net(bonus_plan, bonus_gross_amt) + override_map.get(item.id, Decimal("0"))
             else:
-                base = (
-                    item.pending_amount
-                    if item.pending_amount is not None and natural_fire_date >= item.pending_amount_effective_date
-                    else item.amount
-                )
+                base = amount_on(item, natural_fire_date)
                 base_amount = base + override_map.get(item.id, Decimal("0"))
             is_cc = item.type == models.RecurringType.credit_card_payment
 

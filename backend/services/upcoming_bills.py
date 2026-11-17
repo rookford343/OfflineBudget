@@ -22,6 +22,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from backend import models
+from backend.services.pending_amount import amount_on
 
 
 @dataclass(frozen=True)
@@ -108,7 +109,7 @@ def upcoming_bills(
             recurring_item_id=item.id,
             name=item.name,
             due_date=shown,
-            amount=projected if projected is not None else overrides.get((item.id, natural), item.amount),
+            amount=projected if projected is not None else overrides.get((item.id, natural), amount_on(item, natural)),
             estimated_amount=item.amount,
             is_actual=(item.id, natural) in overrides,
             card_id=item.card_id,

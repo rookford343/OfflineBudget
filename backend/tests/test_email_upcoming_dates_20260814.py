@@ -175,3 +175,51 @@ def test_daily_summary_upcoming_shows_the_override_amount_not_the_typical_amount
     assert "actual" in html_upcoming.lower(), "an is_actual row should carry a muted 'actual' tag"
     assert "$124.69" in text_upcoming
     assert "$100.00" not in text_upcoming
+
+
+def test_daily_summary_upcoming_shows_a_scheduled_pending_amount_once_effective(db_session):
+    """Final review finding: the daily email's "Upcoming (next 7 days)"
+    section (this module's own upcoming list, built off upcoming_bills())
+    read RecurringItem.amount through upcoming_bills() before the shared
+    amount_on() helper existed, so a bill due on/after a scheduled
+    pending_amount_effective_date still showed the OLD amount here while the
+    Forecast/Contingency pages already showed the new one -- the same kind of
+    cross-surface drift this file's own docstring documents fixing once
+    before between these same two Dashboard/email callers."""
+    from backend.services.summary_generator import generate_daily_summary
+
+    user = models.User(username="pendingemail", hashed_password="x", display_name="P")
+    db_session.add(user)
+    db_session.flush()
+    account = models.Account(user_id=user.id, name="Checking", type=models.AccountType.checking,
+                              current_balance=Decimal("5000.00"))
+    db_session.add(account)
+    db_session.flush()
+    db_session.add(models.RecurringItem(
+        user_id=user.id, account_id=account.id, name="Test Mortgage",
+        amount=Decimal("2200.00"), type=models.RecurringType.expense,
+        frequency=models.RecurringFrequency.monthly, day_of_month=1,
+        start_date=date(2026, 1, 1),
+        pending_amount=Decimal("1950.00"), pending_amount_effective_date=date(2027, 1, 1),
+    ))
+    db_session.commit()
+
+    import backend.services.summary_generator as sg
+    orig = sg.date
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return date(2026, 12, 27)  # the Jan 1 occurrence falls inside the 7-day window
+    sg.date = _FixedDate
+    try:
+        html, text = generate_daily_summary(db_session, user)
+    finally:
+        sg.date = orig
+
+    html_upcoming = html[html.index("Upcoming (next 7 days)"): html.index("Credit Cards")]
+    text_upcoming = text[text.index("UPCOMING BILLS"): text.index("CREDIT CARDS")]
+
+    assert "$1,950.00" in html_upcoming, "the email must show the new, scheduled amount"
+    assert "$2,200.00" not in html_upcoming, "the stale pre-change amount must not appear"
+    assert "$1,950.00" in text_upcoming
+    assert "$2,200.00" not in text_upcoming
