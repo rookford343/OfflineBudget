@@ -21,6 +21,7 @@ from backend import models
 from backend.dependencies import get_db, get_current_user
 from backend.routers import recurring as recurring_router_module
 from backend.services.forecast_engine import build_forecast
+from backend.services.pending_amount import promote_due_pending_amounts
 
 D = Decimal
 
@@ -203,3 +204,30 @@ def test_a_confirmed_statement_amount_still_beats_a_pending_change(db_session):
     db_session.commit()
     entries = build_forecast(db_session, user.id, checking.id, date(2027, 1, 1), date(2027, 1, 31))
     assert _amount_on(entries, "Test Mortgage", date(2027, 1, 1)) == D("-2015.42")
+
+
+# Task 3: once the effective date arrives, promote_due_pending_amounts moves
+# pending_amount into amount and clears both pending fields.
+
+def test_promotes_an_item_whose_date_has_arrived(db_session):
+    _, _, item = _mortgage_world(db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1))
+    ids = promote_due_pending_amounts(db_session, date(2027, 1, 1))
+    db_session.refresh(item)
+    assert ids == [item.id]
+    assert item.amount == D("1950.00")
+    assert item.pending_amount is None and item.pending_amount_effective_date is None
+
+
+def test_leaves_a_not_yet_due_item_alone(db_session):
+    _, _, item = _mortgage_world(db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1))
+    ids = promote_due_pending_amounts(db_session, date(2026, 12, 31))
+    db_session.refresh(item)
+    assert ids == []
+    assert item.amount == D("2200.00") and item.pending_amount == D("1950.00")
+
+
+def test_running_it_twice_on_the_same_day_is_a_no_op_the_second_time(db_session):
+    _, _, item = _mortgage_world(db_session, pending_amount=D("1950.00"), effective_date=date(2027, 1, 1))
+    promote_due_pending_amounts(db_session, date(2027, 1, 1))
+    ids = promote_due_pending_amounts(db_session, date(2027, 1, 1))
+    assert ids == []

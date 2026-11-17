@@ -404,6 +404,16 @@ def _scheduler_sweep() -> None:
                     refresh_item_amounts(db, user, date.today())
         except Exception:
             logger.exception("Scheduler sweep: bonus plan refresh step failed")
+        # Once a scheduled amount change's effective date arrives, promote it
+        # into amount so every other reader (which only ever cares about
+        # "now") is automatically correct. Guarded like the rest.
+        try:
+            from backend.services.pending_amount import promote_due_pending_amounts
+            promoted = promote_due_pending_amounts(db, date.today())
+            if promoted:
+                logger.info("Scheduler sweep: promoted pending amount change for recurring items %s", promoted)
+        except Exception:
+            logger.exception("Scheduler sweep: pending amount promotion step failed")
         # Record once when the calculation rules change, so history can say
         # "the rules changed" rather than blame the data. Guarded like the rest.
         try:
