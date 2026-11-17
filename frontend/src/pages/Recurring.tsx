@@ -23,7 +23,7 @@ function endMonthLabel(iso: string): string {
   return `${MONTHS[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
 }
 
-const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", owner_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "", amount_varies: false, is_floating: false, is_essential: true };
+const emptyForm = { name: "", amount: "", type: "expense", frequency: "monthly", month_of_year: "1", account_id: "", category_id: "", owner_id: "", card_id: "", day_of_month: "15", start_date: new Date().toISOString().slice(0, 10), end_date: "", notes: "", statement_day: "", amount_varies: false, is_floating: false, is_essential: true, pending_amount: "", pending_amount_effective_date: "" };
 
 /** Next occurrence of a monthly item's due day, on or after today.
  *  Only monthly items get inline actual-amount entry: yearly and quarterly
@@ -218,11 +218,11 @@ export default function Recurring() {
 
   function done() { qc.invalidateQueries({ queryKey: ["recurring"] }); qc.invalidateQueries({ queryKey: ["amount-drift"] }); qc.invalidateQueries({ queryKey: ["recurring-breakdown"] }); qc.invalidateQueries({ queryKey: ["recurring-month-summary"] }); qc.invalidateQueries({ queryKey: ["recurring-contingency"] }); setShowForm(false); setEditItem(null); }
   function openNew() { setForm({ ...emptyForm, account_id: accounts[0]?.id?.toString() ?? "" }); setEditItem(null); setEssentialTouched(false); setShowForm(true); }
-  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), owner_id: String(i.owner_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "", amount_varies: !!i.amount_varies, is_floating: !!i.is_floating, is_essential: !!i.is_essential }); setEssentialTouched(false); setShowForm(true); }
+  function openEdit(i: any) { setEditItem(i); setForm({ name: i.name, amount: i.amount, type: i.type, frequency: i.frequency ?? "monthly", month_of_year: String(i.month_of_year ?? "1"), account_id: String(i.account_id), category_id: String(i.category_id ?? ""), owner_id: String(i.owner_id ?? ""), card_id: String(i.card_id ?? ""), day_of_month: String(i.day_of_month), start_date: i.start_date, end_date: i.end_date ?? "", notes: i.notes ?? "", statement_day: i.statement_day != null ? String(i.statement_day) : "", amount_varies: !!i.amount_varies, is_floating: !!i.is_floating, is_essential: !!i.is_essential, pending_amount: i.pending_amount != null ? String(i.pending_amount) : "", pending_amount_effective_date: i.pending_amount_effective_date ?? "" }); setEssentialTouched(false); setShowForm(true); }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, owner_id: form.owner_id ? parseInt(form.owner_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null, is_floating: form.frequency === "monthly" && !!form.is_floating, is_essential: form.is_essential };
+    const data = { ...form, amount: parseFloat(form.amount), account_id: parseInt(form.account_id), category_id: form.category_id ? parseInt(form.category_id) : null, owner_id: form.owner_id ? parseInt(form.owner_id) : null, card_id: form.card_id ? parseInt(form.card_id) : null, day_of_month: parseInt(form.day_of_month), month_of_year: (form.frequency === "yearly" || form.frequency === "quarterly") ? parseInt(form.month_of_year) : null, end_date: form.end_date || null, statement_day: form.statement_day ? parseInt(form.statement_day) : null, is_floating: form.frequency === "monthly" && !!form.is_floating, is_essential: form.is_essential, pending_amount: form.pending_amount ? parseFloat(form.pending_amount) : null, pending_amount_effective_date: form.pending_amount_effective_date || null };
     if (editItem) updateMut.mutate({ id: editItem.id, data });
     else createMut.mutate(data);
   }
@@ -288,6 +288,11 @@ export default function Recurring() {
                 {(byId[item.id]?.months_remaining ?? 0) === 0
                   ? "ended"
                   : `ends ${endMonthLabel(item.end_date)} · ${byId[item.id]?.months_remaining} mo`}
+              </span>
+            )}
+            {item.pending_amount != null && (
+              <span className="badge-amber" title={`Changes to ${fmt(item.pending_amount)} on ${fmtDate(item.pending_amount_effective_date)}`}>
+                → {fmt(item.pending_amount)} on {fmtDate(item.pending_amount_effective_date)}
               </span>
             )}
           </div>
@@ -744,6 +749,16 @@ export default function Recurring() {
                   Amount varies (don't ask when payments differ)
                 </label>
               )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Scheduled Change <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input type="number" step="0.01" className="input" placeholder="New amount" value={form.pending_amount} onChange={e => setForm({ ...form, pending_amount: e.target.value })} />
+                </div>
+                <div>
+                  <label className="label">Starting On</label>
+                  <input type="date" className="input" value={form.pending_amount_effective_date} onChange={e => setForm({ ...form, pending_amount_effective_date: e.target.value })} />
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="label">Start Date</label><input type="date" className="input" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} required /></div>
                 <div><label className="label">End Date (optional)</label><input type="date" className="input" value={form.end_date} onChange={e => setForm({ ...form, end_date: e.target.value })} /></div>
