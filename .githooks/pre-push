@@ -75,7 +75,14 @@ if ! bun install --frozen-lockfile; then
 fi
 
 echo "Frontend dependency audit (known vulnerabilities)..."
-if ! bun audit --audit-level=high; then
+# GHSA-fc5q-39xc-vjpf (picomatch ReDoS, CVE-2026-112366): reviewed 2026-11-17,
+# no fixed version exists -- every published picomatch release is in the
+# vulnerable range, so there is nothing to upgrade to. picomatch only reaches
+# this repo as a dev-time build dependency of vite/Tailwind/typescript-eslint
+# (never runtime code or user input), so exploitability here is effectively
+# nil. Dan approved this scoped, single-advisory suppression on 2026-11-17;
+# remove it once upstream ships a fix.
+if ! bun audit --audit-level=high --ignore=GHSA-fc5q-39xc-vjpf; then
   echo "BLOCKED: a locked frontend dependency has a known high/critical vulnerability. Upgrade or override it." >&2
   exit 1
 fi
