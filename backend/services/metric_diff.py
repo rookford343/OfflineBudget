@@ -499,8 +499,11 @@ def headline(causes: list[Cause]) -> str:
 
 
 def _history_cause(c: Cause) -> schemas.HistoryCause:
+    # A grouped cause's `.amount` is the signed sum of its items, kept only as
+    # an internal sort key (see `_group`) -- the public API never carried a
+    # grouped cause's total before that key existed, so it stays None here.
     return schemas.HistoryCause(
-        text=c.text, amount=c.amount, head=c.head or None,
+        text=c.text, amount=None if c.head else c.amount, head=c.head or None,
         items=[schemas.HistoryCauseItem(name=n, amount=a) for n, a in c.rows],
     )
 

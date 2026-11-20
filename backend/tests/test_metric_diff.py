@@ -285,18 +285,25 @@ def test_checking_rows_use_account_name_and_actual_filter(db_session):
 
 # ── Ranking causes by dollar size ────────────────────────────────────────────
 
-def test_large_grouped_source_cause_leads_over_small_line_cause(db_session):
-    user, chk, _v, _m = _world(db_session)
-    pending = {"account_id": chk.id, "account": "Example Checking", "external_id": "c1",
-               "description": "Online Deposit", "amount": "1491.26"}
+def test_higher_owner_id_grouped_cause_leads_when_it_is_larger(db_session):
+    """The bug this fix targets: `_grouped_causes` builds groups in owner-id
+    order (card id / account id), not by size. A lower-id card's small
+    cluster must not keep the headline slot from a higher-id card's larger
+    one -- Dan's reported case was a large deposit losing to a lower-id
+    card's smaller charge cluster purely because of owner-id ordering."""
+    user, _chk, visa, mc = _world(db_session)
+    assert visa.id < mc.id  # Visa is created first in _world
+    pending = [
+        _pend(visa.id, "Visa", "p1", "Small Charge", "5.00"),
+        _pend(mc.id, "Mastercard", "p2", "Big Deposit", "900.00"),
+    ]
     prev, cur = _pair(
-        db_session, user, "checking_balance",
-        cur_kw={"sources": _sources(checking_pending=[pending])},
-        prev_ex=_ex(_row("start", "Base", "100.00")), cur_ex=_ex(_row("start", "Base", "105.00")),
+        db_session, user, "left_to_spend",
+        cur_kw={"sources": _sources(card_pending=pending)},
     )
-    causes = _causes(db_session, user, "checking_balance", prev, cur)
-    assert causes[0].text == "new pending Example Checking charge: Online Deposit $1,491.26"
-    assert headline(causes) == "New pending Example Checking charge + 1 more"
+    causes = _causes(db_session, user, "left_to_spend", prev, cur)
+    assert causes[0].text == "new pending Mastercard charge: Big Deposit $900.00"
+    assert headline(causes) == "New pending Mastercard charge + 1 more"
 
 
 def test_small_grouped_source_cause_does_not_lead_over_larger_line_cause(db_session):

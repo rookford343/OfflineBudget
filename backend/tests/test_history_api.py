@@ -219,3 +219,25 @@ def test_grouped_cause_serializes_head_and_items(db_session):
     assert grouped["head"] == "new pending Visa charges"
     assert [(i["name"], D(i["amount"])) for i in grouped["items"]] == [
         ("Example Insurance Co.", D("250.00")), ("Grocery Store", D("100.00"))]
+
+
+def test_grouped_cause_amount_stays_null_in_the_api(db_session):
+    """A grouped cause's `.amount` is a real, nonzero dollar sum internally (it
+    ranks the cause against other causes by size -- see metric_diff._group),
+    but that sum is not part of the documented API shape: the serialized
+    `amount` stays None for a grouped cause, exactly as before that sum
+    existed."""
+    user = _user(db_session)
+    card = models.CreditCard(user_id=user.id, name="Visa", credit_limit=D("5000"),
+                             statement_day=20, due_day=10)
+    db_session.add(card)
+    db_session.commit()
+    pending = [{"card_id": card.id, "card": "Visa", "external_id": "p1", "merchant": "Big Store",
+                "amount": "250.00"}]
+    _snap(db_session, user, T1, "500.00", key="safety_margin", explain_json=_explain("1"))
+    _snap(db_session, user, T2, "250.00", key="safety_margin", explain_json=_explain("1"), sources_json=json.dumps({
+        "card_pending": pending, "checking_pending": [], "max_txn_id": 0, "max_card_txn_id": 0}))
+    change = _client(db_session, user).get("/history/safety_margin").json()["changes"][0]
+    grouped = change["causes"][0]
+    assert grouped["head"] == "new pending Visa charge"
+    assert grouped["amount"] is None
