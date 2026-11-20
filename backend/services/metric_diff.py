@@ -271,7 +271,8 @@ def _group(kind_text: str, owner: str, items: list[_Item], *, plural: str, singu
     head = kind_text.format(owner=owner, noun=noun)
     shown = tuple(f"{i.name} {money(i.amount)}" for i in items)
     rows = tuple((i.name, i.amount) for i in items)
-    return Cause(f"{head}: {', '.join(shown)}", None, head=head, items=shown, rows=rows)
+    total = sum((i.amount for i in items), start=Decimal("0"))
+    return Cause(f"{head}: {', '.join(shown)}", total, head=head, items=shown, rows=rows)
 
 
 def _by_owner(items: list[_Item]) -> list[tuple[int, str, list[_Item]]]:
@@ -415,21 +416,29 @@ def explain_change(
     db: Session, user_id: int, metric_key: str,
     prev: models.MetricReading, cur: models.MetricReading, *, _depth: int = 0,
 ) -> list[Cause]:
-    """Why `metric_key` differs between two readings: calculation change first,
-    then source events, then receipt lines by size. A derived figure's line for
-    its parent is replaced by the parent's causes (see DERIVED_FROM).
+    """Why `metric_key` differs between two readings: a calculation change
+    leads unconditionally when the rules changed, then a new-month note
+    when the readings crossed into a new month -- both are complete
+    top-level explanations, not events competing on size, so they always
+    lead. Otherwise every source event and receipt-line cause is ranked
+    together by dollar size, largest first. A derived figure's inherited
+    parent causes (see DERIVED_FROM) ride along in that same ranked group
+    but always trail every cause that carries a dollar amount of its own,
+    since (like a grouped cause shown to a parent) they carry none.
     `[Cause("inputs changed")]` when nothing nameable differs."""
     prev_snap, cur_snap = prev.snapshot, cur.snapshot
-    causes: list[Cause] = []
+    calc_note: list[Cause] = []
     if prev_snap.calc_version != cur_snap.calc_version:
         note = CALC_CHANGELOG.get(cur_snap.calc_version, "the rules changed")
-        causes.append(Cause(
+        calc_note.append(Cause(
             f"calculation changed (v{prev_snap.calc_version} → v{cur_snap.calc_version}: {note})",
             None,
         ))
+    causes: list[Cause] = list(calc_note)
     causes.extend(_source_causes(db, user_id, metric_key, prev_snap, cur_snap))
+    new_month: list[Cause] = []
     if (prev_snap.as_of.year, prev_snap.as_of.month) != (cur_snap.as_of.year, cur_snap.as_of.month):
-        causes.append(Cause(f"new month ({cur_snap.as_of:%b})", None))
+        new_month.append(Cause(f"new month ({cur_snap.as_of:%b})", None))
     else:
         lines = diff_explanations(
             schemas.Explanation.model_validate_json(prev.explain_json),
@@ -442,6 +451,17 @@ def explain_change(
                 causes.extend(_inherited(c) for c in inherit[1])
             else:
                 causes.append(_line_cause(line))
+    # Rank every amount-bearing cause (grouped source events + receipt lines)
+    # together by size. An inherited parent cause carries no amount of its
+    # own (`_inherited` always sets it to None) -- unlike the new-month note
+    # and the calc-change note, it is not a complete explanation on its own,
+    # just a substitute for a line that already ranked among the others, so
+    # it keys below every real amount (never above, the way `None` would
+    # sort if treated as infinite) and merely keeps its stable append order
+    # among ties.
+    rest = causes[len(calc_note):]
+    rest.sort(key=lambda c: abs(c.amount) if c.amount is not None else Decimal("-1"), reverse=True)
+    causes = calc_note + new_month + rest
     seen: set[str] = set()
     unique = [c for c in causes if not (c.text in seen or seen.add(c.text))]
     return unique or [Cause(_NOTHING_NAMED, None)]

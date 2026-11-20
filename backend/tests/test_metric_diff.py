@@ -283,6 +283,64 @@ def test_checking_rows_use_account_name_and_actual_filter(db_session):
     assert [c.text for c in _causes(db_session, user, "left_to_spend", prev, cur)] == ["inputs changed"]
 
 
+# ── Ranking causes by dollar size ────────────────────────────────────────────
+
+def test_large_grouped_source_cause_leads_over_small_line_cause(db_session):
+    user, chk, _v, _m = _world(db_session)
+    pending = {"account_id": chk.id, "account": "Example Checking", "external_id": "c1",
+               "description": "Online Deposit", "amount": "1491.26"}
+    prev, cur = _pair(
+        db_session, user, "checking_balance",
+        cur_kw={"sources": _sources(checking_pending=[pending])},
+        prev_ex=_ex(_row("start", "Base", "100.00")), cur_ex=_ex(_row("start", "Base", "105.00")),
+    )
+    causes = _causes(db_session, user, "checking_balance", prev, cur)
+    assert causes[0].text == "new pending Example Checking charge: Online Deposit $1,491.26"
+    assert headline(causes) == "New pending Example Checking charge + 1 more"
+
+
+def test_small_grouped_source_cause_does_not_lead_over_larger_line_cause(db_session):
+    user, chk, _v, _m = _world(db_session)
+    pending = {"account_id": chk.id, "account": "Example Checking", "external_id": "c2",
+               "description": "Coffee Stand", "amount": "-5.00"}
+    prev, cur = _pair(
+        db_session, user, "checking_balance",
+        cur_kw={"sources": _sources(checking_pending=[pending])},
+        prev_ex=_ex(_row("start", "Base", "100.00")), cur_ex=_ex(_row("start", "Base", "1591.26")),
+    )
+    causes = _causes(db_session, user, "checking_balance", prev, cur)
+    assert causes[0].text == "Base +$1,491.26"
+    assert causes[1].text == "new pending Example Checking charge: Coffee Stand $5.00"
+
+
+def test_new_month_note_leads_over_a_larger_grouped_source_cause(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    pending = [_pend(visa.id, "Visa", "p1", "Big Store", "900.00")]
+    prev, cur = _pair(
+        db_session, user, "left_to_spend",
+        prev_kw={"as_of": date(2026, 10, 31)},
+        cur_kw={"as_of": date(2026, 11, 1), "sources": _sources(card_pending=pending)},
+        prev_ex=_ex(_row("start", "Base", "100.00")), cur_ex=_ex(_row("start", "Base", "900.00")),
+    )
+    causes = _causes(db_session, user, "left_to_spend", prev, cur)
+    assert causes[0].text == "new month (Nov)"
+
+
+def test_calc_change_note_leads_over_everything(db_session):
+    user, _chk, visa, _mc = _world(db_session)
+    pending = [_pend(visa.id, "Visa", "p1", "Big Store", "900.00")]
+    prev, cur = _pair(
+        db_session, user, "available_to_spend",
+        prev_kw={"calc_version": 11},
+        cur_kw={"calc_version": 12, "sources": _sources(card_pending=pending)},
+        prev_ex=_ex(_row("start", "Base", "100.00")), cur_ex=_ex(_row("start", "Base", "105.00")),
+    )
+    causes = _causes(db_session, user, "available_to_spend", prev, cur)
+    assert causes[0].text == (
+        "calculation changed (v11 → v12: Available to Spend counts balance-only cards "
+        "like Left to Spend)")
+
+
 def test_old_dated_import_between_snapshots_is_not_a_cause(db_session):
     user, chk, _v, _m = _world(db_session)
     db_session.add_all([
@@ -452,7 +510,11 @@ def test_split_search_is_capped_per_owner(db_session):
     user, _chk, visa, _mc = _world(db_session)
     _card_rows(db_session, user, visa, "25.00", "35.00", *["1.00"] * 11)
     texts = _card_texts(db_session, user, [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")], [])
-    assert texts[0] == "pending Visa charge dropped: Big Store $60.00"
+    # The split was never matched (13 owner rows exceeds the cap), so both the dropped
+    # pending charge and the unmatched posted rows are named; the $71 posted group now
+    # outranks the $60 dropped charge by dollar size.
+    assert texts[0].startswith("new Visa transactions: ")
+    assert "pending Visa charge dropped: Big Store $60.00" in texts
 
 
 def test_split_cap_boundary_is_twelve_owner_rows(db_session):
@@ -468,7 +530,10 @@ def test_split_cap_boundary_thirteen_rows_is_not_searched(db_session):
     user, _chk, visa, _mc = _world(db_session)
     _card_rows(db_session, user, visa, "25.00", "35.00", *["1.00"] * 11)  # 13 rows: skipped
     texts = _card_texts(db_session, user, [_pend(visa.id, "Visa", "p1", "Big Store", "60.00")], [])
-    assert texts[0] == "pending Visa charge dropped: Big Store $60.00"
+    # Same as above: the split is skipped past the cap, so both groups are named; the
+    # $71 posted group outranks the $60 dropped charge by dollar size.
+    assert texts[0].startswith("new Visa transactions: ")
+    assert "pending Visa charge dropped: Big Store $60.00" in texts
 
 
 def test_split_parts_must_share_the_pending_sign(db_session):
