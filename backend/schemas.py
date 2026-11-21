@@ -1974,6 +1974,9 @@ class PlannedExpenseInstallmentsCreate(BaseModel):
 
     @model_validator(mode="after")
     def _two_to_six_legs(self):
+        # 2/6 are literals, not an import, to avoid a schemas<->services
+        # import cycle (installment_plan imports schemas). Keep this bound
+        # in sync with installment_plan.MIN_INSTALLMENTS/MAX_INSTALLMENTS.
         if not (2 <= len(self.legs) <= 6):
             raise ValueError(
                 "a split one-off needs between 2 and 6 installments "

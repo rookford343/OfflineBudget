@@ -1,9 +1,16 @@
-"""Task 2 (Split One-Off Installments): the schema cap (2-6 legs, positive
-amounts) and create_installment_group's bulk-create behaviour -- numbered
-names baked in at creation, every leg linked to the first leg's id, shared
-account/card/category, outflow-only, funding fields left null, and the
-all-or-nothing atomicity of the bulk-create route (a caller who doesn't own
-the account gets zero rows, not a partial group).
+"""Task 2 (Split One-Off Installments): the schema cap (0, 1, and 7+ legs
+rejected; 2-6 accepted), create_installment_group's bulk-create behaviour --
+numbered names baked in at creation, every leg linked to the first leg's id,
+shared account/card/category, outflow-only, funding fields left at their
+model defaults -- and two distinct atomicity properties:
+
+  - pre-validation: a caller who doesn't own the account never reaches
+    create_installment_group at all, so zero rows are written;
+  - mid-batch rollback: even once create_installment_group's first flush has
+    already written every leg to the DB, a failure before its second flush
+    completes (the one that sets installment_group_id) leaves zero rows once
+    the caller rolls back -- the whole group is one transaction, not legs
+    trickling in one at a time.
 
 All figures are invented; the repo is public."""
 from datetime import date, timedelta
@@ -25,6 +32,11 @@ def _legs(n, amount="50.00"):
         {"amount": amount, "expected_date": (date.today() + timedelta(days=i)).isoformat()}
         for i in range(n)
     ]
+
+
+def test_rejects_zero_legs():
+    with pytest.raises(ValidationError):
+        schemas.PlannedExpenseInstallmentsCreate(name="X", legs=[])
 
 
 def test_rejects_fewer_than_two_legs():
@@ -85,9 +97,17 @@ def test_create_installment_group_makes_n_linked_legs_with_numbered_names(db_ses
     assert all(pe.account_id == account.id for pe in legs)
     assert all(pe.direction == models.PlannedDirection.outflow for pe in legs)
     assert all(not pe.is_refund_watch for pe in legs)
+    assert all(pe.funding_account_id is None for pe in legs)
+    assert all(pe.funding_amount is None for pe in legs)
+    assert all(pe.funding_lead_days == 0 for pe in legs)
 
 
 def test_create_installment_group_rejects_an_account_the_caller_does_not_own(db_session):
+    """Pre-validation atomicity only: `_require_owned` 404s before
+    create_installment_group is ever called, so this proves "rejected before
+    any write", not "rolled back after a partial write". See
+    test_create_installment_group_rolls_back_a_partial_write below for the
+    mid-batch rollback property."""
     user, account = _seed(db_session)
     other = models.User(username="other-inst", hashed_password="x", display_name="O")
     db_session.add(other)
@@ -101,3 +121,37 @@ def test_create_installment_group_rejects_an_account_the_caller_does_not_own(db_
     r = client.post("/planned-expenses/installments", json=body)
     assert r.status_code == 404
     assert db_session.query(models.PlannedExpense).count() == before
+
+
+def test_create_installment_group_rolls_back_a_partial_write(db_session, monkeypatch):
+    """create_installment_group flushes twice: the first flush inserts every
+    leg (each already has a row/id in the DB); the second flush -- which
+    sets installment_group_id on all of them -- is the only thing left that
+    can still fail. Forces that second flush to raise, then rolls back the
+    way a caller must, and confirms the first flush's legs don't survive --
+    the group is one all-or-nothing transaction, not legs trickling in."""
+    user, account = _seed(db_session)
+    body = schemas.PlannedExpenseInstallmentsCreate(
+        name="X", account_id=account.id, legs=[
+            {"amount": "10.00", "expected_date": date.today().isoformat()},
+            {"amount": "10.00", "expected_date": date.today().isoformat()},
+        ],
+    )
+
+    real_flush = db_session.flush
+    calls = {"n": 0}
+
+    def _fail_on_second_flush(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("simulated failure on the second flush")
+        return real_flush(*args, **kwargs)
+
+    monkeypatch.setattr(db_session, "flush", _fail_on_second_flush)
+
+    with pytest.raises(RuntimeError):
+        create_installment_group(db_session, user, body)
+    assert calls["n"] == 2  # confirms the first flush really did write legs first
+
+    db_session.rollback()
+    assert db_session.query(models.PlannedExpense).count() == 0
