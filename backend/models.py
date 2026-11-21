@@ -911,6 +911,17 @@ class PlannedExpense(Base):
     # estimate can be compared against reality instead of overwritten.
     settled_on: Mapped[date | None] = mapped_column(Date)
     actual_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+
+    # Installment grouping (see docs/superpowers/specs/2026-11-20-split-one-off-installments-design.md).
+    # Every leg in a split one-off shares `installment_group_id` -- the
+    # anchor leg's own id. A refund-watch row (opened when a cleared leg is
+    # cancelled) shares that same group id too, but is excluded from the
+    # group-cancel cascade so cancelling the rest of the plan doesn't also
+    # cancel its own refund expectation.
+    installment_group_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("planned_expenses.id"),
+    )
+    is_refund_watch: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped[User] = relationship(back_populates="planned_expenses")

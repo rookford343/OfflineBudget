@@ -127,6 +127,8 @@ def upgrade_schema():
         "ALTER TABLE categories ADD COLUMN tax_deductible BOOLEAN DEFAULT 0",
         "ALTER TABLE credit_cards ADD COLUMN next_payment_date DATE",
         "ALTER TABLE planned_expenses ADD COLUMN account_id INTEGER REFERENCES accounts(id)",
+        "ALTER TABLE planned_expenses ADD COLUMN installment_group_id INTEGER REFERENCES planned_expenses(id)",
+        "ALTER TABLE planned_expenses ADD COLUMN is_refund_watch BOOLEAN DEFAULT 0",
         "ALTER TABLE credit_cards ADD COLUMN monthly_spend_estimate NUMERIC(14,2)",
         """CREATE TABLE IF NOT EXISTS transaction_rules (
             id INTEGER PRIMARY KEY,
