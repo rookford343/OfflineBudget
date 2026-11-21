@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
-from backend.services.installment_plan import create_installment_group
+from backend.services.installment_plan import create_installment_group, preview_installment_group
 from backend.services.one_off_preview import preview_one_off
 from backend.services.planned_auto_settle import apply_settlement
 
@@ -117,6 +117,21 @@ def create_planned_expense_installments(
     for leg in legs:
         db.refresh(leg)
     return schemas.PlannedExpenseInstallmentsOut(legs=legs)
+
+
+@router.post("/installments/preview", response_model=schemas.InstallmentsPreviewOut)
+def preview_planned_expense_installments(
+    body: schemas.PlannedExpenseInstallmentsCreate,
+    account_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Safety Margin before and after a draft split one-off group. Writes nothing."""
+    _require_owned(
+        db, user, account_id=body.account_id, card_id=body.card_id, category_id=body.category_id,
+        also_account_ids=(account_id,),
+    )
+    return preview_installment_group(db, user, account_id, body)
 
 
 @router.patch("/{expense_id}", response_model=schemas.PlannedExpenseOut)

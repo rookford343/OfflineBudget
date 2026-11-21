@@ -2010,6 +2010,18 @@ class OneOffPreviewOut(BaseModel):
     card_payment: Optional[CardPaymentImpact] = None
 
 
+class InstallmentsPreviewOut(BaseModel):
+    """What a draft split one-off (2-6 legs) would do to the Safety Margin,
+    without saving it -- the group analogue of OneOffPreviewOut. `card_payments`
+    holds one entry per DISTINCT due date across all legs (legs due the same
+    statement cycle are collapsed into one summed entry), so installments
+    spanning more than one statement cycle show every cycle's impact rather
+    than just the first or last."""
+    safety_margin_weekly: BeforeAfter
+    safety_margin: BeforeAfter
+    card_payments: list[CardPaymentImpact] = []
+
+
 class PlannedExpenseSettle(BaseModel):
     """Close out a one-off once its date has passed.
 

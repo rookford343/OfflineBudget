@@ -24,6 +24,7 @@ from pydantic import ValidationError
 from backend import models, schemas
 from backend.dependencies import get_current_user, get_db
 from backend.routers import planned_expenses as pe_router
+from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.installment_plan import create_installment_group
 
 
@@ -155,3 +156,58 @@ def test_create_installment_group_rolls_back_a_partial_write(db_session, monkeyp
 
     db_session.rollback()
     assert db_session.query(models.PlannedExpense).count() == 0
+
+
+def test_preview_installments_matches_combined_commit(db_session):
+    user, account = _seed(db_session)
+    client = _client(db_session, user)
+    body = {"name": "Leia dental", "account_id": account.id, "legs": [
+        {"amount": "50.00", "expected_date": date.today().isoformat()},
+        {"amount": "75.00", "expected_date": (date.today() + timedelta(days=30)).isoformat()},
+    ]}
+    base = compute_budget_snapshot(db_session, user, account.id)
+    r = client.post(f"/planned-expenses/installments/preview?account_id={account.id}", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert client.post("/planned-expenses/installments", json=body).status_code == 201
+    after = compute_budget_snapshot(db_session, user, account.id)
+    assert Decimal(out["safety_margin"]["before"]) == base.safety_margin
+    assert Decimal(out["safety_margin"]["after"]) == after.safety_margin
+    assert Decimal(out["safety_margin"]["after"]) < Decimal(out["safety_margin"]["before"])
+
+
+def test_preview_installments_writes_nothing(db_session):
+    user, account = _seed(db_session)
+    client = _client(db_session, user)
+    before = db_session.query(models.PlannedExpense).count()
+    body = {"name": "X", "account_id": account.id, "legs": [
+        {"amount": "10.00", "expected_date": date.today().isoformat()},
+        {"amount": "10.00", "expected_date": (date.today() + timedelta(days=5)).isoformat()},
+    ]}
+    r = client.post(f"/planned-expenses/installments/preview?account_id={account.id}", json=body)
+    assert r.status_code == 200, r.text
+    assert db_session.query(models.PlannedExpense).count() == before
+
+
+def test_preview_installments_lists_one_card_payment_per_distinct_due_date(db_session):
+    user, account = _seed(db_session)
+    card = models.CreditCard(
+        user_id=user.id, name="Test Card", credit_limit=Decimal("5000.00"),
+        statement_day=28, due_day=25, balance_due=Decimal("0.00"),
+        current_balance=Decimal("0.00"),
+    )
+    db_session.add(card)
+    db_session.commit()
+    client = _client(db_session, user)
+    # One leg today, one leg ~90 days out -- far enough apart to land on two
+    # different statement cycles for any statement_day/due_day combination.
+    body = {"name": "Spread out", "card_id": card.id, "legs": [
+        {"amount": "20.00", "expected_date": date.today().isoformat()},
+        {"amount": "30.00", "expected_date": (date.today() + timedelta(days=90)).isoformat()},
+    ]}
+    r = client.post(f"/planned-expenses/installments/preview?account_id={account.id}", json=body)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    due_dates = {cp["due"] for cp in out["card_payments"]}
+    assert len(due_dates) == 2
+    assert {Decimal(cp["amount"]) for cp in out["card_payments"]} == {Decimal("20.00"), Decimal("30.00")}
