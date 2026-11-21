@@ -1416,7 +1416,11 @@ export default function Forecast() {
         onOpenChange={(open) => !open && setDeleteExpense(null)}
         icon={Trash2}
         title="Delete this planned expense?"
-        description={`"${deleteExpense?.name}" will be permanently removed from your forecast.`}
+        description={
+          deleteExpense?.installment_group_id && !deleteExpense?.is_refund_watch
+            ? `"${deleteExpense?.name}" is one of a split payment plan. Deleting it cancels every payment in that plan that hasn't happened yet; any payment that already cleared stays as history and a refund will be watched for instead.`
+            : `"${deleteExpense?.name}" will be permanently removed from your forecast.`
+        }
         confirmLabel="Delete"
         confirmingLabel="Deleting…"
         isPending={deleteExpenseMut.isPending}

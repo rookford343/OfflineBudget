@@ -1946,6 +1946,8 @@ class PlannedExpenseOut(BaseModel):
     settled_on: Optional[date] = None
     actual_amount: Optional[Decimal] = None
     is_settled: bool = False
+    installment_group_id: Optional[int] = None
+    is_refund_watch: bool = False
     created_at: datetime
 
 
