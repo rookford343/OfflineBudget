@@ -130,3 +130,106 @@ def preview_installment_group(
         safety_margin=schemas.BeforeAfter(before=base.safety_margin, after=with_it.safety_margin),
         card_payments=card_payments,
     )
+
+
+def _detach_trip_items(db: Session, user: models.User, expense: models.PlannedExpense) -> None:
+    for item in db.query(models.TripItem).filter(
+        models.TripItem.planned_expense_id == expense.id,
+        models.TripItem.user_id == user.id,
+    ).all():
+        item.planned_expense_id = None
+
+
+def _is_cleared(pe: models.PlannedExpense) -> bool:
+    return pe.settled_on is not None and pe.actual_amount is not None
+
+
+def _retarget_group(
+    db: Session, departing: models.PlannedExpense, survivors: list[models.PlannedExpense], group_id: int,
+) -> int:
+    """`installment_group_id` is a self-referencing FK to the group's anchor
+    leg (its own id, set once at creation -- see create_installment_group).
+    When the row ABOUT TO BE DELETED is that anchor (`departing.id ==
+    group_id`) and at least one other row will still exist afterward, every
+    survivor has to be re-pointed to a new anchor -- the lowest id among
+    them -- *before* the old anchor is deleted, or the survivors are left
+    referencing a row that no longer exists and SQLite's FK check (on, same
+    as production) rejects the delete. Returns the group id survivors (and
+    any refund-watch row about to be created) should use from here on; a
+    no-op when `departing` isn't the anchor, or nothing survives it."""
+    if departing.id != group_id or not survivors:
+        return group_id
+    new_group_id = min(s.id for s in survivors)
+    for s in survivors:
+        s.installment_group_id = new_group_id
+    db.flush()
+    return new_group_id
+
+
+def cancel_installment_group(db: Session, user: models.User, expense: models.PlannedExpense) -> None:
+    group_id = expense.installment_group_id
+    siblings = db.query(models.PlannedExpense).filter(
+        models.PlannedExpense.installment_group_id == group_id,
+        models.PlannedExpense.user_id == user.id,
+        models.PlannedExpense.is_refund_watch == False,
+    ).all()
+
+    if not any(not _is_cleared(s) for s in siblings):
+        # Every leg in the group already cleared -- there's nothing left to
+        # cancel, so this is just a single history row going away. The row
+        # leaving might be the group's anchor itself, in which case whatever
+        # else survives needs a new one first (see _retarget_group).
+        survivors = [s for s in siblings if s.id != expense.id]
+        _retarget_group(db, expense, survivors, group_id)
+        _detach_trip_items(db, user, expense)
+        db.delete(expense)
+        db.flush()
+        return
+
+    cleared = [s for s in siblings if _is_cleared(s)]
+    uncleared = [s for s in siblings if not _is_cleared(s)]
+    old_anchor = next((s for s in uncleared if s.id == group_id), None)
+
+    # Cleared legs survive as history (and get a refund-watch) -- re-point
+    # them off the old anchor *before* anything is deleted, while it still
+    # exists to validate the intermediate state.
+    new_group_id = _retarget_group(db, old_anchor, cleared, group_id) if old_anchor is not None else group_id
+
+    # Create the refund-watch rows BEFORE deleting anything below. SQLite
+    # reuses a freed integer id as soon as it becomes the new max+1 (this
+    # table has no AUTOINCREMENT keyword), so inserting first -- while the
+    # uncleared legs it's replacing still occupy their ids -- keeps a new
+    # refund-watch row from ever landing on the very id a swept sibling just
+    # vacated.
+    for sibling in cleared:
+        db.add(models.PlannedExpense(
+            user_id=user.id,
+            name=f"{sibling.name} — refund expected",
+            amount=sibling.actual_amount,
+            expected_date=date.today(),
+            direction=models.PlannedDirection.inflow,
+            account_id=sibling.account_id,
+            card_id=sibling.card_id,
+            category_id=sibling.category_id,
+            installment_group_id=new_group_id,
+            is_refund_watch=True,
+        ))
+    if cleared:
+        db.flush()
+
+    # Uncleared, non-anchor legs can always be deleted safely -- nothing
+    # else is ever FK-linked to a non-anchor leg's own id.
+    for sibling in uncleared:
+        if sibling is old_anchor:
+            continue
+        _detach_trip_items(db, user, sibling)
+        db.delete(sibling)
+    if any(s is not old_anchor for s in uncleared):
+        db.flush()
+
+    # The anchor itself can only be deleted last, once every row that used
+    # to reference it has either been swept above or re-pointed above.
+    if old_anchor is not None:
+        _detach_trip_items(db, user, old_anchor)
+        db.delete(old_anchor)
+        db.flush()
