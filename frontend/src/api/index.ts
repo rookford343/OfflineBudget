@@ -325,6 +325,9 @@ export const plannedExpensesApi = {
   unsettle: (id: number) => api.post(`/planned-expenses/${id}/unsettle`).then((r) => r.data),
   update: (id: number, data: object) => api.patch(`/planned-expenses/${id}`, data).then((r) => r.data),
   remove: (id: number) => api.delete(`/planned-expenses/${id}`),
+  previewInstallments: (accountId: number, data: object) =>
+    api.post("/planned-expenses/installments/preview", data, { params: { account_id: accountId } }).then((r) => r.data),
+  createInstallments: (data: object) => api.post("/planned-expenses/installments", data).then((r) => r.data),
 };
 
 // ── Planned Transfers ────────────────────────────────────────────────────────
