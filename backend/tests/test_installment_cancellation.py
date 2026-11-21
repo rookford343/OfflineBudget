@@ -317,3 +317,55 @@ def test_deleting_the_anchor_refund_watch_retargets_the_sibling_refund_watch(db_
     assert db_session.query(models.PlannedExpense.id).filter(
         models.PlannedExpense.id == other.installment_group_id,
     ).first() is not None
+
+def test_re_cancelling_a_group_does_not_double_the_same_refund_watch(db_session):
+    # Regression: cancel_installment_group always created a fresh
+    # refund-watch for every currently-cleared sibling, with no check for
+    # one already open against it. Reachable without fabricating any state
+    # -- just real endpoint calls:
+    #   1. Clear two of three legs (X and Y); delete the third, uncleared
+    #      anchor leg. That single cascade sweeps the anchor and opens one
+    #      refund-watch each for X and Y (both now cleared survivors).
+    #   2. Unsettle Y (POST .../unsettle) -- it goes back to uncleared, but
+    #      its refund-watch from step 1 is untouched.
+    #   3. Delete Y again. Y is uncleared again, so this is a real cascade,
+    #      not the "fully resolved" branch -- and X is still cleared, still
+    #      carrying its refund-watch from step 1. Without the dedupe guard,
+    #      the loop re-adds a second "X -- refund expected" row for X, even
+    #      though nothing about X changed between step 1 and step 3.
+    user, account = _seed(db_session)
+    legs = _group(db_session, user, account, ["50.00", "75.00", "40.00"])
+    anchor, x, y = legs
+    x.settled_on = date.today()
+    x.actual_amount = Decimal("73.00")
+    y.settled_on = date.today()
+    y.actual_amount = Decimal("38.00")
+    db_session.commit()
+    client = _client(db_session, user)
+
+    # Step 1: delete the uncleared anchor -- opens one refund-watch each for
+    # x and y, retargeted onto a new anchor (the lower-id cleared survivor).
+    assert client.delete(f"/planned-expenses/{anchor.id}").status_code == 204
+    refunds_after_first_cascade = db_session.query(models.PlannedExpense).filter(
+        models.PlannedExpense.is_refund_watch.is_(True),
+    ).all()
+    assert len(refunds_after_first_cascade) == 2
+    x_refund_name = f"{x.name} — refund expected"
+    assert sum(1 for r in refunds_after_first_cascade if r.name == x_refund_name) == 1
+
+    # Step 2: unsettle y -- back to uncleared, x and its refund-watch
+    # untouched.
+    assert client.post(f"/planned-expenses/{y.id}/unsettle").status_code == 200
+    db_session.refresh(y)
+    assert y.settled_on is None and y.actual_amount is None
+
+    # Step 3: delete y again. y is uncleared, so this is a real cascade
+    # (not "fully resolved"); x is still cleared and still has its
+    # refund-watch from step 1 untouched -- this must not spawn a second one.
+    assert client.delete(f"/planned-expenses/{y.id}").status_code == 204
+
+    x_refunds = db_session.query(models.PlannedExpense).filter(
+        models.PlannedExpense.is_refund_watch.is_(True),
+        models.PlannedExpense.name == x_refund_name,
+    ).all()
+    assert len(x_refunds) == 1  # not 2

@@ -258,10 +258,22 @@ def cancel_installment_group(db: Session, user: models.User, expense: models.Pla
     # uncleared legs it's replacing still occupy their ids -- keeps a new
     # refund-watch row from ever landing on the very id a swept sibling just
     # vacated.
+    #
+    # A sibling can already have a refund-watch open against it from an
+    # earlier, partial cancel of this same group (e.g. it was cleared,
+    # watched, then unsettled and re-cleared, or another leg's cancel
+    # re-triggers this loop while this sibling is still cleared from before)
+    # -- re-running this loop must not open a second one. `_refund_watches`
+    # already reflects any retargeting done above, so its names are the
+    # right set to dedupe against here.
+    existing_names = {rw.name for rw in _refund_watches(db, user, new_group_id)}
     for sibling in cleared:
+        refund_name = f"{sibling.name} — refund expected"
+        if refund_name in existing_names:
+            continue
         db.add(models.PlannedExpense(
             user_id=user.id,
-            name=f"{sibling.name} — refund expected",
+            name=refund_name,
             amount=sibling.actual_amount,
             expected_date=date.today(),
             direction=models.PlannedDirection.inflow,
@@ -271,6 +283,7 @@ def cancel_installment_group(db: Session, user: models.User, expense: models.Pla
             installment_group_id=new_group_id,
             is_refund_watch=True,
         ))
+        existing_names.add(refund_name)
     if cleared:
         db.flush()
 
