@@ -144,6 +144,22 @@ def _is_cleared(pe: models.PlannedExpense) -> bool:
     return pe.settled_on is not None and pe.actual_amount is not None
 
 
+def _refund_watches(db: Session, user: models.User, group_id: int) -> list[models.PlannedExpense]:
+    """Every refund-watch row already open against this group, for this
+    user. These share the same self-referencing `installment_group_id` FK
+    as every other leg, so a caller re-pointing survivors off a departing
+    anchor (see `_retarget_group`) has to fold these in too -- they're
+    deliberately excluded from `cancel_installment_group`'s own `siblings`
+    query (they never participate in cascade decisions and are never
+    swept), but excluding them there doesn't mean they're exempt from
+    FK bookkeeping when the anchor they point at goes away."""
+    return db.query(models.PlannedExpense).filter(
+        models.PlannedExpense.installment_group_id == group_id,
+        models.PlannedExpense.user_id == user.id,
+        models.PlannedExpense.is_refund_watch.is_(True),
+    ).all()
+
+
 def _retarget_group(
     db: Session, departing: models.PlannedExpense, survivors: list[models.PlannedExpense], group_id: int,
 ) -> int:
@@ -171,15 +187,23 @@ def cancel_installment_group(db: Session, user: models.User, expense: models.Pla
     siblings = db.query(models.PlannedExpense).filter(
         models.PlannedExpense.installment_group_id == group_id,
         models.PlannedExpense.user_id == user.id,
-        models.PlannedExpense.is_refund_watch == False,
+        models.PlannedExpense.is_refund_watch.is_(False),
     ).all()
 
     if not any(not _is_cleared(s) for s in siblings):
         # Every leg in the group already cleared -- there's nothing left to
         # cancel, so this is just a single history row going away. The row
         # leaving might be the group's anchor itself, in which case whatever
-        # else survives needs a new one first (see _retarget_group).
+        # else survives -- including any refund-watch already open against
+        # this group, which shares the FK but is never part of `siblings`
+        # -- needs a new one first (see _retarget_group).
         survivors = [s for s in siblings if s.id != expense.id]
+        if expense.id == group_id:
+            survivors += _refund_watches(db, user, group_id)
+        # The returned id is never used again here: nothing downstream in
+        # this branch creates a row that would need it, since "fully
+        # resolved" never spawns a refund-watch -- the mutation inside
+        # _retarget_group (not its return value) is what matters.
         _retarget_group(db, expense, survivors, group_id)
         _detach_trip_items(db, user, expense)
         db.delete(expense)
@@ -192,8 +216,14 @@ def cancel_installment_group(db: Session, user: models.User, expense: models.Pla
 
     # Cleared legs survive as history (and get a refund-watch) -- re-point
     # them off the old anchor *before* anything is deleted, while it still
-    # exists to validate the intermediate state.
-    new_group_id = _retarget_group(db, old_anchor, cleared, group_id) if old_anchor is not None else group_id
+    # exists to validate the intermediate state. Any refund-watch already
+    # open against this group from an earlier, partial cancel shares the
+    # same FK and has to move with them even though it's excluded from
+    # `siblings` (and from the cascade itself -- Review Focus #5).
+    new_group_id = group_id
+    if old_anchor is not None:
+        survivors_to_retarget = cleared + _refund_watches(db, user, group_id)
+        new_group_id = _retarget_group(db, old_anchor, survivors_to_retarget, group_id)
 
     # Create the refund-watch rows BEFORE deleting anything below. SQLite
     # reuses a freed integer id as soon as it becomes the new max+1 (this

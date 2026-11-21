@@ -73,6 +73,14 @@ def test_deleting_a_cleared_leg_sweeps_the_unpaid_sibling_and_opens_a_refund_wat
     assert refund.expected_date == date.today()
 
 def test_settled_with_no_actual_amount_counts_as_unpaid(db_session):
+    # Guards Review Focus #1: `settled_on` alone (no `actual_amount`) must
+    # count as unpaid, not cleared. If `_is_cleared` ever regresses to check
+    # only `settled_on`, this won't fail as a clean assertion below -- it
+    # fails as an unhandled IntegrityError (NOT NULL on `amount`), because
+    # the code would then try to build a refund-watch by copying
+    # legs[0].actual_amount, which is None. That crash *is* the regression
+    # signal here: a 500 on this delete means "didn't happen" started being
+    # treated as cleared.
     user, account = _seed(db_session)
     legs = _group(db_session, user, account, ["50.00", "75.00"])
     legs[0].settled_on = date.today()  # "didn't happen" -- no actual_amount
@@ -175,3 +183,78 @@ def test_refund_watch_settles_through_the_existing_auto_settle_matcher(db_sessio
     assert any(s.planned_expense_id == refund.id for s in settlements)
     db_session.refresh(refund)
     assert refund.is_settled
+
+def test_deleting_an_anchor_with_an_existing_refund_watch_retargets_it(db_session):
+    # Regression for the Critical bug a task reviewer found in this file's
+    # first round: `_retarget_group`'s survivor list used to come only from
+    # `cancel_installment_group`'s `siblings` query, which deliberately
+    # excludes refund-watch rows. That's correct for cascade *decisions*
+    # (a refund-watch never gets swept, never makes a group "still has
+    # something to cancel"), but it also meant a refund-watch's own
+    # installment_group_id was invisible to the retarget step -- so
+    # deleting the anchor leg out from under an already-open refund-watch
+    # left the refund-watch referencing a row that no longer existed, and
+    # SQLite's FK check rejected the delete outright (an unhandled
+    # IntegrityError surfacing as a 500 on a routine delete).
+    user, account = _seed(db_session)
+    legs = _group(db_session, user, account, ["50.00", "75.00"])
+    legs[0].settled_on = date.today()
+    legs[0].actual_amount = Decimal("50.00")
+    db_session.commit()
+    client = _client(db_session, user)
+
+    # legs[0] (the anchor) is cleared and survives; legs[1] gets swept and
+    # opens a refund-watch against legs[0].
+    assert client.delete(f"/planned-expenses/{legs[1].id}").status_code == 204
+    refund = db_session.query(models.PlannedExpense).filter(
+        models.PlannedExpense.is_refund_watch.is_(True),
+    ).one()
+    assert refund.installment_group_id == legs[0].id
+
+    # Now delete the anchor itself, with the refund-watch still open against
+    # it. Must succeed (204, not an unhandled exception/500).
+    assert client.delete(f"/planned-expenses/{legs[0].id}").status_code == 204
+
+    remaining = db_session.query(models.PlannedExpense).filter(models.PlannedExpense.user_id == user.id).all()
+    assert [pe.id for pe in remaining] == [refund.id]  # only the refund-watch itself survives
+    db_session.refresh(refund)
+    # Whatever group id it carries now has to point at a row that actually
+    # exists -- here, since nothing else survived, at itself.
+    assert refund.installment_group_id == refund.id
+    assert db_session.query(models.PlannedExpense.id).filter(
+        models.PlannedExpense.id == refund.installment_group_id,
+    ).first() is not None
+
+def test_deleting_an_uncleared_anchor_retargets_two_cleared_survivors_at_once(db_session):
+    # Coverage gap a task reviewer flagged: every other test in this file
+    # uses a 2-leg group, so `_retarget_group`'s loop over *multiple*
+    # survivors never actually ran with more than zero/one real survivor.
+    # 3 legs: the anchor (legs[0]) is uncleared and gets swept; legs[1] and
+    # legs[2] are both cleared and must both land on the same new anchor,
+    # each with its own correctly-pointed refund-watch.
+    user, account = _seed(db_session)
+    legs = _group(db_session, user, account, ["50.00", "75.00", "100.00"])
+    legs[1].settled_on = date.today()
+    legs[1].actual_amount = Decimal("72.00")
+    legs[2].settled_on = date.today()
+    legs[2].actual_amount = Decimal("98.50")
+    db_session.commit()
+    client = _client(db_session, user)
+
+    assert legs[0].installment_group_id == legs[0].id  # legs[0] is the anchor
+    assert client.delete(f"/planned-expenses/{legs[0].id}").status_code == 204
+
+    remaining = db_session.query(models.PlannedExpense).filter(models.PlannedExpense.user_id == user.id).all()
+    assert len(remaining) == 4  # legs[1], legs[2], and one refund-watch each
+    assert db_session.query(models.PlannedExpense).filter(models.PlannedExpense.id == legs[0].id).first() is None
+
+    survivor_legs = {pe.id: pe for pe in remaining if not pe.is_refund_watch}
+    assert set(survivor_legs) == {legs[1].id, legs[2].id}
+    new_anchor_id = min(legs[1].id, legs[2].id)
+    assert all(pe.installment_group_id == new_anchor_id for pe in remaining)  # all four, same new anchor
+
+    refunds = {r.amount: r for r in remaining if r.is_refund_watch}
+    assert set(refunds) == {Decimal("72.00"), Decimal("98.50")}
+    for refund in refunds.values():
+        assert refund.direction == models.PlannedDirection.inflow
+        assert refund.installment_group_id == new_anchor_id
