@@ -258,3 +258,62 @@ def test_deleting_an_uncleared_anchor_retargets_two_cleared_survivors_at_once(db
     for refund in refunds.values():
         assert refund.direction == models.PlannedDirection.inflow
         assert refund.installment_group_id == new_anchor_id
+
+def test_deleting_the_anchor_refund_watch_retargets_the_sibling_refund_watch(db_session):
+    # Regression for the Critical bug a final whole-branch review found:
+    # once a cascade strips a group down to refund-watch rows only, one of
+    # them ends up as the group's current anchor (installment_group_id ==
+    # its own id), same as any ordinary leg would. The router's delete
+    # endpoint sent every is_refund_watch=True row straight to the plain
+    # TripItem-detach-then-delete branch with no retargeting at all, so
+    # deleting that anchor refund-watch left the sibling refund-watch
+    # referencing a row that no longer existed -- an unhandled
+    # IntegrityError surfacing as a 500 on a routine delete.
+    user, account = _seed(db_session)
+    legs = _group(db_session, user, account, ["50.00", "75.00", "40.00"])
+    legs[0].settled_on = date.today()
+    legs[0].actual_amount = Decimal("48.00")
+    legs[1].settled_on = date.today()
+    legs[1].actual_amount = Decimal("73.00")
+    db_session.commit()
+    client = _client(db_session, user)
+
+    # Delete the remaining uncleared leg -- opens a refund-watch for each
+    # of the two cleared legs, both pointing at legs[0] (the anchor).
+    assert client.delete(f"/planned-expenses/{legs[2].id}").status_code == 204
+    refunds = db_session.query(models.PlannedExpense).filter(
+        models.PlannedExpense.is_refund_watch.is_(True),
+    ).all()
+    assert len(refunds) == 2
+    assert all(r.installment_group_id == legs[0].id for r in refunds)
+
+    # Delete both cleared history legs in turn -- each goes through
+    # cancel_installment_group's "fully resolved" branch (no uncleared
+    # sibling left either time), which retargets the open refund-watches
+    # off the departing anchor on the way out.
+    assert client.delete(f"/planned-expenses/{legs[0].id}").status_code == 204
+    assert client.delete(f"/planned-expenses/{legs[1].id}").status_code == 204
+
+    remaining = db_session.query(models.PlannedExpense).filter(
+        models.PlannedExpense.user_id == user.id,
+    ).all()
+    assert len(remaining) == 2
+    assert all(pe.is_refund_watch for pe in remaining)
+    anchor = next(pe for pe in remaining if pe.installment_group_id == pe.id)
+    other = next(pe for pe in remaining if pe.id != anchor.id)
+    assert other.installment_group_id == anchor.id
+
+    # Delete the anchor refund-watch directly. Must succeed (204, not an
+    # unhandled exception/500), and the sibling left behind must land on a
+    # new anchor that actually exists -- here, since it's the only row
+    # left, its own id.
+    assert client.delete(f"/planned-expenses/{anchor.id}").status_code == 204
+
+    assert db_session.query(models.PlannedExpense.id).filter(
+        models.PlannedExpense.id == anchor.id,
+    ).first() is None
+    db_session.refresh(other)
+    assert other.installment_group_id == other.id
+    assert db_session.query(models.PlannedExpense.id).filter(
+        models.PlannedExpense.id == other.installment_group_id,
+    ).first() is not None

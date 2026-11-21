@@ -188,7 +188,16 @@ export default function PlanOneOffSheet({ open, onOpenChange, accountId, hidden 
                 type="checkbox"
                 className="h-4 w-4"
                 checked={split}
-                onChange={(e) => setSplit(e.target.checked)}
+                onChange={(e) => {
+                  setSplit(e.target.checked);
+                  // A failed submit's error message must not linger once the
+                  // user switches modes -- each mutation only ever runs in
+                  // one mode, so the other's stale isError would otherwise
+                  // show "Couldn't add it" for a submit that never happened
+                  // in the newly-selected mode.
+                  add.reset();
+                  addInstallments.reset();
+                }}
               />
               <label htmlFor="oneoff-split" className="text-sm text-gray-700 dark:text-gray-300">
                 Split into separate payments

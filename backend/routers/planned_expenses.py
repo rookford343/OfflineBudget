@@ -5,6 +5,7 @@ from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.installment_plan import (
     cancel_installment_group, create_installment_group, preview_installment_group,
+    retarget_before_deleting_refund_watch,
 )
 from backend.services.one_off_preview import preview_one_off
 from backend.services.planned_auto_settle import apply_settlement
@@ -177,6 +178,12 @@ def delete_planned_expense(
     if expense.installment_group_id is not None and not expense.is_refund_watch:
         cancel_installment_group(db, user, expense)
     else:
+        if expense.is_refund_watch:
+            # A refund-watch delete stays a plain single-row delete (no
+            # cascade), but if this one happens to be the group's current
+            # anchor, every other refund-watch still pointing at it needs a
+            # new anchor first or the FK check below rejects the delete.
+            retarget_before_deleting_refund_watch(db, user, expense)
         # An Adventures trip item can link to this one-off via
         # TripItem.planned_expense_id. The FK has no ondelete, so null the
         # link before deleting or SQLite raises an IntegrityError.

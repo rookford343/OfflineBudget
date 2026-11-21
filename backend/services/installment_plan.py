@@ -114,6 +114,10 @@ def preview_installment_group(
             by_due: dict[date, Decimal] = {}
             for leg in legs:
                 due = _card_payoff_date_for_charge(card, leg.expected_date)
+                # Presentational grouping sum for this preview display only
+                # (never read back for forecast math) -- exempt from
+                # test_calc_guard.py's scan for the same reason
+                # one_off_preview.py's single-leg card payment amount is.
                 by_due[due] = by_due.get(due, Decimal("0")) + leg.amount
             card_payments = [
                 schemas.CardPaymentImpact(card_id=card.id, due=due, amount=amount)
@@ -180,6 +184,29 @@ def _retarget_group(
         s.installment_group_id = new_group_id
     db.flush()
     return new_group_id
+
+
+def retarget_before_deleting_refund_watch(
+    db: Session, user: models.User, expense: models.PlannedExpense,
+) -> None:
+    """A refund-watch delete never re-runs the cascade (Review Focus #5 --
+    it stays a plain single-row delete, never the sweep/open-new-watch
+    machinery in `cancel_installment_group`), but a refund-watch row still
+    carries the same self-referencing `installment_group_id` FK as every
+    other leg. Once a cascade has stripped a group down to refund-watch
+    rows only, one of them ends up as the group's anchor
+    (`installment_group_id == its own id`) same as any other leg would. By
+    the time that's reachable, no non-refund-watch sibling is ever still
+    around to need re-pointing -- the cascade already swept or resolved
+    those -- so the only survivors left to retarget are other refund-watch
+    rows in the same group. Call this before the plain delete whenever the
+    row being deleted is itself a refund-watch; a no-op when `expense`
+    isn't currently the anchor, or nothing else is left pointing at it."""
+    group_id = expense.installment_group_id
+    if group_id is None or group_id != expense.id:
+        return
+    survivors = [r for r in _refund_watches(db, user, group_id) if r.id != expense.id]
+    _retarget_group(db, expense, survivors, group_id)
 
 
 def cancel_installment_group(db: Session, user: models.User, expense: models.PlannedExpense) -> None:
