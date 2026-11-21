@@ -319,6 +319,7 @@ Settled by the principal. Record any behavior change here.
 - **Percent and share ratios (decision (c))** over figures the backend already sent (a progress bar's percent of budget, a pie slice's share of the total) are presentational and may be computed in the frontend. Anything that adds or subtracts money is not.
 - **Workflow:** build in the live working tree. Take a `backup_database()` copy before schema changes, and run a before/after on a database copy for any step that moves a visible number.
 - **Change-history causes rank by dollar size.** A grouped source event (a new or dropped pending charge, a posted row) and a receipt-line cause compete on the same `abs(amount)` scale for the headline and the itemized receipt. A calculation-change note and a new-month note still lead unconditionally, since each is a complete top-level explanation rather than an event competing on size; a derived figure's inherited parent causes carry no dollar amount of their own either, but they are a substitute for one ranked line rather than a top-level explanation, so they trail behind every sized cause instead of leading.
+- **A one-off can be split into 2-6 dated installments.** One shared name and payment method, each leg clears on its own through the existing auto-settle matcher; deleting any leg cancels every installment that hasn't cleared yet, and opens a cancelable refund-watch for any that already did. No calculation changed -- only what a one-off can be created as and how deleting one behaves.
 
 ## How the change history works
 
