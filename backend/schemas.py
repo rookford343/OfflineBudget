@@ -1949,6 +1949,43 @@ class PlannedExpenseOut(BaseModel):
     created_at: datetime
 
 
+class InstallmentLegIn(BaseModel):
+    amount: Decimal
+    expected_date: date
+
+    @model_validator(mode="after")
+    def _amount_is_positive(self):
+        if self.amount <= 0:
+            raise ValueError("each installment's amount must be greater than zero")
+        return self
+
+
+class PlannedExpenseInstallmentsCreate(BaseModel):
+    """A one-off split into 2-6 dated legs, all outflow, sharing one
+    account/card -- see docs/superpowers/specs/2026-11-20-split-one-off-installments-design.md.
+    Funding fields are deliberately absent: a split installment plan is never
+    savings-funded in this flow."""
+    name: str
+    legs: list[InstallmentLegIn]
+    notes: Optional[str] = None
+    category_id: Optional[int] = None
+    account_id: Optional[int] = None
+    card_id: Optional[int] = None
+
+    @model_validator(mode="after")
+    def _two_to_six_legs(self):
+        if not (2 <= len(self.legs) <= 6):
+            raise ValueError(
+                "a split one-off needs between 2 and 6 installments "
+                "-- more than 6 should be a recurring item instead",
+            )
+        return self
+
+
+class PlannedExpenseInstallmentsOut(BaseModel):
+    legs: list[PlannedExpenseOut]
+
+
 class BeforeAfter(BaseModel):
     before: Decimal
     after: Decimal
