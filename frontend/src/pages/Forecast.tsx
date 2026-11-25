@@ -1098,7 +1098,7 @@ export default function Forecast() {
           <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
             <div className="flex justify-between items-center mb-3">
               <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Planned One-Off</p>
-              <button onClick={() => { setShowExpenseForm(false); resetExpenseAddForm(); }} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+              <button onClick={() => { setShowExpenseForm(false); resetExpenseAddForm(); createExpenseMut.reset(); createInstallmentsMut.reset(); }} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
@@ -1284,7 +1284,7 @@ export default function Forecast() {
                 >
                   {(createExpenseMut.isPending || createInstallmentsMut.isPending) ? "Saving…" : "Add Planned Expense"}
                 </button>
-                <button onClick={() => { setShowExpenseForm(false); resetExpenseAddForm(); }} className="btn-secondary">Cancel</button>
+                <button onClick={() => { setShowExpenseForm(false); resetExpenseAddForm(); createExpenseMut.reset(); createInstallmentsMut.reset(); }} className="btn-secondary">Cancel</button>
               </div>
             </div>
           </div>
