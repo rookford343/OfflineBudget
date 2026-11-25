@@ -1098,7 +1098,11 @@ export default function Forecast() {
           <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
             <div className="flex justify-between items-center mb-3">
               <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Planned One-Off</p>
-              <button onClick={() => { setShowExpenseForm(false); resetExpenseAddForm(); createExpenseMut.reset(); createInstallmentsMut.reset(); }} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+              <button
+                onClick={() => { setShowExpenseForm(false); resetExpenseAddForm(); createExpenseMut.reset(); createInstallmentsMut.reset(); }}
+                disabled={createExpenseMut.isPending || createInstallmentsMut.isPending}
+                className="text-gray-400 hover:text-gray-600 disabled:opacity-50"
+              ><X size={16} /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
@@ -1278,13 +1282,17 @@ export default function Forecast() {
               {(createExpenseMut.isError || createInstallmentsMut.isError) && <p className="col-span-2 text-sm text-red-600 dark:text-red-400">Couldn't add it. Try again.</p>}
               <div className="col-span-2 flex gap-2">
                 <button
-                  onClick={() => splitExpense ? createInstallmentsMut.mutate(debouncedInstallmentsDraft) : createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null, account_id: expenseForm.account_id ? parseInt(expenseForm.account_id) : null, card_id: expenseForm.card_id ? parseInt(expenseForm.card_id) : null, direction: expenseForm.direction, funding_account_id: expenseForm.funding_account_id ? parseInt(expenseForm.funding_account_id) : null, funding_amount: expenseForm.funding_amount ? parseFloat(expenseForm.funding_amount) : null, funding_lead_days: expenseForm.funding_lead_days ? parseInt(expenseForm.funding_lead_days) : 0 })}
-                  disabled={splitExpense ? !(expenseLegsReady && installmentsPreviewMatchesForm && !!installmentsPreview && !installmentsPreviewFetching && !installmentsPreviewIsStale && !installmentsPreviewIsError && !createInstallmentsMut.isPending) : (!expenseForm.name || !expenseForm.amount || createExpenseMut.isPending)}
+                  onClick={() => splitExpense ? createInstallmentsMut.mutate({ ...debouncedInstallmentsDraft, notes: expenseForm.notes || null }) : createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null, account_id: expenseForm.account_id ? parseInt(expenseForm.account_id) : null, card_id: expenseForm.card_id ? parseInt(expenseForm.card_id) : null, direction: expenseForm.direction, funding_account_id: expenseForm.funding_account_id ? parseInt(expenseForm.funding_account_id) : null, funding_amount: expenseForm.funding_amount ? parseFloat(expenseForm.funding_amount) : null, funding_lead_days: expenseForm.funding_lead_days ? parseInt(expenseForm.funding_lead_days) : 0 })}
+                  disabled={splitExpense ? !(!!expenseForm.name.trim() && expenseLegsReady && installmentsPreviewMatchesForm && !!installmentsPreview && !installmentsPreviewFetching && !installmentsPreviewIsStale && !installmentsPreviewIsError && !createInstallmentsMut.isPending) : (!expenseForm.name || !expenseForm.amount || createExpenseMut.isPending)}
                   className="btn-primary"
                 >
                   {(createExpenseMut.isPending || createInstallmentsMut.isPending) ? "Saving…" : "Add Planned Expense"}
                 </button>
-                <button onClick={() => { setShowExpenseForm(false); resetExpenseAddForm(); createExpenseMut.reset(); createInstallmentsMut.reset(); }} className="btn-secondary">Cancel</button>
+                <button
+                  onClick={() => { setShowExpenseForm(false); resetExpenseAddForm(); createExpenseMut.reset(); createInstallmentsMut.reset(); }}
+                  disabled={createExpenseMut.isPending || createInstallmentsMut.isPending}
+                  className="btn-secondary"
+                >Cancel</button>
               </div>
             </div>
           </div>
