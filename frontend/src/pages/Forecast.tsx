@@ -1062,7 +1062,7 @@ export default function Forecast() {
                         </button>
                         <button
                           className="text-xs text-gray-400 hover:text-gray-600"
-                          onClick={() => { setPartialPayId(null); setPartialPayAmount(""); }}>
+                          onClick={() => { setPartialPayId(null); setPartialPayAmount(""); partialPayMut.reset(); }}>
                           Cancel
                         </button>
                         {partialPayMut.isError && <p className="w-full text-xs text-red-600 dark:text-red-400">Couldn't save that. Try again.</p>}
@@ -1070,7 +1070,7 @@ export default function Forecast() {
                     ) : (
                       <button
                         className="mt-2 text-xs text-amber-700 dark:text-amber-400 hover:underline"
-                        onClick={() => { setPartialPayId(pe.id); setPartialPayAmount(""); setPartialPayDate(today()); }}>
+                        onClick={() => { setPartialPayId(pe.id); setPartialPayAmount(""); setPartialPayDate(today()); partialPayMut.reset(); }}>
                         Already paid part of this?
                       </button>
                     )}
