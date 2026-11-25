@@ -328,6 +328,8 @@ export const plannedExpensesApi = {
   previewInstallments: (accountId: number, data: object) =>
     api.post("/planned-expenses/installments/preview", data, { params: { account_id: accountId } }).then((r) => r.data),
   createInstallments: (data: object) => api.post("/planned-expenses/installments", data).then((r) => r.data),
+  alreadyPaid: (id: number, data: object) =>
+    api.post(`/planned-expenses/${id}/already-paid`, data).then((r) => r.data),
 };
 
 // ── Planned Transfers ────────────────────────────────────────────────────────

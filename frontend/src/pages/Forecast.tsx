@@ -409,6 +409,9 @@ export default function Forecast() {
   // estimate to what actually moved is how the next one gets better.
   const [settleId, setSettleId] = useState<number | null>(null);
   const [settleAmount, setSettleAmount] = useState("");
+  const [partialPayId, setPartialPayId] = useState<number | null>(null);
+  const [partialPayAmount, setPartialPayAmount] = useState("");
+  const [partialPayDate, setPartialPayDate] = useState(today());
   const settleMut = useMutation({
     mutationFn: ({ id, actual }: { id: number; actual: number | null }) =>
       plannedExpensesApi.settle(id, actual),
@@ -436,6 +439,18 @@ export default function Forecast() {
       qc.invalidateQueries({ queryKey: ["planned-expenses"] });
       qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
       qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      setEditExpenseId(null);
+    },
+  });
+  const partialPayMut = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: object }) => plannedExpensesApi.alreadyPaid(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["planned-expenses"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      setPartialPayId(null);
+      setPartialPayAmount("");
+      setPartialPayDate(today());
       setEditExpenseId(null);
     },
   });
@@ -1020,6 +1035,45 @@ export default function Forecast() {
                       </button>
                       <button onClick={() => setEditExpenseId(null)} className="btn-secondary text-sm">Cancel</button>
                     </div>
+                    {partialPayId === pe.id ? (
+                      <div className="mt-2 flex flex-wrap items-center gap-2 bg-amber-50 dark:bg-amber-900/15 rounded-md px-3 py-2">
+                        <span className="text-xs text-gray-600 dark:text-gray-300">Amount paid</span>
+                        <input
+                          type="number" step="0.01" autoFocus
+                          className="input py-1 text-sm w-28"
+                          value={partialPayAmount}
+                          onChange={e => setPartialPayAmount(e.target.value)}
+                        />
+                        <span className="text-xs text-gray-600 dark:text-gray-300">on</span>
+                        <input
+                          type="date"
+                          className="input py-1 text-sm"
+                          value={partialPayDate}
+                          onChange={e => setPartialPayDate(e.target.value)}
+                        />
+                        <button
+                          className="btn-primary text-xs px-2 py-1"
+                          disabled={
+                            !(parseFloat(partialPayAmount) > 0 && parseFloat(partialPayAmount) < parseFloat(editExpenseForm.amount))
+                            || !partialPayDate || partialPayMut.isPending
+                          }
+                          onClick={() => partialPayMut.mutate({ id: pe.id, data: { amount_paid: parseFloat(partialPayAmount), date_paid: partialPayDate } })}>
+                          {partialPayMut.isPending ? "Saving…" : "Confirm"}
+                        </button>
+                        <button
+                          className="text-xs text-gray-400 hover:text-gray-600"
+                          onClick={() => { setPartialPayId(null); setPartialPayAmount(""); }}>
+                          Cancel
+                        </button>
+                        {partialPayMut.isError && <p className="w-full text-xs text-red-600 dark:text-red-400">Couldn't save that. Try again.</p>}
+                      </div>
+                    ) : (
+                      <button
+                        className="mt-2 text-xs text-amber-700 dark:text-amber-400 hover:underline"
+                        onClick={() => { setPartialPayId(pe.id); setPartialPayAmount(""); setPartialPayDate(today()); }}>
+                        Already paid part of this?
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div className="py-3">
