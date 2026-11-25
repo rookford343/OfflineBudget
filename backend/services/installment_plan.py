@@ -303,3 +303,48 @@ def cancel_installment_group(db: Session, user: models.User, expense: models.Pla
         _detach_trip_items(db, user, old_anchor)
         db.delete(old_anchor)
         db.flush()
+
+
+def split_off_paid_portion(
+    db: Session, user: models.User, expense: models.PlannedExpense,
+    amount_paid: Decimal, date_paid: date,
+) -> list[models.PlannedExpense]:
+    """Record that part of an ordinary, ungrouped one-off has already been
+    paid in real life: splits it into a new settled leg (the real amount,
+    the real date) and shrinks `expense` itself down to the remaining
+    balance on its existing due date. The existing row's id is always
+    lower than any row created here, so it stays the group's anchor --
+    unlike create_installment_group, there is no id reassignment step.
+    Caller (the router) validates amount_paid < expense.amount and
+    expense.installment_group_id is None before calling this, and
+    commits afterward."""
+    base_name = expense.name
+    remaining = expense.amount - amount_paid
+
+    paid_leg = models.PlannedExpense(
+        user_id=user.id,
+        name=f"{base_name} (1 of 2)",
+        amount=amount_paid,
+        expected_date=date_paid,
+        direction=expense.direction,
+        notes=expense.notes,
+        category_id=expense.category_id,
+        account_id=expense.account_id,
+        card_id=expense.card_id,
+        settled_on=date_paid,
+        actual_amount=amount_paid,
+    )
+    db.add(paid_leg)
+    db.flush()
+
+    group_id = expense.id
+    paid_leg.installment_group_id = group_id
+    expense.installment_group_id = group_id
+    expense.name = f"{base_name} (2 of 2)"
+    expense.amount = remaining
+    expense.funding_account_id = None
+    expense.funding_amount = None
+    expense.funding_lead_days = 0
+    db.flush()
+
+    return [paid_leg, expense]

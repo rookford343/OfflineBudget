@@ -1991,6 +1991,17 @@ class PlannedExpenseInstallmentsOut(BaseModel):
     legs: list[PlannedExpenseOut]
 
 
+class PlannedExpensePartialPaidIn(BaseModel):
+    amount_paid: Decimal
+    date_paid: date
+
+    @model_validator(mode="after")
+    def _amount_paid_is_positive(self):
+        if self.amount_paid <= 0:
+            raise ValueError("amount paid must be greater than zero")
+        return self
+
+
 class BeforeAfter(BaseModel):
     before: Decimal
     after: Decimal

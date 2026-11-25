@@ -5,7 +5,7 @@ from backend import models, schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.installment_plan import (
     cancel_installment_group, create_installment_group, preview_installment_group,
-    retarget_before_deleting_refund_watch,
+    retarget_before_deleting_refund_watch, split_off_paid_portion,
 )
 from backend.services.one_off_preview import preview_one_off
 from backend.services.planned_auto_settle import apply_settlement
@@ -250,3 +250,35 @@ def unsettle_planned_expense(
     db.commit()
     db.refresh(expense)
     return expense
+
+
+@router.post(
+    "/{expense_id}/already-paid", response_model=schemas.PlannedExpenseInstallmentsOut,
+)
+def mark_expense_partially_paid(
+    expense_id: int,
+    body: schemas.PlannedExpensePartialPaidIn,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Split an ordinary one-off into a settled already-paid leg and a
+    shrunk remaining-balance leg. Not the bulk 2-6-leg split-creation
+    flow -- see docs/superpowers/plans/2026-11-25-split-off-paid-portion-plan.md."""
+    expense = db.query(models.PlannedExpense).filter(
+        models.PlannedExpense.id == expense_id,
+        models.PlannedExpense.user_id == user.id,
+    ).first()
+    if not expense:
+        raise HTTPException(status_code=404, detail="Planned expense not found")
+    if expense.installment_group_id is not None:
+        raise HTTPException(status_code=422, detail="This one-off is already part of a split plan")
+    if body.amount_paid >= expense.amount:
+        raise HTTPException(
+            status_code=422,
+            detail="Amount paid must be less than the total -- use settle instead if it's fully paid",
+        )
+    legs = split_off_paid_portion(db, user, expense, body.amount_paid, body.date_paid)
+    db.commit()
+    for leg in legs:
+        db.refresh(leg)
+    return schemas.PlannedExpenseInstallmentsOut(legs=legs)
