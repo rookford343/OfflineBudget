@@ -1054,7 +1054,7 @@ export default function Forecast() {
                         <button
                           className="btn-primary text-xs px-2 py-1"
                           disabled={
-                            !(parseFloat(partialPayAmount) > 0 && parseFloat(partialPayAmount) < parseFloat(editExpenseForm.amount))
+                            !(parseFloat(partialPayAmount) > 0 && parseFloat(partialPayAmount) < parseFloat(pe.amount))
                             || !partialPayDate || partialPayMut.isPending
                           }
                           onClick={() => partialPayMut.mutate({ id: pe.id, data: { amount_paid: parseFloat(partialPayAmount), date_paid: partialPayDate } })}>
@@ -1065,7 +1065,7 @@ export default function Forecast() {
                           onClick={() => { setPartialPayId(null); setPartialPayAmount(""); partialPayMut.reset(); }}>
                           Cancel
                         </button>
-                        {partialPayMut.isError && <p className="w-full text-xs text-red-600 dark:text-red-400">Couldn't save that. Try again.</p>}
+                        {partialPayMut.isError && <p className="w-full text-xs text-red-600 dark:text-red-400">{(partialPayMut.error as any)?.response?.data?.detail ?? "Couldn't save that. Try again."}</p>}
                       </div>
                     ) : (
                       <button
@@ -1100,7 +1100,7 @@ export default function Forecast() {
                         <span className={`font-semibold ${pe.direction === "inflow" ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
                           {pe.direction === "inflow" ? "+" : "−"}{fmt(pe.amount)}
                         </span>
-                        <button onClick={() => { setEditExpenseId(pe.id); setEditExpenseForm({ name: pe.name, amount: String(pe.amount), expected_date: pe.expected_date, notes: pe.notes ?? "", account_id: pe.account_id ? String(pe.account_id) : "", card_id: pe.card_id ? String(pe.card_id) : "", direction: pe.direction ?? "outflow", funding_account_id: pe.funding_account_id ? String(pe.funding_account_id) : "", funding_amount: pe.funding_amount ? String(pe.funding_amount) : "", funding_lead_days: String(pe.funding_lead_days ?? 1) }); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={14} /></button>
+                        <button onClick={() => { setEditExpenseId(pe.id); setEditExpenseForm({ name: pe.name, amount: String(pe.amount), expected_date: pe.expected_date, notes: pe.notes ?? "", account_id: pe.account_id ? String(pe.account_id) : "", card_id: pe.card_id ? String(pe.card_id) : "", direction: pe.direction ?? "outflow", funding_account_id: pe.funding_account_id ? String(pe.funding_account_id) : "", funding_amount: pe.funding_amount ? String(pe.funding_amount) : "", funding_lead_days: String(pe.funding_lead_days ?? 1) }); setPartialPayId(null); partialPayMut.reset(); }} className="text-gray-300 hover:text-indigo-500"><Pencil size={14} /></button>
                         <button onClick={() => setDeleteExpense(pe)} className="text-gray-300 hover:text-red-500"><Trash2 size={14} /></button>
                       </div>
                     </div>

@@ -211,6 +211,87 @@ def test_rejects_an_expense_already_in_a_group(db_session):
     assert r.status_code == 422
 
 
+def test_rejects_an_already_settled_expense(db_session):
+    """Guards Review Focus #2: a settled original has no "unpaid remainder"
+    to split off -- amount_paid would stack on top of the existing
+    actual_amount with nothing cancelling it out."""
+    user, account = _seed(db_session)
+    expense = _expense(db_session, user, account, amount="620.00")
+    expense.settled_on = date.today()
+    expense.actual_amount = Decimal("620.00")
+    db_session.commit()
+    before = db_session.query(models.PlannedExpense).count()
+    client = _client(db_session, user)
+    r = client.post(
+        f"/planned-expenses/{expense.id}/already-paid",
+        json={"amount_paid": "292.00", "date_paid": date.today().isoformat()},
+    )
+    assert r.status_code == 422
+    assert db_session.query(models.PlannedExpense).count() == before
+    db_session.refresh(expense)
+    assert expense.amount == Decimal("620.00")
+
+
+def test_rejects_an_expense_linked_to_a_trip_item(db_session):
+    """Guards the Critical bug: a trip-linked one-off can't be split off,
+    because any later trip edit re-runs sync_trip_planned_expenses
+    (adventures_lifecycle.py), which resets the remaining leg back to the
+    trip item's full original amount -- double-counting against the
+    now-separate settled leg."""
+    user, account = _seed(db_session)
+    expense = _expense(db_session, user, account, amount="620.00")
+    trip = models.Trip(
+        user_id=user.id, name="Trip", start_date=date.today(),
+        end_date=date.today() + timedelta(days=5), travelers=1,
+    )
+    db_session.add(trip)
+    db_session.flush()
+    db_session.add(models.TripItem(
+        trip_id=trip.id, user_id=user.id, category=models.TripCategory.getting_there,
+        name="Flight", planned_expense_id=expense.id,
+    ))
+    db_session.commit()
+    before = db_session.query(models.PlannedExpense).count()
+    client = _client(db_session, user)
+    r = client.post(
+        f"/planned-expenses/{expense.id}/already-paid",
+        json={"amount_paid": "292.00", "date_paid": date.today().isoformat()},
+    )
+    assert r.status_code == 422
+    assert "trip" in r.json()["detail"].lower()
+    assert db_session.query(models.PlannedExpense).count() == before
+    db_session.refresh(expense)
+    assert expense.amount == Decimal("620.00")
+
+
+def test_rejects_an_expense_linked_to_a_committed_scenario_expense(db_session):
+    """Guards the Critical bug: uncommit_scenario (scenario_service.py)
+    tries to delete the anchor row while the paid leg still FK-references
+    it, raising an IntegrityError -> 500 if this were allowed through."""
+    user, account = _seed(db_session)
+    expense = _expense(db_session, user, account, amount="620.00")
+    scenario = models.ForecastScenario(user_id=user.id, name="One-offs")
+    db_session.add(scenario)
+    db_session.flush()
+    db_session.add(models.ScenarioProposedExpense(
+        scenario_id=scenario.id, name="Roof repair", amount=Decimal("620.00"),
+        expected_date=expense.expected_date, account_id=account.id,
+        committed_planned_expense_id=expense.id,
+    ))
+    db_session.commit()
+    before = db_session.query(models.PlannedExpense).count()
+    client = _client(db_session, user)
+    r = client.post(
+        f"/planned-expenses/{expense.id}/already-paid",
+        json={"amount_paid": "292.00", "date_paid": date.today().isoformat()},
+    )
+    assert r.status_code == 422
+    assert "scenario" in r.json()["detail"].lower()
+    assert db_session.query(models.PlannedExpense).count() == before
+    db_session.refresh(expense)
+    assert expense.amount == Decimal("620.00")
+
+
 def test_happy_path_through_the_http_endpoint(db_session):
     user, account = _seed(db_session)
     client = _client(db_session, user)

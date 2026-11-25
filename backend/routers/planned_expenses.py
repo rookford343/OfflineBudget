@@ -272,6 +272,22 @@ def mark_expense_partially_paid(
         raise HTTPException(status_code=404, detail="Planned expense not found")
     if expense.installment_group_id is not None:
         raise HTTPException(status_code=422, detail="This one-off is already part of a split plan")
+    if expense.settled_on is not None:
+        raise HTTPException(status_code=422, detail="This one-off is already settled")
+    if db.query(models.TripItem.id).filter(
+        models.TripItem.planned_expense_id == expense.id,
+    ).first():
+        raise HTTPException(
+            status_code=422,
+            detail="This one-off is linked to a trip -- edit it from Adventures instead",
+        )
+    if db.query(models.ScenarioProposedExpense.id).filter(
+        models.ScenarioProposedExpense.committed_planned_expense_id == expense.id,
+    ).first():
+        raise HTTPException(
+            status_code=422,
+            detail="This one-off is linked to a scenario -- edit it from Scenarios instead",
+        )
     if body.amount_paid >= expense.amount:
         raise HTTPException(
             status_code=422,
