@@ -173,7 +173,7 @@ DATABASE_URL="sqlite:///./data/demo.db" \
   uv run uvicorn backend.main:app --host 127.0.0.1 --port 8001
 
 # in another terminal
-cd frontend && VITE_API_URL="http://127.0.0.1:8001" bun run dev --port 5174
+cd frontend && VITE_API_URL="http://127.0.0.1:8001/api" bun run dev --port 5174
 ```
 
 Sign in with **demo / demo123**.
