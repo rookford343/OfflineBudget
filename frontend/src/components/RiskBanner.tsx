@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowRightLeft } from "lucide-react";
-import { fmt } from "../lib/utils";
+import { useBalancesHidden } from "../store/balanceVisibility";
+import {
+  alertHeadline,
+  projectedBalanceText,
+  suggestionHeadline,
+  transferHeadline,
+} from "../lib/riskBannerText";
 import { VerificationFlagButton } from "./VerificationFlagButton";
 
 interface SourceAccount {
@@ -24,13 +30,6 @@ interface Risk {
   suggested_transfer_already_planned?: boolean;
 }
 
-function formatDate(iso: string): string {
-  return new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
-    month: "long",
-    day: "numeric",
-  });
-}
-
 export function RiskBanner({
   risk,
   accountId,
@@ -46,6 +45,7 @@ export function RiskBanner({
   // source is ambiguous (zero or 2+ savings accounts) rather than guessing.
   // Accepting has to resolve that before it creates a source-less transfer.
   const [pickedFromId, setPickedFromId] = useState("");
+  const hidden = useBalancesHidden();
 
   // The suggested amount/date are editable before accepting -- the user may know
   // better than the forecast (round to a cleaner number, pull it in earlier
@@ -104,7 +104,7 @@ export function RiskBanner({
             <ArrowRightLeft size={18} className="text-orange-500 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-orange-900 dark:text-orange-200 text-sm">
-                {`Needs a ${fmt(parseFloat(risk.transfer_amount!))} transfer from ${risk.transfer_from} around ${formatDate(risk.transfer_date!)}`}
+                {transferHeadline(risk.transfer_amount!, risk.transfer_from, risk.transfer_date!, hidden)}
               </p>
               <p className="text-xs text-orange-700 dark:text-orange-400 mt-0.5">
                 Modeled automatically to keep the account above its action threshold.
@@ -119,9 +119,12 @@ export function RiskBanner({
             <ArrowRightLeft size={18} className="text-blue-500 mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="font-semibold text-blue-900 dark:text-blue-200 text-sm">
-                {risk.suggested_transfer_already_planned
-                  ? `Still short: top up by ${fmt(parseFloat(risk.suggested_transfer_amount!))} by ${formatDate(risk.suggested_transfer_date!)}`
-                  : `Suggested: move ${fmt(parseFloat(risk.suggested_transfer_amount!))} to cover this by ${formatDate(risk.suggested_transfer_date!)}`}
+                {suggestionHeadline(
+                  risk.suggested_transfer_amount!,
+                  risk.suggested_transfer_date!,
+                  risk.suggested_transfer_already_planned,
+                  hidden,
+                )}
               </p>
               <p className="text-xs text-blue-700 dark:text-blue-400 mt-0.5">
                 {risk.suggested_transfer_already_planned
@@ -129,17 +132,24 @@ export function RiskBanner({
                   : "You'll need to make this transfer yourself in your bank — accepting just plans it here."}
               </p>
               <div className="flex items-center gap-3 mt-2 text-xs text-blue-800 dark:text-blue-300">
-                <label className="flex items-center gap-1.5">
-                  Amount
-                  <input
-                    type="number"
-                    step="1"
-                    min="0"
-                    className="input w-24 text-xs py-1"
-                    value={effectiveAmount}
-                    onChange={(e) => setAmountOverride(e.target.value)}
-                  />
-                </label>
+                {hidden ? (
+                  <span className="flex items-center gap-1.5">
+                    Amount
+                    <span title="Show balances to edit the amount">••••••</span>
+                  </span>
+                ) : (
+                  <label className="flex items-center gap-1.5">
+                    Amount
+                    <input
+                      type="number"
+                      step="1"
+                      min="0"
+                      className="input w-24 text-xs py-1"
+                      value={effectiveAmount}
+                      onChange={(e) => setAmountOverride(e.target.value)}
+                    />
+                  </label>
+                )}
                 <label className="flex items-center gap-1.5">
                   Date
                   <input
@@ -188,11 +198,7 @@ export function RiskBanner({
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between gap-2">
                 <p className={`font-semibold ${amber ? "text-amber-900 dark:text-amber-200" : "text-red-900 dark:text-red-200"} text-sm`}>
-                  {parseFloat(risk.threshold) <= 0
-                    ? `Projected to go negative on ${formatDate(risk.date!)}`
-                    : risk.status === "danger"
-                    ? `Drops below your ${fmt(parseFloat(risk.threshold))} cushion on ${formatDate(risk.date!)} and goes negative within the window`
-                    : `Projected to drop below your ${fmt(parseFloat(risk.threshold))} cushion on ${formatDate(risk.date!)}`}
+                  {alertHeadline(risk.threshold, risk.status, risk.date!, hidden)}
                 </p>
                 <VerificationFlagButton
                   feature="forecast"
@@ -203,7 +209,7 @@ export function RiskBanner({
                 />
               </div>
               <p className={`text-xs ${amber ? "text-amber-700 dark:text-amber-400" : "text-red-700 dark:text-red-400"} mt-0.5`}>
-                Projected balance: <strong>{fmt(parseFloat(risk.amount!))}</strong>
+                Projected balance: <strong>{projectedBalanceText(risk.amount!, hidden)}</strong>
               </p>
             </div>
           </div>
