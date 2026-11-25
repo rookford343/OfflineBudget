@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useQueries, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { accountsApi, forecastApi, scenariosApi, plannedExpensesApi, authApi, cardsApi, dayCheckpointsApi, transactionsApi, categoriesApi, plannedTransfersApi } from "../api";
-import { fmt, today } from "../lib/utils";
+import { fmt, fmtDate, today } from "../lib/utils";
 import { axisTicks, rangeOptions, resolveRange, sampleLows, yearStarts, type RangeKey } from "../lib/forecastRange";
 import { Link } from "react-router-dom";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea, Legend, BarChart, Bar, ComposedChart } from "recharts";
@@ -13,6 +13,8 @@ import { RiskBanner } from "../components/RiskBanner";
 import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
 import { useMinWidth } from "../lib/useMinWidth";
 import { sortCategoryList, byName } from "../lib/selectOptions";
+import { useDebouncedValue } from "../lib/useDebouncedValue";
+import { splitEvenly } from "../lib/splitEvenly";
 
 function isDarkMode(): boolean {
   return document.documentElement.classList.contains("dark");
@@ -35,6 +37,10 @@ function chartTheme() {
 }
 
 const emptyExpense = { name: "", amount: "", expected_date: today(), notes: "", account_id: "", card_id: "", direction: "outflow", funding_account_id: "", funding_amount: "", funding_lead_days: "1" };
+
+type ExpenseLeg = { amount: string; expected_date: string };
+const emptyExpenseLegs = (n: number): ExpenseLeg[] =>
+  Array.from({ length: n }, () => ({ amount: "", expected_date: "" }));
 
 export default function Forecast() {
   const qc = useQueryClient();
@@ -98,6 +104,10 @@ export default function Forecast() {
   const [showHelp, setShowHelp] = useState(false);
   const [showExpenseForm, setShowExpenseForm] = useState(false);
   const [expenseForm, setExpenseForm] = useState({ ...emptyExpense });
+  const [splitExpense, setSplitExpense] = useState(false);
+  const [expenseTotal, setExpenseTotal] = useState("");
+  const [expenseLegCount, setExpenseLegCount] = useState(2);
+  const [expenseLegs, setExpenseLegs] = useState<ExpenseLeg[]>(emptyExpenseLegs(2));
   const [editExpenseId, setEditExpenseId] = useState<number | null>(null);
   const [editExpenseForm, setEditExpenseForm] = useState({ ...emptyExpense });
   const [deleteExpense, setDeleteExpense] = useState<any | null>(null);
@@ -309,6 +319,61 @@ export default function Forecast() {
   // years, and using the selected year made Q1 2027 look already past.
   const quarterEndDate = (q: { year: number; quarter: number }) => new Date(q.year, q.quarter * 3, 0);
 
+  const resetExpenseAddForm = () => {
+    setExpenseForm({ ...emptyExpense });
+    setSplitExpense(false);
+    setExpenseTotal("");
+    setExpenseLegCount(2);
+    setExpenseLegs(emptyExpenseLegs(2));
+  };
+
+  const changeExpenseLegCount = (delta: number) => {
+    const next = Math.min(6, Math.max(2, expenseLegCount + delta));
+    setExpenseLegCount(next);
+    setExpenseLegs((prev) => {
+      const trimmed = prev.slice(0, next);
+      return trimmed.length < next ? [...trimmed, ...emptyExpenseLegs(next - trimmed.length)] : trimmed;
+    });
+  };
+
+  const updateExpenseLeg = (i: number, patch: Partial<ExpenseLeg>) => {
+    setExpenseLegs((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  };
+
+  const handleExpenseSplitEvenly = () => {
+    const t = parseFloat(expenseTotal);
+    if (!(t > 0)) return;
+    const amounts = splitEvenly(t, expenseLegCount);
+    setExpenseLegs(amounts.map((a, i) => ({ amount: a.toFixed(2), expected_date: expenseLegs[i]?.expected_date ?? "" })));
+  };
+
+  const installmentsDraft = useMemo(() => ({
+    name: expenseForm.name.trim() || "One-off",
+    legs: expenseLegs.map((l) => ({ amount: l.amount, expected_date: l.expected_date })),
+    account_id: expenseForm.account_id ? parseInt(expenseForm.account_id) : null,
+    card_id: expenseForm.card_id ? parseInt(expenseForm.card_id) : null,
+  }), [expenseForm.name, expenseLegs, expenseForm.account_id, expenseForm.card_id]);
+  const debouncedInstallmentsDraft = useDebouncedValue(installmentsDraft, 300);
+  const expenseLegsReady = expenseLegs.length >= 2 && expenseLegs.every((l) => parseFloat(l.amount) > 0 && !!l.expected_date);
+  // The account the money leaves: the chosen checking account, or -- for a
+  // card or "Any checking account" -- this page's own active checking account.
+  const installmentsPreviewAccountId = expenseForm.account_id ? parseInt(expenseForm.account_id) : activeAccountId;
+
+  const {
+    data: installmentsPreview,
+    isFetching: installmentsPreviewFetching,
+    isError: installmentsPreviewIsError,
+    isPlaceholderData: installmentsPreviewIsStale,
+  } = useQuery<any>({
+    queryKey: ["one-off-preview-installments", installmentsPreviewAccountId, debouncedInstallmentsDraft],
+    queryFn: () => plannedExpensesApi.previewInstallments(installmentsPreviewAccountId, debouncedInstallmentsDraft),
+    enabled: showExpenseForm && splitExpense && expenseLegsReady && !!installmentsPreviewAccountId,
+    staleTime: 0,
+    gcTime: 0,
+    placeholderData: keepPreviousData,
+  });
+  const installmentsPreviewMatchesForm = JSON.stringify(installmentsDraft) === JSON.stringify(debouncedInstallmentsDraft);
+
   // Every mutation below changes a planned expense that forecast-quarters and
   // forecast-multi-year read from (forecast_engine.py queries PlannedExpense
   // live on every request -- there's no backend cache to invalidate). The
@@ -326,7 +391,17 @@ export default function Forecast() {
       qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
       qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
       setShowExpenseForm(false);
-      setExpenseForm({ ...emptyExpense });
+      resetExpenseAddForm();
+    },
+  });
+  const createInstallmentsMut = useMutation({
+    mutationFn: (body: object) => plannedExpensesApi.createInstallments(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["planned-expenses"] });
+      qc.invalidateQueries({ queryKey: ["forecast-quarters"] });
+      qc.invalidateQueries({ queryKey: ["forecast-multi-year"] });
+      setShowExpenseForm(false);
+      resetExpenseAddForm();
     },
   });
   // Settling a one-off closes the prediction against reality. Kept separate
@@ -1023,28 +1098,105 @@ export default function Forecast() {
           <div className="border-t border-gray-100 dark:border-gray-700 pt-4">
             <div className="flex justify-between items-center mb-3">
               <p className="text-sm font-medium text-gray-900 dark:text-gray-100">New Planned One-Off</p>
-              <button onClick={() => setShowExpenseForm(false)} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
+              <button onClick={() => { setShowExpenseForm(false); resetExpenseAddForm(); }} className="text-gray-400 hover:text-gray-600"><X size={16} /></button>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <label className="label">Name</label>
                 <input className="input" placeholder="Vacation, down payment…" value={expenseForm.name} onChange={e => setExpenseForm({ ...expenseForm, name: e.target.value })} />
               </div>
-              <div>
-                <label className="label">Amount</label>
-                <input type="number" step="0.01" className="input" placeholder="5000" value={expenseForm.amount} onChange={e => setExpenseForm({ ...expenseForm, amount: e.target.value })} />
+              <div className="col-span-2 flex items-center gap-2">
+                <input
+                  id="expense-split"
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={splitExpense}
+                  onChange={(e) => {
+                    setSplitExpense(e.target.checked);
+                    // Each mode only ever submits through its own mutation -- without this,
+                    // a stale isError from the mode just left would show "Couldn't add
+                    // it" for a submit that never happened in the newly-selected mode.
+                    createExpenseMut.reset();
+                    createInstallmentsMut.reset();
+                  }}
+                />
+                <label htmlFor="expense-split" className="text-sm text-gray-700 dark:text-gray-300">
+                  Split into separate payments
+                </label>
               </div>
-              <div>
-                <label className="label">Expected Date</label>
-                <input type="date" className="input" value={expenseForm.expected_date} onChange={e => setExpenseForm({ ...expenseForm, expected_date: e.target.value })} />
-              </div>
-              <div>
-                <label className="label">Direction</label>
-                <select className="input" value={expenseForm.direction} onChange={e => setExpenseForm({ ...expenseForm, direction: e.target.value })}>
-                  <option value="outflow">Money out</option>
-                  <option value="inflow">Money in</option>
-                </select>
-              </div>
+              {!splitExpense && (
+                <>
+                  <div>
+                    <label className="label">Amount</label>
+                    <input type="number" step="0.01" className="input" placeholder="5000" value={expenseForm.amount} onChange={e => setExpenseForm({ ...expenseForm, amount: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="label">Expected Date</label>
+                    <input type="date" className="input" value={expenseForm.expected_date} onChange={e => setExpenseForm({ ...expenseForm, expected_date: e.target.value })} />
+                  </div>
+                </>
+              )}
+              {splitExpense && (
+                <div className="col-span-2 space-y-3">
+                  <div className="grid grid-cols-2 gap-3 items-end">
+                    <div>
+                      <label className="label">Total</label>
+                      <input type="number" step="0.01" className="input" placeholder="5000" value={expenseTotal} onChange={e => setExpenseTotal(e.target.value)} />
+                    </div>
+                    <div>
+                      <span className="label">Payments</span>
+                      <div className="flex items-center gap-2">
+                        <button type="button" className="btn-secondary px-3" onClick={() => changeExpenseLegCount(-1)} disabled={expenseLegCount <= 2}>−</button>
+                        <span className="w-6 text-center tabular-nums text-gray-900 dark:text-gray-100">{expenseLegCount}</span>
+                        <button type="button" className="btn-secondary px-3" onClick={() => changeExpenseLegCount(1)} disabled={expenseLegCount >= 6}>+</button>
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary w-full"
+                    onClick={handleExpenseSplitEvenly}
+                    disabled={!(parseFloat(expenseTotal) > 0)}
+                  >
+                    Split evenly
+                  </button>
+                  <div className="space-y-2">
+                    {expenseLegs.map((leg, i) => (
+                      <div key={i} className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="label">{`Payment ${i + 1} amount`}</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            className="input"
+                            placeholder="0.00"
+                            value={leg.amount}
+                            onChange={e => updateExpenseLeg(i, { amount: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="label">{`Payment ${i + 1} date`}</label>
+                          <input
+                            type="date"
+                            className="input"
+                            value={leg.expected_date}
+                            onChange={e => updateExpenseLeg(i, { expected_date: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {!splitExpense && (
+                <div>
+                  <label className="label">Direction</label>
+                  <select className="input" value={expenseForm.direction} onChange={e => setExpenseForm({ ...expenseForm, direction: e.target.value })}>
+                    <option value="outflow">Money out</option>
+                    <option value="inflow">Money in</option>
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="label">Charge to</label>
                 <select
@@ -1063,48 +1215,76 @@ export default function Forecast() {
                   <p className="text-xs text-gray-400 mt-1">Won't hit checking until this card's next statement is paid off.</p>
                 )}
               </div>
-                {/* A large purchase usually isn't paid from the month's cash flow.
-                    Recording the source here keeps the transfer welded to the purchase
-                    date, so moving one moves the other. */}
-                <div className="col-span-2">
-                  <label className="label">Fund from (optional)</label>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select className="input flex-1 min-w-[10rem]" value={expenseForm.funding_account_id}
-                      onChange={e => setExpenseForm({ ...expenseForm, funding_account_id: e.target.value })}>
-                      <option value="">Paid from normal cash flow</option>
-                      {fundingAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
+              {!splitExpense && (
+                <>
+                  {/* A large purchase usually isn't paid from the month's cash flow.
+                      Recording the source here keeps the transfer welded to the purchase
+                      date, so moving one moves the other. */}
+                  <div className="col-span-2">
+                    <label className="label">Fund from (optional)</label>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select className="input flex-1 min-w-[10rem]" value={expenseForm.funding_account_id}
+                        onChange={e => setExpenseForm({ ...expenseForm, funding_account_id: e.target.value })}>
+                        <option value="">Paid from normal cash flow</option>
+                        {fundingAccounts.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                      </select>
+                      {expenseForm.funding_account_id && (
+                        <>
+                          <input type="number" step="0.01" className="input w-32" placeholder="Same as amount"
+                            value={expenseForm.funding_amount} onChange={e => setExpenseForm({ ...expenseForm, funding_amount: e.target.value })} />
+                          <div className="flex items-center gap-1">
+                            <input type="number" className="input w-16" value={expenseForm.funding_lead_days}
+                              onChange={e => setExpenseForm({ ...expenseForm, funding_lead_days: e.target.value })} />
+                            <span className="text-xs text-gray-500 dark:text-gray-400">days before</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
                     {expenseForm.funding_account_id && (
-                      <>
-                        <input type="number" step="0.01" className="input w-32" placeholder="Same as amount"
-                          value={expenseForm.funding_amount} onChange={e => setExpenseForm({ ...expenseForm, funding_amount: e.target.value })} />
-                        <div className="flex items-center gap-1">
-                          <input type="number" className="input w-16" value={expenseForm.funding_lead_days}
-                            onChange={e => setExpenseForm({ ...expenseForm, funding_lead_days: e.target.value })} />
-                          <span className="text-xs text-gray-500 dark:text-gray-400">days before</span>
-                        </div>
-                      </>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Transfer moves with the purchase date. Blank amount moves exactly the purchase amount.
+                      </p>
                     )}
                   </div>
-                  {expenseForm.funding_account_id && (
-                    <p className="text-xs text-gray-400 mt-1">
-                      Transfer moves with the purchase date. Blank amount moves exactly the purchase amount.
-                    </p>
-                  )}
-                </div>
+                </>
+              )}
               <div className="col-span-2">
                 <label className="label">Notes (optional)</label>
                 <input className="input" value={expenseForm.notes} onChange={e => setExpenseForm({ ...expenseForm, notes: e.target.value })} />
               </div>
+              {splitExpense && (
+                <div className="col-span-2 rounded-xl bg-gray-50 dark:bg-[#333947] p-3" aria-live="polite">
+                  {!expenseLegsReady && <p className="text-sm text-gray-500 dark:text-gray-400">Enter at least 2 payments with an amount and a date to see the effect.</p>}
+                  {expenseLegsReady && installmentsPreviewIsError && <p className="text-sm text-red-600 dark:text-red-400">Couldn't work out the preview. Try again.</p>}
+                  {expenseLegsReady && !installmentsPreviewIsError && !installmentsPreview && <p className="text-sm text-gray-500 dark:text-gray-400">Working it out…</p>}
+                  {expenseLegsReady && installmentsPreview && (
+                    <div className={installmentsPreviewFetching ? "opacity-60" : ""}>
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">Safety Margin (this week)</p>
+                      <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                        {fmt(installmentsPreview.safety_margin_weekly.before)} → {fmt(installmentsPreview.safety_margin_weekly.after)}
+                      </p>
+                      <p className="text-sm text-gray-600 dark:text-gray-300">
+                        This month: {fmt(installmentsPreview.safety_margin.before)} → {fmt(installmentsPreview.safety_margin.after)}
+                      </p>
+                      {installmentsPreview.card_payments?.map((cp: { card_id: number; due: string; amount: number | string }, i: number) => (
+                        <p key={i} className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+                          Adds {fmt(cp.amount)} to {activeCards.find((c: any) => c.id === cp.card_id)?.name ?? "the card"} payment due {fmtDate(cp.due)}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+              {(createExpenseMut.isError || createInstallmentsMut.isError) && <p className="col-span-2 text-sm text-red-600 dark:text-red-400">Couldn't add it. Try again.</p>}
               <div className="col-span-2 flex gap-2">
                 <button
-                  onClick={() => createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null, account_id: expenseForm.account_id ? parseInt(expenseForm.account_id) : null, card_id: expenseForm.card_id ? parseInt(expenseForm.card_id) : null, direction: expenseForm.direction, funding_account_id: expenseForm.funding_account_id ? parseInt(expenseForm.funding_account_id) : null, funding_amount: expenseForm.funding_amount ? parseFloat(expenseForm.funding_amount) : null, funding_lead_days: expenseForm.funding_lead_days ? parseInt(expenseForm.funding_lead_days) : 0 })}
-                  disabled={!expenseForm.name || !expenseForm.amount || createExpenseMut.isPending}
+                  onClick={() => splitExpense ? createInstallmentsMut.mutate(debouncedInstallmentsDraft) : createExpenseMut.mutate({ name: expenseForm.name, amount: parseFloat(expenseForm.amount), expected_date: expenseForm.expected_date, notes: expenseForm.notes || null, account_id: expenseForm.account_id ? parseInt(expenseForm.account_id) : null, card_id: expenseForm.card_id ? parseInt(expenseForm.card_id) : null, direction: expenseForm.direction, funding_account_id: expenseForm.funding_account_id ? parseInt(expenseForm.funding_account_id) : null, funding_amount: expenseForm.funding_amount ? parseFloat(expenseForm.funding_amount) : null, funding_lead_days: expenseForm.funding_lead_days ? parseInt(expenseForm.funding_lead_days) : 0 })}
+                  disabled={splitExpense ? !(expenseLegsReady && installmentsPreviewMatchesForm && !!installmentsPreview && !installmentsPreviewFetching && !installmentsPreviewIsStale && !installmentsPreviewIsError && !createInstallmentsMut.isPending) : (!expenseForm.name || !expenseForm.amount || createExpenseMut.isPending)}
                   className="btn-primary"
                 >
-                  {createExpenseMut.isPending ? "Saving…" : "Add Planned Expense"}
+                  {(createExpenseMut.isPending || createInstallmentsMut.isPending) ? "Saving…" : "Add Planned Expense"}
                 </button>
-                <button onClick={() => setShowExpenseForm(false)} className="btn-secondary">Cancel</button>
+                <button onClick={() => { setShowExpenseForm(false); resetExpenseAddForm(); }} className="btn-secondary">Cancel</button>
               </div>
             </div>
           </div>
