@@ -11,7 +11,7 @@ from decimal import Decimal, ROUND_CEILING
 from typing import NamedTuple
 from sqlalchemy.orm import Session
 from backend import models
-from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
+from backend.schemas import BudgetSnapshot, CardSnapshot, WeeklyLow, WeeklyDigestCategory, MerchantSpendingEntry, ExplainChild
 from backend.services.explain import ExplainBuilder
 from backend.services.forecast_walk import floor_mask, standard_walk
 from backend.services.cushion import DEFAULT_CUSHION, cushion_for, cushion_status
@@ -166,6 +166,33 @@ def _floor_minimum(
         return Decimal("0"), None
     low = min(candidates, key=lambda day: day.projected_balance)
     return low.projected_balance, low.date
+
+
+def _weekly_lows(window: LookaheadWindow, as_of: date, cushion: Decimal) -> list[WeeklyLow]:
+    """Lowest unmasked balance per rolling 7-day bucket starting at `as_of`.
+    The last bucket ends on the window's last day and may be shorter. A bucket
+    with no unmasked day is a gap (amount/date None), never $0. Ties go to the
+    earliest day."""
+    live = [d for d in window.days if d.date >= as_of]
+    if not live:
+        return []
+    unmasked = {id(d) for d, ok in zip(window.days, window.mask) if ok}
+    last = max(d.date for d in live)
+    out: list[WeeklyLow] = []
+    start = as_of
+    while start <= last:
+        end = min(start + timedelta(days=6), last)
+        cands = [d for d in live if start <= d.date <= end and id(d) in unmasked]
+        if cands:
+            low = min(cands, key=lambda d: (d.projected_balance, d.date))
+            out.append(WeeklyLow(
+                start=start, end=end, amount=low.projected_balance, date=low.date,
+                status=cushion_status(low.projected_balance, cushion),
+            ))
+        else:
+            out.append(WeeklyLow(start=start, end=end))
+        start = end + timedelta(days=1)
+    return out
 
 
 def _lookahead_window(
@@ -898,6 +925,9 @@ def compute_budget_snapshot(
         days_remaining_in_month=days_remaining,
         lookahead_minimum=display_min,
         lookahead_minimum_date=display_min_date,
+        # Slices display_window (not Safety Margin's walk) so the lowest bar
+        # equals lookahead_minimum.
+        weekly_lows=_weekly_lows(display_window, as_of, safety_cushion),
         lookahead_status=display_status,
         safety_cushion=safety_cushion,
         next_month_minimum=next_month_min,

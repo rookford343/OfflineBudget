@@ -2193,6 +2193,17 @@ class CardSnapshot(BaseModel):
     statement_stale_reason: Optional[str] = None
 
 
+class WeeklyLow(BaseModel):
+    """Lowest unmasked projected balance in one rolling 7-day bucket of the
+    display window. `amount`/`date` are None when every day is masked (a gap,
+    never $0); `end` is inclusive."""
+    start: date_type
+    end: date_type
+    amount: Optional[Decimal] = None
+    date: Optional[date_type] = None
+    status: Literal["ok", "warning", "danger"] = "ok"
+
+
 class BudgetSnapshot(BaseModel):
     as_of: date
     leftover: Decimal
@@ -2242,6 +2253,9 @@ class BudgetSnapshot(BaseModel):
     # by side).
     lookahead_minimum: Decimal = Decimal("0")
     lookahead_minimum_date: Optional[date] = None
+    # Per-week lows over the same display window as lookahead_minimum, so the
+    # lowest bar equals that figure. Drives the Dashboard chart.
+    weekly_lows: list[WeeklyLow] = []
     # The 3-month low as a warning signal (approved 2026-11-06): "danger"
     # strictly below $0, "warning" strictly below safety_cushion, else "ok"
     # (exactly at the cushion is ok). safety_cushion is the user's setting,
