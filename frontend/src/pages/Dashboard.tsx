@@ -23,6 +23,7 @@ import { useMinWidth } from "../lib/useMinWidth";
 import { SnapshotHero } from "../components/dashboard/SnapshotHero";
 import { BalanceFlowCard } from "../components/dashboard/BalanceFlowCard";
 import { UpcomingBillsCard } from "../components/dashboard/UpcomingBillsCard";
+import { DigestCard } from "../components/dashboard/DigestCard";
 
 /** The next date on/after `today` whose day-of-month is `dueDay` (clamped to
  *  the month's last day), plus the day-count to reach it -- both derived
@@ -74,7 +75,6 @@ export default function Dashboard() {
   // this just re-orders that same top-5 set alphabetically on request,
   // matching Securo's "Highest first" sort control. Doesn't re-select which
   // 5 categories show, only how they're listed.
-  const [categorySortAlpha, setCategorySortAlpha] = useState(false);
   const [editingPending, setEditingPending] = useState<number | null>(null);
   const [pendingValue, setPendingValue] = useState("");
   const qc = useQueryClient();
@@ -127,6 +127,11 @@ export default function Dashboard() {
   const { data: weeklyDigest } = useQuery<any>({
     queryKey: ["weekly-digest", primaryChecking?.id],
     queryFn: () => analyticsApi.weeklyDigest(primaryChecking.id),
+    enabled: !!primaryChecking,
+  });
+  const { data: monthlyDigest } = useQuery<any>({
+    queryKey: ["monthly-digest", primaryChecking?.id],
+    queryFn: () => analyticsApi.monthlyDigest(primaryChecking.id),
     enabled: !!primaryChecking,
   });
   // Reuses the same day-by-day forecast walk everything else on this app
@@ -294,13 +299,13 @@ export default function Dashboard() {
       {/* The hero leads; anything asking for an action follows it. */}
       {isXWide ? (
         <div className="grid grid-cols-[minmax(0,720px)_minmax(0,1fr)] gap-6 items-start">
-          <div>
+          <div className="space-y-6">
             {snapshot && (
               <SnapshotHero snapshot={snapshot} primaryCheckingId={primaryChecking?.id} hidden={balancesHidden} isWide />
             )}
-          </div>
-          <div className="space-y-6">
             <NeedsAttention risk={weeklyDigest?.risk} />
+          </div>
+          <div>
             <BalanceFlowCard {...balanceFlowProps} />
           </div>
         </div>
@@ -428,86 +433,27 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Balance Flow and Weekly Digest paired into one row at 2xl (the user,
-          2026-09-02) -- same breakpoint as the hero row above, so this
-          split only kicks in once there's the same room already proven
-          comfortable there. Weekly Digest keeps its own internal
-          Category/Merchants split (md:grid-cols-2) regardless of how
-          narrow its half of this row gets, since Tailwind breakpoints are
-          viewport-width based, not container-based -- 2xl leaves enough
-          room that this doesn't feel cramped. */}
-      <div className={`grid ${isXWide ? "" : "2xl:grid-cols-2"} gap-6`}>
+      {/* Balance Flow keeps its own slot below the xwide breakpoint (at xwide
+          it lives in the right column of the hero row). The two digests sit
+          in their own row: side by side at 2xl, stacked below. Inside each
+          card: By Category above Top Merchants, both full card width. */}
       {!isXWide && <BalanceFlowCard {...balanceFlowProps} />}
 
-      {weeklyDigest && (
-        <div className="card">
-          <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">
-            Weekly Digest — {new Date(weeklyDigest.week_start + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-            {" – "}
-            {new Date(weeklyDigest.week_end + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-          </h3>
-          <p className="text-sm text-gray-500 mb-3">Total spent: <span className="font-semibold text-gray-900 dark:text-gray-100">{maskIfHidden(balancesHidden, fmt(parseFloat(weeklyDigest.total_spent)))}</span></p>
-
-          <div className="grid md:grid-cols-2 gap-6">
-            {weeklyDigest.categories.length > 0 && (
-              <div>
-                <div className="flex items-center justify-between mb-2 pb-1 border-b-2 border-line">
-                  <p className="text-xs font-bold text-accent uppercase tracking-wider">By Category</p>
-                  <button
-                    onClick={() => setCategorySortAlpha(v => !v)}
-                    className="text-[13px] font-medium text-gray-400 dark:text-gray-500 hover:text-accent"
-                  >
-                    {categorySortAlpha ? "A–Z" : "Highest first"}
-                  </button>
-                </div>
-                <div className="space-y-1.5 text-sm">
-                  {(categorySortAlpha
-                    ? [...weeklyDigest.categories.slice(0, 5)].sort((a: any, b: any) => a.category_name.localeCompare(b.category_name))
-                    : weeklyDigest.categories.slice(0, 5)
-                  ).map((c: any) => {
-                    const budget = budgetByCategory.get(c.category_id);
-                    const budgeted = budget ? parseFloat(budget.budgeted) : 0;
-                    const actual = budget ? parseFloat(budget.actual_total) : 0;
-                    const pct = budgeted > 0 ? Math.min(100, (actual / budgeted) * 100) : 0;
-                    const overBudget = budgeted > 0 && actual > budgeted;
-                    return (
-                      <div key={c.category_id} className={`relative rounded overflow-hidden ${budgeted > 0 ? `border-l-2 ${overBudget ? "border-red-500" : "border-accent"}` : ""}`}>
-                        {budgeted > 0 && (
-                          <div
-                            className={`absolute inset-y-0 left-0 ${overBudget ? "bg-red-200/70 dark:bg-red-900/40" : "bg-accent/20"}`}
-                            style={{ width: `${pct}%` }}
-                          />
-                        )}
-                        <div className="relative flex justify-between gap-4 px-1.5 py-1 text-gray-600 dark:text-gray-400">
-                          <span className="flex items-center gap-1 min-w-0 truncate">
-                            {overBudget && <AlertTriangle size={11} className="text-red-500 shrink-0" />}
-                            {c.category_name}
-                          </span>
-                          <span className="tabular-nums shrink-0">{maskIfHidden(balancesHidden, fmt(parseFloat(c.total)))}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {weeklyDigest.top_merchants.length > 0 && (
-              <div>
-                <p className="text-xs font-bold text-accent uppercase tracking-wider mb-2 pb-1 border-b-2 border-line">Top Merchants</p>
-                <div className="space-y-1.5 text-sm">
-                  {weeklyDigest.top_merchants.slice(0, 5).map((m: any) => (
-                    <div key={m.name} className="flex justify-between gap-4 px-1.5 py-1 text-gray-600 dark:text-gray-400">
-                      <span className="truncate">{m.name}</span>
-                      <span className="tabular-nums shrink-0">{maskIfHidden(balancesHidden, fmt(parseFloat(m.total)))}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <div className="grid 2xl:grid-cols-2 gap-6">
+        <DigestCard
+          title={weeklyDigest ? `Weekly Digest — ${new Date(weeklyDigest.week_start + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date(weeklyDigest.week_end + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
+          digest={weeklyDigest}
+          budgetByCategory={budgetByCategory}
+          hidden={balancesHidden}
+          emptyText=""
+        />
+        <DigestCard
+          title={`Monthly Digest — ${new Date(monthStart + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${new Date(todayStr + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
+          digest={monthlyDigest}
+          budgetByCategory={budgetByCategory}
+          hidden={balancesHidden}
+          emptyText="No spending yet this month."
+        />
       </div>
 
       {/* Same idea: a third column rather than two stretched ones, so
