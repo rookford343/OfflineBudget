@@ -35,6 +35,15 @@ describe("BalanceFlowCard", () => {
     expect(html).toContain("Balance Flow");
   });
 
+  test("fill classes appear only when fill is true", () => {
+    const off = renderToStaticMarkup(<BalanceFlowCard {...base} balancesHidden={false} />);
+    const on = renderToStaticMarkup(<BalanceFlowCard {...base} balancesHidden={false} fill />);
+    for (const c of ["h-full flex flex-col", "flex-1 min-h-[220px]"]) {
+      expect(off).not.toContain(c);
+      expect(on).toContain(c);
+    }
+  });
+
   test("renders nothing without data", () => {
     const html = renderToStaticMarkup(
       <BalanceFlowCard {...base} balanceFlow={[]} lastMonthFlow={[]} balancesHidden={false} />,

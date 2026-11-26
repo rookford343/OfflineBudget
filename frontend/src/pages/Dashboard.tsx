@@ -71,10 +71,6 @@ export default function Dashboard() {
   const balancesHidden = useBalancesHidden();
   const [showHelp, setShowHelp] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
-  // Backend already returns the digest's top categories highest-first --
-  // this just re-orders that same top-5 set alphabetically on request,
-  // matching Securo's "Highest first" sort control. Doesn't re-select which
-  // 5 categories show, only how they're listed.
   const [editingPending, setEditingPending] = useState<number | null>(null);
   const [pendingValue, setPendingValue] = useState("");
   const qc = useQueryClient();
@@ -298,15 +294,15 @@ export default function Dashboard() {
 
       {/* The hero leads; anything asking for an action follows it. */}
       {isXWide ? (
-        <div className="grid grid-cols-[minmax(0,720px)_minmax(0,1fr)] gap-6 items-start">
+        <div className="grid grid-cols-[minmax(0,720px)_minmax(0,1fr)] gap-6 items-stretch">
           <div className="space-y-6">
             {snapshot && (
               <SnapshotHero snapshot={snapshot} primaryCheckingId={primaryChecking?.id} hidden={balancesHidden} isWide />
             )}
             <NeedsAttention risk={weeklyDigest?.risk} />
           </div>
-          <div>
-            <BalanceFlowCard {...balanceFlowProps} />
+          <div className="flex flex-col">
+            <BalanceFlowCard {...balanceFlowProps} fill />
           </div>
         </div>
       ) : (

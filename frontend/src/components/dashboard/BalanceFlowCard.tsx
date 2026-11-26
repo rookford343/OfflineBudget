@@ -13,11 +13,13 @@ interface Props {
   todayStr: string;
   isDark: boolean;
   balancesHidden: boolean;
+  /** Stretch to the full height of the grid row (xwide layout only). */
+  fill?: boolean;
 }
 
 /** Balance Flow: this month's projected balance against the saved forecast
  *  (or last month). All figures are computed in Dashboard and passed in. */
-export function BalanceFlowCard({ balanceFlow, lastMonthFlow, baseline, flowFigures, lastMonthRange, monthStart, todayStr, isDark, balancesHidden }: Props) {
+export function BalanceFlowCard({ balanceFlow, lastMonthFlow, baseline, flowFigures, lastMonthRange, monthStart, todayStr, isDark, balancesHidden, fill = false }: Props) {
   if (!(balanceFlow.length > 0 || lastMonthFlow.length > 0 || !!baseline?.points)) return null;
   // Reference line: the saved start-of-month forecast when there is
   // one, otherwise last month's actuals. Keyed by day-of-month either
@@ -60,7 +62,7 @@ export function BalanceFlowCard({ balanceFlow, lastMonthFlow, baseline, flowFigu
   const lineColor = isDark ? "#2dd4bf" : "#0f766e";
   const priorLineColor = isDark ? "#5b6577" : "#9ca3af";
   return (
-    <div className="card">
+    <div className={fill ? "card h-full flex flex-col" : "card"}>
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><TrendingUp size={16} className="text-accent" /> Balance Flow</h3>
@@ -76,7 +78,8 @@ export function BalanceFlowCard({ balanceFlow, lastMonthFlow, baseline, flowFigu
           </span>
         )}
       </div>
-      <ResponsiveContainer width="100%" height={200}>
+      <div className={fill ? "flex-1 min-h-[220px]" : undefined}>
+      <ResponsiveContainer width="100%" height={fill ? "100%" : 200}>
         <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
           <defs>
             <linearGradient id="balanceFlowGradient" x1="0" y1="0" x2="0" y2="1">
@@ -97,6 +100,7 @@ export function BalanceFlowCard({ balanceFlow, lastMonthFlow, baseline, flowFigu
           <Line type="monotone" dataKey="reference" stroke={priorLineColor} strokeWidth={1.5} strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false} />
         </AreaChart>
       </ResponsiveContainer>
+      </div>
       {sameDayRef && sameDayPct != null && (
         <p className="text-xs text-gray-400 mt-2">
           {refIsForecast ? <>Forecast for day {todayDay}: </> : <>In {lastMonthName} on day {todayDay}: </>}
