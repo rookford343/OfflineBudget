@@ -143,6 +143,12 @@ locked, "CC Estimate" otherwise) and the snapshot's explain notes read their `ba
   (`subscription_flat`).
 - A card with a recurring `credit_card_payment` item, or a payment marked sent and awaiting sync, is
   skipped: something else already pays it.
+- **Payment in transit:** the card's feed shows a payment credit (negative, payment wording per
+  `is_card_payment`, dated in the last 10 days) but `balance_due` is already 0, so the model plans
+  nothing. Credits minus checking debits that pay that card (posted or pending, from 5 days before
+  the earliest credit; `match_payment_card`) above `_FULL_COVERAGE_SLOP` becomes a "Payment in
+  transit: {card}" line on today in `build_forecast`, next to "Payment sent". It clears itself once
+  the debit posts or goes pending, and a card with the manual payment-sent marker gets none.
 
 Pending is always `card_pending(card, today)`; the model never reads `pending_charges`. A balance-only
 card (no transaction feed) has no spend rows, so the payments come from its balance.
@@ -380,3 +386,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 - v10: net worth has one recipe; assets include account balances
 - v11: Available to Spend rebuilt before budgets on the shared layer
 - v12: Available to Spend counts balance-only cards like Left to Spend
+- v13: a card payment credited but not yet in checking stays in the forecast until the debit lands

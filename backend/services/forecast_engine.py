@@ -18,7 +18,8 @@ from sqlalchemy import or_
 from backend import models
 from backend.schemas import ForecastEntry, ForecastTransaction, QuarterSummary
 from backend.services.tax_service import ss_wage_base_for
-from backend.services.card_matching import card_matches_description
+from backend.services.card_matching import card_matches_description, match_payment_card
+from backend.services.spending_helpers import is_card_payment
 from backend.services.cushion import cushion_status
 from backend.services.pending_amount import amount_on
 
@@ -809,6 +810,48 @@ class ScenarioProposal:
     expenses: tuple["models.PlannedExpense", ...] = ()
 
 
+_IN_TRANSIT_CREDIT_DAYS = 10  # how far back a card payment credit still counts
+_IN_TRANSIT_DEBIT_LEAD_DAYS = 5  # a debit may precede the credit it pays by this much
+
+
+def _payment_in_transit(
+    db: Session, account: models.Account, card: "models.CreditCard",
+    cards: list["models.CreditCard"], pending_rows: list, today: date,
+) -> Decimal:
+    """What the card's recent payment credits exceed the checking debits that
+    pay it by: money the card already counts as paid that has not left
+    checking, posted or pending. Zero once the debits cover it. Pending rows
+    are the card's pending_card_debits_by_card rows (live Plaid snapshot only;
+    the walk already subtracts them, so they only reduce this amount)."""
+    credits = [
+        c for c in db.query(models.CreditCardTransaction).filter(
+            models.CreditCardTransaction.card_id == card.id,
+            models.CreditCardTransaction.amount < 0,
+            models.CreditCardTransaction.date >= today - timedelta(days=_IN_TRANSIT_CREDIT_DAYS),
+            models.CreditCardTransaction.date <= today,
+        ).all()
+        if is_card_payment(c.merchant) or is_card_payment(c.description)
+    ]
+    if not credits:
+        return Decimal("0")
+    credited = sum((-Decimal(str(c.amount)) for c in credits), Decimal("0"))
+    since = min(c.date for c in credits) - timedelta(days=_IN_TRANSIT_DEBIT_LEAD_DAYS)
+    debited = sum((
+        -Decimal(str(t.amount)) for t in db.query(models.Transaction).filter(
+            models.Transaction.user_id == account.user_id,
+            models.Transaction.account_id == account.id,
+            models.Transaction.is_actual == True,
+            models.Transaction.amount < 0,
+            models.Transaction.date >= since,
+        ).all()
+        if (paid := match_payment_card(cards, t.description)) is not None and paid.id == card.id
+    ), Decimal("0"))
+    debited += sum(
+        (-Decimal(str(r.amount)) for r in pending_rows if r.date >= since), Decimal("0"),
+    )
+    return max(credited - debited, Decimal("0"))
+
+
 def build_forecast(
     db: Session,
     user_id: int,
@@ -1022,6 +1065,26 @@ def build_forecast(
                 pending_today_lines.append(ForecastTransaction(
                     name=f"Payment sent: {card.name}",
                     amount=-(marker - pending_total),
+                    type="expense",
+                    category_name=None,
+                    is_actual=True,
+                    is_pending=True,
+                    is_cc_payment=True,
+                ))
+            # Payment in transit: the card's own feed already shows a payment
+            # credit (balance_due reset to 0, so the payment model plans no
+            # payoff) but no checking debit, posted or pending, covers it yet
+            # (a holiday ACH delay). The money is still in checking and about
+            # to leave, so keep subtracting it until the debit shows up. The
+            # manual marker wins: it already subtracts the payment.
+            if card.payment_sent_pending_sync:
+                continue
+            from backend.services.statement_reconcile import _FULL_COVERAGE_SLOP  # circular at module level
+            in_transit = _payment_in_transit(db, account, card, all_active_cards, rows, today)
+            if in_transit > _FULL_COVERAGE_SLOP:
+                pending_today_lines.append(ForecastTransaction(
+                    name=f"Payment in transit: {card.name}",
+                    amount=-in_transit,
                     type="expense",
                     category_name=None,
                     is_actual=True,

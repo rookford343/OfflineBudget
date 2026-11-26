@@ -5,7 +5,7 @@ means (not refactors that keep every figure identical), and add a matching
 `- vN:` line to the "Calculation changelog" in docs/architecture.md.
 """
 
-CALC_VERSION: int = 12
+CALC_VERSION: int = 13
 
 # Copied from the "Calculation changelog" in docs/architecture.md (a test keeps
 # them equal); change history quotes it when a figure moved because the rules did.
@@ -22,4 +22,5 @@ CALC_CHANGELOG: dict[int, str] = {
     10: "net worth has one recipe; assets include account balances",
     11: "Available to Spend rebuilt before budgets on the shared layer",
     12: "Available to Spend counts balance-only cards like Left to Spend",
+    13: "a card payment credited but not yet in checking stays in the forecast until the debit lands",
 }
