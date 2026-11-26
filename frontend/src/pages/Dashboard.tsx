@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { accountsApi, cardsApi, recurringApi, analyticsApi, budgetApi, forecastApi, bankSyncApi } from "../api";
+import { accountsApi, cardsApi, recurringApi, analyticsApi, budgetApi, forecastApi } from "../api";
 import { fmt, utilColor, utilBg, firstOfMonth, today } from "../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { maskMoneyText } from "../lib/maskMoney";
@@ -13,22 +13,14 @@ import HowCalculated from "../components/HowCalculated";
 import WhatChanged from "../components/WhatChanged";
 import { TrendBadge } from "../components/TrendBadge";
 import { SparkLine } from "../components/SparkLine";
-import { RiskBanner } from "../components/RiskBanner";
-import { PlannedTransferReminder } from "../components/PlannedTransferReminder";
-import BillsToConfirm from "../components/BillsToConfirm";
-import AmountDrift from "../components/AmountDrift";
-import { VerificationFlagButton } from "../components/VerificationFlagButton";
+import { NeedsAttention } from "../components/NeedsAttention";
 import RecentTransactions from "../components/RecentTransactions";
 import BankSyncStatusLine from "../components/BankSyncStatusLine";
 import CheckingBalancesCard from "../components/CheckingBalancesCard";
-import SafetyMarginHero from "../components/phone/SafetyMarginHero";
-import SpendableTile from "../components/phone/SpendableTile";
 import UpcomingOneOffs from "../components/phone/UpcomingOneOffs";
 import PlanOneOffSheet from "../components/phone/PlanOneOffSheet";
-import { lastBankSync } from "../lib/freshness";
 import { useMinWidth } from "../lib/useMinWidth";
-import { lowestBalanceRows } from "../lib/lowestBalanceRows";
-import { SPENDABLE_HELP, MARGIN_HELP } from "../components/dashboard/SnapshotHero";
+import { SnapshotHero } from "../components/dashboard/SnapshotHero";
 
 /** The next date on/after `today` whose day-of-month is `dueDay` (clamped to
  *  the month's last day), plus the day-count to reach it -- both derived
@@ -186,7 +178,6 @@ export default function Dashboard() {
     enabled: !!primaryChecking,
   });
   const isDark = useIsDarkMode();
-  const { data: bankConnections = [] } = useQuery<any[]>({ queryKey: ["bank-connections"], queryFn: bankSyncApi.status });
   const { data: snapshot } = useQuery<any>({
     queryKey: ["budget-snapshot", primaryChecking?.id],
     queryFn: () => analyticsApi.budgetSnapshot(primaryChecking.id),
@@ -227,7 +218,6 @@ export default function Dashboard() {
   // Below lg: the phone layout. lg and up falls through to the desktop
   // layout below, which is unchanged.
   if (!isDesktop) {
-    const num = (v: any) => (v == null ? 0 : parseFloat(v));
     const reference: any[] = baseline?.points ?? lastMonthFlow;
     const byDay = new Map<number, { day: number; thisMonth?: number; reference?: number }>();
     for (const e of reference) {
@@ -241,7 +231,7 @@ export default function Dashboard() {
       byDay.set(day, row);
     }
     const phoneChart = [...byDay.values()].sort((a, b) => a.day - b.day);
-    const lineColor = isDark ? "#a5b4fc" : "#6366f1";
+    const lineColor = isDark ? "#2dd4bf" : "#0f766e";
     const priorLineColor = isDark ? "#5b6577" : "#9ca3af";
     const axisColor = isDark ? "#8f99a8" : "#6b7280";
     return (
@@ -249,30 +239,12 @@ export default function Dashboard() {
         {oneOffSheet}
         <div className="space-y-4 min-w-0">
           {snapshot ? (
-            <>
-              <SafetyMarginHero
-                weekly={num(snapshot.safety_margin_weekly)}
-                month={num(snapshot.safety_margin)}
-                perDay={num(snapshot.safety_margin_today)}
-                pending={{ count: snapshot.pending_cards_count ?? 0, total: num(snapshot.pending_cards_total) }}
-                lastSync={lastBankSync(bankConnections)}
-                hidden={balancesHidden}
-              />
-              <SpendableTile
-                weekly={num(snapshot.left_to_spend_weekly)}
-                today={num(snapshot.spendable_today)}
-                onPace={!!snapshot.on_pace}
-                hidden={balancesHidden}
-              />
-            </>
+            <SnapshotHero snapshot={snapshot} primaryCheckingId={primaryChecking?.id} hidden={balancesHidden} isWide={false} />
           ) : (
-            <div className="card text-sm text-gray-400">Loading…</div>
+            <div className="card text-sm text-muted">Loading…</div>
           )}
           <button type="button" className="btn-primary w-full min-h-[44px]" disabled={!primaryChecking} onClick={() => setPlanOpen(true)}>+ Plan a one-off</button>
-          {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
-          <PlannedTransferReminder />
-          <BillsToConfirm />
-          <AmountDrift />
+          <NeedsAttention risk={weeklyDigest?.risk} />
         </div>
         {isWide && (
           <div className="space-y-4 min-w-0">
@@ -307,18 +279,17 @@ export default function Dashboard() {
     <div className="space-y-6">
       {oneOffSheet}
       <div>
-        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Dashboard <button onClick={() => setShowHelp(true)} className="text-gray-400 hover:text-indigo-500 font-normal"><HelpCircle size={15} /></button></h2>
+        <h2 className="text-xl font-bold text-gray-900 flex items-center gap-1.5">Dashboard <button onClick={() => setShowHelp(true)} className="text-muted hover:text-accent font-normal"><HelpCircle size={15} /></button></h2>
         <p className="text-sm text-gray-500">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
         <BankSyncStatusLine accounts={accounts} cards={cards} />
       </div>
 
-      {/* Anything asking for an action goes first. These were sitting below
-          the digest, so a transfer waiting to be scheduled was easy to scroll
-          past on a page whose top half is reference figures. */}
-      {weeklyDigest?.risk && <RiskBanner risk={weeklyDigest.risk} />}
-      <PlannedTransferReminder />
-      <BillsToConfirm />
-      <AmountDrift />
+      {/* The hero leads; anything asking for an action follows it. */}
+      {snapshot && (
+        <SnapshotHero snapshot={snapshot} primaryCheckingId={primaryChecking?.id} hidden={balancesHidden} isWide />
+      )}
+
+      <NeedsAttention risk={weeklyDigest?.risk} />
 
       {/* Wide screens gain a COLUMN, not width. These panels are label/value
           lists and short prose, so stretching two of them to 900px only pads
@@ -328,11 +299,11 @@ export default function Dashboard() {
           compact label/value lists, so both get less width than Household
           Snapshot and Month in Review, which actually need the room. */}
       {(ats || snapshot) && (
-        <div className="grid md:grid-cols-2 2xl:grid-cols-[0.85fr_1.15fr_1.15fr_0.85fr] gap-6">
+        <div className="grid md:grid-cols-2 2xl:grid-cols-[0.85fr_1.15fr_0.85fr] gap-6">
           {ats && (
-            <div className="card bg-gradient-to-br from-indigo-50 to-blue-50 border-indigo-100 dark:from-indigo-950/40 dark:to-blue-950/40 dark:border-indigo-900/50">
+            <div className="card">
               <div className="flex items-center gap-2 mb-3">
-                <Wallet size={16} className="text-indigo-500" />
+                <Wallet size={16} className="text-accent" />
                 <h3 className="font-semibold text-gray-900 dark:text-white">
                   Available to Spend —{" "}
                   {new Date().toLocaleDateString("en-US", { month: "long" })}
@@ -374,138 +345,12 @@ export default function Dashboard() {
             </div>
           )}
 
-          {snapshot && (
-            <div className="card bg-gradient-to-br from-emerald-50 to-teal-50 border-emerald-100 dark:from-emerald-950/40 dark:to-teal-950/40 dark:border-emerald-900/50">
-              <div className="flex items-center gap-2 mb-3">
-                <Wallet size={16} className="text-emerald-600" />
-                <h3 className="font-semibold text-gray-900 dark:text-white">Household Snapshot</h3>
-                {/* The snapshot shows no separate Leftover line, so its history
-                    sits here beside the other figures it feeds. */}
-                <WhatChanged metric={{ key: "leftover", title: "Leftover" }} />
-                <VerificationFlagButton
-                  feature="household_snapshot"
-                  referenceType="account"
-                  referenceId={primaryChecking?.id}
-                  observed={{
-                    left_to_spend: snapshot.left_to_spend,
-                    left_to_spend_weekly: snapshot.left_to_spend_weekly,
-                    safety_margin: snapshot.safety_margin,
-                    safety_margin_weekly: snapshot.safety_margin_weekly,
-                  }}
-                  expectedFields={[
-                    { key: "left_to_spend", label: "Left to Spend (monthly)" },
-                    { key: "safety_margin", label: "Safety Margin (monthly)" },
-                  ]}
-                  className="ml-auto"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center justify-center gap-1">
-                    Spendable this week
-                    <HowCalculated title="Spendable this week"
-                      explanations={[snapshot.explain?.left_to_spend, snapshot.explain?.spendable_week, snapshot.explain?.spendable_today]}
-                      helpText={SPENDABLE_HELP} />
-                    <WhatChanged metric={{ key: "left_to_spend", title: "Spendable this month" }} />
-                  </p>
-                  <p className={`text-xl font-bold tabular-nums ${snapshot.on_pace ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>{maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.left_to_spend_weekly)))}</p>
-                  <p className={`text-xs mt-1 ${snapshot.on_pace ? "text-emerald-500 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>
-                    {/* Signed, not Math.abs(). When the week is overspent this
-                        figure is how much a day must come BACK, and stripping
-                        the minus rendered an over-pace deficit as a positive
-                        daily allowance -- the opposite of what it means, on the
-                        one number the household reads before spending. */}
-                    {parseFloat(snapshot.spendable_today) < 0 ? "−" : ""}{maskIfHidden(balancesHidden, fmt(Math.abs(parseFloat(snapshot.spendable_today))))}/day · {snapshot.on_pace ? "on pace" : "over pace"}
-                  </p>
-                  {/* Weekly is this figure prorated by the share of the month
-                      remaining -- same method the spreadsheet uses, so the two
-                      lines are one calculation at two scales. */}
-                  <p className="text-xs text-gray-400 mt-1">{maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.left_to_spend)))} this month</p>
-                </div>
-                <div className="text-center p-3 bg-white/60 dark:bg-black/20 rounded-lg">
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 flex items-center justify-center gap-1">
-                    Safety Margin (this week)
-                    <HowCalculated title="Safety Margin"
-                      explanations={[snapshot.explain?.safety_margin, snapshot.explain?.safety_margin_week, snapshot.explain?.safety_margin_today]}
-                      helpText={MARGIN_HELP} />
-                    <WhatChanged metric={{ key: "safety_margin", title: "Safety Margin (month)" }} />
-                  </p>
-                  <p className={`text-xl font-bold tabular-nums ${parseFloat(snapshot.safety_margin_weekly) < 0 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400"}`}>{maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.safety_margin_weekly)))}</p>
-                  <p className={`text-xs mt-1 ${parseFloat(snapshot.safety_margin_today) < 0 ? "text-red-500 dark:text-red-400" : "text-amber-500 dark:text-amber-400"}`}>
-                    {/* Safety Margin's own per-day figure, same shape as
-                        Spendable's $/day line above -- safety_margin_weekly
-                        prorated across the days left this week. */}
-                    {parseFloat(snapshot.safety_margin_today) < 0 ? "−" : ""}{maskIfHidden(balancesHidden, fmt(Math.abs(parseFloat(snapshot.safety_margin_today))))}/day
-                  </p>
-                  <p className="text-xs text-gray-400 mt-1">{maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.safety_margin)))} this month</p>
-                  {/* The other decision boundary: below zero the plan already
-                      runs into savings, so money has to come back out. */}
-                  {parseFloat(snapshot.savings_pull_needed) > 0 && (
-                    <p className="text-[11px] text-red-600 dark:text-red-400 mt-1.5 leading-snug">
-                      Pull {maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.savings_pull_needed)))} from savings
-                    </p>
-                  )}
-                </div>
-              </div>
-              {/* A warning signal, not a spending figure: Safety Margin reads
-                  next month's low, so a dip further out shows here instead --
-                  plain (sign-colored) when ok, amber below the user's safety
-                  cushion, red below $0 on the 3-month row (status decided by
-                  the backend's lookahead_status). When next month's low is a
-                  distinct date/amount from the 3-month low, it gets its own
-                  row above the 3-month one -- see lowestBalanceRows() --
-                  with a "move money into checking" line right under the
-                  first row when the backend says next month dips below $0. */}
-              {lowestBalanceRows(snapshot).map((row, i) => {
-                const status = snapshot.lookahead_status ?? "ok";
-                const warn = row.isLookaheadRow && status !== "ok";
-                const figureClass = warn
-                  ? status === "danger"
-                    ? "text-red-600 dark:text-red-400"
-                    : "text-amber-600 dark:text-amber-400"
-                  : row.amount < 0
-                    ? "text-red-600 dark:text-red-400"
-                    : "text-green-600 dark:text-green-400";
-                return (
-                  <div key={row.label}>
-                    <p className={`text-xs text-gray-500 dark:text-gray-400 ${i === 0 ? "mt-3" : "mt-1"} text-center`}>
-                      {row.label}:{" "}
-                      <span className={`font-semibold tabular-nums ${figureClass}`}>
-                        {maskIfHidden(balancesHidden, fmt(row.amount))}
-                      </span>{" "}
-                      on {new Date(row.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}{" "}
-                      {row.isLookaheadRow && (
-                        <span className="inline-flex align-middle">
-                          <HowCalculated title="3-month lowest point" explanations={[snapshot.explain?.lookahead_minimum]} />
-                          <WhatChanged metric={{ key: "lookahead_minimum", title: "3-month lowest point" }} />
-                        </span>
-                      )}
-                      {warn && (
-                        <span className={`block mt-0.5 font-medium ${figureClass}`}>
-                          {status === "danger"
-                            ? "below $0"
-                            : `below your ${maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.safety_cushion)))} cushion`}
-                        </span>
-                      )}
-                    </p>
-                    {i === 0 && snapshot.next_month_minimum_date && parseFloat(snapshot.move_to_checking_needed) > 0 && (
-                      <p className="text-[11px] text-red-600 dark:text-red-400 mt-1 text-center">
-                        Move {maskIfHidden(balancesHidden, fmt(parseFloat(snapshot.move_to_checking_needed)))} into checking by{" "}
-                        {new Date(new Date(snapshot.next_month_minimum_date + "T12:00:00").getFullYear(), new Date(snapshot.next_month_minimum_date + "T12:00:00").getMonth(), 1)
-                          .toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
       {/* Spans the row while the band is two-up: wrapping alone into a
           half-width slot left the other half empty. */}
       {summary && (
-        <div className="card md:col-span-2 2xl:col-span-1">
+        <div className="card">
           <div className="flex items-center gap-2 mb-2">
-            <BookOpen size={16} className="text-indigo-500" />
+            <BookOpen size={16} className="text-accent" />
             <h3 className="font-semibold text-gray-900 dark:text-white">
               Month in Review —{" "}
               {new Date(summaryYear, summaryMonth - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })}
@@ -540,7 +385,7 @@ export default function Dashboard() {
           overflowing off-screen. Net Position is the one figure not shown
           as a single number anywhere else, so it stays -- as the narrow
           bookend on the far right of this row rather than its own. */}
-      <div className={`stat-card animate-fade-slide-up animate-delay-100 ${netPosition >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
+      <div className={`stat-card md:col-span-2 2xl:col-span-1 animate-fade-slide-up animate-delay-100 ${netPosition >= 0 ? "stat-card-accent-green" : "stat-card-accent-red"}`}>
         <span className="stat-label flex items-center gap-1">
           Net Position
           <HowCalculated title="Net Position" explanations={netPos ? [netPos.explain] : []} helpText={NET_POSITION_HELP} />
@@ -551,7 +396,7 @@ export default function Dashboard() {
         </span>
         <span className="text-xs text-gray-500">checking minus due</span>
         <div className="flex items-center justify-between mt-1">
-          <span className="text-[10px] text-gray-400">spending vs last month</span>
+          <span className="text-[13px] text-gray-400">spending vs last month</span>
           <div className="flex items-center gap-2">
             <TrendBadge pct={momPct} inverse />
             <SparkLine data={sparkData} color={netPosition >= 0 ? "#22c55e" : "#ef4444"} />
@@ -609,13 +454,13 @@ export default function Dashboard() {
           ? new Date(baseline.taken_on + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })
           : null;
 
-        const lineColor = isDark ? "#a5b4fc" : "#6366f1";
+        const lineColor = isDark ? "#2dd4bf" : "#0f766e";
         const priorLineColor = isDark ? "#5b6577" : "#9ca3af";
         return (
           <div className="card">
             <div className="flex items-start justify-between mb-4">
               <div>
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><TrendingUp size={16} className="text-indigo-500" /> Balance Flow</h3>
+                <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><TrendingUp size={16} className="text-accent" /> Balance Flow</h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                   {refIsForecast
                     ? <>{thisMonthName} so far, vs. forecast from {savedOn}</>
@@ -672,11 +517,11 @@ export default function Dashboard() {
           <div className="grid md:grid-cols-2 gap-6">
             {weeklyDigest.categories.length > 0 && (
               <div>
-                <div className="flex items-center justify-between mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">
-                  <p className="text-xs font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wider">By Category</p>
+                <div className="flex items-center justify-between mb-2 pb-1 border-b-2 border-line">
+                  <p className="text-xs font-bold text-accent uppercase tracking-wider">By Category</p>
                   <button
                     onClick={() => setCategorySortAlpha(v => !v)}
-                    className="text-[11px] font-medium text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-300"
+                    className="text-[13px] font-medium text-gray-400 dark:text-gray-500 hover:text-accent"
                   >
                     {categorySortAlpha ? "A–Z" : "Highest first"}
                   </button>
@@ -692,10 +537,10 @@ export default function Dashboard() {
                     const pct = budgeted > 0 ? Math.min(100, (actual / budgeted) * 100) : 0;
                     const overBudget = budgeted > 0 && actual > budgeted;
                     return (
-                      <div key={c.category_id} className={`relative rounded overflow-hidden ${budgeted > 0 ? `border-l-2 ${overBudget ? "border-red-500" : "border-indigo-400"}` : ""}`}>
+                      <div key={c.category_id} className={`relative rounded overflow-hidden ${budgeted > 0 ? `border-l-2 ${overBudget ? "border-red-500" : "border-accent"}` : ""}`}>
                         {budgeted > 0 && (
                           <div
-                            className={`absolute inset-y-0 left-0 ${overBudget ? "bg-red-200/70 dark:bg-red-900/40" : "bg-indigo-200/70 dark:bg-indigo-800/40"}`}
+                            className={`absolute inset-y-0 left-0 ${overBudget ? "bg-red-200/70 dark:bg-red-900/40" : "bg-accent/20"}`}
                             style={{ width: `${pct}%` }}
                           />
                         )}
@@ -715,7 +560,7 @@ export default function Dashboard() {
 
             {weeklyDigest.top_merchants.length > 0 && (
               <div>
-                <p className="text-xs font-bold text-indigo-600 dark:text-indigo-300 uppercase tracking-wider mb-2 pb-1 border-b-2 border-indigo-100 dark:border-indigo-900/50">Top Merchants</p>
+                <p className="text-xs font-bold text-accent uppercase tracking-wider mb-2 pb-1 border-b-2 border-line">Top Merchants</p>
                 <div className="space-y-1.5 text-sm">
                   {weeklyDigest.top_merchants.slice(0, 5).map((m: any) => (
                     <div key={m.name} className="flex justify-between gap-4 px-1.5 py-1 text-gray-600 dark:text-gray-400">
@@ -742,7 +587,7 @@ export default function Dashboard() {
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-gray-900 flex items-center gap-2"><CreditCard size={16} /> Credit Cards</h3>
-            <button onClick={() => navigate("/credit-cards")} className="text-xs text-indigo-600 hover:underline">Manage →</button>
+            <button onClick={() => navigate("/credit-cards")} className="text-xs text-accent hover:underline">Manage →</button>
           </div>
           {cards.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">No credit cards added yet</p>
@@ -773,7 +618,7 @@ export default function Dashboard() {
                         {maskIfHidden(balancesHidden, fmt(cycleSpend))} spent this cycle
                       </p>
                       {c.statement_stale_reason && (
-                        <p className="text-[11px] text-amber-600 mt-0.5">statement figure may be stale</p>
+                        <p className="text-[13px] text-amber-600 mt-0.5">statement figure may be stale</p>
                       )}
                       <div className="mt-1 w-32">
                         <div className="progress-bar">
@@ -839,7 +684,7 @@ export default function Dashboard() {
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Calendar size={16} /> Upcoming Bills</h3>
-            <button onClick={() => navigate("/recurring")} className="text-xs text-indigo-600 hover:underline">Manage →</button>
+            <button onClick={() => navigate("/recurring")} className="text-xs text-accent hover:underline">Manage →</button>
           </div>
           {upcomingBills.length === 0 ? (
             <p className="text-sm text-gray-400 text-center py-4">{recurring.length === 0 ? "No recurring bills set up" : "No bills due in the next 30 days"}</p>
@@ -863,7 +708,7 @@ export default function Dashboard() {
                     </div>
                     <span className="text-sm font-semibold text-red-600 tabular-nums">
                       {maskIfHidden(balancesHidden, fmt(r.amount))}
-                      {r.is_actual && <span className="ml-1 text-[10px] font-normal text-gray-400 align-middle">actual</span>}
+                      {r.is_actual && <span className="ml-1 text-[13px] font-normal text-gray-400 align-middle">actual</span>}
                     </span>
                   </div>
                 );
@@ -877,7 +722,7 @@ export default function Dashboard() {
       {/* Empty state for new users */}
       {accounts.length === 0 && recurring.length === 0 && (
         <div className="card text-center py-10">
-          <AlertCircle className="mx-auto text-indigo-300 mb-3" size={40} />
+          <AlertCircle className="mx-auto text-muted mb-3" size={40} />
           <h3 className="font-semibold text-gray-700 mb-1">Welcome to OfflineBudget!</h3>
           <p className="text-sm text-gray-500 mb-4">Start by adding your checking account and recurring income/bills.</p>
           <div className="flex gap-3 justify-center">
