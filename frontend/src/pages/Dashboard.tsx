@@ -596,7 +596,7 @@ export default function Dashboard() {
 
       {/* Same idea: a third column rather than two stretched ones, so
           All Accounts rises out of the tail of the page. */}
-      <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6">
+      <div className={`grid md:grid-cols-2 ${isXWide ? "" : "2xl:grid-cols-3"} gap-6`}>
         {/* Checking stacks above Credit cards in one column, so the grid
             keeps its three slots. */}
         <div className="space-y-6">

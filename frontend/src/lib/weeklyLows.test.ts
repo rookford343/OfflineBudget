@@ -91,4 +91,8 @@ describe("chart geometry", () => {
     expect(cushionOffsetPx(0, 2500)).toBe(0);
     expect(cushionOffsetPx(-5, 2500)).toBe(0);
   });
+  test("a non-finite cushion is treated as 0", () => {
+    expect(scaleMaxFor([low({ amount: "800.00" })], NaN)).toBe(800);
+    expect(cushionOffsetPx(NaN, 2500)).toBe(0);
+  });
 });

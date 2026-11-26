@@ -72,7 +72,7 @@ export const STUB_PX = 4;
 
 /** Top of the chart's $0-based scale: the larger of the biggest low and the cushion (1 if neither is positive). */
 export function scaleMaxFor(lows: WeeklyLow[], cushion: number): number {
-  let top = cushion;
+  let top = Number.isFinite(cushion) ? cushion : 0;
   for (const l of lows) {
     if (l.amount == null) continue;
     const v = parseFloat(l.amount);
@@ -91,5 +91,5 @@ export function barHeightPx(amount: string | null, scaleMax: number): number {
 
 /** Display-only distance of the cushion line above the chart baseline. */
 export function cushionOffsetPx(cushion: number, scaleMax: number): number {
-  return Math.round((Math.max(0, cushion) / scaleMax) * CHART_PX);
+  return Math.round((Math.max(0, Number.isFinite(cushion) ? cushion : 0) / scaleMax) * CHART_PX);
 }

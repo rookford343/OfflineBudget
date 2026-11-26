@@ -55,6 +55,9 @@ describe("WeeklyLowsChart geometry and order", () => {
     const off = cushionOffsetPx(500, scaleMaxFor(lows, 500));
     expect(m![0]).toContain(`bottom:${off}px`);
     expect(html.match(/data-testid="cushion-line"/g)?.length).toBe(1);
+    // spans exactly the bar row (n bars of 40px + gaps of 6px), capped at the chart width
+    expect(m![0]).toContain(`width:min(100%, ${lows.length * 40 + (lows.length - 1) * 6}px)`);
+    expect(m![0]).not.toContain("inset-x-0");
   });
 
   test("bar heights come from barHeightPx", () => {

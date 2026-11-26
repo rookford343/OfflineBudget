@@ -68,8 +68,8 @@ export function WeeklyLowsChart({
         <div
           data-testid="cushion-line"
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 border-t border-dashed border-muted opacity-70"
-          style={{ bottom: cushionOffsetPx(cushion, scaleMax) }}
+          className="pointer-events-none absolute left-0 border-t border-dashed border-muted opacity-70"
+          style={{ bottom: cushionOffsetPx(cushion, scaleMax), width: `min(100%, ${lows.length * 40 + (lows.length - 1) * 6}px)` }}
         />
       </div>
       <div data-testid="month-ticks" className="mt-1 flex justify-start gap-[6px] h-4 text-[13px] text-muted">
