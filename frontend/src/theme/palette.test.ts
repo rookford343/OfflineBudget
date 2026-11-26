@@ -86,3 +86,18 @@ describe("temporary indigo alias", () => {
     expect(contrastRatio(scale[k], "#131c2e")).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+describe("dark indigo text overrides", () => {
+  const rules = [...css.matchAll(/\.dark \.text-indigo-\d+[^{]*\{\s*color:\s*([^;}]+?)\s*;?\s*\}/g)];
+  const teal = new Set(["var(--c-accent)", "#5eead4", "#2dd4bf"]);
+  test("rules exist", () => expect(rules.length).toBeGreaterThan(0));
+  test("every rule uses a teal color, not a hard-coded indigo", () => {
+    for (const r of rules) expect(teal.has(r[1].toLowerCase())).toBe(true);
+  });
+  test("each resolves to >= 4.5 on the dark card", () => {
+    for (const r of rules) {
+      const hex = r[1] === "var(--c-accent)" ? dark["accent"] : r[1];
+      expect(contrastRatio(hex, dark["card"])).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+});
