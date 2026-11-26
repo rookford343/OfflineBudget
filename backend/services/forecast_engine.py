@@ -1288,8 +1288,20 @@ def build_forecast(
 
     # Pre-compute which recurring item IDs have linked actuals, and on which dates.
     # Used to suppress projected entries when the actual arrives on a different day.
+    # Read from its own query, reaching back before start_date: a monthly item
+    # matched on the 12th must still suppress the projection on the 30th of a
+    # forecast that starts on the 26th (a biweekly one needs 3 days of reach).
+    # all_actuals / actuals_by_date stay start-bound; they drive balances.
+    match_from = min(start_date.replace(day=1), start_date - timedelta(days=3))
+    match_actuals = db.query(models.Transaction).filter(
+        models.Transaction.user_id == user_id,
+        models.Transaction.account_id == account_id,
+        models.Transaction.is_actual == True,
+        models.Transaction.date >= match_from,
+        models.Transaction.date <= end_date,
+    ).all()
     actual_by_ri: dict[int, list[date]] = {}
-    for t in all_actuals:
+    for t in match_actuals:
         if t.recurring_item_id:
             actual_by_ri.setdefault(t.recurring_item_id, []).append(t.date)
 

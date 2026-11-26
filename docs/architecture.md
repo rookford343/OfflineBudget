@@ -257,6 +257,7 @@ from the horizon on:
 - A start at or before it (the year views, `/monthly-summary`) walks its history as before, then
   re-seeds at the horizon to the bank balance less the actuals since. An old unmatched projection or an
   old checkpoint stays in the history and stops there.
+- A recurring item matched earlier in the start's month (or within 3 days before the start, for biweekly and weekly) stays suppressed: `build_forecast` reads the linked actuals for that match from a separate query reaching back before `start_date`; balances and on-date actual lines still read only from `start_date`.
 - A walk that reaches today reverses today's actuals from the bank balance too (it re-applies them).
 - The card cycle after a locked payoff is anchored to today, not to the window's start.
 
@@ -392,3 +393,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 - v11: Available to Spend rebuilt before budgets on the shared layer
 - v12: Available to Spend counts balance-only cards like Left to Spend
 - v13: a card payment credited but not yet in checking stays in the forecast until the debit lands
+- v14: A monthly bill already paid earlier this month is no longer projected again later in the month.
