@@ -9,10 +9,28 @@ All names and amounts are invented; the repo is public."""
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from backend import models
 from backend.services.forecast_engine import build_forecast
 
 START = date(2026, 11, 26)
+
+
+def _freeze_today(monkeypatch, fixed: date) -> None:
+    """Pin date.today() in every module on the build_forecast path."""
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return fixed
+    monkeypatch.setattr("backend.services.forecast_engine.date", _FixedDate)
+    monkeypatch.setattr("backend.services.budget_snapshot.date", _FixedDate)
+
+
+@pytest.fixture(autouse=True)
+def _pin_today(monkeypatch):
+    # Default to START; tests with another start re-pin to their own start.
+    _freeze_today(monkeypatch, START)
 
 
 def _item(db, user, account, *, floating=True, day=0,
@@ -86,3 +104,25 @@ def test_biweekly_actual_just_before_start_suppressed(db_session, test_user, tes
     _actual(db_session, test_user, test_account, item, date(2026, 11, 25))
     entries = build_forecast(db_session, test_user.id, test_account.id, START, date(2026, 12, 5))
     assert date(2026, 11, 27) not in _projected_dates(entries)
+
+
+def test_previous_month_actual_just_before_start_does_not_suppress(
+        db_session, test_user, test_account, monkeypatch):
+    start = date(2026, 11, 2)
+    _freeze_today(monkeypatch, start)
+    item = _item(db_session, test_user, test_account)
+    _actual(db_session, test_user, test_account, item, date(2026, 10, 30))
+    entries = build_forecast(db_session, test_user.id, test_account.id, start, date(2026, 12, 5))
+    assert date(2026, 11, 30) in _projected_dates(entries)
+
+
+def test_weekend_first_bill_not_hidden_by_last_months_payment(
+        db_session, test_user, test_account, monkeypatch):
+    # May 1 2027 is a Saturday, so the bill is projected on Fri Apr 30. The
+    # April 1 payment belongs to April; it must not suppress May's bill.
+    start = date(2027, 4, 20)
+    _freeze_today(monkeypatch, start)
+    item = _item(db_session, test_user, test_account, floating=False, day=1)
+    _actual(db_session, test_user, test_account, item, date(2027, 4, 1))
+    entries = build_forecast(db_session, test_user.id, test_account.id, start, date(2027, 5, 10))
+    assert date(2027, 4, 30) in _projected_dates(entries)

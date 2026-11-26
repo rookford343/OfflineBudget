@@ -1402,7 +1402,10 @@ def build_forecast(
                 ri_actual_dates = actual_by_ri[item.id]
                 freq = getattr(item, "frequency", None)
                 if freq in (models.RecurringFrequency.monthly, models.RecurringFrequency.yearly):
-                    if any(d.year == current.year and d.month == current.month for d in ri_actual_dates):
+                    # natural_fire_date, not current: a weekend 1st posts on the prior
+                    # month's last Friday, but belongs to the month it is due in.
+                    if any(d.year == natural_fire_date.year and d.month == natural_fire_date.month
+                           for d in ri_actual_dates):
                         continue
                 else:
                     if any(abs((d - current).days) <= 3 for d in ri_actual_dates):
