@@ -751,13 +751,14 @@ export default function Recurring() {
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Scheduled Change <span className="text-gray-400 font-normal">(optional)</span></label>
-                  <input type="number" step="0.01" className="input" placeholder="New amount" value={form.pending_amount} onChange={e => setForm({ ...form, pending_amount: e.target.value })} />
+                  <label className="label">Upcoming amount change <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input type="number" step="0.01" className="input" placeholder="New amount, e.g. 225.00" value={form.pending_amount} onChange={e => setForm({ ...form, pending_amount: e.target.value })} />
                 </div>
                 <div>
-                  <label className="label">Starting On</label>
+                  <label className="label">New amount starts</label>
                   <input type="date" className="input" value={form.pending_amount_effective_date} onChange={e => setForm({ ...form, pending_amount_effective_date: e.target.value })} />
                 </div>
+                <p className="col-span-2 text-[13px] text-gray-500 dark:text-gray-400">Use this when the payment amount will change on a future date, like a price increase. Leave blank if it stays the same.</p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div><label className="label">Start Date</label><input type="date" className="input" value={form.start_date} onChange={e => setForm({ ...form, start_date: e.target.value })} required /></div>
