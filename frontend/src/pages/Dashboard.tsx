@@ -6,7 +6,7 @@ import { fmt, utilColor, utilBg, firstOfMonth, today } from "../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { maskMoneyText } from "../lib/maskMoney";
 import { useIsDarkMode } from "../store/theme";
-import { CreditCard, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle, TrendingUp } from "lucide-react";
+import { CreditCard, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle } from "lucide-react";
 import { AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import HelpPanel from "../components/HelpPanel";
 import HowCalculated from "../components/HowCalculated";
@@ -21,6 +21,7 @@ import UpcomingOneOffs from "../components/phone/UpcomingOneOffs";
 import PlanOneOffSheet from "../components/phone/PlanOneOffSheet";
 import { useMinWidth } from "../lib/useMinWidth";
 import { SnapshotHero } from "../components/dashboard/SnapshotHero";
+import { BalanceFlowCard } from "../components/dashboard/BalanceFlowCard";
 import { UpcomingBillsCard } from "../components/dashboard/UpcomingBillsCard";
 
 /** The next date on/after `today` whose day-of-month is `dueDay` (clamped to
@@ -180,6 +181,9 @@ export default function Dashboard() {
     enabled: !!primaryChecking,
   });
   const isDark = useIsDarkMode();
+  // Rendered in exactly one place: the right column when isXWide, else the
+  // Weekly Digest row.
+  const balanceFlowProps = { balanceFlow, lastMonthFlow, baseline, flowFigures, lastMonthRange, monthStart, todayStr, isDark, balancesHidden };
   const { data: snapshot } = useQuery<any>({
     queryKey: ["budget-snapshot", primaryChecking?.id],
     queryFn: () => analyticsApi.budgetSnapshot(primaryChecking.id),
@@ -289,7 +293,7 @@ export default function Dashboard() {
 
       {/* The hero leads; anything asking for an action follows it. */}
       {isXWide ? (
-        <div className="grid grid-cols-[minmax(0,960px)_minmax(320px,1fr)] gap-6 items-start">
+        <div className="grid grid-cols-[minmax(0,720px)_minmax(0,1fr)] gap-6 items-start">
           <div>
             {snapshot && (
               <SnapshotHero snapshot={snapshot} primaryCheckingId={primaryChecking?.id} hidden={balancesHidden} isWide />
@@ -297,7 +301,7 @@ export default function Dashboard() {
           </div>
           <div className="space-y-6">
             <NeedsAttention risk={weeklyDigest?.risk} />
-            <UpcomingBillsCard bills={upcomingBills} hasRecurring={recurring.length > 0} hidden={balancesHidden} />
+            <BalanceFlowCard {...balanceFlowProps} />
           </div>
         </div>
       ) : (
@@ -432,96 +436,8 @@ export default function Dashboard() {
           narrow its half of this row gets, since Tailwind breakpoints are
           viewport-width based, not container-based -- 2xl leaves enough
           room that this doesn't feel cramped. */}
-      <div className="grid 2xl:grid-cols-2 gap-6">
-      {(balanceFlow.length > 0 || lastMonthFlow.length > 0 || !!baseline?.points) && (() => {
-        // Reference line: the saved start-of-month forecast when there is
-        // one, otherwise last month's actuals. Keyed by day-of-month either
-        // way so both lines share an X position.
-        const reference: any[] = baseline?.points ?? lastMonthFlow;
-        const refIsForecast = !!baseline?.points;
-        const byDay = new Map<number, { day: number; thisMonth?: number; reference?: number }>();
-        for (const e of reference) {
-          const day = parseInt(e.date.slice(-2), 10);
-          byDay.set(day, { day, reference: parseFloat(e.projected_balance) });
-        }
-        for (const e of balanceFlow) {
-          const day = parseInt(e.date.slice(-2), 10);
-          const row = byDay.get(day) ?? { day };
-          row.thisMonth = parseFloat(e.projected_balance);
-          byDay.set(day, row);
-        }
-        const chartData = [...byDay.values()].sort((a, b) => a.day - b.day);
-
-        const last = balanceFlow.length ? parseFloat(balanceFlow[balanceFlow.length - 1].projected_balance) : null;
-
-        const lastMonthName = new Date(lastMonthRange.start + "T12:00:00").toLocaleDateString("en-US", { month: "long" });
-        const thisMonthName = new Date(monthStart + "T12:00:00").toLocaleDateString("en-US", { month: "long" });
-        const todayDay = parseInt(todayStr.slice(-2), 10);
-        const sameDayRef = reference.find((e: any) => parseInt(e.date.slice(-2), 10) === todayDay);
-        const refToday = sameDayRef ? parseFloat(sameDayRef.projected_balance) : null;
-
-        // Headline: drift from forecast when there's a baseline, otherwise
-        // the month-to-date change it has always shown.
-        const rawDelta = refIsForecast ? flowFigures?.drift_from_forecast : flowFigures?.month_to_date_change;
-        const delta = rawDelta != null ? parseFloat(rawDelta) : null;
-        const sameDayPct = refToday != null && last != null && refToday !== 0
-          ? ((last - refToday) / Math.abs(refToday)) * 100
-          : null;
-        const refName = refIsForecast ? "Forecast" : lastMonthName;
-        const savedOn = refIsForecast
-          ? new Date(baseline.taken_on + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })
-          : null;
-
-        const lineColor = isDark ? "#2dd4bf" : "#0f766e";
-        const priorLineColor = isDark ? "#5b6577" : "#9ca3af";
-        return (
-          <div className="card">
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h3 className="font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2"><TrendingUp size={16} className="text-accent" /> Balance Flow</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {refIsForecast
-                    ? <>{thisMonthName} so far, vs. forecast from {savedOn}</>
-                    : <>{thisMonthName} so far, vs. all of {lastMonthName}</>}
-                </p>
-              </div>
-              {delta != null && (
-                <span className={`text-xl font-bold tabular-nums ${delta >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}>
-                  {maskIfHidden(balancesHidden, `${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta))}`)}
-                </span>
-              )}
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <AreaChart data={chartData} margin={{ top: 5, right: 10, left: 10, bottom: 5 }}>
-                <defs>
-                  <linearGradient id="balanceFlowGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={lineColor} stopOpacity={0.18} />
-                    <stop offset="95%" stopColor={lineColor} stopOpacity={0.01} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? "#3a4051" : "#e5e7eb"} />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: isDark ? "#8f99a8" : "#6b7280" }} />
-                <YAxis tick={{ fontSize: 11, fill: isDark ? "#8f99a8" : "#6b7280" }} tickFormatter={(v: number) => balancesHidden ? "•••" : fmt(v)} width={balancesHidden ? 40 : 70} domain={["auto", "auto"]} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: isDark ? "#2a2f3d" : "#ffffff", border: `1px solid ${isDark ? "#3a4051" : "#e5e7eb"}`, borderRadius: 8, fontSize: 12 }}
-                  labelStyle={{ color: isDark ? "#c4ccd8" : "#111827" }}
-                  formatter={(v: number, name: string) => [maskIfHidden(balancesHidden, fmt(v)), name === "thisMonth" ? thisMonthName : refName]}
-                  labelFormatter={(d: number) => `Day ${d}`}
-                />
-                <Area type="monotone" dataKey="thisMonth" stroke={lineColor} strokeWidth={2} fill="url(#balanceFlowGradient)" dot={false} connectNulls animationDuration={700} animationEasing="ease-out" />
-                <Line type="monotone" dataKey="reference" stroke={priorLineColor} strokeWidth={1.5} strokeDasharray="4 3" dot={false} connectNulls isAnimationActive={false} />
-              </AreaChart>
-            </ResponsiveContainer>
-            {sameDayRef && sameDayPct != null && (
-              <p className="text-xs text-gray-400 mt-2">
-                {refIsForecast ? <>Forecast for day {todayDay}: </> : <>In {lastMonthName} on day {todayDay}: </>}
-                {maskIfHidden(balancesHidden, fmt(refToday!))}
-                {" "}({sameDayPct >= 0 ? "+" : ""}{sameDayPct.toFixed(1)}%)
-              </p>
-            )}
-          </div>
-        );
-      })()}
+      <div className={`grid ${isXWide ? "" : "2xl:grid-cols-2"} gap-6`}>
+      {!isXWide && <BalanceFlowCard {...balanceFlowProps} />}
 
       {weeklyDigest && (
         <div className="card">
@@ -596,7 +512,7 @@ export default function Dashboard() {
 
       {/* Same idea: a third column rather than two stretched ones, so
           All Accounts rises out of the tail of the page. */}
-      <div className={`grid md:grid-cols-2 ${isXWide ? "" : "2xl:grid-cols-3"} gap-6`}>
+      <div className="grid md:grid-cols-2 2xl:grid-cols-3 gap-6">
         {/* Checking stacks above Credit cards in one column, so the grid
             keeps its three slots. */}
         <div className="space-y-6">
@@ -699,7 +615,7 @@ export default function Dashboard() {
         </div>
 
         {/* Upcoming bills (moves to the right column at 1700px+) */}
-        {!isXWide && <UpcomingBillsCard bills={upcomingBills} hasRecurring={recurring.length > 0} hidden={balancesHidden} />}
+        <UpcomingBillsCard bills={upcomingBills} hasRecurring={recurring.length > 0} hidden={balancesHidden} />
       <RecentTransactions />
       </div>
 

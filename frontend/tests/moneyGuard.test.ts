@@ -50,7 +50,7 @@ const ALLOWED: Record<string, string> = {
     "draft preview: sizes the unsaved allocation form against the upcoming bonuses; the backend applies the real split on save",
   "pages/Import.tsx:if (Math.abs(txnAmt - recurAmt) < 0.01) return null;":
     "draft check: decides whether to offer 'Update to' by comparing the row being imported with the linked item's amount; the difference is never displayed",
-  "pages/Dashboard.tsx:? ((last - refToday) / Math.abs(refToday)) * 100":
+  "components/dashboard/BalanceFlowCard.tsx:? ((last - refToday) / Math.abs(refToday)) * 100":
     "decision (c): percent change between two figures the backend already sent",
   "pages/Dashboard.tsx:return prev === 0 ? null : ((cur - prev) / prev) * 100;":
     "decision (c): percent change between two figures the backend already sent",
