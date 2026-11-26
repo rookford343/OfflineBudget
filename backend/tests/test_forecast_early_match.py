@@ -126,3 +126,16 @@ def test_weekend_first_bill_not_hidden_by_last_months_payment(
     _actual(db_session, test_user, test_account, item, date(2027, 4, 1))
     entries = build_forecast(db_session, test_user.id, test_account.id, start, date(2027, 5, 10))
     assert date(2027, 4, 30) in _projected_dates(entries)
+
+
+def test_weekend_first_bill_paid_early_not_double_counted(
+        db_session, test_user, test_account, monkeypatch):
+    # Due Sat May 1 2027, projected Fri Apr 30. Paid early on Apr 29: that is
+    # an April date, but it is 2 days before the natural due date, so it
+    # settles this bill and the Apr 30 projection must not appear.
+    start = date(2027, 4, 26)
+    _freeze_today(monkeypatch, start)
+    item = _item(db_session, test_user, test_account, floating=False, day=1)
+    _actual(db_session, test_user, test_account, item, date(2027, 4, 29))
+    entries = build_forecast(db_session, test_user.id, test_account.id, start, date(2027, 5, 10))
+    assert date(2027, 4, 30) not in _projected_dates(entries)

@@ -393,4 +393,4 @@ Hand-bumped alongside `CALC_VERSION`. One line per version, newest last.
 - v11: Available to Spend rebuilt before budgets on the shared layer
 - v12: Available to Spend counts balance-only cards like Left to Spend
 - v13: a card payment credited but not yet in checking stays in the forecast until the debit lands
-- v14: a monthly bill already paid earlier this month is no longer projected again later in the month; a weekend-1st bill shifted into the prior month still projects
+- v14: a monthly bill already paid earlier this month is no longer projected again later in the month; a weekend-1st bill shifted into the prior month still projects, or paid up to 3 days early

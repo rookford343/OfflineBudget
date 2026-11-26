@@ -23,5 +23,5 @@ CALC_CHANGELOG: dict[int, str] = {
     11: "Available to Spend rebuilt before budgets on the shared layer",
     12: "Available to Spend counts balance-only cards like Left to Spend",
     13: "a card payment credited but not yet in checking stays in the forecast until the debit lands",
-    14: "a monthly bill already paid earlier this month is no longer projected again later in the month; a weekend-1st bill shifted into the prior month still projects",
+    14: "a monthly bill already paid earlier this month is no longer projected again later in the month; a weekend-1st bill shifted into the prior month still projects, or paid up to 3 days early",
 }

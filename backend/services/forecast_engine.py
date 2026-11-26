@@ -1404,7 +1404,10 @@ def build_forecast(
                 if freq in (models.RecurringFrequency.monthly, models.RecurringFrequency.yearly):
                     # natural_fire_date, not current: a weekend 1st posts on the prior
                     # month's last Friday, but belongs to the month it is due in.
-                    if any(d.year == natural_fire_date.year and d.month == natural_fire_date.month
+                    # Also: paid up to 3 days before the natural due date, even when
+                    # that lands in the prior month (Sat May 1 bill paid Apr 28-29).
+                    if any((d.year == natural_fire_date.year and d.month == natural_fire_date.month)
+                           or 0 <= (natural_fire_date - d).days <= 3
                            for d in ri_actual_dates):
                         continue
                 else:
