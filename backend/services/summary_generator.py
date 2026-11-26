@@ -39,6 +39,22 @@ def _move_to_checking_line(snap) -> str | None:
     return f"Move {_fmt(snap.move_to_checking_needed)} into checking by {move_by.strftime('%b %-d')}"
 
 
+def email_subject(snap, today: date, with_weekly: bool) -> str:
+    """Amount-free subject that leads with the answer. `snap` is the same
+    snapshot the email body was built from (None when there is no checking
+    account, which gives the plain subject)."""
+    tail = f"Daily Budget Summary — {today.strftime('%B %-d, %Y')}"
+    if snap is None:
+        subject = tail
+    elif snap.savings_pull_needed > 0:
+        subject = f"Action needed: pull from savings · {tail}"
+    elif snap.lookahead_status in ("danger", "warning") or _move_to_checking_line(snap):
+        subject = f"Heads up: low point ahead · {tail}"
+    else:
+        subject = f"Covered this week · {tail}"
+    return subject + (" + Weekly Digest" if with_weekly else "")
+
+
 def _lowest_balance_rows(snap) -> list[tuple[str, Decimal, date]]:
     """[(label, amount, date), ...] for the "lowest balance" lines below the
     Household Snapshot cards -- shared ordering/same-date logic for both the
@@ -280,6 +296,7 @@ def _fires_soon(item: models.RecurringItem, today: date, days_ahead: int = 7) ->
 def generate_daily_summary(
     db: Session, user: models.User, *, weekly_digest: WeeklyDigest | None = None,
     since_lines: dict[str, str] | None = None, since_changes: list | None = None,
+    snapshot_out: list | None = None,
 ) -> tuple[str, str]:
     """Return (html_body, text_body) for a daily budget summary email.
 
@@ -292,6 +309,10 @@ def generate_daily_summary(
     email" line (metric_diff.since_last_email), printed under that figure. `since_changes`
     (metric_diff.explain_since_last_email) adds a closing section naming what
     moved each figure; empty or None leaves it out.
+
+    `snapshot_out`, when given, receives the snapshot used for the body (one
+    item, or nothing when there is no checking account) so the caller builds
+    the subject from the same numbers via `email_subject`.
     """
     since = since_lines or {}
     today = date.today()
@@ -304,6 +325,8 @@ def generate_daily_summary(
     ).order_by(models.Account.id).all()
     primary_account = primary_checking(db, user.id)
     snap = compute_budget_snapshot(db, user, primary_account.id, as_of=today) if primary_account else None
+    if snapshot_out is not None and snap is not None:
+        snapshot_out.append(snap)
 
     # UpcomingBill rows, sorted chronologically by due_date -- not by
     # day_of_month, which sorts a window spanning a month boundary out of

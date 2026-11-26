@@ -106,7 +106,7 @@ def _send_daily_summaries_locked() -> None:
     from backend.database import SessionLocal
     from backend import models
     from backend.services.email_service import send_email_via
-    from backend.services.summary_generator import generate_daily_summary, generate_weekly_digest
+    from backend.services.summary_generator import email_subject, generate_daily_summary, generate_weekly_digest
     from backend.services import scheduler_state, app_settings
 
     # Sync first, always. The report quotes balances, month-to-date spend and
@@ -220,13 +220,14 @@ def _send_daily_summaries_locked() -> None:
                     except Exception:  # noqa: BLE001
                         logger.exception("Daily summary: rollback after history failure failed")
                     readings, since, since_changes = None, {}, []
+                snap_box: list = []
                 html_body, text_body = generate_daily_summary(
                     db, user, weekly_digest=weekly_digest, since_lines=since,
-                    since_changes=since_changes,
+                    since_changes=since_changes, snapshot_out=snap_box,
                 )
-                subject = f"Daily Budget Summary — {date.today().strftime('%B %-d, %Y')}"
-                if weekly_digest is not None:
-                    subject += " + Weekly Digest"
+                subject = email_subject(
+                    snap_box[0] if snap_box else None, date.today(), weekly_digest is not None,
+                )
                 any_sent = False
                 for recipient in recipients:
                     ok, err = send_email_via(db, recipient, subject, html_body, text_body)
