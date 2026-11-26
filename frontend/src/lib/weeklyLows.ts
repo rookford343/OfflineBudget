@@ -62,9 +62,14 @@ export function monthTicks(lows: WeeklyLow[]): { index: number; label: string }[
   return ticks;
 }
 
-/** Red only below $0; there is no amber state. */
-export function safetyMarginTone(weekly: number): "ink" | "danger" {
-  return weekly < 0 ? "danger" : "ink";
+/** Green at $0 or above, red below $0; there is no amber state. */
+export function safetyMarginTone(weekly: number): "good" | "danger" {
+  return weekly < 0 ? "danger" : "good";
+}
+
+/** Green when on pace (>= 0), amber when over pace (< 0). */
+export function spendableTone(weekly: number): "good" | "caution" {
+  return weekly < 0 ? "caution" : "good";
 }
 
 export const CHART_PX = 64;

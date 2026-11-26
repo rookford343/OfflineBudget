@@ -64,21 +64,38 @@ describe("SnapshotHero", () => {
     expect(content).toContain("Week of Dec 15: no forecast low");
   });
 
-  test("positive Safety Margin is not amber", () => {
-    const s = baseSnapshot();
-    s.safety_margin_weekly = "250.00";
-    s.savings_pull_needed = "0";
-    const html = render(s, false);
-    const fig = html.match(/<p data-testid="sm-figure"[^>]*>/)![0];
-    expect(fig).not.toContain("amber");
-    expect(fig).not.toContain("warn");
-    expect(fig).not.toContain("red");
-    expect(fig).toContain("text-ink");
+  test("positive Safety Margin is green, never amber or red", () => {
+    for (const v of ["250.00", "0.00"]) {
+      const s = baseSnapshot();
+      s.safety_margin_weekly = v;
+      s.savings_pull_needed = "0";
+      const fig = render(s, false).match(/<p data-testid="sm-figure"[^>]*>/)![0];
+      expect(fig).toContain("text-emerald-600");
+      expect(fig).not.toContain("amber");
+      expect(fig).not.toContain("warn");
+      expect(fig).not.toContain("red");
+    }
   });
 
-  test("negative Safety Margin is red", () => {
-    const html = render(baseSnapshot(), false);
-    expect(html.match(/<p data-testid="sm-figure"[^>]*>/)![0]).toContain("text-red-600");
+  test("negative Safety Margin is red, never amber or green", () => {
+    const s = baseSnapshot();
+    s.safety_margin_weekly = "-0.01";
+    const fig = render(s, false).match(/<p data-testid="sm-figure"[^>]*>/)![0];
+    expect(fig).toContain("text-red-600");
+    expect(fig).not.toContain("warn");
+    expect(fig).not.toContain("emerald");
+  });
+
+  test("Spendable figure is green at 0.00 and amber when negative", () => {
+    const s = baseSnapshot();
+    s.left_to_spend_weekly = "0.00";
+    const ok = render(s, false).match(/<p data-testid="sp-figure"[^>]*>/)![0];
+    expect(ok).toContain("text-emerald-600");
+    expect(ok).not.toContain("warn");
+    s.left_to_spend_weekly = "-0.01";
+    const over = render(s, false).match(/<p data-testid="sp-figure"[^>]*>/)![0];
+    expect(over).toContain("text-warn-figure");
+    expect(over).not.toContain("emerald");
   });
 
   test("pending-charges line is shown with count and total", () => {

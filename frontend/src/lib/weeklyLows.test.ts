@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { barHeightPx, barLabel, barTone, cushionOffsetPx, lowestIndex, monthTicks, safetyMarginTone, scaleMaxFor, type WeeklyLow } from "./weeklyLows";
+import { barHeightPx, barLabel, barTone, cushionOffsetPx, lowestIndex, monthTicks, safetyMarginTone, scaleMaxFor, spendableTone, type WeeklyLow } from "./weeklyLows";
 
 // Made-up amounts only (public repo).
 const low = (over: Partial<WeeklyLow> = {}): WeeklyLow => ({
@@ -63,9 +63,17 @@ describe("monthTicks", () => {
 
 describe("safetyMarginTone", () => {
   test("boundaries", () => {
-    expect(safetyMarginTone(0)).toBe("ink");
+    expect(safetyMarginTone(0)).toBe("good");
     expect(safetyMarginTone(-0.01)).toBe("danger");
-    expect(safetyMarginTone(5)).toBe("ink");
+    expect(safetyMarginTone(5)).toBe("good");
+  });
+});
+
+describe("spendableTone", () => {
+  test("boundaries", () => {
+    expect(spendableTone(0)).toBe("good");
+    expect(spendableTone(-0.01)).toBe("caution");
+    expect(spendableTone(5)).toBe("good");
   });
 });
 

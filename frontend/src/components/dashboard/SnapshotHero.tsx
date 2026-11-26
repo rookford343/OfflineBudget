@@ -6,7 +6,7 @@ import { WeeklyLowsChart } from "./WeeklyLowsChart";
 import { fmt } from "../../lib/utils";
 import { maskIfHidden } from "../../store/balanceVisibility";
 import { lowestBalanceRows } from "../../lib/lowestBalanceRows";
-import { safetyMarginTone, type WeeklyLow } from "../../lib/weeklyLows";
+import { safetyMarginTone, spendableTone, type WeeklyLow } from "../../lib/weeklyLows";
 
 export const SPENDABLE_HELP = "How much you can spend on everyday things (groceries, eating out, shopping) between now and the end of the week, after bills, savings, and tithing are already set aside.\n\nGoes down as you spend. If it's negative, you've spent more than this week's share — it'll say \"over pace\" and show what to pull back.";
 export const MARGIN_HELP = "The lowest your checking account is projected to go over the next 3 months, after also setting aside the credit card bills still coming due this month.\n\nPositive means that's how much room you have above $0 before you'd need to pull from savings. Negative means the plan already dips into savings, even before anything unexpected happens — worth a closer look before a big purchase.";
@@ -32,6 +32,8 @@ export function SnapshotHero({
   const smWeekly = parseFloat(snapshot.safety_margin_weekly);
   const smToday = parseFloat(snapshot.safety_margin_today);
   const smTone = safetyMarginTone(smWeekly);
+  const spWeekly = parseFloat(snapshot.left_to_spend_weekly);
+  const spTone = spendableTone(spWeekly);
   const spendToday = parseFloat(snapshot.spendable_today);
   const lows: WeeklyLow[] = Array.isArray(snapshot.weekly_lows) ? snapshot.weekly_lows : [];
   const status = snapshot.lookahead_status ?? "ok";
@@ -72,7 +74,7 @@ export function SnapshotHero({
           </p>
           <p
             data-testid="sm-figure"
-            className={`text-4xl md:text-[40px] font-bold tabular-nums ${smTone === "danger" ? "text-red-600 dark:text-red-400" : "text-ink"}`}
+            className={`text-4xl md:text-[40px] font-bold tabular-nums ${smTone === "danger" ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}
           >
             {m(smWeekly)}
           </p>
@@ -101,7 +103,12 @@ export function SnapshotHero({
             />
             <WhatChanged metric={{ key: "left_to_spend", title: "Spendable this month" }} />
           </p>
-          <p className="text-[22px] font-bold tabular-nums text-ink">{m(parseFloat(snapshot.left_to_spend_weekly))}</p>
+          <p
+            data-testid="sp-figure"
+            className={`text-[22px] font-bold tabular-nums ${spTone === "caution" ? "text-warn-figure" : "text-emerald-600 dark:text-emerald-400"}`}
+          >
+            {m(spWeekly)}
+          </p>
           <p className="text-[13px] text-muted mt-1">
             {/* Signed on purpose: over pace, this is how much a day must come back. */}
             {signed(spendToday)}/day ·{" "}
