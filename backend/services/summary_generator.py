@@ -55,7 +55,7 @@ def email_subject(snap, today: date, with_weekly: bool, *, stale: bool = False) 
     elif snap.lookahead_status in ("danger", "warning") or _move_to_checking_line(snap):
         subject = f"Heads up: low point ahead · {tail}"
     else:
-        subject = f"Covered this week · {tail}"
+        subject = tail
     return subject + (" + Weekly Digest" if with_weekly else "")
 
 
@@ -331,9 +331,10 @@ def _weekly_lows_bars_html(lows, cushion: Decimal) -> str:
     ok_idx = [i for i, w in enumerate(lows) if w.amount is not None and w.status == "ok"]
     lowest_ok = min(ok_idx, key=lambda i: (lows[i].amount, i)) if ok_idx else None
     cells = []
+    cw = f"{100 / len(lows):.2f}"  # percentage cell widths so the row spans the hero
     for i, w in enumerate(lows):
         if w.amount is None:
-            cells.append("<td valign='bottom' height='48'></td>")
+            cells.append(f"<td valign='bottom' height='48' width='{cw}%'></td>")
             continue
         if w.amount <= 0 or denom <= 0:
             h = BAR_STUB_PX
@@ -348,12 +349,12 @@ def _weekly_lows_bars_html(lows, cushion: Decimal) -> str:
         else:
             color, cls = "#cbd5e1", " class='ob-bar'"
         cells.append(
-            f"<td valign='bottom' height='48'><div{cls} style='width:16px;height:{h}px;"
+            f"<td valign='bottom' height='48' width='{cw}%'><div{cls} style='width:100%;height:{h}px;"
             f"background:{color};border-radius:2px 2px 0 0'></div></td>"
         )
     return (
-        "<table role='presentation' cellspacing='0' cellpadding='0' "
-        "style='border-collapse:separate;border-spacing:3px 0;max-width:100%'>"
+        "<table role='presentation' width='100%' cellspacing='0' cellpadding='0' "
+        "style='width:100%;border-collapse:separate;border-spacing:3px 0'>"
         f"<tr valign='bottom'>{''.join(cells)}</tr></table>"
     )
 
@@ -635,19 +636,24 @@ def generate_daily_summary(
         household_html = f"""
 <div class='ob-card ob-hero' style='background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:14px;color:#0f172a'>
   <p class='ob-ink' style='margin:0 0 8px;color:#0f172a;font-size:14px;font-weight:600'>Household Snapshot</p>
+  <table role='presentation' width='100%' cellspacing='0' cellpadding='0' style='width:100%;border-collapse:collapse'><tr>
+  <td class='ob-col' width='50%' valign='top' style='width:50%;vertical-align:top;padding:0 10px 0 0'>
   <p class='ob-muted' style='margin:0;color:#64748b;font-size:13px'>Safety Margin (this week)</p>
   <p class='{margin_cls}' data-ob='margin-figure' style='margin:2px 0;color:{margin_color};font-size:32px;font-weight:700;line-height:1.1;{_WRAP}'>{fmt(snap.safety_margin_weekly)}</p>
   <p class='ob-muted' style='margin:0;color:#64748b;font-size:13px;{_WRAP}'>{margin_today_sign}{fmt(abs(snap.safety_margin_today))}/day &middot; {fmt(snap.safety_margin)} this month</p>
   {_since_html(since.get(SINCE_MARGIN), "2px 0 0")}
   {pending_html}
   {pull_pill}
-  <div class='ob-line' style='border-top:1px solid #e2e8f0;margin-top:12px;padding-top:10px'>
+  </td>
+  <td class='ob-col ob-line ob-col-right' width='50%' valign='top' style='width:50%;vertical-align:top;border-left:1px solid #e2e8f0;padding:0 0 0 12px'>
+  
     <p class='ob-muted' style='margin:0;color:#64748b;font-size:13px'>Spendable this week</p>
     <p class='{spend_cls}' data-ob='spendable-figure' style='margin:2px 0 0;color:{spend_color};font-size:20px;font-weight:600;{_WRAP}'>{fmt(snap.left_to_spend_weekly)}</p>
     <p class='{pace_cls}' style='margin:0;color:{pace_color};font-size:13px;{_WRAP}'>{spendable_today_sign}{fmt(abs(snap.spendable_today))}/day &middot; {"on pace" if snap.on_pace else "over pace"}</p>
     <p class='ob-muted' style='margin:0;color:#64748b;font-size:13px;{_WRAP}'>{fmt(snap.left_to_spend)} this month</p>
     {_since_html(since.get(SINCE_SPENDABLE), "2px 0 0")}
-  </div>
+  </td>
+  </tr></table>
   {bars_block}
   {lowest_html}
 </div>"""
@@ -706,6 +712,10 @@ def generate_daily_summary(
    light-mode render, so a client that strips <style> loses nothing. */
 @media (min-width: 600px) {{
   .ob-hero {{ padding: 20px !important; }}
+}}
+@media (max-width: 599px) {{
+  .ob-col {{ display: block !important; width: 100% !important; padding: 0 !important; }}
+  .ob-col-right {{ border-left: 0 !important; border-top: 1px solid #e2e8f0 !important; margin-top: 12px !important; padding-top: 10px !important; }}
 }}
 @media (prefers-color-scheme: dark) {{
   .ob-page {{ background: #0b1220 !important; }}

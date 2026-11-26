@@ -237,10 +237,10 @@ def test_email_safety_margin_per_day_line_positive_has_no_sign(db_session):
 
 # ── 4. Layout: two-cell table row with percentage widths ───────────────────
 
-def test_hero_is_single_column_and_wraps_long_figures(db_session):
-    """Restyle (2026-11-26): the two side-by-side 50% cards became one hero
-    column (Safety Margin, then Spendable). It must still never overflow a
-    narrow phone: no percentage-width cells, and every figure wraps."""
+def test_hero_is_two_cell_row_and_wraps_long_figures(db_session):
+    """Desktop fix (2026-11-26): the hero is a two-cell row (Safety Margin
+    left, Spendable right) that stacks on narrow screens via @media. Every
+    figure must still wrap so a client that strips <style> cannot overflow."""
     snap = _blank_snapshot(
         left_to_spend_weekly=Decimal("-250.00"),
         safety_margin_weekly=Decimal("100.00"),
@@ -248,6 +248,6 @@ def test_hero_is_single_column_and_wraps_long_figures(db_session):
     html, _text = _render(db_session, snap, "layout")
 
     hero = html[html.index("ob-hero"):html.index("Nothing needs you today.")]
-    assert "width='50%'" not in hero and "width:50%" not in hero
+    assert hero.count("class='ob-col") == 2
     for figure in re.findall(r"<p[^>]*data-ob='[a-z-]+-figure'[^>]*>", hero):
         assert "word-break:break-word" in figure and "overflow-wrap:break-word" in figure

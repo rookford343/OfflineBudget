@@ -225,7 +225,7 @@ def test_lookahead_warning_alone_is_not_quiet(db_session):
     assert "below your $1,000.00 cushion" in block
 
 
-def test_covered_subject_iff_quiet_body(db_session):
+def test_plain_subject_iff_quiet_body(db_session):
     from backend.services.summary_generator import email_subject
     states = {
         "ok": {},
@@ -238,13 +238,13 @@ def test_covered_subject_iff_quiet_body(db_session):
     for name, kw in states.items():
         snap = _blank_snapshot(**kw)
         html, _ = _render(db_session, snap, f"iff{name}")
-        covered = email_subject(snap, date(2026, 11, 26), False).startswith("Covered")
+        covered = email_subject(snap, date(2026, 11, 26), False).startswith("Daily Budget Summary")
         assert covered == ("Nothing needs you today." in html), name
         assert covered == ("Needs attention" not in html), name
 
 
-def test_covered_subject_iff_quiet_body_with_stale_data(db_session):
-    """With a stale connection the subject is never "Covered" and the body is
+def test_plain_subject_iff_quiet_body_with_stale_data(db_session):
+    """With a stale connection the subject is never plain and the body is
     never quiet; both flip together."""
     from unittest.mock import patch
     from backend import models
@@ -263,7 +263,7 @@ def test_covered_subject_iff_quiet_body_with_stale_data(db_session):
             html, _ = generate_daily_summary(db_session, user, snapshot_out=snap_box, stale_out=stale_box)
         assert stale_box == [stale], name
         subject = email_subject(snap_box[0], date(2026, 11, 26), False, stale=bool(stale_box and stale_box[0]))
-        covered = subject.startswith("Covered")
+        covered = subject.startswith("Daily Budget Summary")
         assert covered == (not stale), name
         assert covered == ("Nothing needs you today." in html), name
         assert covered == ("Needs attention" not in html), name
@@ -278,3 +278,29 @@ def test_hero_red_lines_have_a_dark_red_override(db_session):
     for m in re.finditer(r"<(?:p|b|span)\b([^>]*)>", hero):
         if "color:#dc2626" in m.group(1):
             assert "ob-neg" in m.group(1), m.group(0)
+
+
+def test_hero_two_cells_stack_on_narrow(db_session):
+    snap = _blank_snapshot(safety_margin_weekly=D("100.00"), left_to_spend_weekly=D("50.00"))
+    html, _ = _render(db_session, snap, "herocols")
+    hero = html[html.index("ob-hero"):html.index("Nothing needs you today.")]
+    cells = re.findall(r"<td class='ob-col[^>]*>", hero)
+    assert len(cells) == 2 and all("width='50%'" in c for c in cells)
+    assert hero.index("Safety Margin (this week)") < hero.index("Spendable this week")
+    assert hero.index("Safety Margin (this week)") < hero.index("class='ob-col ob-line")
+    assert "@media (max-width: 599px)" in html
+    assert ".ob-col {" in html and "display: block !important" in html
+
+
+def test_bars_span_full_width_with_percentage_cells():
+    lows = [_low(i, "500.00") for i in range(14)]
+    html = _weekly_lows_bars_html(lows, D("1000.00"))
+    assert "<table role='presentation' width='100%'" in html
+    widths = [float(w) for w in re.findall(r"<td valign='bottom' height='48' width='([\d.]+)%'", html)]
+    assert len(widths) == 14 and abs(sum(widths) - 100) < 0.5
+    assert "width:16px" not in html and html.count("width:100%;height:") == 14
+
+
+def test_bar_heights_unchanged_for_fixture():
+    lows = [_low(0, "2500.00"), _low(1, "-50.00", "danger"), _low(2, "1000.00"), _low(3, None)]
+    assert _heights(_weekly_lows_bars_html(lows, D("1000.00"))) == [48, 3, 19]
