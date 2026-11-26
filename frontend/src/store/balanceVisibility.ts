@@ -41,8 +41,8 @@ export function useBalancesHidden(): boolean {
 // A fixed-width mask so a hidden dollar figure doesn't visibly resize its
 // container or shift adjacent layout -- long enough to plausibly cover a
 // large balance, short enough not to look like a placeholder/loading state.
-const MASK = "••••••";
+export const BALANCE_MASK = "••••••";
 
 export function maskIfHidden(hidden: boolean, text: string): string {
-  return hidden ? MASK : text;
+  return hidden ? BALANCE_MASK : text;
 }

@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowRightLeft } from "lucide-react";
-import { useBalancesHidden } from "../store/balanceVisibility";
+import { BALANCE_MASK, useBalancesHidden } from "../store/balanceVisibility";
 import {
   alertHeadline,
+  effectiveTransferAmount,
   projectedBalanceText,
+  riskHasContent,
+  type Risk,
   suggestionHeadline,
   transferHeadline,
 } from "../lib/riskBannerText";
@@ -12,22 +15,6 @@ import { VerificationFlagButton } from "./VerificationFlagButton";
 interface SourceAccount {
   id: number;
   name: string;
-}
-
-interface Risk {
-  at_risk: boolean;
-  date: string | null;
-  amount: string | null;
-  threshold: string;
-  status?: "ok" | "warning" | "danger";
-  transfer_triggered?: boolean;
-  transfer_date?: string | null;
-  transfer_amount?: string | null;
-  transfer_from?: string | null;
-  suggested_transfer_amount?: string | null;
-  suggested_transfer_date?: string | null;
-  suggested_transfer_from_account_id?: number | null;
-  suggested_transfer_already_planned?: boolean;
 }
 
 export function RiskBanner({
@@ -72,7 +59,13 @@ export function RiskBanner({
     setDateOverride("");
   }, [risk?.suggested_transfer_amount, risk?.suggested_transfer_date]);
 
-  if (!risk) return null;
+  // A typed override is invisible once balances are hidden, so drop it: Accept
+  // must then use the backend suggestion, not a stale number the user can't see.
+  useEffect(() => {
+    if (hidden) setAmountOverride("");
+  }, [hidden]);
+
+  if (!risk || !riskHasContent(risk)) return null;
 
   // One cushion: amber below it, red below $0 (status from /risk).
   const amber = risk.status === "warning";
@@ -90,23 +83,21 @@ export function RiskBanner({
       : null;
   const resolvedFromId = suggestedFromId ?? validPickedId;
 
-  const effectiveAmount = amountOverride || risk.suggested_transfer_amount || "";
+  const effectiveAmount = effectiveTransferAmount(hidden, amountOverride, risk.suggested_transfer_amount);
   const effectiveDate = dateOverride || risk.suggested_transfer_date || "";
   const effectiveAmountValid = parseFloat(effectiveAmount) > 0;
-
-  if (!showAlert && !showTransfer && !showSuggestion) return null;
 
   return (
     <div className="flex flex-col gap-2">
       {showTransfer && (
-        <div className="card border-orange-200 dark:border-orange-700 bg-orange-50/60 dark:bg-orange-900/20">
+        <div className="card border-warn-line bg-warn-bg">
           <div className="flex items-start gap-3">
-            <ArrowRightLeft size={18} className="text-orange-500 mt-0.5 shrink-0" />
+            <ArrowRightLeft size={18} className="text-warn mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-orange-900 dark:text-orange-200 text-sm">
+              <p className="font-semibold text-warn-text text-sm">
                 {transferHeadline(risk.transfer_amount!, risk.transfer_from, risk.transfer_date!, hidden)}
               </p>
-              <p className="text-xs text-orange-700 dark:text-orange-400 mt-0.5">
+              <p className="text-xs text-warn-text mt-0.5">
                 Modeled automatically to keep the account above its action threshold.
               </p>
             </div>
@@ -114,11 +105,11 @@ export function RiskBanner({
         </div>
       )}
       {showSuggestion && onAcceptSuggestion && (
-        <div className="card border-blue-200 dark:border-blue-700 bg-blue-50/60 dark:bg-blue-900/20">
+        <div className="card border-line bg-card">
           <div className="flex items-start gap-3">
-            <ArrowRightLeft size={18} className="text-blue-500 mt-0.5 shrink-0" />
+            <ArrowRightLeft size={18} className="text-accent mt-0.5 shrink-0" />
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-blue-900 dark:text-blue-200 text-sm">
+              <p className="font-semibold text-ink text-sm">
                 {suggestionHeadline(
                   risk.suggested_transfer_amount!,
                   risk.suggested_transfer_date!,
@@ -126,16 +117,17 @@ export function RiskBanner({
                   hidden,
                 )}
               </p>
-              <p className="text-xs text-blue-700 dark:text-blue-400 mt-0.5">
+              <p className="text-xs text-muted mt-0.5">
                 {risk.suggested_transfer_already_planned
                   ? "You already have a transfer planned near this date, but it doesn't cover the whole dip."
                   : "You'll need to make this transfer yourself in your bank — accepting just plans it here."}
               </p>
-              <div className="flex items-center gap-3 mt-2 text-xs text-blue-800 dark:text-blue-300">
+              <div className="flex items-center gap-3 mt-2 text-xs text-ink">
                 {hidden ? (
                   <span className="flex items-center gap-1.5">
                     Amount
-                    <span title="Show balances to edit the amount">••••••</span>
+                    <span title="Show balances to edit the amount">{BALANCE_MASK}</span>
+                    <span className="text-muted">Show balances to edit the amount</span>
                   </span>
                 ) : (
                   <label className="flex items-center gap-1.5">
@@ -161,7 +153,7 @@ export function RiskBanner({
                 </label>
               </div>
               {needsSourcePick && (
-                <label className="flex items-center gap-2 mt-2 text-xs text-blue-800 dark:text-blue-300">
+                <label className="flex items-center gap-2 mt-2 text-xs text-ink">
                   Move from
                   <select
                     className="input w-auto text-xs py-1"
@@ -192,12 +184,12 @@ export function RiskBanner({
         </div>
       )}
       {showAlert && (
-        <div className={`card ${amber ? "border-amber-200 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-900/20" : "border-red-200 dark:border-red-700 bg-red-50/60 dark:bg-red-900/20"}`}>
+        <div className={`card ${amber ? "border-warn-line bg-warn-bg" : "border-red-200 dark:border-red-700 bg-red-50/60 dark:bg-red-900/20"}`}>
           <div className="flex items-start gap-3">
-            <AlertTriangle size={18} className={`${amber ? "text-amber-500" : "text-red-500"} mt-0.5 shrink-0`} />
+            <AlertTriangle size={18} className={`${amber ? "text-warn" : "text-red-500"} mt-0.5 shrink-0`} />
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between gap-2">
-                <p className={`font-semibold ${amber ? "text-amber-900 dark:text-amber-200" : "text-red-900 dark:text-red-200"} text-sm`}>
+                <p className={`font-semibold ${amber ? "text-warn-text" : "text-red-900 dark:text-red-200"} text-sm`}>
                   {alertHeadline(risk.threshold, risk.status, risk.date!, hidden)}
                 </p>
                 <VerificationFlagButton
@@ -208,7 +200,7 @@ export function RiskBanner({
                   expectedFields={[{ key: "projected_balance", label: "Projected Balance" }]}
                 />
               </div>
-              <p className={`text-xs ${amber ? "text-amber-700 dark:text-amber-400" : "text-red-700 dark:text-red-400"} mt-0.5`}>
+              <p className={`text-xs ${amber ? "text-warn-text" : "text-red-700 dark:text-red-400"} mt-0.5`}>
                 Projected balance: <strong>{projectedBalanceText(risk.amount!, hidden)}</strong>
               </p>
             </div>

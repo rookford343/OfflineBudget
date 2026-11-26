@@ -46,3 +46,45 @@ export function alertHeadline(
 export function projectedBalanceText(amount: string, hidden: boolean): string {
   return money(hidden, amount);
 }
+
+export interface Risk {
+  at_risk: boolean;
+  date: string | null;
+  amount: string | null;
+  threshold: string;
+  status?: "ok" | "warning" | "danger";
+  transfer_triggered?: boolean;
+  transfer_date?: string | null;
+  transfer_amount?: string | null;
+  transfer_from?: string | null;
+  suggested_transfer_amount?: string | null;
+  suggested_transfer_date?: string | null;
+  suggested_transfer_from_account_id?: number | null;
+  suggested_transfer_already_planned?: boolean;
+}
+
+// True when the banner would render at least one of its three cards.
+export function riskHasContent(risk: Risk | null | undefined): boolean {
+  if (!risk) return false;
+  const showAlert = !!(risk.at_risk && risk.date && risk.amount != null);
+  const showTransfer = !!(risk.transfer_triggered && risk.transfer_date && risk.transfer_amount != null);
+  // already_planned no longer suppresses: the backend's amount is already net
+  // of any accepted transfer, so a surviving suggestion is a genuine top-up.
+  const showSuggestion = !!(
+    risk.at_risk &&
+    risk.suggested_transfer_amount != null &&
+    risk.suggested_transfer_date != null
+  );
+  return showAlert || showTransfer || showSuggestion;
+}
+
+// A typed override must never be used while balances are hidden: the user
+// cannot see the field, so Accept falls back to the backend's suggestion.
+export function effectiveTransferAmount(
+  hidden: boolean,
+  override: string,
+  suggested: string | null | undefined,
+): string {
+  if (hidden) return suggested ?? "";
+  return override || suggested || "";
+}
