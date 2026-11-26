@@ -78,7 +78,7 @@ export default function AmountDrift() {
             >
               <div className="min-w-0">
                 <p className="text-sm font-medium text-ink truncate">{d.name}</p>
-                <p className="text-xs text-muted">
+                <p className="text-xs text-warn-text">
                   {d.varies
                     ? `recent payments ${d.recent_amounts.map((a: string) => money(a)).join(", ")} · planned ${money(d.planned_amount)}`
                     : `paid ${money(d.latest_amount)} on ${shortDate(d.latest_date)} · planned ${money(d.planned_amount)}`}

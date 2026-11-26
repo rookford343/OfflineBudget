@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { NeedsAttention } from "./NeedsAttention";
+import { BALANCE_MASK } from "../store/balanceVisibility";
 import type { Risk } from "../lib/riskBannerText";
 
 // Made-up fixture amounts only (public repo).
@@ -75,5 +76,36 @@ describe("NeedsAttention", () => {
     const html = render({}, alertRisk);
     expect(html).toContain("Needs attention");
     expect(html).not.toContain("Nothing needs you today.");
+  });
+});
+
+describe("NeedsAttention with balances hidden", () => {
+  test("planned transfer and bill amounts are masked, including placeholders", () => {
+    g.localStorage = { getItem: () => "1", setItem: () => {} } as unknown as Storage;
+    const html = render(
+      {
+        "planned-transfers": [
+          { id: 1, status: "pending", amount: "7531", from_account_id: 1, to_account_id: 2, target_date: "2026-12-04" },
+        ],
+        "bills-to-confirm": [
+          {
+            recurring_item_id: 9,
+            name: "Test Bill",
+            statement_date: "2026-12-01",
+            due_date: "2026-12-20",
+            estimated_amount: "468.13",
+          },
+        ],
+        accounts: [
+          { id: 1, name: "Savings" },
+          { id: 2, name: "Checking" },
+        ],
+      },
+      null,
+    );
+    const content = html.replace(/ class="[^"]*"/g, "").replace(/<svg[\s\S]*?<\/svg>/g, "");
+    expect(content).toContain(BALANCE_MASK);
+    expect(content).not.toContain("$");
+    for (const leak of ["7531", "7,531", "468"]) expect(content).not.toContain(leak);
   });
 });

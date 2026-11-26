@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { plannedTransfersApi, accountsApi } from "../api";
 import { fmt } from "../lib/utils";
+import { maskIfHidden, useBalancesHidden } from "../store/balanceVisibility";
 import { Landmark, Check, Trash2, Pencil, X } from "lucide-react";
 import { ConfirmDialog } from "./ConfirmDialog";
 
@@ -19,6 +20,7 @@ export function usePlannedTransfersHasContent(): boolean {
 }
 
 export function PlannedTransferReminder() {
+  const hidden = useBalancesHidden();
   const qc = useQueryClient();
   const { data: transfers = [] } = useQuery<any[]>({ queryKey: ["planned-transfers"], queryFn: plannedTransfersApi.list });
   const { data: accounts = [] } = useQuery<any[]>({ queryKey: ["accounts"], queryFn: accountsApi.list });
@@ -98,7 +100,7 @@ export function PlannedTransferReminder() {
               <Landmark size={16} className="text-warn shrink-0" />
               <p className="text-sm text-warn-text truncate">
                 {t.status === "scheduled" ? "Scheduled — waiting to verify: " : "Move "}
-                <strong>{fmt(parseFloat(t.amount))}</strong> {accountName(t.from_account_id)} → {accountName(t.to_account_id)} by {formatDate(t.target_date)}
+                <strong>{maskIfHidden(hidden, fmt(parseFloat(t.amount)))}</strong> {accountName(t.from_account_id)} → {accountName(t.to_account_id)} by {formatDate(t.target_date)}
               </p>
             </div>
           )}
@@ -126,7 +128,7 @@ export function PlannedTransferReminder() {
         onOpenChange={(open) => !open && setDeleteTransfer(null)}
         icon={Trash2}
         title="Remove this planned transfer?"
-        description={`This removes the planned move of ${deleteTransfer ? fmt(parseFloat(deleteTransfer.amount)) : ""} from your reminders.`}
+        description={`This removes the planned move of ${deleteTransfer ? maskIfHidden(hidden, fmt(parseFloat(deleteTransfer.amount))) : ""} from your reminders.`}
         confirmLabel="Remove"
         confirmingLabel="Removing…"
         isPending={removeMut.isPending}

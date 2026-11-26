@@ -81,6 +81,41 @@ describe("SnapshotHero", () => {
     expect(html.match(/<p data-testid="sm-figure"[^>]*>/)![0]).toContain("text-red-600");
   });
 
+  test("pending-charges line is shown with count and total", () => {
+    const s = baseSnapshot();
+    s.pending_cards_count = 2;
+    s.pending_cards_total = "87.65";
+    const html = render(s, false);
+    expect(html).toContain("Includes pending charges on 2 cards ($87.65)");
+  });
+
+  test("pending-charges line is masked when hidden and absent at count 0", () => {
+    const s = baseSnapshot();
+    s.pending_cards_count = 1;
+    s.pending_cards_total = "87.65";
+    const html = render(s, true);
+    expect(html).toContain(`Includes pending charges on 1 card (${BALANCE_MASK})`);
+    expect(html).not.toContain("87.65");
+    s.pending_cards_count = 0;
+    expect(render(s, false)).not.toContain("pending charges");
+  });
+
+  test("the sign stays inside the mask on /day lines", () => {
+    const hiddenHtml = render(baseSnapshot(), true);
+    expect(hiddenHtml).not.toContain("−" + BALANCE_MASK);
+    expect(hiddenHtml).toContain(BALANCE_MASK + "/day");
+    expect(render(baseSnapshot(), false)).toContain("−$35.77/day");
+  });
+
+  test("amber lows use warn-figure; desktop margin figure is 40px", () => {
+    const s = baseSnapshot();
+    s.lookahead_status = "warning";
+    const html = render(s, false);
+    expect(html).toContain("text-warn-figure");
+    expect(html).not.toMatch(/font-semibold tabular-nums text-warn-text/);
+    expect(html.match(/<p data-testid="sm-figure"[^>]*>/)![0]).toContain("md:text-[40px]");
+  });
+
   test("no weekly_lows still renders without a chart", () => {
     const s = baseSnapshot();
     delete s.weekly_lows;

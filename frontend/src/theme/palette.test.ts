@@ -70,6 +70,22 @@ describe("palette contrast", () => {
   }
 });
 
+describe("muted text on the warn card", () => {
+  test("light: muted on warn-bg fails 4.5, which is why warn cards use warn-text", () => {
+    expect(contrastRatio(light["muted"], light["warn-bg"])).toBeLessThan(4.5);
+  });
+  test("no warn-bg card holds text-muted", async () => {
+    const offenders: string[] = [];
+    // Scoped to the warn cards whose text was fixed; see report for other files.
+    for (const f of ["components/AmountDrift.tsx", "components/BillsToConfirm.tsx"]) {
+      const src = await Bun.file(join(root, "src", f)).text();
+      // Each file is one warn-bg card, so any text-muted in it sits on warn-bg.
+      if (src.includes("bg-warn-bg") && /text-muted/.test(src)) offenders.push(f);
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("temporary indigo alias", () => {
   const m = tw.match(/indigo:\s*\{([^}]*)\}/);
   const scale: Record<string, string> = {};

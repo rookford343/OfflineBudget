@@ -26,6 +26,9 @@ export function SnapshotHero({
   isWide: boolean;
 }) {
   const m = (n: number) => maskIfHidden(hidden, fmt(n));
+  // Sign goes inside the mask so a hidden figure never reveals its sign.
+  const signed = (n: number) => maskIfHidden(hidden, (n < 0 ? "−" : "") + fmt(Math.abs(n)));
+  const pendingCount = Number(snapshot.pending_cards_count ?? 0);
   const smWeekly = parseFloat(snapshot.safety_margin_weekly);
   const smToday = parseFloat(snapshot.safety_margin_today);
   const smTone = safetyMarginTone(smWeekly);
@@ -69,14 +72,19 @@ export function SnapshotHero({
           </p>
           <p
             data-testid="sm-figure"
-            className={`text-4xl font-bold tabular-nums ${smTone === "danger" ? "text-red-600 dark:text-red-400" : "text-ink"}`}
+            className={`text-4xl md:text-[40px] font-bold tabular-nums ${smTone === "danger" ? "text-red-600 dark:text-red-400" : "text-ink"}`}
           >
             {m(smWeekly)}
           </p>
           <p className="text-[13px] text-muted mt-1">
-            {smToday < 0 ? "−" : ""}{m(Math.abs(smToday))}/day
+            {signed(smToday)}/day
           </p>
           <p className="text-[13px] text-muted">{m(parseFloat(snapshot.safety_margin))} this month</p>
+          {pendingCount > 0 && (
+            <p className="text-[13px] text-muted">
+              Includes pending charges on {pendingCount} card{pendingCount === 1 ? "" : "s"} ({m(parseFloat(snapshot.pending_cards_total))})
+            </p>
+          )}
           {parseFloat(snapshot.savings_pull_needed) > 0 && (
             <p className="text-sm font-medium text-warn-text mt-2">
               Pull {m(parseFloat(snapshot.savings_pull_needed))} from savings
@@ -96,7 +104,7 @@ export function SnapshotHero({
           <p className="text-[22px] font-bold tabular-nums text-ink">{m(parseFloat(snapshot.left_to_spend_weekly))}</p>
           <p className="text-[13px] text-muted mt-1">
             {/* Signed on purpose: over pace, this is how much a day must come back. */}
-            {spendToday < 0 ? "−" : ""}{m(Math.abs(spendToday))}/day ·{" "}
+            {signed(spendToday)}/day ·{" "}
             <span className={snapshot.on_pace ? "" : "text-warn-text font-medium"}>
               {snapshot.on_pace ? "on pace" : "over pace"}
             </span>
@@ -119,7 +127,7 @@ export function SnapshotHero({
         const figureClass = warn
           ? status === "danger"
             ? "text-red-600 dark:text-red-400"
-            : "text-warn-text"
+            : "text-warn-figure"
           : row.amount < 0
             ? "text-red-600 dark:text-red-400"
             : "text-ink";

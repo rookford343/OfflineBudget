@@ -243,8 +243,9 @@ export default function Dashboard() {
           ) : (
             <div className="card text-sm text-muted">Loading…</div>
           )}
-          <button type="button" className="btn-primary w-full min-h-[44px]" disabled={!primaryChecking} onClick={() => setPlanOpen(true)}>+ Plan a one-off</button>
+          <BankSyncStatusLine accounts={accounts} cards={cards} />
           <NeedsAttention risk={weeklyDigest?.risk} />
+          <button type="button" className="btn-primary w-full min-h-[44px]" disabled={!primaryChecking} onClick={() => setPlanOpen(true)}>+ Plan a one-off</button>
         </div>
         {isWide && (
           <div className="space-y-4 min-w-0">

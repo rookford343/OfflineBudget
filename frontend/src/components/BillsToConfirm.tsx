@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { recurringApi, billOverridesApi } from "../api";
 import { fmt } from "../lib/utils";
+import { maskIfHidden, useBalancesHidden } from "../store/balanceVisibility";
 import { Receipt, Check } from "lucide-react";
 
 /** "Mon D" from an ISO date, parsed at noon so a UTC-negative timezone can't
@@ -28,6 +29,7 @@ export function useBillsToConfirmHasContent(): boolean {
 }
 
 export default function BillsToConfirm() {
+  const hidden = useBalancesHidden();
   const qc = useQueryClient();
   const { data: bills = [] } = useQuery<any[]>({
     queryKey: ["bills-to-confirm"],
@@ -86,8 +88,8 @@ export default function BillsToConfirm() {
             >
               <div className="min-w-0">
                 <p className="text-sm font-medium text-ink truncate">{b.name}</p>
-                <p className="text-xs text-muted">
-                  statement ~{shortDate(b.statement_date)} · est. {fmt(b.estimated_amount)}
+                <p className="text-xs text-warn-text">
+                  statement ~{shortDate(b.statement_date)} · est. {maskIfHidden(hidden, fmt(b.estimated_amount))}
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -95,7 +97,7 @@ export default function BillsToConfirm() {
                   type="number"
                   step="0.01"
                   className="input py-1 text-sm w-24 text-right"
-                  placeholder={fmt(b.estimated_amount)}
+                  placeholder={maskIfHidden(hidden, fmt(b.estimated_amount))}
                   value={value}
                   aria-label={`Actual amount for ${b.name}`}
                   disabled={isThisRowPending}
