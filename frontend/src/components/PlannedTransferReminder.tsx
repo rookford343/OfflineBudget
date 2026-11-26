@@ -9,6 +9,15 @@ function formatDate(iso: string): string {
   return new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric" });
 }
 
+const isActiveTransfer = (t: any) => t.status === "pending" || t.status === "scheduled";
+
+/** True when at least one planned transfer is pending or scheduled. Same query
+ *  key and filter as the component, so the two cannot disagree. */
+export function usePlannedTransfersHasContent(): boolean {
+  const { data: transfers = [] } = useQuery<any[]>({ queryKey: ["planned-transfers"], queryFn: plannedTransfersApi.list });
+  return transfers.some(isActiveTransfer);
+}
+
 export function PlannedTransferReminder() {
   const qc = useQueryClient();
   const { data: transfers = [] } = useQuery<any[]>({ queryKey: ["planned-transfers"], queryFn: plannedTransfersApi.list });
@@ -63,11 +72,12 @@ export function PlannedTransferReminder() {
     updateMut.mutate({ id, data });
   }
 
-  const active = transfers.filter((t: any) => t.status === "pending" || t.status === "scheduled");
-  if (active.length === 0) return null;
+  const hasContent = usePlannedTransfersHasContent();
+  if (!hasContent) return null;
+  const active = transfers.filter(isActiveTransfer);
 
   return (
-    <div className="card border-amber-200 dark:border-amber-700 bg-amber-50/60 dark:bg-amber-900/20 space-y-2">
+    <div className="card border-warn-line bg-warn-bg space-y-2">
       {active.map((t: any) => (
         <div key={t.id} className="flex items-center justify-between gap-3">
           {editingId === t.id ? (
@@ -81,12 +91,12 @@ export function PlannedTransferReminder() {
                 ))}
               </select>
               <button onClick={() => saveEdit(t.id)} disabled={updateMut.isPending} className="text-green-600"><Check size={16} /></button>
-              <button onClick={() => setEditingId(null)} className="text-gray-400"><X size={16} /></button>
+              <button onClick={() => setEditingId(null)} className="text-muted"><X size={16} /></button>
             </div>
           ) : (
             <div className="flex items-center gap-2 min-w-0">
-              <Landmark size={16} className="text-amber-500 shrink-0" />
-              <p className="text-sm text-amber-900 dark:text-amber-200 truncate">
+              <Landmark size={16} className="text-warn shrink-0" />
+              <p className="text-sm text-warn-text truncate">
                 {t.status === "scheduled" ? "Scheduled — waiting to verify: " : "Move "}
                 <strong>{fmt(parseFloat(t.amount))}</strong> {accountName(t.from_account_id)} → {accountName(t.to_account_id)} by {formatDate(t.target_date)}
               </p>

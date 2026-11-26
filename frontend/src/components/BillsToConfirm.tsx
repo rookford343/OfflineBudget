@@ -18,6 +18,15 @@ function shortDate(iso: string): string {
  * one the Recurring page's inline $ button uses), so the forecast picks up
  * the real amount for that one due date.
  */
+/** True when at least one bill awaits confirmation. Same key as the component. */
+export function useBillsToConfirmHasContent(): boolean {
+  const { data: bills = [] } = useQuery<any[]>({
+    queryKey: ["bills-to-confirm"],
+    queryFn: recurringApi.billsToConfirm,
+  });
+  return bills.length > 0;
+}
+
 export default function BillsToConfirm() {
   const qc = useQueryClient();
   const { data: bills = [] } = useQuery<any[]>({
@@ -52,12 +61,13 @@ export default function BillsToConfirm() {
     },
   });
 
-  if (bills.length === 0) return null;
+  const hasContent = useBillsToConfirmHasContent();
+  if (!hasContent) return null;
 
   return (
-    <div className="card">
-      <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-        <Receipt size={16} className="text-indigo-500" /> Bills to confirm
+    <div className="card border-warn-line bg-warn-bg">
+      <h3 className="font-semibold text-warn-text mb-3 flex items-center gap-2">
+        <Receipt size={16} className="text-warn" /> Bills to confirm
       </h3>
       {confirmMut.isError && (
         <p className="text-xs text-red-500 dark:text-red-400 mb-2" role="alert">
@@ -72,11 +82,11 @@ export default function BillsToConfirm() {
           return (
             <div
               key={b.recurring_item_id}
-              className="flex flex-wrap items-center justify-between gap-2 py-2 border-b border-gray-50 dark:border-gray-800 last:border-0"
+              className="flex flex-wrap items-center justify-between gap-2 py-2 border-b border-line last:border-0"
             >
               <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{b.name}</p>
-                <p className="text-xs text-gray-400">
+                <p className="text-sm font-medium text-ink truncate">{b.name}</p>
+                <p className="text-xs text-muted">
                   statement ~{shortDate(b.statement_date)} · est. {fmt(b.estimated_amount)}
                 </p>
               </div>

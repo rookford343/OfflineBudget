@@ -20,6 +20,15 @@ type Action = "update" | "keep" | "varies";
  * asking for that item. A bill whose payments swing on their own is offered
  * only Keep or Varies, since no single number fits it.
  */
+/** True when at least one recurring amount has drifted. Same key as the component. */
+export function useAmountDriftHasContent(): boolean {
+  const { data: items = [] } = useQuery<any[]>({
+    queryKey: ["amount-drift"],
+    queryFn: recurringApi.amountDrift,
+  });
+  return items.length > 0;
+}
+
 export default function AmountDrift() {
   const qc = useQueryClient();
   const hidden = useBalancesHidden();
@@ -45,12 +54,13 @@ export default function AmountDrift() {
     },
   });
 
-  if (items.length === 0) return null;
+  const hasContent = useAmountDriftHasContent();
+  if (!hasContent) return null;
 
   return (
-    <div className="card">
-      <h3 className="font-semibold text-gray-900 dark:text-white mb-3 flex items-center gap-2">
-        <TrendingUp size={16} className="text-amber-500" /> Amounts changed?
+    <div className="card border-warn-line bg-warn-bg">
+      <h3 className="font-semibold text-warn-text mb-3 flex items-center gap-2">
+        <TrendingUp size={16} className="text-warn" /> Amounts changed?
       </h3>
       {answerMut.isError && (
         <p className="text-xs text-red-500 dark:text-red-400 mb-2" role="alert">
@@ -64,11 +74,11 @@ export default function AmountDrift() {
           return (
             <div
               key={d.recurring_item_id}
-              className="flex flex-wrap items-center justify-between gap-2 py-2 border-b border-gray-50 dark:border-gray-800 last:border-0"
+              className="flex flex-wrap items-center justify-between gap-2 py-2 border-b border-line last:border-0"
             >
               <div className="min-w-0">
-                <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{d.name}</p>
-                <p className="text-xs text-gray-400">
+                <p className="text-sm font-medium text-ink truncate">{d.name}</p>
+                <p className="text-xs text-muted">
                   {d.varies
                     ? `recent payments ${d.recent_amounts.map((a: string) => money(a)).join(", ")} · planned ${money(d.planned_amount)}`
                     : `paid ${money(d.latest_amount)} on ${shortDate(d.latest_date)} · planned ${money(d.planned_amount)}`}
