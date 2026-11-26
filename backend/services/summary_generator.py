@@ -580,18 +580,24 @@ def generate_daily_summary(
             if lookahead_warning and _is_lookahead_row(label):
                 row_color = lookahead_color
                 warning_html = (
-                    f" <span style='color:{lookahead_color};font-weight:600'>"
+                    f" <span class='{'ob-neg' if lookahead_color == '#dc2626' else 'ob-amber'}' "
+                    f"style='color:{lookahead_color};font-weight:600'>"
                     f"&middot; {lookahead_warning}</span>"
                 )
+                attention_items.append(
+                    f"<p style='margin:0;font-size:13px;{_WRAP}'>{label}: {fmt(amount)} on "
+                    f"{d.strftime('%b %-d')} &middot; {lookahead_warning}</p>"
+                )
+            row_cls = "ob-neg" if row_color == "#dc2626" else "ob-amber" if row_color == "#d97706" else "ob-ink"
             lowest_html_parts.append(
                 f"<p class='ob-muted' style='color:#64748b;font-size:13px;margin:{'10px' if i == 0 else '6px'} 0 0;"
                 f"{_WRAP}'>{label}: "
-                f"<b style='color:{row_color}'>{fmt(amount)}</b> on {d.strftime('%b %-d')}{warning_html}</p>"
+                f"<b class='{row_cls}' style='color:{row_color}'>{fmt(amount)}</b> on {d.strftime('%b %-d')}{warning_html}</p>"
                 + _since_html(_lowest_row_since(label, since), "2px 0 0")
             )
             if i == 0 and move_line:
                 lowest_html_parts.append(
-                    f"<p style='color:#dc2626;font-size:12px;margin:4px 0 0;{_WRAP}'>{move_line}</p>"
+                    f"<p class='ob-neg' style='color:#dc2626;font-size:12px;margin:4px 0 0;{_WRAP}'>{move_line}</p>"
                 )
         lowest_html = "".join(lowest_html_parts)
         if move_line:

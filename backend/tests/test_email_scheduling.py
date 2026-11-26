@@ -42,7 +42,8 @@ def test_is_digest_day_fails_open_on_unsupported_cron_forms():
 import backend.main as main_module
 
 
-def _run_send_daily_summaries(monkeypatch, *, recipients: str, today: date, weekly_digest_day: str = "fri"):
+def _run_send_daily_summaries(monkeypatch, *, recipients: str, today: date, weekly_digest_day: str = "fri",
+                              generate=None, send=None):
     """Runs _send_daily_summaries against one active user with one checking
     account, stubbing generate_daily_summary/generate_weekly_digest/send_email.
     Returns the `weekly_digest` value generate_daily_summary was called with
@@ -96,9 +97,9 @@ def _run_send_daily_summaries(monkeypatch, *, recipients: str, today: date, week
         captured["weekly_digest"] = weekly_digest
         return ("<html>", "text")
 
-    monkeypatch.setattr("backend.services.summary_generator.generate_daily_summary", _fake_generate_daily_summary)
+    monkeypatch.setattr("backend.services.summary_generator.generate_daily_summary", generate or _fake_generate_daily_summary)
     monkeypatch.setattr("backend.services.summary_generator.generate_weekly_digest", lambda db, u, account_id: "WEEKLY_DIGEST_STUB")
-    monkeypatch.setattr("backend.services.email_service.send_email_via", lambda *a, **kw: (True, None))
+    monkeypatch.setattr("backend.services.email_service.send_email_via", send or (lambda *a, **kw: (True, None)))
 
     main_module._send_daily_summaries()
     return captured["weekly_digest"]
@@ -197,3 +198,26 @@ def test_daily_summary_emails_every_recipient_in_a_multi_address_field(monkeypat
     main_module._send_daily_summaries()
 
     assert sent_to == ["dan@example.com", "wife@example.com"]
+
+
+def test_scheduled_subject_comes_from_email_subject_on_the_body_snapshot(monkeypatch):
+    """The scheduler builds its subject from the snapshot generate_daily_summary
+    hands back through snapshot_out (a pull-from-savings snapshot here)."""
+    from decimal import Decimal
+    from types import SimpleNamespace
+    subjects = []
+
+    def _fake(db, u, *, weekly_digest=None, since_lines=None, since_changes=None, snapshot_out=None):
+        snapshot_out.append(SimpleNamespace(
+            savings_pull_needed=Decimal("75.00"), lookahead_status="ok",
+            move_to_checking_needed=Decimal("0.00"), next_month_minimum_date=None,
+        ))
+        return ("<html>", "text")
+
+    def _send(db, recipient, subject, html, text):
+        subjects.append(subject)
+        return True, None
+
+    _run_send_daily_summaries(monkeypatch, recipients="dan@example.com", today=date(2026, 8, 13),
+                              generate=_fake, send=_send)
+    assert subjects and subjects[0] == "Action needed: pull from savings · Daily Budget Summary — August 13, 2026"

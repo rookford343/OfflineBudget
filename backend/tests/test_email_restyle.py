@@ -211,3 +211,44 @@ def test_every_inline_text_colour_is_dark_mode_safe(db_session):
     used = set(re.findall(r"(?<![-\w])color:(#[0-9a-fA-F]{6})", html.split("</style>", 1)[1]))
     assert used, "expected inline colours"
     assert used <= _DARK_SAFE, f"inline colours with no dark-mode treatment: {sorted(used - _DARK_SAFE)}"
+
+
+def test_lookahead_warning_alone_is_not_quiet(db_session):
+    """Subject says "Heads up" for a warning low point, so the body must not
+    say "Nothing needs you today." (no pull, no move line)."""
+    snap = _blank_snapshot(lookahead_minimum=D("400.00"), lookahead_minimum_date=date(2027, 1, 25),
+                           lookahead_status="warning", safety_cushion=D("1000.00"))
+    html, _ = _render(db_session, snap, "lookwarn")
+    assert "Nothing needs you today." not in html
+    block = html[html.index("Needs attention"):html.index("Checking Accounts")]
+    assert "Lowest in the next 3 months: $400.00 on Jan 25" in block
+    assert "below your $1,000.00 cushion" in block
+
+
+def test_covered_subject_iff_quiet_body(db_session):
+    from backend.services.summary_generator import email_subject
+    states = {
+        "ok": {},
+        "warning": dict(lookahead_minimum=D("400.00"), lookahead_minimum_date=date(2027, 1, 25), lookahead_status="warning"),
+        "danger": dict(lookahead_minimum=D("-400.00"), lookahead_minimum_date=date(2027, 1, 25), lookahead_status="danger"),
+        "pull": dict(savings_pull_needed=D("90.00")),
+        "move": dict(next_month_minimum=D("-100.00"), next_month_minimum_date=date(2026, 12, 9), next_month_label="December"),
+        "nm_ok": dict(next_month_minimum=D("50.00"), next_month_minimum_date=date(2026, 12, 9), next_month_label="December"),
+    }
+    for name, kw in states.items():
+        snap = _blank_snapshot(**kw)
+        html, _ = _render(db_session, snap, f"iff{name}")
+        covered = email_subject(snap, date(2026, 11, 26), False).startswith("Covered")
+        assert covered == ("Nothing needs you today." in html), name
+        assert covered == ("Needs attention" not in html), name
+
+
+def test_hero_red_lines_have_a_dark_red_override(db_session):
+    snap = _blank_snapshot(lookahead_minimum=D("-400.00"), lookahead_minimum_date=date(2027, 1, 25),
+                           lookahead_status="danger", next_month_minimum=D("-100.00"),
+                           next_month_minimum_date=date(2026, 12, 9), next_month_label="December")
+    html, _ = _render(db_session, snap, "darkred")
+    hero = html[html.index("ob-hero"):html.index("Needs attention")]
+    for m in re.finditer(r"<(?:p|b|span)\b([^>]*)>", hero):
+        if "color:#dc2626" in m.group(1):
+            assert "ob-neg" in m.group(1), m.group(0)
