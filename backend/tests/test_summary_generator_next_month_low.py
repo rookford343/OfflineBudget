@@ -237,16 +237,17 @@ def test_email_safety_margin_per_day_line_positive_has_no_sign(db_session):
 
 # ── 4. Layout: two-cell table row with percentage widths ───────────────────
 
-def test_household_snapshot_cards_are_one_table_row_two_cells_percentage_widths(db_session):
+def test_hero_is_single_column_and_wraps_long_figures(db_session):
+    """Restyle (2026-11-26): the two side-by-side 50% cards became one hero
+    column (Safety Margin, then Spendable). It must still never overflow a
+    narrow phone: no percentage-width cells, and every figure wraps."""
     snap = _blank_snapshot(
         left_to_spend_weekly=Decimal("-250.00"),
         safety_margin_weekly=Decimal("100.00"),
     )
     html, _text = _render(db_session, snap, "layout")
 
-    snapshot_block = html[html.index("Household Snapshot"):]
-    row = snapshot_block[: snapshot_block.index("</tr>")]
-    tds = re.findall(r"<td\b[^>]*>", row)
-    assert len(tds) == 2, f"expected exactly 2 <td> cells in the snapshot row, found {len(tds)}"
-    for td in tds:
-        assert "50%" in td, f"cell must carry a percentage width, got: {td}"
+    hero = html[html.index("ob-hero"):html.index("Nothing needs you today.")]
+    assert "width='50%'" not in hero and "width:50%" not in hero
+    for figure in re.findall(r"<p[^>]*data-ob='[a-z-]+-figure'[^>]*>", hero):
+        assert "word-break:break-word" in figure and "overflow-wrap:break-word" in figure

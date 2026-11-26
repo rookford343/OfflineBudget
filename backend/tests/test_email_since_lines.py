@@ -154,8 +154,9 @@ def _marked():
 def test_spendable_card_prints_its_line(db_session, monkeypatch):
     user, _ = _world(db_session, monkeypatch)
     html, text = generate_daily_summary(db_session, user, since_lines=_marked())
-    assert html.index("Spendable this week") < html.index("MARK-spendable_week") < html.index("Safety Margin (this week)")
-    assert text.index("Spendable this week:") < text.index("    MARK-spendable_week\n") < text.index("Safety margin (this week)")
+    # Restyle: Safety Margin leads the hero, Spendable follows it.
+    assert html.index("Safety Margin (this week)") < html.index("Spendable this week") < html.index("MARK-spendable_week")
+    assert text.index("Safety margin (this week)") < text.index("Spendable this week:") < text.index("    MARK-spendable_week\n")
 
 
 def test_safety_margin_card_prints_its_line(db_session, monkeypatch):
@@ -274,16 +275,17 @@ def _moved_world(db, monkeypatch, pending=2):
     return user
 
 
-def test_section_comes_last_with_label_delta_and_cause(db_session, monkeypatch):
+def test_section_follows_the_hero_with_label_delta_and_cause(db_session, monkeypatch):
     user = _moved_world(db_session, monkeypatch)
     changes = _explained(db_session, user)
     html, text = generate_daily_summary(db_session, user, since_changes=changes)
-    assert html.index("Sent by OfflineBudget") > html.index(CHANGES_TITLE) > html.index("Spending this month")
-    block = html[html.index(CHANGES_TITLE):html.index("Sent by OfflineBudget")]
+    # Restyle: "what changed" now sits right after the hero / Needs attention.
+    assert html.index("Safety Margin (this week)") < html.index(CHANGES_TITLE) < html.index("Checking Accounts")
+    block = html[html.index(CHANGES_TITLE):html.index("Checking Accounts")]
     assert "Safety Margin (this week)" in block and "−$400.00" in block
     assert "new pending Test Visa charges" in block
-    assert text.rstrip().splitlines()[-1].startswith("    ")
-    tail = text[text.index(CHANGES_TITLE.upper()):]
+    tail = text[text.index(CHANGES_TITLE.upper()):text.index("CHECKING ACCOUNTS")]
+    assert tail.rstrip().splitlines()[-1].startswith("    ")
     assert "Safety Margin (this week)" in tail and "−$400.00" in tail and "new pending Test Visa" in tail
     assert tail.index("Example Shop Number 0") < tail.index("Example Shop Number 1")
 

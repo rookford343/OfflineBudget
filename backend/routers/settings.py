@@ -121,7 +121,7 @@ def run_daily_summary_now(
     neither satisfies nor suppresses that day's scheduled send.
     """
     from backend.services.email_service import send_email_via
-    from backend.services.summary_generator import generate_daily_summary, generate_weekly_digest
+    from backend.services.summary_generator import email_subject, generate_daily_summary, generate_weekly_digest
     from datetime import date
 
     if not app_settings.get_effective(db, "SMTP_HOST"):
@@ -152,10 +152,11 @@ def run_daily_summary_now(
         if checking:
             weekly_digest = generate_weekly_digest(db, user, checking.id)
 
-    html_body, text_body = generate_daily_summary(db, user, weekly_digest=weekly_digest)
-    subject = f"Daily Budget Summary \u2014 {date.today().strftime('%B %-d, %Y')}"
-    if weekly_digest is not None:
-        subject += " + Weekly Digest"
+    snap_box: list = []
+    html_body, text_body = generate_daily_summary(
+        db, user, weekly_digest=weekly_digest, snapshot_out=snap_box,
+    )
+    subject = email_subject(snap_box[0] if snap_box else None, date.today(), weekly_digest is not None)
 
     sent, errors = [], []
     for r in recipients:

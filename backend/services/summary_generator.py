@@ -122,7 +122,7 @@ def _since_html(line: str | None, margin: str = "3px 0 0", align: str = "") -> s
     if not line:
         return ""
     return (
-        f"<p style='margin:{margin};color:#9ca3af;font-size:11px;line-height:1.4;{align}"
+        f"<p class='ob-muted' style='margin:{margin};color:#64748b;font-size:11px;line-height:1.4;{align}"
         f"white-space:normal;word-break:break-word;overflow-wrap:break-word'>{html_lib.escape(line)}</p>"
     )
 
@@ -293,6 +293,67 @@ def _fires_soon(item: models.RecurringItem, today: date, days_ahead: int = 7) ->
     return _next_fire_date(item, today, days_ahead) is not None
 
 
+_WRAP = "word-break:break-word;overflow-wrap:break-word"
+_CARD_STYLE = (
+    "background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:14px 16px;"
+    "margin-bottom:14px;color:#0f172a"
+)
+BAR_MAX_PX = 48
+BAR_STUB_PX = 3
+
+
+def _email_section(title: str, body: str) -> str:
+    """A titled card: plain 14px semibold title (no emoji), body below."""
+    return (
+        f"<div class='ob-card' style='{_CARD_STYLE}'>"
+        f"<p class='ob-ink' style='margin:0 0 8px;font-size:14px;font-weight:600;color:#0f172a'>{title}</p>"
+        f"{body}</div>"
+    )
+
+
+def _weekly_lows_bars_html(lows, cushion: Decimal) -> str:
+    """Email-safe weekly-lows bars: one table cell per week, bottom-aligned,
+    each a fixed-size div (no SVG/canvas, which mail clients strip).
+
+    Height = amount / max(largest positive low, cushion) x 48px; a week at or
+    below $0 is a 3px stub. Colour: danger red, warning amber, the lowest `ok`
+    week (earliest on a tie) the accent, the rest neutral. A week with no
+    amount (every day masked) is an empty cell. Returns "" with nothing to draw.
+    """
+    amounts = [w.amount for w in lows if w.amount is not None]
+    if not amounts:
+        return ""
+    denom = max(max((a for a in amounts if a > 0), default=Decimal("0")), cushion)
+    ok_idx = [i for i, w in enumerate(lows) if w.amount is not None and w.status == "ok"]
+    lowest_ok = min(ok_idx, key=lambda i: (lows[i].amount, i)) if ok_idx else None
+    cells = []
+    for i, w in enumerate(lows):
+        if w.amount is None:
+            cells.append("<td valign='bottom' height='48'></td>")
+            continue
+        if w.amount <= 0 or denom <= 0:
+            h = BAR_STUB_PX
+        else:
+            h = max(1, round(float(w.amount / denom) * BAR_MAX_PX))
+        if w.status == "danger":
+            color, cls = "#dc2626", ""
+        elif w.status == "warning":
+            color, cls = "#d97706", ""
+        elif i == lowest_ok:
+            color, cls = "#0f766e", " class='ob-bar-acc'"
+        else:
+            color, cls = "#cbd5e1", " class='ob-bar'"
+        cells.append(
+            f"<td valign='bottom' height='48'><div{cls} style='width:16px;height:{h}px;"
+            f"background:{color};border-radius:2px 2px 0 0'></div></td>"
+        )
+    return (
+        "<table role='presentation' cellspacing='0' cellpadding='0' "
+        "style='border-collapse:separate;border-spacing:3px 0;max-width:100%'>"
+        f"<tr valign='bottom'>{''.join(cells)}</tr></table>"
+    )
+
+
 def generate_daily_summary(
     db: Session, user: models.User, *, weekly_digest: WeeklyDigest | None = None,
     since_lines: dict[str, str] | None = None, since_changes: list | None = None,
@@ -352,8 +413,8 @@ def generate_daily_summary(
     # a 340px viewport instead of widening it, and a no-break space keeps
     # each ✓/⚠ on the same line as the connection it marks.
     last_pull_html = (
-        f"<p style='color:#9ca3af;margin:-14px 0 20px;font-size:11px;line-height:1.4;"
-        f"word-break:break-word;overflow-wrap:break-word'>{html_lib.escape(last_pull).replace(' ✓', '&nbsp;✓').replace(' ⚠', '&nbsp;⚠')}</p>"
+        f"<p class='ob-muted' style='color:#64748b;margin:0 0 14px;font-size:11px;line-height:1.4;"
+        f"{_WRAP}'>{html_lib.escape(last_pull).replace(' ✓', '&nbsp;✓').replace(' ⚠', '&nbsp;⚠')}</p>"
     ) if last_pull else ""
 
     fmt = _fmt
@@ -364,7 +425,7 @@ def generate_daily_summary(
 
     stale_rows = "".join(
         f"<tr><td style='padding:4px 12px 4px 0'>{_connection_label(c)}</td>"
-        f"<td style='padding:4px 0;color:#991b1b'>"
+        f"<td style='padding:4px 0'>"
         + (
             f"failing: {c.last_error}" if c.status == models.BankConnectionStatus.error and c.last_error
             else "sync failing" if c.status == models.BankConnectionStatus.error
@@ -375,11 +436,9 @@ def generate_daily_summary(
         for c in stale_connections
     )
     stale_html = (
-        f"<div style='background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px;margin-bottom:16px'>"
-        f"<p style='margin:0 0 6px;color:#991b1b;font-weight:600;font-size:13px'>⚠ Stale bank data</p>"
-        f"<table style='width:100%;font-size:13px'>{stale_rows}</table>"
-        f"<p style='margin:6px 0 0;color:#991b1b;font-size:12px'>Balances and transactions below may not reflect today's activity.</p>"
-        f"</div>"
+        f"<p style='margin:0 0 4px;font-weight:600;font-size:13px'>Stale bank data</p>"
+        f"<table style='width:100%;font-size:13px;color:#92400e'>{stale_rows}</table>"
+        f"<p style='margin:4px 0 0;font-size:12px'>Balances and transactions below may not reflect today's activity.</p>"
     ) if stale_connections else ""
 
     acct_last_txn = _last_txn_dates(db, models.Transaction.account_id, models.Transaction.date, [a.id for a in accounts])
@@ -488,28 +547,26 @@ def generate_daily_summary(
 
     card_rows = "".join(_card_row(c) for c in cards) or "<tr><td colspan='3' style='color:#9ca3af'>No credit cards</td></tr>"
 
+    attention_items: list[str] = []
+    if stale_html:
+        attention_items.append(stale_html)
     if snap is not None:
-        spendable_color = "#059669" if snap.on_pace else "#dc2626"
-        pace_color = "#10b981" if snap.on_pace else "#ef4444"
-        margin_color = "#dc2626" if snap.safety_margin_weekly < 0 else "#d97706"
+        # Owner ruling 2026-11-26: figures carry semantic colour. Safety
+        # Margin is green at $0 or above, red below; Spendable green while
+        # on pace (>= $0), amber when over. Never amber on the Safety Margin.
+        margin_color, margin_cls = ("#dc2626", "ob-neg") if snap.safety_margin_weekly < 0 else ("#059669", "ob-pos")
+        spend_color, spend_cls = ("#b45309", "ob-amber") if snap.left_to_spend_weekly < 0 else ("#059669", "ob-pos")
 
         # Only Safety Margin signals savings moves now. Left to Spend answers
         # "am I on budget", and mixing a savings instruction into it made the
         # two numbers say overlapping things.
-        pull_savings_html = ""
-        if snap.savings_pull_needed > 0:
-            pull_savings_html = (
-                f"<p style='margin:6px 0 0;color:#dc2626;font-size:11px'>"
-                f"Pull {fmt(snap.savings_pull_needed)} from savings</p>"
-            )
+        pull_line = f"Pull {fmt(snap.savings_pull_needed)} from savings" if snap.savings_pull_needed > 0 else ""
         spendable_today_sign = "−" if snap.spendable_today < 0 else ""
         margin_today_sign = "−" if snap.safety_margin_today < 0 else ""
-        # The two "lowest balance" lines (this is the sanity check behind the
-        # weekly numbers -- it is what says whether a big purchase is safe;
-        # the user's spreadsheet keeps the amount and its date together,
-        # '2026 Overview'!B23:C27) plus the move-to-checking line when next
-        # month's low dips below $0. Shared with the text body via
-        # _lowest_balance_rows/_move_to_checking_line so the two can't drift.
+        # The "lowest balance" lines (the sanity check behind the weekly
+        # numbers -- whether a big purchase is safe) plus the move-to-checking
+        # line when next month's low dips below $0. Shared with the text body
+        # via _lowest_balance_rows/_move_to_checking_line so the two can't drift.
         lowest_rows = _lowest_balance_rows(snap)
         move_line = _move_to_checking_line(snap)
         # The 3-month row is plain info when lookahead_status is "ok", amber
@@ -518,7 +575,7 @@ def generate_daily_summary(
         lookahead_color = {"warning": "#d97706", "danger": "#dc2626"}.get(snap.lookahead_status)
         lowest_html_parts: list[str] = []
         for i, (label, amount, d) in enumerate(lowest_rows):
-            row_color = "#dc2626" if amount < 0 else "#065f46"
+            row_color = "#dc2626" if amount < 0 else "#0f172a"
             warning_html = ""
             if lookahead_warning and _is_lookahead_row(label):
                 row_color = lookahead_color
@@ -526,74 +583,84 @@ def generate_daily_summary(
                     f" <span style='color:{lookahead_color};font-weight:600'>"
                     f"&middot; {lookahead_warning}</span>"
                 )
-            margin = "12px 0 0" if i == 0 else "6px 0 0"
             lowest_html_parts.append(
-                f"<p style='color:#047857;font-size:12px;margin:{margin};text-align:center;"
-                f"word-break:break-word;overflow-wrap:break-word'>{label}: "
+                f"<p class='ob-muted' style='color:#64748b;font-size:13px;margin:{'10px' if i == 0 else '6px'} 0 0;"
+                f"{_WRAP}'>{label}: "
                 f"<b style='color:{row_color}'>{fmt(amount)}</b> on {d.strftime('%b %-d')}{warning_html}</p>"
-                + _since_html(_lowest_row_since(label, since), "2px 0 0", "text-align:center;")
+                + _since_html(_lowest_row_since(label, since), "2px 0 0")
             )
             if i == 0 and move_line:
                 lowest_html_parts.append(
-                    f"<p style='color:#dc2626;font-size:11px;margin:4px 0 0;text-align:center;"
-                    f"word-break:break-word;overflow-wrap:break-word'>{move_line}</p>"
+                    f"<p style='color:#dc2626;font-size:12px;margin:4px 0 0;{_WRAP}'>{move_line}</p>"
                 )
         lowest_html = "".join(lowest_html_parts)
+        if move_line:
+            attention_items.append(f"<p style='margin:0;font-size:13px;{_WRAP}'>{move_line}</p>")
+        if pull_line:
+            attention_items.append(f"<p style='margin:0;font-size:13px;{_WRAP}'>{pull_line}</p>")
 
-        # Cards stay side by side at every width: a two-cell table row with
-        # percentage widths (no spacer cell -- the gap between them is each
-        # cell's own padding, so the two tds still sum to exactly 100% and
-        # never overflow a narrow viewport), mobile-sized text/padding
-        # inline so it works with no media-query support at all, and
-        # word-break/overflow-wrap so a long figure wraps instead of
-        # pushing the card past the screen edge. The @media block in the
-        # <head> only enlarges things back up for wider screens -- it never
-        # carries functionality the inline styles don't already have.
+        pending_html = (
+            f"<p class='ob-muted' style='margin:0;color:#64748b;font-size:13px;{_WRAP}'>"
+            f"Includes pending charges on {snap.pending_cards_count} card"
+            f"{'' if snap.pending_cards_count == 1 else 's'} ({fmt(snap.pending_cards_total)})</p>"
+        ) if snap.pending_cards_count > 0 else ""
+        pull_pill = (
+            f"<p style='margin:8px 0 0;display:inline-block;background:#fef3c7;color:#92400e;font-size:13px;"
+            f"padding:5px 10px;border-radius:8px'>{pull_line}</p>"
+        ) if pull_line else ""
+        pace_color = "#64748b" if snap.on_pace else "#92400e"
+        pace_cls = "ob-muted" if snap.on_pace else "ob-warn-text"
+        bars_html = _weekly_lows_bars_html(snap.weekly_lows, snap.safety_cushion)
+        bars_block = (
+            f"<p class='ob-muted' style='margin:14px 0 6px;color:#64748b;font-size:11px;letter-spacing:.04em'>"
+            f"CHECKING LOW POINT EACH WEEK &middot; NEXT 3 MONTHS</p>{bars_html}"
+        ) if bars_html else ""
+
+        # Mobile-first inline sizes; the <head> @media block only enlarges
+        # for wide screens and supplies the dark palette -- never functionality.
         household_html = f"""
-<div style='background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:16px;margin-bottom:20px'>
-  <h3 style='margin:0 0 12px;color:#065f46;font-size:15px'>Household Snapshot</h3>
-  <table role='presentation' width='100%' style='width:100%;max-width:100%;border-collapse:collapse' cellspacing='0' cellpadding='0'>
-    <tr>
-      <td width='50%' valign='top' style='width:50%;padding:0 4px 0 0;vertical-align:top'>
-        <div class='ob-card' style='background:#ffffff;border-radius:8px;padding:10px 6px;text-align:center'>
-          <p class='ob-card-label' style='margin:0 0 4px;color:#6b7280;font-size:10px;text-transform:uppercase;letter-spacing:.02em;white-space:normal;word-break:break-word;overflow-wrap:break-word'>Spendable this week</p>
-          <p class='ob-card-figure' style='margin:0;color:{spendable_color};font-size:17px;font-weight:700;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.left_to_spend_weekly)}</p>
-          <p class='ob-card-pace' style='margin:5px 0 0;color:{pace_color};font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{spendable_today_sign}{fmt(abs(snap.spendable_today))}/day &middot; {"on pace" if snap.on_pace else "over pace"}</p>
-          <p class='ob-card-foot' style='margin:3px 0 0;color:#9ca3af;font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.left_to_spend)} this month</p>
-          {_since_html(since.get(SINCE_SPENDABLE))}
-        </div>
-      </td>
-      <td width='50%' valign='top' style='width:50%;padding:0 0 0 4px;vertical-align:top'>
-        <div class='ob-card' style='background:#ffffff;border-radius:8px;padding:10px 6px;text-align:center'>
-          <p class='ob-card-label' style='margin:0 0 4px;color:#6b7280;font-size:10px;text-transform:uppercase;letter-spacing:.02em;white-space:normal;word-break:break-word;overflow-wrap:break-word'>Safety Margin (this week)</p>
-          <p class='ob-card-figure' style='margin:0;color:{margin_color};font-size:17px;font-weight:700;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.safety_margin_weekly)}</p>
-          <p class='ob-card-pace' style='margin:5px 0 0;color:{margin_color};font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{margin_today_sign}{fmt(abs(snap.safety_margin_today))}/day</p>
-          <p class='ob-card-foot' style='margin:3px 0 0;color:#9ca3af;font-size:10px;white-space:normal;word-break:break-word;overflow-wrap:break-word'>{fmt(snap.safety_margin)} this month</p>
-          {pull_savings_html}
-          {_since_html(since.get(SINCE_MARGIN))}
-        </div>
-      </td>
-    </tr>
-  </table>
+<div class='ob-card ob-hero' style='background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:14px;color:#0f172a'>
+  <p class='ob-muted' style='margin:0;color:#64748b;font-size:13px'>Safety Margin (this week)</p>
+  <p class='{margin_cls}' data-ob='margin-figure' style='margin:2px 0;color:{margin_color};font-size:32px;font-weight:700;line-height:1.1;{_WRAP}'>{fmt(snap.safety_margin_weekly)}</p>
+  <p class='ob-muted' style='margin:0;color:#64748b;font-size:13px;{_WRAP}'>{margin_today_sign}{fmt(abs(snap.safety_margin_today))}/day &middot; {fmt(snap.safety_margin)} this month</p>
+  {_since_html(since.get(SINCE_MARGIN), "2px 0 0")}
+  {pending_html}
+  {pull_pill}
+  <div class='ob-line' style='border-top:1px solid #e2e8f0;margin-top:12px;padding-top:10px'>
+    <p class='ob-muted' style='margin:0;color:#64748b;font-size:13px'>Spendable this week</p>
+    <p class='{spend_cls}' data-ob='spendable-figure' style='margin:2px 0 0;color:{spend_color};font-size:20px;font-weight:600;{_WRAP}'>{fmt(snap.left_to_spend_weekly)}</p>
+    <p class='{pace_cls}' style='margin:0;color:{pace_color};font-size:13px;{_WRAP}'>{spendable_today_sign}{fmt(abs(snap.spendable_today))}/day &middot; {"on pace" if snap.on_pace else "over pace"}</p>
+    <p class='ob-muted' style='margin:0;color:#64748b;font-size:13px;{_WRAP}'>{fmt(snap.left_to_spend)} this month</p>
+    {_since_html(since.get(SINCE_SPENDABLE), "2px 0 0")}
+  </div>
+  {bars_block}
   {lowest_html}
 </div>"""
     else:
         household_html = (
-            "<div style='background:#f9fafb;border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:20px'>"
-            "<h3 style='margin:0 0 4px;color:#374151;font-size:15px'>Household Snapshot</h3>"
-            "<p style='color:#9ca3af;margin:0'>No checking account to compute a snapshot from.</p></div>"
+            f"<div class='ob-card' style='{_CARD_STYLE}'>"
+            "<p style='margin:0 0 4px;font-size:14px;font-weight:600'>Household Snapshot</p>"
+            "<p class='ob-muted' style='color:#64748b;margin:0'>No checking account to compute a snapshot from.</p></div>"
+        )
+
+    if attention_items:
+        needs_html = (
+            "<div class='ob-warn' style='background:#fef3c7;border:1px solid #fde68a;border-radius:12px;"
+            "padding:12px 16px;margin-bottom:14px;color:#92400e'>"
+            "<p style='margin:0 0 4px;font-weight:600;font-size:14px'>Needs attention</p>"
+            + "".join(f"<div style='margin:0 0 6px'>{item}</div>" for item in attention_items)
+            + "</div>"
+        )
+    else:
+        needs_html = (
+            f"<div class='ob-card' style='{_CARD_STYLE};padding:12px 16px'>"
+            "<p class='ob-muted' style='margin:0;color:#64748b;font-size:13px'>Nothing needs you today.</p></div>"
         )
 
     weekly_html, weekly_text = _weekly_digest_section(weekly_digest) if weekly_digest else ("", "")
 
 
-    def _section(icon: str, title: str, body: str) -> str:
-        return (
-            f"<div style='margin-bottom:22px'>"
-            f"<h3 style='margin:0 0 8px;padding-bottom:6px;border-bottom:1px solid #e5e7eb;"
-            f"color:#111827;font-size:14px;font-weight:600'>{icon}&nbsp; {title}</h3>"
-            f"{body}</div>"
-        )
+    _section = _email_section
 
     # ── "Spending this month" ───────────────────────────────────────────
     # The weekly digest's breakdown over the month so far, from the same
@@ -607,7 +674,7 @@ def generate_daily_summary(
     month = spending_breakdown(db, user.id, month_start, today)
     month_title = f"Spending this month ({month_range})"
     month_tables_html, month_tables_text = _breakdown_tables(month.categories, month.top_merchants, "this month")
-    month_section_html = _section("📊", month_title, (
+    month_section_html = _section(month_title, (
         f"<p style='font-size:14px;color:#374151;margin:0 0 8px'>Total spent: "
         f"<b style='color:#111827'>{fmt(month.total)}</b></p>{month_tables_html}"
     ))
@@ -619,35 +686,45 @@ def generate_daily_summary(
 <html>
 <head>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
+<meta name='color-scheme' content='light dark'>
+<meta name='supported-color-schemes' content='light dark'>
 <style>
-/* Progressive enhancement only -- every rule above already works with NO
-   media-query support at all (Apple Mail and Gmail both honor this block,
-   but a client that strips <style> just keeps the mobile-sized inline
-   defaults, which is still a correct, non-overflowing render). */
+/* Progressive enhancement only: every inline style is already a correct
+   light-mode render, so a client that strips <style> loses nothing. */
 @media (min-width: 600px) {{
-  .ob-card {{ padding: 14px !important; }}
-  .ob-card-label {{ font-size: 11px !important; letter-spacing: .03em !important; }}
-  .ob-card-figure {{ font-size: 24px !important; }}
-  .ob-card-pace {{ font-size: 12px !important; }}
-  .ob-card-foot {{ font-size: 11px !important; }}
+  .ob-hero {{ padding: 20px !important; }}
+}}
+@media (prefers-color-scheme: dark) {{
+  .ob-page {{ background: #0b1220 !important; }}
+  .ob-card {{ background: #131c2e !important; border-color: #22304a !important; color: #e2e8f0 !important; }}
+  .ob-line {{ border-color: #22304a !important; }}
+  .ob-ink, [style*="color:#0f172a"] {{ color: #e2e8f0 !important; }}
+  .ob-muted, [style*="color:#64748b"] {{ color: #94a3b8 !important; }}
+  .ob-pos {{ color: #34d399 !important; }}
+  .ob-neg {{ color: #f87171 !important; }}
+  .ob-amber, .ob-warn-text {{ color: #fbbf24 !important; }}
+  .ob-bar {{ background: #334155 !important; }}
+  .ob-bar-acc {{ background: #2dd4bf !important; }}
+  .ob-accent {{ color: #2dd4bf !important; }}
+  .ob-warn {{ background: #2a1a06 !important; border-color: #78350f !important; color: #fcd34d !important; }}
+  .ob-warn table, .ob-warn p, .ob-warn div {{ color: #fcd34d !important; }}
 }}
 </style>
 </head>
-<body style='font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f3f4f6;margin:0;padding:24px 0'>
-<div style='max-width:600px;margin:0 auto;background:#ffffff;border-radius:12px;padding:24px;color:#1f2937'>
-<h2 style='color:#4f46e5;margin:0 0 4px;font-size:19px'>OfflineBudget Daily Summary</h2>
-<p style='color:#6b7280;margin:0 0 20px;font-size:13px'>{today.strftime("%A, %B %-d, %Y")}</p>
+<body class='ob-page' style='font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;background:#f8fafc;margin:0;padding:16px 0;color:#0f172a'>
+<div style='max-width:600px;margin:0 auto;padding:0 16px'>
+<p class='ob-accent' style='margin:0 0 2px;color:#0f766e;font-weight:700;font-size:13px'>OfflineBudget Daily Summary</p>
+<p class='ob-muted' style='color:#64748b;margin:0 0 14px;font-size:13px'>{today.strftime("%A, %B %-d, %Y")}</p>
 {last_pull_html}
-
-{stale_html}
 {household_html}
-{_section("🏦", "Checking Accounts", f"<table style='width:100%;font-size:14px'>{acct_rows}</table>")}
-{_section("📅", "Upcoming (next 7 days)", f"<table style='width:100%;font-size:14px'>{upcoming_rows}</table>")}
-{_section("💳", "Credit Cards", f"<table style='width:100%;font-size:14px'>{card_rows}</table>")}
-{month_section_html}
-{weekly_html}
+{needs_html}
 {changes_html}
-<p style='color:#9ca3af;font-size:11px;margin-top:24px;text-align:center'>Sent by OfflineBudget</p>
+{_section("Checking Accounts", f"<table style='width:100%;font-size:14px'>{acct_rows}</table>")}
+{_section("Upcoming (next 7 days)", f"<table style='width:100%;font-size:14px'>{upcoming_rows}</table>")}
+{_section("Credit Cards", f"<table style='width:100%;font-size:14px'>{card_rows}</table>")}
+{weekly_html}
+{month_section_html}
+<p class='ob-muted' style='color:#64748b;font-size:11px;margin-top:20px;text-align:center'>Sent by OfflineBudget</p>
 </div>
 </body></html>"""
 
@@ -686,14 +763,17 @@ def generate_daily_summary(
         )
         household_text = (
             "HOUSEHOLD SNAPSHOT\n"
-            f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}\n"
-            + _since_text(since.get(SINCE_SPENDABLE))
             + f"  Safety margin (this week): {fmt(snap.safety_margin_weekly)}"
             + f" ({margin_today_sign}{fmt(abs(snap.safety_margin_today))}/day)"
             + ("" if snap.savings_pull_needed <= 0 else
                f"  (pull {fmt(snap.savings_pull_needed)} from savings)")
             + "\n"
             + _since_text(since.get(SINCE_MARGIN))
+            + (f"  Includes pending charges on {snap.pending_cards_count} card"
+               f"{'' if snap.pending_cards_count == 1 else 's'} ({fmt(snap.pending_cards_total)})\n"
+               if snap.pending_cards_count > 0 else "")
+            + f"  Spendable this week: {fmt(snap.left_to_spend_weekly)}\n"
+            + _since_text(since.get(SINCE_SPENDABLE))
             + f"  Monthly: {fmt(snap.left_to_spend)} left to spend, {fmt(snap.safety_margin)} before your spending starts eating into savings.\n"
             + lowest_text
         )
@@ -715,7 +795,7 @@ def generate_daily_summary(
     last_pull_text = f"{last_pull}\n" if last_pull else ""
     text = f"""OfflineBudget Daily Summary — {today.strftime("%B %-d, %Y")}
 {last_pull_text}{stale_text}
-{household_text}
+{household_text}{changes_text}
 CHECKING ACCOUNTS
 {acct_text}
 
@@ -725,8 +805,7 @@ UPCOMING BILLS (next 7 days)
 CREDIT CARDS
 {card_text}
 
-{month_section_text}
-{weekly_text}{changes_text}"""
+{weekly_text}{month_section_text}"""
     return html, text
 
 
@@ -777,7 +856,7 @@ def _cause_item(c, esc, money) -> tuple[str, list[str]]:
         f"<li style='margin:1px 0'>{esc(n)}{(' ' + esc(a)) if a else ''}</li>" for n, a in kept
     )
     if hidden:
-        sub += f"<li style='margin:1px 0;color:#6b7280'>and {hidden} more</li>"
+        sub += f"<li style='margin:1px 0;color:#64748b'>and {hidden} more</li>"
     html = esc(c.head or c.text) + (f"<ul style='margin:2px 0;padding-left:16px'>{sub}</ul>" if sub else "")
     text_lines = [c.head or c.text] + [f"    {n}{(' ' + a) if a else ''}" for n, a in kept]
     if hidden:
@@ -838,14 +917,14 @@ def _receipt_block(ch, money, signed_money, esc, wrap) -> tuple[str, list[str]]:
         cause_text_lines.append(f"- {item_text_lines[0]}")
         cause_text_lines += item_text_lines[1:]
     if extra > 0:
-        cause_items_html += f"<li style='margin:4px 0;color:#6b7280'>and {extra} more</li>"
+        cause_items_html += f"<li style='margin:4px 0;color:#64748b'>and {extra} more</li>"
         cause_text_lines.append(f"- and {extra} more")
 
-    sub_heading = "margin:10px 0 2px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em"
+    sub_heading = "margin:10px 0 2px;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.03em"
     html = (
-        f"<p style='margin:10px 0 4px;font-size:14px;color:#111827;{wrap}'><b>{header_html}</b></p>"
+        f"<p style='margin:10px 0 4px;font-size:14px;color:#0f172a;{wrap}'><b>{header_html}</b></p>"
         f"<p style='{sub_heading}'>What changed</p>"
-        f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#374151;{wrap}'>{cause_items_html}</ul>"
+        f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#0f172a;{wrap}'>{cause_items_html}</ul>"
     )
     text_lines = [header_text, "What changed", *cause_text_lines]
 
@@ -854,14 +933,14 @@ def _receipt_block(ch, money, signed_money, esc, wrap) -> tuple[str, list[str]]:
         math_items_html = "".join(
             f"<li style='margin:2px 0'>{esc(m.label)}: {_math_figures(m.old, m.new, money, signed_money)}"
             + "".join(
-                f"<div style='padding-left:16px;color:#6b7280'>{esc(p.label)} {signed_money(p.delta)}</div>"
+                f"<div style='padding-left:16px;color:#64748b'>{esc(p.label)} {signed_money(p.delta)}</div>"
                 for p in m.parts
             ) + "</li>"
             for m in ch.math
         )
         html += (
             f"<p style='{sub_heading}'>How the number moved</p>"
-            f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#374151;{wrap}'>"
+            f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#0f172a;{wrap}'>"
             f"{math_items_html}<li style='margin:2px 0;font-weight:600'>{esc(ch.label)}: {total}</li></ul>"
         )
         text_lines.append("How the number moved")
@@ -904,7 +983,7 @@ def _changes_section(changes: list | None, section) -> tuple[str, str]:
             note = f"Moved: {', '.join(labels)}" if moved else ""
             items_html += (
                 f"<li style='margin:4px 0'>{item_html}"
-                + (f"<div style='font-size:12px;color:#6b7280'>{esc(note)}</div>" if note else "")
+                + (f"<div style='font-size:12px;color:#64748b'>{esc(note)}</div>" if note else "")
                 + "</li>"
             )
             others_text_lines.append(f"- {item_text_lines[0]}")
@@ -912,18 +991,18 @@ def _changes_section(changes: list | None, section) -> tuple[str, str]:
             if note:
                 others_text_lines.append(f"    {note}")
         if extra > 0:
-            items_html += f"<li style='margin:4px 0;color:#6b7280'>and {extra} more reasons</li>"
+            items_html += f"<li style='margin:4px 0;color:#64748b'>and {extra} more reasons</li>"
             others_text_lines.append(f"- and {extra} more reasons")
         others_html = (
-            f"<p style='margin:10px 0 4px;font-size:14px;color:#111827;{wrap}'><b>{top_html}</b></p>"
-            f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#374151;{wrap}'>{items_html}</ul>"
+            f"<p style='margin:10px 0 4px;font-size:14px;color:#0f172a;{wrap}'><b>{top_html}</b></p>"
+            f"<ul style='margin:0;padding-left:20px;font-size:13px;color:#0f172a;{wrap}'>{items_html}</ul>"
         )
 
     receipt_html, receipt_text_lines = _receipt_block(receipt, money, signed_money, esc, wrap)
 
     body = others_html + receipt_html
     text_lines = others_text_lines + receipt_text_lines
-    return section("🔎", title, body), f"\n{title.upper()}\n" + "\n".join(text_lines) + "\n"
+    return section(title, body), f"\n{title.upper()}\n" + "\n".join(text_lines) + "\n"
 
 
 def _breakdown_tables(categories, merchants, period: str) -> tuple[str, str]:
@@ -947,7 +1026,7 @@ def _breakdown_tables(categories, merchants, period: str) -> tuple[str, str]:
     merchant_text = "\n".join(
         f"  {m.name}: {fmt(m.total)}" for m in merchants[:10]
     ) or f"  No merchant activity {period}"
-    heading = "margin:{top}px 0 4px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.03em"
+    heading = "margin:{top}px 0 4px;font-size:12px;color:#64748b;text-transform:uppercase;letter-spacing:.03em"
     html = (
         f"<h4 style='{heading.format(top=12)}'>Spending by Category</h4>"
         f"<table style='width:100%;font-size:14px'>{cat_rows}</table>"
@@ -980,8 +1059,8 @@ def _weekly_digest_section(digest: WeeklyDigest) -> tuple[str, str]:
 
     html = f"""
 <div style='margin-bottom:22px'>
-<h3 style='margin:24px 0 8px;padding-bottom:6px;border-bottom:1px solid #e5e7eb;color:#111827;font-size:14px;font-weight:600'>🗓️&nbsp; Weekly Digest — {digest.week_start.strftime('%B %-d')}–{digest.week_end.strftime('%B %-d, %Y')}</h3>
-<p style='font-size:14px;color:#374151;margin:0 0 8px'>Total spent this week: <b style='color:#111827'>{fmt(digest.total_spent)}</b></p>
+<h3 style='margin:24px 0 8px;padding-bottom:6px;border-bottom:1px solid #e2e8f0;color:#0f172a;font-size:14px;font-weight:600'>🗓️&nbsp; Weekly Digest — {digest.week_start.strftime('%B %-d')}–{digest.week_end.strftime('%B %-d, %Y')}</h3>
+<p style='font-size:14px;color:#0f172a;margin:0 0 8px'>Total spent this week: <b style='color:#0f172a'>{fmt(digest.total_spent)}</b></p>
 {risk_html}
 {tables_html}
 </div>

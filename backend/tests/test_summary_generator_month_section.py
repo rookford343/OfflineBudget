@@ -95,15 +95,16 @@ def test_month_section_empty_state(db_session, monkeypatch):
     assert "No merchant activity this month" in html
 
 
-def test_spending_sections_come_last_monthly_then_weekly(db_session, monkeypatch):
+def test_spending_sections_come_last_weekly_then_monthly(db_session, monkeypatch):
     """The account and bill sections lead; the spending breakdowns close the
-    report, month first and the weekly digest (digest days only) after it."""
+    report, the weekly digest (digest days only) first and the month last
+    (restyle order, 2026-11-26)."""
     from unittest.mock import MagicMock
     _with_today(monkeypatch, TODAY)
     user = _seed(db_session)
     fake_weekly = ("<h3>🗓️&nbsp; Weekly Digest — marker</h3>", "WEEKLY DIGEST — marker")
     monkeypatch.setattr(summary_generator_module, "_weekly_digest_section", lambda d: fake_weekly)
     html, text = generate_daily_summary(db_session, user, weekly_digest=MagicMock())
-    assert html.index("Credit Cards") < html.index("Spending this month") < html.index("Weekly Digest")
-    assert text.index("CREDIT CARDS") < text.index("SPENDING THIS MONTH") < text.index("WEEKLY DIGEST")
+    assert html.index("Credit Cards") < html.index("Weekly Digest") < html.index("Spending this month")
+    assert text.index("CREDIT CARDS") < text.index("WEEKLY DIGEST") < text.index("SPENDING THIS MONTH")
     assert html.index("Checking Accounts") < html.index("Spending this month")

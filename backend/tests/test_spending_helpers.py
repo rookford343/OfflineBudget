@@ -227,7 +227,7 @@ def test_daily_summary_renders_household_snapshot_and_weekly_digest_sections(db_
     digest = generate_weekly_digest(db_session, user, account.id)
     html, text = generate_daily_summary(db_session, user, weekly_digest=digest)
 
-    assert "Household Snapshot" in html
+    assert "Safety Margin (this week)" in html  # restyle: the hero leads with it; no separate "Household Snapshot" title
     assert "Credit Cards" in html
     assert "Weekly Digest" in html
     assert "Groceries" in html
