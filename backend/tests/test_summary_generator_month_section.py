@@ -66,7 +66,7 @@ def test_month_section_totals_checking_and_card_spend_for_this_month_only(db_ses
     _with_today(monkeypatch, TODAY)
     html, text = generate_daily_summary(db_session, _seed(db_session))
     # 120 checking + 300 + 45 card; last month's $75 and the card payoff excluded
-    assert "Total spent: <b style='color:#111827'>$465.00</b>" in html
+    assert "Total spent: <b style='color:#0f172a'>$465.00</b>" in html
     assert "Total spent: $465.00" in text
     assert "Old Market" not in html
     assert "AUTOMATIC PAYMENT" not in html

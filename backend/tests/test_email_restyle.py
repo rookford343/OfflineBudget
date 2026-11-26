@@ -30,7 +30,7 @@ def _heights(html):
 def test_hero_leads_with_safety_margin(db_session):
     snap = _blank_snapshot(safety_margin_weekly=D("1850.00"), left_to_spend_weekly=D("1400.00"))
     html, _ = _render(db_session, snap, "herolead")
-    assert html.index("Safety Margin") < html.index("Spendable this week") < html.index("Checking")
+    assert html.index("Safety Margin") < html.index("Spendable this week") < html.index("Checking Accounts")
 
 
 def _figure_style(html, name="margin-figure"):
@@ -180,3 +180,34 @@ def test_no_checking_account_still_renders(db_session):
     db_session.commit()
     html, text = generate_daily_summary(db_session, user)
     assert "No checking account to compute a snapshot from." in html
+
+
+# Colours the dark block remaps (palette ink/muted) plus semantic colours that
+# read fine on both backgrounds or carry their own dark override / own box.
+_DARK_SAFE = {
+    "#0f172a", "#64748b",                       # remapped by attribute selectors
+    "#059669", "#dc2626", "#b45309", "#92400e",  # green/red/amber/warn-text (classes)
+    "#d97706", "#0f766e", "#991b1b",             # amber text, accent (class), red text on its own light box
+}
+
+
+def test_every_inline_text_colour_is_dark_mode_safe(db_session):
+    from unittest.mock import patch
+    from backend import models
+    from backend.services import summary_generator as sg
+    from backend.tests.test_summary_generator_next_month_low import _user_and_checking
+    user = _user_and_checking(db_session, "darkcolors")
+    db_session.add(models.CreditCard(user_id=user.id, name="Card", credit_limit=D("5000"), statement_day=15,
+                                     due_day=1, current_balance=D("300.00"), balance_due=D("100.00")))
+    db_session.commit()
+    snap = _blank_snapshot(
+        weekly_lows=[_low(0, "2500.00"), _low(1, "-5.00", "danger")], savings_pull_needed=D("50.00"),
+        next_month_minimum=D("-100.00"), next_month_minimum_date=date(2026, 12, 9), next_month_label="December",
+        lookahead_minimum=D("-100.00"), lookahead_minimum_date=date(2027, 1, 9), lookahead_status="danger",
+        pending_cards_count=1, pending_cards_total=D("10.00"))
+    digest = sg.generate_weekly_digest(db_session, user, db_session.query(models.Account).first().id)
+    with patch("backend.services.summary_generator.compute_budget_snapshot", return_value=snap):
+        html, _ = sg.generate_daily_summary(db_session, user, weekly_digest=digest, since_lines={"safety_margin_week": "x"})
+    used = set(re.findall(r"(?<![-\w])color:(#[0-9a-fA-F]{6})", html.split("</style>", 1)[1]))
+    assert used, "expected inline colours"
+    assert used <= _DARK_SAFE, f"inline colours with no dark-mode treatment: {sorted(used - _DARK_SAFE)}"

@@ -444,14 +444,14 @@ def generate_daily_summary(
     acct_last_txn = _last_txn_dates(db, models.Transaction.account_id, models.Transaction.date, [a.id for a in accounts])
 
     acct_rows = "".join(
-        f"<tr><td style='padding:6px 12px 6px 0;color:#374151'>{a.name}"
-        f"<br><span style='color:#9ca3af;font-size:11px;font-weight:400'>{_last_txn_label(acct_last_txn.get(a.id))}</span>"
+        f"<tr><td style='padding:6px 12px 6px 0;color:#0f172a'>{a.name}"
+        f"<br><span style='color:#64748b;font-size:11px;font-weight:400'>{_last_txn_label(acct_last_txn.get(a.id))}</span>"
         + (_since_html(since.get(SINCE_CHECKING), "2px 0 0", "font-weight:400;")
            if primary_account is not None and a.id == primary_account.id else "")
         + "</td>"
-        f"<td style='padding:6px 0;text-align:right'><b style='color:#111827'>{fmt(a.current_balance)}</b></td></tr>"
+        f"<td style='padding:6px 0;text-align:right'><b style='color:#0f172a'>{fmt(a.current_balance)}</b></td></tr>"
         for a in accounts
-    ) or "<tr><td style='color:#9ca3af'>No checking accounts</td></tr>"
+    ) or "<tr><td style='color:#64748b'>No checking accounts</td></tr>"
 
     def _day_label(d: date) -> str:
         offset = (d - today).days
@@ -464,16 +464,16 @@ def generate_daily_summary(
     upcoming_rows = "".join(
         (
             lambda is_income: (
-                f"<tr><td style='padding:6px 12px 6px 0;color:#9ca3af;font-size:12px;white-space:nowrap;vertical-align:top'>{_day_label(b.due_date)}</td>"
-                f"<td style='padding:6px 12px 6px 0;color:#374151'>{b.name}</td>"
+                f"<tr><td style='padding:6px 12px 6px 0;color:#64748b;font-size:12px;white-space:nowrap;vertical-align:top'>{_day_label(b.due_date)}</td>"
+                f"<td style='padding:6px 12px 6px 0;color:#0f172a'>{b.name}</td>"
                 f"<td style='padding:6px 0;text-align:right;white-space:nowrap'>"
                 f"<b style='color:{'#059669' if is_income else '#dc2626'}'>{'+' if is_income else '−'}{fmt(b.amount)}</b>"
-                + (" <span style='color:#9ca3af;font-size:10px'>actual</span>" if b.is_actual else "")
+                + (" <span style='color:#64748b;font-size:10px'>actual</span>" if b.is_actual else "")
                 + "</td></tr>"
             )
         )(b.type == models.RecurringType.income)
         for b in upcoming
-    ) or "<tr><td style='color:#9ca3af'>None in the next 7 days</td></tr>"
+    ) or "<tr><td style='color:#64748b'>None in the next 7 days</td></tr>"
 
     # snap.cards carries utilization_pct and pending_charges already computed
     # for the exact same reason the Dashboard's card list does -- reusing it
@@ -517,9 +517,9 @@ def generate_daily_summary(
         util = sc.utilization_pct if sc else (
             round(float(c.current_balance) / float(c.credit_limit) * 100, 1) if c.credit_limit else 0.0
         )
-        util_color = "#dc2626" if util >= 80 else "#d97706" if util >= 50 else "#6b7280"
+        util_color = "#dc2626" if util >= 80 else "#d97706" if util >= 50 else "#64748b"
         pending = sc.pending_charges if sc else Decimal("0")
-        pending_html = f" <span style='color:#9ca3af'>(+{fmt(pending)} pending)</span>" if pending else ""
+        pending_html = f" <span style='color:#64748b'>(+{fmt(pending)} pending)</span>" if pending else ""
         due_in = None
         if c.due_day:
             # Same next-occurrence helper _due_label uses below, so "due in
@@ -535,17 +535,17 @@ def generate_daily_summary(
             + (" &middot; <span style='color:#d97706'>statement figure may be stale</span>" if stale else "")
         )
         return (
-            f"<tr><td style='padding:6px 12px 6px 0;color:#374151'>{c.name}"
-            f"<br><span style='color:#9ca3af;font-size:11px;font-weight:400'>{_last_txn_label(card_last_txn.get(c.id))}</span>"
-            f"<br><span style='color:#6b7280;font-size:11px;font-weight:400'>{breakdown}</span></td>"
-            f"<td style='padding:6px 0;text-align:right;vertical-align:top'><b style='color:#111827'>{fmt(c.current_balance)}</b>{pending_html}</td>"
+            f"<tr><td style='padding:6px 12px 6px 0;color:#0f172a'>{c.name}"
+            f"<br><span style='color:#64748b;font-size:11px;font-weight:400'>{_last_txn_label(card_last_txn.get(c.id))}</span>"
+            f"<br><span style='color:#64748b;font-size:11px;font-weight:400'>{breakdown}</span></td>"
+            f"<td style='padding:6px 0;text-align:right;vertical-align:top'><b style='color:#0f172a'>{fmt(c.current_balance)}</b>{pending_html}</td>"
             f"<td style='padding:6px 0 6px 12px;text-align:right;white-space:nowrap;font-size:12px;vertical-align:top'>"
             f"<span style='color:{util_color}'>{util:.0f}% used</span>"
-            + (f" <span style='color:#9ca3af'>&middot; {due_in}</span>" if due_in else "")
+            + (f" <span style='color:#64748b'>&middot; {due_in}</span>" if due_in else "")
             + "</td></tr>"
         )
 
-    card_rows = "".join(_card_row(c) for c in cards) or "<tr><td colspan='3' style='color:#9ca3af'>No credit cards</td></tr>"
+    card_rows = "".join(_card_row(c) for c in cards) or "<tr><td colspan='3' style='color:#64748b'>No credit cards</td></tr>"
 
     attention_items: list[str] = []
     if stale_html:
@@ -620,6 +620,7 @@ def generate_daily_summary(
         # for wide screens and supplies the dark palette -- never functionality.
         household_html = f"""
 <div class='ob-card ob-hero' style='background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin-bottom:14px;color:#0f172a'>
+  <p class='ob-ink' style='margin:0 0 8px;color:#0f172a;font-size:14px;font-weight:600'>Household Snapshot</p>
   <p class='ob-muted' style='margin:0;color:#64748b;font-size:13px'>Safety Margin (this week)</p>
   <p class='{margin_cls}' data-ob='margin-figure' style='margin:2px 0;color:{margin_color};font-size:32px;font-weight:700;line-height:1.1;{_WRAP}'>{fmt(snap.safety_margin_weekly)}</p>
   <p class='ob-muted' style='margin:0;color:#64748b;font-size:13px;{_WRAP}'>{margin_today_sign}{fmt(abs(snap.safety_margin_today))}/day &middot; {fmt(snap.safety_margin)} this month</p>
@@ -660,8 +661,6 @@ def generate_daily_summary(
     weekly_html, weekly_text = _weekly_digest_section(weekly_digest) if weekly_digest else ("", "")
 
 
-    _section = _email_section
-
     # ── "Spending this month" ───────────────────────────────────────────
     # The weekly digest's breakdown over the month so far, from the same
     # spending_breakdown the Dashboard's digest card uses. On the 1st,
@@ -674,13 +673,13 @@ def generate_daily_summary(
     month = spending_breakdown(db, user.id, month_start, today)
     month_title = f"Spending this month ({month_range})"
     month_tables_html, month_tables_text = _breakdown_tables(month.categories, month.top_merchants, "this month")
-    month_section_html = _section(month_title, (
-        f"<p style='font-size:14px;color:#374151;margin:0 0 8px'>Total spent: "
-        f"<b style='color:#111827'>{fmt(month.total)}</b></p>{month_tables_html}"
+    month_section_html = _email_section(month_title, (
+        f"<p style='font-size:14px;color:#0f172a;margin:0 0 8px'>Total spent: "
+        f"<b style='color:#0f172a'>{fmt(month.total)}</b></p>{month_tables_html}"
     ))
     month_section_text = f"{month_title.upper()}\n  Total spent: {fmt(month.total)}\n{month_tables_text}\n"
 
-    changes_html, changes_text = _changes_section(since_changes, _section)
+    changes_html, changes_text = _changes_section(since_changes, _email_section)
 
     html = f"""<!DOCTYPE html>
 <html>
@@ -719,9 +718,9 @@ def generate_daily_summary(
 {household_html}
 {needs_html}
 {changes_html}
-{_section("Checking Accounts", f"<table style='width:100%;font-size:14px'>{acct_rows}</table>")}
-{_section("Upcoming (next 7 days)", f"<table style='width:100%;font-size:14px'>{upcoming_rows}</table>")}
-{_section("Credit Cards", f"<table style='width:100%;font-size:14px'>{card_rows}</table>")}
+{_email_section("Checking Accounts", f"<table style='width:100%;font-size:14px'>{acct_rows}</table>")}
+{_email_section("Upcoming (next 7 days)", f"<table style='width:100%;font-size:14px'>{upcoming_rows}</table>")}
+{_email_section("Credit Cards", f"<table style='width:100%;font-size:14px'>{card_rows}</table>")}
 {weekly_html}
 {month_section_html}
 <p class='ob-muted' style='color:#64748b;font-size:11px;margin-top:20px;text-align:center'>Sent by OfflineBudget</p>
