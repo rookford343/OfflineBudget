@@ -25,21 +25,21 @@ export default function MoreSheet({ onClose, onLogout, balancesHidden, onToggleB
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-  const row = "flex min-h-[44px] items-center gap-3 rounded-lg px-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50";
+  const row = "flex min-h-[44px] items-center gap-3 rounded-lg px-3 text-sm text-ink hover:bg-surface";
   return (
     <div className="fixed inset-0 z-[60] lg:hidden" role="dialog" aria-modal="true" aria-label="More">
       <button aria-label="Close menu" className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-2xl bg-white dark:bg-gray-800 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl">
+      <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-y-auto rounded-t-2xl bg-card px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xl">
         <div className="flex items-center justify-between pb-2">
-          <h2 className="text-base font-semibold text-gray-900 dark:text-white">More</h2>
-          <button ref={closeRef} onClick={onClose} aria-label="Close" className="flex h-11 w-11 items-center justify-center text-gray-500"><X size={20} /></button>
+          <h2 className="text-base font-semibold text-ink">More</h2>
+          <button ref={closeRef} onClick={onClose} aria-label="Close" className="flex h-11 w-11 items-center justify-center text-muted"><X size={20} /></button>
         </div>
         {NAV_GROUPS.map(group => (
           <div key={group.key} className="pb-2">
-            <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">{group.label}</p>
+            <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{group.label}</p>
             {group.items.map(item => (
               <NavLink key={item.to} to={item.to} onClick={onClose}
-                className={({ isActive }) => cx(row, isActive && "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300")}>
+                className={({ isActive }) => cx(row, isActive && "bg-surface text-accent")}>
                 <item.icon size={18} />
                 {item.label}
                 {badgeFor(item)}
@@ -47,7 +47,7 @@ export default function MoreSheet({ onClose, onLogout, balancesHidden, onToggleB
             ))}
           </div>
         ))}
-        <div className="border-t border-gray-100 dark:border-gray-700 pt-2">
+        <div className="border-t border-line pt-2">
           <NavLink to={SETTINGS_ITEM.to} onClick={onClose} className={row}>
             <SettingsIcon size={18} /> Settings
           </NavLink>

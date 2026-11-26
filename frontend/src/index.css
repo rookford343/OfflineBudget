@@ -3,13 +3,44 @@
 @tailwind utilities;
 
 @layer base {
+  /* Named palette (slate + teal). Tailwind colors surface/card/ink/... read
+     these variables, so they switch with .dark and need no dark: variant. */
+  :root {
+    --c-surface: #f8fafc;
+    --c-card: #ffffff;
+    --c-ink: #0f172a;
+    --c-muted: #64748b;
+    --c-line: #e2e8f0;
+    --c-bar: #cbd5e1;
+    --c-accent: #0f766e;
+    --c-accent-strong: #0f766e;
+    --c-warn: #d97706;
+    --c-warn-text: #92400e;
+    --c-warn-figure: #b45309;
+    --c-warn-bg: #fef3c7;
+    --c-warn-line: #fde68a;
+  }
+  .dark {
+    --c-surface: #0b1220;
+    --c-card: #131c2e;
+    --c-ink: #e2e8f0;
+    --c-muted: #94a3b8;
+    --c-line: #22304a;
+    --c-bar: #334155;
+    --c-accent: #2dd4bf;
+    --c-accent-strong: #0f766e;
+    --c-warn: #f59e0b;
+    --c-warn-text: #fcd34d;
+    --c-warn-figure: #fbbf24;
+    --c-warn-bg: #2a1a06;
+    --c-warn-line: #5a3a0e;
+  }
+
   /* Same colours as the <main> surface, so a viewport-fit=cover safe area
      (the Duo status strip) matches the app instead of showing browser gray. */
-  html { @apply bg-gray-50 dark:bg-gray-900; }
+  html { @apply bg-surface; }
   body {
-    @apply bg-gray-50 text-gray-900 antialiased;
-    /* Dark: warm-slate, not pure black — reduces eye strain */
-    @apply dark:bg-gray-900 dark:text-[#c4ccd8];
+    @apply bg-surface text-ink antialiased;
     margin: 0;
   }
   * { box-sizing: border-box; }
@@ -17,29 +48,25 @@
 
 @layer components {
   .card {
-    @apply bg-white rounded-xl shadow-sm border border-gray-100 p-5;
-    @apply dark:bg-[#2a2f3d] dark:border-[#3a4051];
+    @apply bg-card rounded-xl shadow-sm border border-line p-5;
   }
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none cursor-pointer;
   }
   .btn-primary {
-    @apply btn bg-indigo-600 text-white hover:bg-indigo-700 focus:ring-indigo-500;
+    @apply btn bg-accent-strong text-white hover:brightness-90 focus:ring-accent;
   }
   .btn-secondary {
-    @apply btn bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 focus:ring-indigo-500;
-    @apply dark:bg-[#333947] dark:text-[#c4ccd8] dark:border-[#454d61] dark:hover:bg-[#3b4253];
+    @apply btn bg-card text-ink border border-line hover:bg-surface focus:ring-accent;
   }
   .btn-danger {
     @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500;
   }
   .btn-ghost {
-    @apply btn text-gray-600 hover:bg-gray-100 focus:ring-gray-400;
-    @apply dark:text-[#909aaa] dark:hover:bg-[#333947] dark:hover:text-[#c4ccd8];
+    @apply btn text-muted hover:bg-surface hover:text-ink focus:ring-muted;
   }
   .input {
-    @apply w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 focus:outline-none transition-colors bg-white;
-    @apply dark:bg-[#333947] dark:border-[#454d61] dark:text-[#c4ccd8] dark:placeholder-[#949daf];
+    @apply w-full rounded-lg border border-line px-3 py-2 text-sm shadow-sm text-ink placeholder-muted focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none transition-colors bg-card;
   }
   .label {
     @apply block text-sm font-medium text-gray-700 mb-1 dark:text-[#9aa3b2];

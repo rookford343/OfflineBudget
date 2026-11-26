@@ -118,14 +118,14 @@ export default function Layout() {
   return (
     <div className="flex h-screen overflow-hidden pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       {/* Sidebar */}
-      <aside className="hidden lg:flex w-60 flex-col bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 shrink-0">
-        <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-700">
+      <aside className="hidden lg:flex w-60 flex-col bg-card border-r border-line shrink-0">
+        <div className="px-5 py-4 border-b border-line">
           <div className="flex items-center justify-between">
-            <h1 className="text-lg font-bold text-indigo-600">OfflineBudget</h1>
+            <h1 className="text-lg font-bold text-accent">OfflineBudget</h1>
             <div className="flex items-center gap-2">
               <button
                 onClick={toggleTheme}
-                className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                className="text-muted hover:text-ink"
                 title={isDark ? "Switch to light mode" : "Switch to dark mode"}
                 aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
               >
@@ -133,7 +133,7 @@ export default function Layout() {
               </button>
               <button
                 onClick={toggleBalancesHidden}
-                className="text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                className="text-muted hover:text-ink"
                 title={balancesHidden ? "Show account balances" : "Hide account balances"}
                 aria-label={balancesHidden ? "Show account balances" : "Hide account balances"}
               >
@@ -154,13 +154,13 @@ export default function Layout() {
               {badgeFor(item)}
             </NavLink>
           ))}
-          {pinnedItems.length > 0 && <div className="my-2 border-t border-gray-100 dark:border-gray-700" />}
+          {pinnedItems.length > 0 && <div className="my-2 border-t border-line" />}
           {NAV_GROUPS.map(group => {
             const visible = group.items.filter(i => !pinnedSet.has(i.to));
             if (visible.length === 0) return null;
             return (
               <div key={group.key} className="pt-3 first:pt-0">
-                <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-400">{group.label}</p>
+                <p className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{group.label}</p>
                 {visible.map(item => (
                   <NavLink key={item.to} to={item.to} className={navLinkClass}>
                     <item.icon size={18} />
@@ -173,18 +173,18 @@ export default function Layout() {
           })}
         </nav>
         {sortedAccounts.length > 0 && (
-          <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700">
+          <div className="px-3 py-3 border-t border-line">
             <div className="flex items-center justify-between px-2 pb-1 gap-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-400 shrink-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted shrink-0">
                 Accounts
               </p>
-              <span className="text-xs font-semibold tabular-nums text-gray-500 dark:text-gray-400 truncate">
+              <span className="text-xs font-semibold tabular-nums text-muted truncate">
                 {maskIfHidden(balancesHidden, fmt(totalAccountBalance))}
               </span>
               {sortedAccounts.length > 4 && (
                 <button
                   onClick={() => setAccountsExpanded(e => !e)}
-                  className="shrink-0 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
+                  className="shrink-0 text-muted hover:text-ink"
                   title={accountsExpanded ? "Show fewer accounts" : "Show all accounts"}
                   aria-label={accountsExpanded ? "Show fewer accounts" : "Show all accounts"}
                 >
@@ -203,23 +203,23 @@ export default function Layout() {
                       className={({ isActive }) =>
                         cx(
                           "flex items-center justify-between px-2 py-1.5 rounded-lg text-sm",
-                          isActive ? "bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300" : "text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50"
+                          isActive ? "bg-surface text-accent" : "text-muted hover:bg-surface"
                         )
                       }
                     >
                       <div className="min-w-0">
                         <p className="truncate">{a.name}</p>
-                        <p className="text-xs text-gray-400 dark:text-gray-500 capitalize">{a.type.replace("_", " ")}</p>
+                        <p className="text-xs text-muted capitalize">{a.type.replace("_", " ")}</p>
                       </div>
                       {balancesHidden ? (
-                        <span className="shrink-0 ml-2 text-gray-400 dark:text-gray-500">••••</span>
+                        <span className="shrink-0 ml-2 text-muted">••••</span>
                       ) : (
                         <div className="shrink-0 ml-2 flex flex-col items-end gap-0.5">
-                          <span className={`tabular-nums ${afterPending < 0 ? "text-red-500 dark:text-red-400" : "text-gray-500 dark:text-gray-400"}`}>
+                          <span className={`tabular-nums ${afterPending < 0 ? "text-red-500 dark:text-red-400" : "text-muted"}`}>
                             {fmt(afterPending)}
                           </span>
                           {pending.length > 0 && (
-                            <span className="text-[10px] leading-none text-gray-400 dark:text-gray-500 whitespace-nowrap" title={`Posted ${fmt(posted)}`}>
+                            <span className="text-[10px] leading-none text-muted whitespace-nowrap" title={`Posted ${fmt(posted)}`}>
                               {pending.length} pending
                             </span>
                           )}
@@ -233,15 +233,15 @@ export default function Layout() {
             </ul>
           </div>
         )}
-        <div className="px-3 py-3 border-t border-gray-200 dark:border-gray-700">
+        <div className="px-3 py-3 border-t border-line">
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
-              <button className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-700/40 hover:bg-gray-100 dark:hover:bg-gray-700/70 text-left">
+              <button className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg bg-surface hover:brightness-95 text-left">
                 <span className="min-w-0">
-                  <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{me?.display_name ?? user?.display_name}</span>
-                  {me?.email && <span className="block text-xs text-gray-400 dark:text-gray-500 truncate">{me.email}</span>}
+                  <span className="block text-sm font-medium text-ink truncate">{me?.display_name ?? user?.display_name}</span>
+                  {me?.email && <span className="block text-xs text-muted truncate">{me.email}</span>}
                 </span>
-                <ChevronsUpDown size={14} className="shrink-0 ml-2 text-gray-400 dark:text-gray-500" />
+                <ChevronsUpDown size={14} className="shrink-0 ml-2 text-muted" />
               </button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
@@ -249,21 +249,21 @@ export default function Layout() {
                 side="top"
                 align="start"
                 sideOffset={6}
-                className="w-52 rounded-xl bg-white dark:bg-[#2a2f3d] border border-gray-100 dark:border-[#3a4051] shadow-lg py-1.5 z-50"
+                className="w-52 rounded-xl bg-card border border-line shadow-lg py-1.5 z-50"
               >
                 <DropdownMenu.Item asChild>
-                  <button onClick={() => navigate("/settings")} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 outline-none">
-                    <SettingsIcon size={15} className="text-gray-400" />
+                  <button onClick={() => navigate("/settings")} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-ink hover:bg-surface outline-none">
+                    <SettingsIcon size={15} className="text-muted" />
                     Settings
                   </button>
                 </DropdownMenu.Item>
                 <DropdownMenu.Item asChild>
-                  <button onClick={() => navigate("/settings/profile")} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 outline-none">
-                    <KeyRound size={15} className="text-gray-400" />
+                  <button onClick={() => navigate("/settings/profile")} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-ink hover:bg-surface outline-none">
+                    <KeyRound size={15} className="text-muted" />
                     Change Password
                   </button>
                 </DropdownMenu.Item>
-                <DropdownMenu.Separator className="my-1.5 border-t border-gray-100 dark:border-gray-700" />
+                <DropdownMenu.Separator className="my-1.5 border-t border-line" />
                 <DropdownMenu.Item asChild>
                   <button onClick={logout} className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 outline-none">
                     <LogOut size={15} />
@@ -277,7 +277,7 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
+      <main className="flex-1 overflow-y-auto bg-surface">
         <ConnectionBanner />
         {/* Fluid up to a readable ceiling. max-w-6xl (72rem) left most of a
             wide monitor empty, but an unbounded width stretches table rows and
@@ -301,14 +301,14 @@ export default function Layout() {
       {/* Phone / folded-and-unfolded bottom nav: below lg, 44px+ targets,
           padded for the home-indicator inset. The page content above carries
           matching bottom padding (pb-24) so nothing hides behind it. */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex justify-around px-2 pt-1 pb-[env(safe-area-inset-bottom)]">
+      <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-card border-t border-line flex justify-around px-2 pt-1 pb-[env(safe-area-inset-bottom)]">
         {[{ ...DASHBOARD_ITEM, label: "Home", icon: Home }, ...barItems].map(item => (
           <NavLink
             key={item.to}
             to={item.to}
             className={({ isActive }) =>
               cx("flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium",
-                isActive ? "text-indigo-600 dark:text-indigo-400" : "text-gray-500 dark:text-gray-400")
+                isActive ? "text-accent" : "text-muted")
             }
           >
             <item.icon size={20} />
@@ -318,7 +318,7 @@ export default function Layout() {
         <button
           ref={moreBtnRef}
           onClick={() => setMoreOpen(true)}
-          className="flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium text-gray-500 dark:text-gray-400"
+          className="flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-xs font-medium text-muted"
         >
           <Menu size={20} />
           <span>More</span>
