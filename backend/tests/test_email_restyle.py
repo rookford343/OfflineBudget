@@ -243,6 +243,32 @@ def test_covered_subject_iff_quiet_body(db_session):
         assert covered == ("Needs attention" not in html), name
 
 
+def test_covered_subject_iff_quiet_body_with_stale_data(db_session):
+    """With a stale connection the subject is never "Covered" and the body is
+    never quiet; both flip together."""
+    from unittest.mock import patch
+    from backend import models
+    from backend.services.summary_generator import email_subject, generate_daily_summary
+    from backend.tests.test_summary_generator_next_month_low import _user_and_checking
+    for name, stale in (("fresh", False), ("stale", True)):
+        user = _user_and_checking(db_session, f"iffstale{name}")
+        if stale:
+            db_session.add(models.BankConnection(
+                user_id=user.id, access_url_encrypted="encrypted",
+                status=models.BankConnectionStatus.error, last_error="boom",
+            ))
+            db_session.commit()
+        snap_box, stale_box = [], []
+        with patch("backend.services.summary_generator.compute_budget_snapshot", return_value=_blank_snapshot()):
+            html, _ = generate_daily_summary(db_session, user, snapshot_out=snap_box, stale_out=stale_box)
+        assert stale_box == [stale], name
+        subject = email_subject(snap_box[0], date(2026, 11, 26), False, stale=bool(stale_box and stale_box[0]))
+        covered = subject.startswith("Covered")
+        assert covered == (not stale), name
+        assert covered == ("Nothing needs you today." in html), name
+        assert covered == ("Needs attention" not in html), name
+
+
 def test_hero_red_lines_have_a_dark_red_override(db_session):
     snap = _blank_snapshot(lookahead_minimum=D("-400.00"), lookahead_minimum_date=date(2027, 1, 25),
                            lookahead_status="danger", next_month_minimum=D("-100.00"),

@@ -221,12 +221,15 @@ def _send_daily_summaries_locked() -> None:
                         logger.exception("Daily summary: rollback after history failure failed")
                     readings, since, since_changes = None, {}, []
                 snap_box: list = []
+                stale_box: list = []
                 html_body, text_body = generate_daily_summary(
                     db, user, weekly_digest=weekly_digest, since_lines=since,
                     since_changes=since_changes, snapshot_out=snap_box,
+                    stale_out=stale_box,
                 )
                 subject = email_subject(
                     snap_box[0] if snap_box else None, date.today(), weekly_digest is not None,
+                    stale=bool(stale_box and stale_box[0]),
                 )
                 any_sent = False
                 for recipient in recipients:

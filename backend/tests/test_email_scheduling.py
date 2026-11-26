@@ -93,7 +93,7 @@ def _run_send_daily_summaries(monkeypatch, *, recipients: str, today: date, week
 
     captured = {"weekly_digest": "not-called"}
 
-    def _fake_generate_daily_summary(db, u, *, weekly_digest=None, since_lines=None, since_changes=None, snapshot_out=None):
+    def _fake_generate_daily_summary(db, u, *, weekly_digest=None, since_lines=None, since_changes=None, snapshot_out=None, stale_out=None):
         captured["weekly_digest"] = weekly_digest
         return ("<html>", "text")
 
@@ -207,7 +207,7 @@ def test_scheduled_subject_comes_from_email_subject_on_the_body_snapshot(monkeyp
     from types import SimpleNamespace
     subjects = []
 
-    def _fake(db, u, *, weekly_digest=None, since_lines=None, since_changes=None, snapshot_out=None):
+    def _fake(db, u, *, weekly_digest=None, since_lines=None, since_changes=None, snapshot_out=None, stale_out=None):
         snapshot_out.append(SimpleNamespace(
             savings_pull_needed=Decimal("75.00"), lookahead_status="ok",
             move_to_checking_needed=Decimal("0.00"), next_month_minimum_date=None,
@@ -221,3 +221,26 @@ def test_scheduled_subject_comes_from_email_subject_on_the_body_snapshot(monkeyp
     _run_send_daily_summaries(monkeypatch, recipients="dan@example.com", today=date(2026, 8, 13),
                               generate=_fake, send=_send)
     assert subjects and subjects[0] == "Action needed: pull from savings · Daily Budget Summary — August 13, 2026"
+
+
+def test_scheduled_subject_flags_stale_bank_data(monkeypatch):
+    """stale_out from generate_daily_summary reaches the scheduled subject."""
+    from decimal import Decimal
+    from types import SimpleNamespace
+    subjects = []
+
+    def _fake(db, u, *, weekly_digest=None, since_lines=None, since_changes=None, snapshot_out=None, stale_out=None):
+        snapshot_out.append(SimpleNamespace(
+            savings_pull_needed=Decimal("0.00"), lookahead_status="warning",
+            move_to_checking_needed=Decimal("0.00"), next_month_minimum_date=None,
+        ))
+        stale_out.append(True)
+        return ("<html>", "text")
+
+    def _send(db, recipient, subject, html, text):
+        subjects.append(subject)
+        return True, None
+
+    _run_send_daily_summaries(monkeypatch, recipients="dan@example.com", today=date(2026, 8, 13),
+                              generate=_fake, send=_send)
+    assert subjects and subjects[0] == "Heads up: bank data stale · Daily Budget Summary — August 13, 2026"

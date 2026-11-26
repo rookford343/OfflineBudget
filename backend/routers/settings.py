@@ -153,10 +153,14 @@ def run_daily_summary_now(
             weekly_digest = generate_weekly_digest(db, user, checking.id)
 
     snap_box: list = []
+    stale_box: list = []
     html_body, text_body = generate_daily_summary(
-        db, user, weekly_digest=weekly_digest, snapshot_out=snap_box,
+        db, user, weekly_digest=weekly_digest, snapshot_out=snap_box, stale_out=stale_box,
     )
-    subject = email_subject(snap_box[0] if snap_box else None, date.today(), weekly_digest is not None)
+    subject = email_subject(
+        snap_box[0] if snap_box else None, date.today(), weekly_digest is not None,
+        stale=bool(stale_box and stale_box[0]),
+    )
 
     sent, errors = [], []
     for r in recipients:
