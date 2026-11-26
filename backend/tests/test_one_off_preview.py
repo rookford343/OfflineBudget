@@ -11,6 +11,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 from unittest.mock import patch
 
+import pytest
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -19,6 +21,26 @@ from backend.dependencies import get_current_user, get_db
 from backend.routers import planned_expenses as pe_router
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.forecast_engine import build_forecast
+
+
+PINNED_TODAY = date(2026, 3, 2)  # early in a month: the card payment lands inside the margin window
+
+
+@pytest.fixture(autouse=True)
+def _pin_today(monkeypatch):
+    """Freeze date.today() in every module on the preview path, so the tests do
+    not depend on the calendar day they run (the card payment must land inside
+    the Safety Margin window: today through end of next calendar month)."""
+    class _FixedDate(date):
+        @classmethod
+        def today(cls):
+            return PINNED_TODAY
+    for mod in (
+        "backend.services.forecast_engine", "backend.services.budget_snapshot",
+        "backend.services.card_payment_model", "backend.services.installment_plan",
+        "backend.routers.planned_expenses", __name__,
+    ):
+        monkeypatch.setattr(f"{mod}.date", _FixedDate)
 
 
 def _next_25th() -> date:
