@@ -10,7 +10,7 @@ from backend import schemas
 from backend.dependencies import get_db, get_current_user
 from backend.services.spending_helpers import merchant_totals
 from backend.services.real_spend import ClassifiedRow, classified_rows
-from backend.services.summary_generator import generate_weekly_digest
+from backend.services.summary_generator import generate_monthly_digest, generate_weekly_digest
 from backend.services.budget_snapshot import compute_budget_snapshot
 from backend.services.recent_activity import get_recent_activity
 from backend.services.spending_figures import direct_actual, discretionary_left, mean_total, merge_breakdowns, monthly_averages
@@ -553,6 +553,15 @@ def get_weekly_digest(
     user: models.User = Depends(get_current_user),
 ):
     return generate_weekly_digest(db, user, account_id)
+
+
+@router.get("/monthly-digest", response_model=schemas.MonthlyDigest)
+def get_monthly_digest(
+    account_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    return generate_monthly_digest(db, user, account_id)
 
 
 # ── Tax Summary ───────────────────────────────────────────────────────────────

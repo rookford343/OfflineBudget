@@ -5,7 +5,7 @@ from decimal import Decimal
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from backend import models
-from backend.schemas import BankConnectionStatusOut, MonthlySummary, WeeklyDigest, ForecastRisk
+from backend.schemas import BankConnectionStatusOut, MonthlySummary, MonthlyDigest, WeeklyDigest, ForecastRisk
 from backend.services.cushion import cushion_for
 from backend.services.forecast_engine import _next_occurrence_on_or_after
 from backend.services.forecast_walk import standard_walk, walk_risk
@@ -1081,4 +1081,22 @@ def generate_weekly_digest(db: Session, user: models.User, account_id: int) -> W
         top_merchants=snapshot.top_merchants,
         risk=risk,
         snapshot=snapshot,
+    )
+
+
+def generate_monthly_digest(db: Session, user: models.User, account_id: int) -> MonthlyDigest:
+    """Month-to-date spending (1st through today): category totals + top
+    merchants, from the same spending_breakdown the weekly digest uses. On the
+    1st the window is that single day. Spending is user-wide, like the weekly
+    digest's; account_id is accepted for API symmetry with it."""
+    today = date.today()
+    month_start = today.replace(day=1)
+    breakdown = spending_breakdown(db, user.id, month_start, today, merchant_limit=10)
+    total_spent = sum((c.total for c in breakdown.categories), Decimal("0"))
+    return MonthlyDigest(
+        month_start=month_start,
+        month_end=today,
+        total_spent=total_spent,
+        categories=breakdown.categories,
+        top_merchants=breakdown.top_merchants,
     )

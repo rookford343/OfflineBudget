@@ -2284,6 +2284,15 @@ class BudgetSnapshot(BaseModel):
     top_merchants: list[MerchantSpendingEntry]
 
 
+class MonthlyDigest(BaseModel):
+    """Month-to-date spending (the 1st through today); same breakdown as the weekly digest."""
+    month_start: date
+    month_end: date
+    total_spent: Decimal
+    categories: list[WeeklyDigestCategory]
+    top_merchants: list[MerchantSpendingEntry]
+
+
 class WeeklyDigest(BaseModel):
     week_start: date
     week_end: date
