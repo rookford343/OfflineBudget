@@ -6,7 +6,7 @@ import { fmt, utilColor, utilBg, firstOfMonth, today } from "../lib/utils";
 import { useBalancesHidden, maskIfHidden } from "../store/balanceVisibility";
 import { maskMoneyText } from "../lib/maskMoney";
 import { useIsDarkMode } from "../store/theme";
-import { CreditCard, Calendar, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle, TrendingUp } from "lucide-react";
+import { CreditCard, AlertCircle, AlertTriangle, Wallet, BookOpen, HelpCircle, TrendingUp } from "lucide-react";
 import { AreaChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import HelpPanel from "../components/HelpPanel";
 import HowCalculated from "../components/HowCalculated";
@@ -21,6 +21,7 @@ import UpcomingOneOffs from "../components/phone/UpcomingOneOffs";
 import PlanOneOffSheet from "../components/phone/PlanOneOffSheet";
 import { useMinWidth } from "../lib/useMinWidth";
 import { SnapshotHero } from "../components/dashboard/SnapshotHero";
+import { UpcomingBillsCard } from "../components/dashboard/UpcomingBillsCard";
 
 /** The next date on/after `today` whose day-of-month is `dueDay` (clamped to
  *  the month's last day), plus the day-count to reach it -- both derived
@@ -64,6 +65,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const isDesktop = useMinWidth(1024);
   const isWide = useMinWidth(640);
+  const isXWide = useMinWidth(1700);
   const balancesHidden = useBalancesHidden();
   const [showHelp, setShowHelp] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
@@ -286,11 +288,26 @@ export default function Dashboard() {
       </div>
 
       {/* The hero leads; anything asking for an action follows it. */}
-      {snapshot && (
-        <SnapshotHero snapshot={snapshot} primaryCheckingId={primaryChecking?.id} hidden={balancesHidden} isWide />
+      {isXWide ? (
+        <div className="grid grid-cols-[minmax(0,960px)_minmax(320px,1fr)] gap-6 items-start">
+          <div>
+            {snapshot && (
+              <SnapshotHero snapshot={snapshot} primaryCheckingId={primaryChecking?.id} hidden={balancesHidden} isWide />
+            )}
+          </div>
+          <div className="space-y-6">
+            <NeedsAttention risk={weeklyDigest?.risk} />
+            <UpcomingBillsCard bills={upcomingBills} hasRecurring={recurring.length > 0} hidden={balancesHidden} />
+          </div>
+        </div>
+      ) : (
+        <>
+          {snapshot && (
+            <SnapshotHero snapshot={snapshot} primaryCheckingId={primaryChecking?.id} hidden={balancesHidden} isWide />
+          )}
+          <NeedsAttention risk={weeklyDigest?.risk} />
+        </>
       )}
-
-      <NeedsAttention risk={weeklyDigest?.risk} />
 
       {/* Wide screens gain a COLUMN, not width. These panels are label/value
           lists and short prose, so stretching two of them to 900px only pads
@@ -681,42 +698,8 @@ export default function Dashboard() {
         </div>
         </div>
 
-        {/* Upcoming bills */}
-        <div className="card">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-gray-900 flex items-center gap-2"><Calendar size={16} /> Upcoming Bills</h3>
-            <button onClick={() => navigate("/recurring")} className="text-xs text-accent hover:underline">Manage →</button>
-          </div>
-          {upcomingBills.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-4">{recurring.length === 0 ? "No recurring bills set up" : "No bills due in the next 30 days"}</p>
-          ) : (
-            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-              {upcomingBills.slice(0, 8).map((r: any) => {
-                const [y, m, d] = r.due_date.split("-").map(Number);
-                const dueDate = new Date(y, m - 1, d);
-                const daysUntil = Math.ceil((dueDate.getTime() - todayDate.getTime()) / 86400000);
-                return (
-                  <div key={`${r.recurring_item_id}-${r.due_date}`} className="flex items-center justify-between py-1">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{r.name}</p>
-                      <p className="text-xs text-gray-500">
-                        {dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                        {" · "}
-                        <span className={daysUntil <= 3 ? "text-red-600 font-medium" : "text-gray-400"}>
-                          {daysUntil === 0 ? "Today" : daysUntil === 1 ? "Tomorrow" : `${daysUntil} days`}
-                        </span>
-                      </p>
-                    </div>
-                    <span className="text-sm font-semibold text-red-600 tabular-nums">
-                      {maskIfHidden(balancesHidden, fmt(r.amount))}
-                      {r.is_actual && <span className="ml-1 text-[13px] font-normal text-gray-400 align-middle">actual</span>}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        {/* Upcoming bills (moves to the right column at 1700px+) */}
+        {!isXWide && <UpcomingBillsCard bills={upcomingBills} hasRecurring={recurring.length > 0} hidden={balancesHidden} />}
       <RecentTransactions />
       </div>
 
