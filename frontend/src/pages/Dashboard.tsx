@@ -27,6 +27,8 @@ import UpcomingOneOffs from "../components/phone/UpcomingOneOffs";
 import PlanOneOffSheet from "../components/phone/PlanOneOffSheet";
 import { lastBankSync } from "../lib/freshness";
 import { useMinWidth } from "../lib/useMinWidth";
+import { lowestBalanceRows } from "../lib/lowestBalanceRows";
+import { SPENDABLE_HELP, MARGIN_HELP } from "../components/dashboard/SnapshotHero";
 
 /** The next date on/after `today` whose day-of-month is `dueDay` (clamped to
  *  the month's last day), plus the day-count to reach it -- both derived
@@ -53,51 +55,6 @@ function nextCardDueOccurrence(dueDay: number, today: Date): { date: Date; days:
   return { date: candidate, days };
 }
 
-type LowestBalanceRow = { label: string; amount: number; date: string; isLookaheadRow: boolean };
-
-/** [{ label, amount, date, isLookaheadRow }, ...] (0, 1, or 2 rows) for the
- *  "lowest balance" lines under the Household Snapshot cards. Ported
- *  line-for-line from backend/services/summary_generator.py's
- *  _lowest_balance_rows (lines 52-78), plus the move-to-checking condition
- *  from _move_to_checking_line (lines 32-39) applied by the caller, so the
- *  dashboard and the daily email never disagree on which rows show, in what
- *  order, or whether next month's low and the 3-month low get merged.
- *  `isLookaheadRow` marks the row Python's `_is_lookahead_row` would pick out
- *  (the one covering "the next 3 months") -- only that row gets the
- *  cushion/danger coloring and warning phrase. */
-function lowestBalanceRows(snapshot: any): LowestBalanceRow[] {
-  const lookaheadDate: string | null = snapshot.lookahead_minimum_date ?? null;
-  const nextMonthDate: string | null = snapshot.next_month_minimum_date ?? null;
-  if (lookaheadDate == null && nextMonthDate == null) return [];
-
-  const quarterRow: LowestBalanceRow | null = lookaheadDate != null
-    ? { label: "Lowest in the next 3 months", amount: parseFloat(snapshot.lookahead_minimum), date: lookaheadDate, isLookaheadRow: true }
-    : null;
-
-  if (nextMonthDate == null) return quarterRow ? [quarterRow] : [];
-
-  const nmLabel = snapshot.next_month_label || "next month";
-  const nextMonthAmount = parseFloat(snapshot.next_month_minimum);
-  const same = quarterRow != null && nextMonthDate === lookaheadDate && nextMonthAmount === quarterRow.amount;
-  if (same) {
-    return [{
-      label: `Lowest next month (${nmLabel}) and in the next 3 months`,
-      amount: nextMonthAmount,
-      date: nextMonthDate,
-      isLookaheadRow: true,
-    }];
-  }
-
-  const rows: LowestBalanceRow[] = [{
-    label: `Lowest next month (${nmLabel})`,
-    amount: nextMonthAmount,
-    date: nextMonthDate,
-    isLookaheadRow: false,
-  }];
-  if (quarterRow) rows.push(quarterRow);
-  return rows;
-}
-
 const DASHBOARD_HELP = `The Dashboard gives you a real-time snapshot of your financial health.
 
 Key sections:
@@ -106,10 +63,6 @@ Key sections:
 • Credit card balances and amounts due
 • Monthly narrative summary — plain-English recap
 • Upcoming bills — items due in the next 30 days`;
-
-const SPENDABLE_HELP = "How much you can spend on everyday things (groceries, eating out, shopping) between now and the end of the week, after bills, savings, and tithing are already set aside.\n\nGoes down as you spend. If it's negative, you've spent more than this week's share — it'll say \"over pace\" and show what to pull back.";
-
-const MARGIN_HELP = "The lowest your checking account is projected to go over the next 3 months, after also setting aside the credit card bills still coming due this month.\n\nPositive means that's how much room you have above $0 before you'd need to pull from savings. Negative means the plan already dips into savings, even before anything unexpected happens — worth a closer look before a big purchase.";
 
 const AVAILABLE_HELP = "This month's income, less bills, one-offs and what you've actually spent so far, before the groceries and savings budgets are set aside.\n\nThe second panel walks from this figure down to Left to Spend, which is the same money after those budgets and counting card spending only.";
 
@@ -255,7 +208,6 @@ export default function Dashboard() {
   const netPosition = netPos ? parseFloat(netPos.net_position) : 0;
 
   const todayDate = new Date();
-
 
   // Sparkline + month-over-month % for the Net Position card.
   const rolling = [...rollingRaw].sort((a, b) => a.month.localeCompare(b.month));
