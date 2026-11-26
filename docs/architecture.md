@@ -144,11 +144,16 @@ locked, "CC Estimate" otherwise) and the snapshot's explain notes read their `ba
 - A card with a recurring `credit_card_payment` item, or a payment marked sent and awaiting sync, is
   skipped: something else already pays it.
 - **Payment in transit:** the card's feed shows a payment credit (negative, payment wording per
-  `is_card_payment`, dated in the last 10 days) but `balance_due` is already 0, so the model plans
-  nothing. Credits minus checking debits that pay that card (posted or pending, from 5 days before
-  the earliest credit; `match_payment_card`) above `_FULL_COVERAGE_SLOP` becomes a "Payment in
-  transit: {card}" line on today in `build_forecast`, next to "Payment sent". It clears itself once
-  the debit posts or goes pending, and a card with the manual payment-sent marker gets none.
+  `is_card_payment`, dated in the last 10 days) that no checking debit covers yet (holiday ACH
+  delay). Credits are paired oldest first with debits that pay that card (posted or pending, from
+  5 days before the credit; `match_payment_card`), each debit used once. A posted debit with
+  card-payment wording that pins no single card covers the remainder when its amount is within
+  `_FULL_COVERAGE_SLOP`. What is left above the slop becomes one "Payment in transit: {card}" line
+  on today in `build_forecast`, applied after today's anchor, manual or auto (the bank has not
+  seen it, so a hand-read balance still includes the money). It clears itself once the debit
+  posts or goes pending. No line when the card has the manual payment-sent marker, or when
+  `balance_due` is above the slop and `next_payment_date` is on or before the latest credit (the
+  locked/overdue payoff still charges that statement).
 
 Pending is always `card_pending(card, today)`; the model never reads `pending_charges`. A balance-only
 card (no transaction feed) has no spend rows, so the payments come from its balance.

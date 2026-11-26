@@ -13,7 +13,7 @@ from decimal import Decimal
 
 from backend import models
 from backend.services.budget_snapshot import compute_budget_snapshot
-from backend.services.forecast_engine import build_forecast
+from backend.services.forecast_engine import AUTO_ANCHOR_NOTE, build_forecast
 
 TODAY = date(2026, 3, 20)
 PAID = Decimal("2000.00")
@@ -119,7 +119,9 @@ def test_pending_debit_covers_the_credit(db_session, monkeypatch):
 def test_posted_debit_covers_the_credit(db_session, monkeypatch):
     user, account, _ = _setup(db_session, monkeypatch, balance="3000.00")
     _posted(db_session, user, account, "-2000.00")
-    assert _lines(_days(db_session, user, account)) == []
+    days = _days(db_session, user, account)
+    assert _lines(days) == []
+    assert _today(days).projected_balance == Decimal("3000.00")
 
 
 def test_partial_pending_debit_leaves_the_remainder(db_session, monkeypatch):
@@ -179,5 +181,86 @@ def test_safety_margin_matches_once_the_money_has_left(db_session, monkeypatch):
     posted = compute_budget_snapshot(db_session, user, account.id, as_of=TODAY)
 
     assert in_transit.safety_margin == posted.safety_margin
-    # and it is lower than if the payment had never been made
-    assert in_transit.safety_margin <= Decimal("3000.00")
+    # the payment is out of the margin either way (no other cash flows here)
+    assert in_transit.safety_margin == Decimal("3000.00")
+
+
+def _checkpoint(db, user, account, balance, note):
+    db.add(models.ForecastDayCheckpoint(user_id=user.id, account_id=account.id, date=TODAY,
+                                        actual_balance=Decimal(balance), note=note))
+    db.commit()
+
+
+def test_manual_anchor_keeps_the_in_transit_line(db_session, monkeypatch):
+    # A hand-read balance still includes money that has not left the bank.
+    user, account, _ = _setup(db_session, monkeypatch)
+    _checkpoint(db_session, user, account, "5000.00", "read it off the app")
+    days = _days(db_session, user, account)
+    assert [t.amount for t in _lines(days)] == [-PAID]
+    assert _today(days).projected_balance == Decimal("5000.00") - PAID
+
+
+def test_auto_anchor_keeps_the_in_transit_line_and_matches_no_checkpoint(db_session, monkeypatch):
+    user, account, _ = _setup(db_session, monkeypatch)
+    plain = _today(_days(db_session, user, account)).projected_balance
+    _checkpoint(db_session, user, account, "5000.00", AUTO_ANCHOR_NOTE)
+    days = _days(db_session, user, account)
+    assert [t.amount for t in _lines(days)] == [-PAID]
+    assert _today(days).projected_balance == plain == Decimal("5000.00") - PAID
+
+
+def test_unnamed_debit_with_ambiguous_card_still_covers(db_session, monkeypatch):
+    # Two "Chase" cards: the wording pins neither, but it is a card payment of
+    # the same amount, so the money has left and the line must go.
+    user, account, _ = _setup(db_session, monkeypatch, balance="3000.00")
+    db_session.add(models.CreditCard(user_id=user.id, name="Chase Freedom", credit_limit=Decimal("5000.00"),
+                                     statement_day=28, due_day=25, is_active=True,
+                                     balance_due=Decimal("0"), current_balance=Decimal("0")))
+    db_session.commit()
+    _posted(db_session, user, account, "-2000.00")
+    assert _lines(_days(db_session, user, account)) == []
+
+
+def test_ambiguous_debit_of_another_amount_does_not_cover(db_session, monkeypatch):
+    user, account, _ = _setup(db_session, monkeypatch)
+    db_session.add(models.CreditCard(user_id=user.id, name="Chase Freedom", credit_limit=Decimal("5000.00"),
+                                     statement_day=28, due_day=25, is_active=True,
+                                     balance_due=Decimal("0"), current_balance=Decimal("0")))
+    db_session.commit()
+    _posted(db_session, user, account, "-750.00")
+    assert [t.amount for t in _lines(_days(db_session, user, account))] == [-PAID]
+
+
+def test_debit_matched_to_another_card_does_not_cover(db_session, monkeypatch):
+    user, account, _ = _setup(db_session, monkeypatch)
+    db_session.add(models.CreditCard(user_id=user.id, name="Visa Rewards", credit_limit=Decimal("5000.00"),
+                                     statement_day=28, due_day=25, is_active=True,
+                                     balance_due=Decimal("0"), current_balance=Decimal("0")))
+    db_session.commit()
+    db_session.add(models.Transaction(user_id=user.id, account_id=account.id, date=TODAY - timedelta(days=1),
+                                      amount=Decimal("-2000.00"), description="VISA CREDIT CRD AUTOPAY",
+                                      is_actual=True))
+    db_session.commit()
+    assert [t.amount for t in _lines(_days(db_session, user, account))] == [-PAID]
+
+
+def test_statement_still_due_is_charged_once_by_the_payoff(db_session, monkeypatch):
+    # The card feed shows the credit but liabilities still show that statement:
+    # the overdue payoff already charges it, so no in-transit line on top.
+    user, account, _ = _setup(db_session, monkeypatch, balance_due=PAID,
+                              next_payment_date=TODAY - timedelta(days=2))
+    _checkpoint(db_session, user, account, "5000.00", AUTO_ANCHOR_NOTE)
+    days = _days(db_session, user, account)
+    assert _lines(days) == []
+    charged = [t.amount for t in _today(days).transactions if t.is_cc_payment and t.amount < 0]
+    assert charged == [-PAID]
+    assert _today(days).projected_balance == Decimal("5000.00") - PAID
+
+
+def test_older_payment_with_its_late_debit_does_not_cover_a_newer_credit(db_session, monkeypatch):
+    user, account, card = _setup(db_session, monkeypatch, balance="3000.00")  # new credit, 2 days ago
+    db_session.add(models.CreditCardTransaction(card_id=card.id, user_id=user.id,
+                                                date=TODAY - timedelta(days=12), amount=-PAID, merchant=CARD_SIDE))
+    db_session.commit()
+    _posted(db_session, user, account, "-2000.00", when=TODAY - timedelta(days=6))
+    assert [t.amount for t in _lines(_days(db_session, user, account))] == [-PAID]

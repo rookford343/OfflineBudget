@@ -820,36 +820,77 @@ def _payment_in_transit(
 ) -> Decimal:
     """What the card's recent payment credits exceed the checking debits that
     pay it by: money the card already counts as paid that has not left
-    checking, posted or pending. Zero once the debits cover it. Pending rows
-    are the card's pending_card_debits_by_card rows (live Plaid snapshot only;
-    the walk already subtracts them, so they only reduce this amount)."""
-    credits = [
-        c for c in db.query(models.CreditCardTransaction).filter(
+    checking, posted or pending. Zero once the debits cover it, or below the
+    coverage slop. `pending_rows` are this card's pending_card_debits_by_card
+    rows (live Plaid snapshot only; the walk already subtracts them, so they
+    only reduce this amount).
+
+    Credits are paired with debits oldest first, each debit used once, so an
+    older payment's late debit cannot cover a newer credit; only credits from
+    the last _IN_TRANSIT_CREDIT_DAYS count toward the result. A posted debit
+    whose wording is a card payment but pins no single card (two "Chase"
+    cards) covers the remainder when its amount matches it within the slop;
+    unmatched pending rows never do, because nothing else subtracts them."""
+    from backend.services.real_spend import is_checking_card_payment
+    from backend.services.statement_reconcile import _FULL_COVERAGE_SLOP  # circular at module level
+
+    horizon = today - timedelta(days=_IN_TRANSIT_CREDIT_DAYS)
+    lookback = horizon - timedelta(days=_IN_TRANSIT_DEBIT_LEAD_DAYS)
+    credits = sorted(
+        (c for c in db.query(models.CreditCardTransaction).filter(
             models.CreditCardTransaction.card_id == card.id,
             models.CreditCardTransaction.amount < 0,
-            models.CreditCardTransaction.date >= today - timedelta(days=_IN_TRANSIT_CREDIT_DAYS),
+            models.CreditCardTransaction.date >= lookback,
             models.CreditCardTransaction.date <= today,
-        ).all()
-        if is_card_payment(c.merchant) or is_card_payment(c.description)
-    ]
-    if not credits:
-        return Decimal("0")
-    credited = sum((-Decimal(str(c.amount)) for c in credits), Decimal("0"))
-    since = min(c.date for c in credits) - timedelta(days=_IN_TRANSIT_DEBIT_LEAD_DAYS)
-    debited = sum((
-        -Decimal(str(t.amount)) for t in db.query(models.Transaction).filter(
-            models.Transaction.user_id == account.user_id,
-            models.Transaction.account_id == account.id,
-            models.Transaction.is_actual == True,
-            models.Transaction.amount < 0,
-            models.Transaction.date >= since,
-        ).all()
-        if (paid := match_payment_card(cards, t.description)) is not None and paid.id == card.id
-    ), Decimal("0"))
-    debited += sum(
-        (-Decimal(str(r.amount)) for r in pending_rows if r.date >= since), Decimal("0"),
+        ).all() if is_card_payment(c.merchant) or is_card_payment(c.description)),
+        key=lambda c: c.date,
     )
-    return max(credited - debited, Decimal("0"))
+    if not any(c.date >= horizon for c in credits):
+        return Decimal("0")
+    # The payoff path already charges a statement the feed has not cleared yet
+    # (liabilities lag the credit): adding the payment again would double it.
+    if (
+        Decimal(str(card.balance_due or 0)) > _FULL_COVERAGE_SLOP
+        and (card.next_payment_date is None or card.next_payment_date <= credits[-1].date)
+    ):
+        return Decimal("0")
+
+    debits: list[list] = []  # [date, amount] attributed to this card
+    unpinned: list[list] = []  # card-payment wording that pins no single card
+    for t in db.query(models.Transaction).filter(
+        models.Transaction.user_id == account.user_id,
+        models.Transaction.account_id == account.id,
+        models.Transaction.is_actual == True,
+        models.Transaction.amount < 0,
+        models.Transaction.date >= lookback,
+    ).all():
+        paid = match_payment_card(cards, t.description)
+        entry = [t.date, -Decimal(str(t.amount))]
+        if paid is not None:
+            if paid.id == card.id:
+                debits.append(entry)
+        elif is_checking_card_payment(t.description, cards):
+            unpinned.append(entry)
+    debits += [[r.date, -Decimal(str(r.amount))] for r in pending_rows if r.date >= lookback]
+    debits.sort(key=lambda d: d[0])
+
+    in_transit = Decimal("0")
+    for credit in credits:
+        left = -Decimal(str(credit.amount))
+        for d in debits:
+            if left <= 0:
+                break
+            if d[1] > 0 and d[0] >= credit.date - timedelta(days=_IN_TRANSIT_DEBIT_LEAD_DAYS):
+                used = min(left, d[1])
+                d[1] -= used
+                left -= used
+        if credit.date >= horizon:
+            in_transit += left
+    for d in sorted(unpinned, key=lambda d: d[0]):
+        if in_transit > 0 and abs(d[1] - in_transit) <= _FULL_COVERAGE_SLOP:
+            in_transit = Decimal("0")
+            break
+    return in_transit if in_transit > _FULL_COVERAGE_SLOP else Decimal("0")
 
 
 def build_forecast(
@@ -1042,6 +1083,9 @@ def build_forecast(
     # card with both counts once, at the larger figure: the marker and the
     # pending debit are the same payment.
     pending_today_lines: list[ForecastTransaction] = []
+    # Not pending at the bank, so a hand-read balance still includes them:
+    # applied on today after the anchor whether it is manual or auto.
+    in_transit_today_lines: list[ForecastTransaction] = []
     if account.type == models.AccountType.checking:
         for card in all_active_cards:
             rows = pending_card_debits.get(card.id, [])
@@ -1079,10 +1123,9 @@ def build_forecast(
             # manual marker wins: it already subtracts the payment.
             if card.payment_sent_pending_sync:
                 continue
-            from backend.services.statement_reconcile import _FULL_COVERAGE_SLOP  # circular at module level
             in_transit = _payment_in_transit(db, account, card, all_active_cards, rows, today)
-            if in_transit > _FULL_COVERAGE_SLOP:
-                pending_today_lines.append(ForecastTransaction(
+            if in_transit > 0:
+                in_transit_today_lines.append(ForecastTransaction(
                     name=f"Payment in transit: {card.name}",
                     amount=-in_transit,
                     type="expense",
@@ -1662,6 +1705,9 @@ def build_forecast(
                 balance += line.amount
                 day_transactions.append(line)
         if current == today:
+            for line in in_transit_today_lines:
+                balance += line.amount
+                day_transactions.append(line)
             for line in overdue_today_lines:
                 balance += line.amount
                 day_transactions.append(line)
