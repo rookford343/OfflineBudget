@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { barLabel, barTone, lowestIndex, monthTicks, safetyMarginTone, type WeeklyLow } from "./weeklyLows";
+import { barHeightPx, barLabel, barTone, cushionOffsetPx, lowestIndex, monthTicks, safetyMarginTone, scaleMaxFor, type WeeklyLow } from "./weeklyLows";
 
 // Made-up amounts only (public repo).
 const low = (over: Partial<WeeklyLow> = {}): WeeklyLow => ({
@@ -66,5 +66,29 @@ describe("safetyMarginTone", () => {
     expect(safetyMarginTone(0)).toBe("ink");
     expect(safetyMarginTone(-0.01)).toBe("danger");
     expect(safetyMarginTone(5)).toBe("ink");
+  });
+});
+
+describe("chart geometry", () => {
+  test("scaleMaxFor takes the larger of the top low and the cushion", () => {
+    expect(scaleMaxFor([low({ amount: "2500.00" }), low({ amount: "800.00" }), low({ amount: null })], 1000)).toBe(2500);
+    expect(scaleMaxFor([low({ amount: "300.00" })], 1000)).toBe(1000);
+  });
+  test("scaleMaxFor never returns 0", () => {
+    expect(scaleMaxFor([], 0)).toBe(1);
+    expect(scaleMaxFor([low({ amount: null })], 0)).toBe(1);
+    expect(scaleMaxFor([low({ amount: "-50.00" })], 0)).toBe(1);
+  });
+  test("barHeightPx", () => {
+    expect(barHeightPx("2500.00", 2500)).toBe(64);
+    expect(barHeightPx("800.00", 2500)).toBe(20);
+    expect(barHeightPx("-50.00", 2500)).toBe(4);
+    expect(barHeightPx("10.00", 2500)).toBe(4);
+    expect(barHeightPx(null, 2500)).toBe(0);
+  });
+  test("cushionOffsetPx", () => {
+    expect(cushionOffsetPx(1000, 2500)).toBe(26);
+    expect(cushionOffsetPx(0, 2500)).toBe(0);
+    expect(cushionOffsetPx(-5, 2500)).toBe(0);
   });
 });

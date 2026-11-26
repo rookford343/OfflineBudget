@@ -66,3 +66,30 @@ export function monthTicks(lows: WeeklyLow[]): { index: number; label: string }[
 export function safetyMarginTone(weekly: number): "ink" | "danger" {
   return weekly < 0 ? "danger" : "ink";
 }
+
+export const CHART_PX = 64;
+export const STUB_PX = 4;
+
+/** Top of the chart's $0-based scale: the larger of the biggest low and the cushion (1 if neither is positive). */
+export function scaleMaxFor(lows: WeeklyLow[], cushion: number): number {
+  let top = cushion;
+  for (const l of lows) {
+    if (l.amount == null) continue;
+    const v = parseFloat(l.amount);
+    if (v > top) top = v;
+  }
+  return top > 0 ? top : 1;
+}
+
+/** Display-only pixel height of a bar; 0 means "render a gap", negatives get a stub. */
+export function barHeightPx(amount: string | null, scaleMax: number): number {
+  if (amount == null) return 0;
+  const v = parseFloat(amount);
+  if (v <= 0) return STUB_PX;
+  return Math.max(STUB_PX, Math.round((v / scaleMax) * CHART_PX));
+}
+
+/** Display-only distance of the cushion line above the chart baseline. */
+export function cushionOffsetPx(cushion: number, scaleMax: number): number {
+  return Math.round((Math.max(0, cushion) / scaleMax) * CHART_PX);
+}

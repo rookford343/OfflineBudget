@@ -54,8 +54,6 @@ const ALLOWED: Record<string, string> = {
     "decision (c): percent change between two figures the backend already sent",
   "pages/Dashboard.tsx:return prev === 0 ? null : ((cur - prev) / prev) * 100;":
     "decision (c): percent change between two figures the backend already sent",
-  "components/dashboard/WeeklyLowsChart.tsx:const frac = (parseFloat(amount) - min) / (max - min);":
-    "chart sampling: scales a bar's pixel height between the min and max weekly lows the backend already sent; no figure is displayed",
 };
 
 const MONEY = [

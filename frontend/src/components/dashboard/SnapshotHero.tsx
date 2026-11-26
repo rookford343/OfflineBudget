@@ -37,7 +37,7 @@ export function SnapshotHero({
   const status = snapshot.lookahead_status ?? "ok";
 
   return (
-    <div className="rounded-xl border border-line bg-card p-4 md:p-5">
+    <div className="max-w-[960px] rounded-xl border border-line bg-card p-4 md:p-5">
       <div className="flex items-center gap-2 mb-3">
         <Wallet size={16} className="text-accent" />
         <h3 className="font-semibold text-ink">Household Snapshot</h3>
@@ -59,7 +59,7 @@ export function SnapshotHero({
           className="ml-auto"
         />
       </div>
-      <div className={isWide ? "grid grid-cols-[1.4fr_1fr] gap-6" : "grid grid-cols-1 gap-4"}>
+      <div className={isWide ? "grid grid-cols-[auto_auto] justify-start gap-x-16" : "grid grid-cols-1 gap-4"}>
         <div>
           <p className="text-[13px] text-muted mb-1 flex items-center gap-1">
             Safety Margin (this week)
@@ -118,7 +118,7 @@ export function SnapshotHero({
           <p className="text-[13px] uppercase tracking-wide text-muted mb-2">
             Checking low point each week · next 3 months
           </p>
-          <WeeklyLowsChart lows={lows} hidden={hidden} />
+          <WeeklyLowsChart lows={lows} hidden={hidden} cushion={parseFloat(snapshot.safety_cushion)} />
         </div>
       )}
 
