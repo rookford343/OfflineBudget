@@ -160,3 +160,27 @@ The same hero stacked: Safety Margin, then Spendable, then chart, then caption. 
 - Whether the chart uses the existing chart library (recharts, already used for Balance Flow) or plain divs/SVG.
 - The exact teal scale used by the indigo alias. It must keep AA contrast wherever indigo text sits on white or on the dark card.
 - Task order and test plan. The plan should verify in real Chrome via the Interceptor skill, on the live app at `https://df-macbookpro16.local:8443`, in light and dark, desktop and phone width, with balances shown and hidden.
+
+## Addendum 2026-11-26: wide-window polish (approved mockups `chart-before-after.html`, `wide-right-column.html`)
+
+Seen on the owner's wide window (~2050px): the chart's lowest bar renders as a hairline, the bars become slabs, Spendable drifts far right, and the selected-week caption sits between the bars and the month labels.
+
+**Chart (`WeeklyLowsChart`)**
+- Bars scale from **$0**, not from the lowest to the highest week. Height is `amount / max(maxAmount, cushion)` of the chart height (about 64px).
+- A week below $0 renders as a 4px red stub at the baseline.
+- A **dashed cushion line** is drawn at `safety_cushion`, in `muted`. It is text-free, so nothing leaks while hidden.
+- Bars are about 40px max width with 6px gaps, left-aligned, never stretched.
+- Order: bars, then month labels aligned to bar positions, then the selected-week caption, then the "Lowest …" rows.
+- The status and accent rules are unchanged.
+
+**Hero (`SnapshotHero`)**
+- The content is capped at about 960px.
+- The Spendable column sits next to Safety Margin (`auto auto` columns with a gap), not at the far edge.
+
+**Very wide windows (main content about 1450px or more; the builder picks the breakpoint)**
+- The hero (about 960px) and a right column sit side by side.
+- The right column holds the **Needs attention** strip, then the existing **Upcoming Bills** card, moved rather than duplicated.
+- Below that width, the layout stays as it is now: the hero, then the strip stacked full width, and Upcoming Bills in its current place.
+- The DA's call: the right column reuses the existing Upcoming Bills card unchanged (next 30 days, top 8), not a new 7-day list. That avoids two bill lists, and the soonest bills are listed first anyway.
+
+**Unchanged:** money logic, masking, statuses, phone layout. The moneyGuard allowlist entry for the bar-height line is re-keyed to the new display-only expression.
